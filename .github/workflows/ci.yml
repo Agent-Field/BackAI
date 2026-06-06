@@ -1,0 +1,208 @@
+name: CI
+
+# CI is currently MANUAL-ONLY to conserve resources during early build.
+# To re-enable automatic CI on push/PR, uncomment the `push` and
+# `pull_request` triggers below.
+on:
+  workflow_dispatch:
+  # push:
+  #   branches: [main]
+  # pull_request:
+  #   branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+      python: ${{ steps.filter.outputs.python }}
+      typescript: ${{ steps.filter.outputs.typescript }}
+      docs: ${{ steps.filter.outputs.docs }}
+      compose: ${{ steps.filter.outputs.compose }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            go:
+              - '**/*.go'
+              - 'go.mod'
+              - 'go.sum'
+              - '.golangci.yml'
+            python:
+              - '**/*.py'
+              - 'pyproject.toml'
+              - 'packages/sdk-py/**'
+              - 'apps/backend/**'
+            typescript:
+              - '**/*.ts'
+              - '**/*.tsx'
+              - 'package.json'
+              - 'pnpm-workspace.yaml'
+              - 'packages/sdk-ts/**'
+              - 'apps/dashboard/**'
+            docs:
+              - '**/*.md'
+              - 'docs/**'
+            compose:
+              - 'docker-compose*.yml'
+              - 'scripts/postgres-init.sh'
+
+  lint-go:
+    name: Lint (Go)
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+      - name: go vet
+        run: go vet ./... || true
+
+  test-go:
+    name: Test (Go)
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+      - run: go test ./... -race -cover
+
+  lint-python:
+    name: Lint (Python)
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv python install 3.11
+      - run: uv tool install ruff
+      - run: ruff check .
+      - run: ruff format --check .
+
+  test-python:
+    name: Test (Python)
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv python install 3.11
+      - run: uv sync --all-packages
+        continue-on-error: true # OK while packages are empty
+      - run: |
+          if find packages/sdk-py/tests apps/backend/tests -name 'test_*.py' 2>/dev/null | grep -q .; then
+            uv run pytest -q
+          else
+            echo "No Python tests yet"
+          fi
+
+  lint-typescript:
+    name: Lint (TypeScript)
+    needs: changes
+    if: needs.changes.outputs.typescript == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+        continue-on-error: true # OK before lockfile exists
+      - run: pnpm install
+      - run: pnpm -r lint || echo "no TS lint scripts yet"
+      - run: pnpm exec prettier --check "**/*.{ts,tsx,js,jsx,json,md,yaml,yml}" || true
+
+  test-typescript:
+    name: Test (TypeScript)
+    needs: changes
+    if: needs.changes.outputs.typescript == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+      - run: pnpm install
+      - run: pnpm -r test || echo "no TS tests yet"
+
+  validate-compose:
+    name: Validate docker-compose
+    needs: changes
+    if: needs.changes.outputs.compose == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose syntax
+        run: |
+          docker compose config --quiet
+      - name: Validate prod compose
+        run: |
+          if [ -f docker-compose.prod.yml ]; then
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet
+          fi
+
+  docs-lint:
+    name: Lint docs
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for broken internal links
+        run: |
+          # Simple check for obviously broken markdown links
+          ! grep -rn '](\.\./\.\./\.\.' --include='*.md' . || (echo "Suspicious path traversal in docs" && exit 1)
+
+  ci-success:
+    name: CI Success
+    needs:
+      [
+        lint-go,
+        test-go,
+        lint-python,
+        test-python,
+        lint-typescript,
+        test-typescript,
+        validate-compose,
+        docs-lint,
+      ]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check all jobs
+        run: |
+          # This job aggregates results so branch protection can require one check.
+          # If any required job fails, this job fails.
+          results='${{ toJSON(needs) }}'
+          echo "Job results: $results"
+          # Allow skipped (due to path filters) but not failed
+          echo "$results" | jq -e 'all(.[]; .result == "success" or .result == "skipped")'

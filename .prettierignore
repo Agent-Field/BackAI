@@ -1,0 +1,16 @@
+node_modules
+dist
+build
+.next
+out
+bin
+*.log
+coverage
+test-reports
+.venv
+.venv-*
+__pycache__
+.ruff_cache
+.mypy_cache
+.pytest_cache
+LICENSE
