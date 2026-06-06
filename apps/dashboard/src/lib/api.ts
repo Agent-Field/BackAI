@@ -222,6 +222,131 @@ export const QueueSummarySchema = z.object({
 })
 export type QueueSummary = z.infer<typeof QueueSummarySchema>
 
+// ─── Jobs (Phase 5) ───────────────────────────────────────────────────────
+
+export const JobSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  args: z.unknown(),
+  state: z.enum([
+    "available",
+    "running",
+    "completed",
+    "discarded",
+    "cancelled",
+    "retryable",
+    "scheduled",
+    "pending",
+  ]),
+  tenant_id: z.string().nullable(),
+  attempt: z.number(),
+  max_attempts: z.number(),
+  scheduled_at: z.string(),
+  enqueued_at: z.string(),
+  attempted_at: z.string().nullable(),
+  finalized_at: z.string().nullable(),
+  errors: z
+    .array(
+      z.object({
+        at: z.string(),
+        attempt: z.number(),
+        error: z.string(),
+      }),
+    )
+    .nullable(),
+})
+export type Job = z.infer<typeof JobSchema>
+
+export const JobListSchema = z.object({
+  jobs: z.array(JobSchema),
+  total: z.number(),
+  has_more: z.boolean(),
+})
+export type JobList = z.infer<typeof JobListSchema>
+
+export const JobDefinitionSchema = z.object({
+  name: z.string(),
+  language: z.enum(["python", "typescript", "go"]),
+  source_path: z.string().nullable(),
+  description: z.string().nullable(),
+  cron: z.string().nullable(),
+  recent: z.object({
+    succeeded: z.number(),
+    failed: z.number(),
+    running: z.number(),
+  }),
+})
+export type JobDefinition = z.infer<typeof JobDefinitionSchema>
+
+export const JobDefinitionListSchema = z.object({
+  definitions: z.array(JobDefinitionSchema),
+})
+export type JobDefinitionList = z.infer<typeof JobDefinitionListSchema>
+
+export const EnqueueJobInputSchema = z.object({
+  name: z.string(),
+  args: z.unknown(),
+  scheduled_at: z.string().optional(),
+  max_attempts: z.number().int().min(1).max(50).optional(),
+})
+export type EnqueueJobInput = z.infer<typeof EnqueueJobInputSchema>
+
+// ─── Secrets (Phase 5) ────────────────────────────────────────────────────
+
+export const SecretMetadataSchema = z.object({
+  key: z.string(),
+  tenant_id: z.string().nullable(),
+  description: z.string().nullable(),
+  rotate_after: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  // value is NEVER returned in list/show responses; only via /secrets/{key}/reveal
+})
+export type SecretMetadata = z.infer<typeof SecretMetadataSchema>
+
+export const SecretListSchema = z.object({
+  secrets: z.array(SecretMetadataSchema),
+})
+export type SecretList = z.infer<typeof SecretListSchema>
+
+export const SecretValueSchema = z.object({
+  key: z.string(),
+  value: z.string(),
+})
+export type SecretValue = z.infer<typeof SecretValueSchema>
+
+export const PutSecretInputSchema = z.object({
+  value: z.string(),
+  description: z.string().optional(),
+  rotate_after: z.string().optional(),
+})
+export type PutSecretInput = z.infer<typeof PutSecretInputSchema>
+
+// ─── Storage (Phase 5) ────────────────────────────────────────────────────
+
+export const StorageObjectSchema = z.object({
+  key: z.string(),
+  size: z.number(),
+  content_type: z.string().nullable(),
+  last_modified: z.string(),
+  etag: z.string().nullable(),
+})
+export type StorageObject = z.infer<typeof StorageObjectSchema>
+
+export const StorageListSchema = z.object({
+  objects: z.array(StorageObjectSchema),
+  prefix: z.string(),
+  next_token: z.string().nullable(),
+})
+export type StorageList = z.infer<typeof StorageListSchema>
+
+export const SignedURLSchema = z.object({
+  key: z.string(),
+  url: z.string(),
+  expires_at: z.string(),
+})
+export type SignedURL = z.infer<typeof SignedURLSchema>
+
 export const ModulesStateSchema = z.object({
   modules: z.array(
     z.object({
@@ -268,6 +393,116 @@ export const api = {
   home: () => request("/api/v1/home/overview", undefined, HomeOverviewSchema),
   modulesState: () => request("/api/v1/modules", undefined, ModulesStateSchema),
   queue: () => request("/api/v1/queues/summary", undefined, QueueSummarySchema),
+
+  // ─── Jobs ───
+  jobs: {
+    list: (params?: {
+      name?: string
+      state?: string
+      tenant?: string
+      limit?: number
+      offset?: number
+    }) => {
+      const qs = new URLSearchParams()
+      if (params?.name) qs.set("name", params.name)
+      if (params?.state) qs.set("state", params.state)
+      if (params?.tenant) qs.set("tenant", params.tenant)
+      if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+      if (params?.offset !== undefined) qs.set("offset", String(params.offset))
+      const q = qs.toString()
+      return request(`/api/v1/jobs${q ? "?" + q : ""}`, undefined, JobListSchema)
+    },
+    get: (id: string) => request(`/api/v1/jobs/${id}`, undefined, JobSchema),
+    enqueue: (input: EnqueueJobInput) =>
+      request("/api/v1/jobs", { method: "POST", json: input }, JobSchema),
+    retry: (id: string) =>
+      request(`/api/v1/jobs/${id}/retry`, { method: "POST" }, JobSchema),
+    definitions: () =>
+      request("/api/v1/jobs/definitions", undefined, JobDefinitionListSchema),
+  },
+
+  // ─── Secrets ───
+  secrets: {
+    list: () => request("/api/v1/secrets", undefined, SecretListSchema),
+    get: (key: string) =>
+      request(
+        `/api/v1/secrets/${encodeURIComponent(key)}`,
+        undefined,
+        SecretMetadataSchema,
+      ),
+    reveal: (key: string) =>
+      request(
+        `/api/v1/secrets/${encodeURIComponent(key)}/reveal`,
+        { method: "POST" },
+        SecretValueSchema,
+      ),
+    put: (key: string, input: PutSecretInput) =>
+      request(
+        `/api/v1/secrets/${encodeURIComponent(key)}`,
+        { method: "PUT", json: input },
+        SecretMetadataSchema,
+      ),
+    delete: (key: string) =>
+      request(
+        `/api/v1/secrets/${encodeURIComponent(key)}`,
+        { method: "DELETE" },
+        z.object({ deleted: z.boolean() }),
+      ),
+    rotate: (key: string, input: { value: string }) =>
+      request(
+        `/api/v1/secrets/${encodeURIComponent(key)}/rotate`,
+        { method: "POST", json: input },
+        SecretMetadataSchema,
+      ),
+  },
+
+  // ─── Storage ───
+  storage: {
+    list: (params?: { prefix?: string; next_token?: string; limit?: number }) => {
+      const qs = new URLSearchParams()
+      if (params?.prefix) qs.set("prefix", params.prefix)
+      if (params?.next_token) qs.set("next_token", params.next_token)
+      if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+      const q = qs.toString()
+      return request(
+        `/api/v1/storage${q ? "?" + q : ""}`,
+        undefined,
+        StorageListSchema,
+      )
+    },
+    signedURL: (key: string, ttlSeconds?: number) => {
+      const qs = new URLSearchParams({ key })
+      if (ttlSeconds !== undefined) qs.set("ttl", String(ttlSeconds))
+      return request(
+        `/api/v1/storage/signed-url?${qs.toString()}`,
+        undefined,
+        SignedURLSchema,
+      )
+    },
+    delete: (key: string) =>
+      request(
+        `/api/v1/storage/${encodeURIComponent(key)}`,
+        { method: "DELETE" },
+        z.object({ deleted: z.boolean() }),
+      ),
+    // Upload uses a raw fetch (multipart body); not run through `request()`
+    // because the schema layer doesn't help with FormData.
+    upload: async (key: string, file: File | Blob): Promise<StorageObject> => {
+      const form = new FormData()
+      form.set("key", key)
+      form.set("file", file)
+      const res = await fetch("/api/v1/storage/upload", {
+        method: "POST",
+        body: form,
+        credentials: "include",
+      })
+      if (!res.ok) {
+        const text = await res.text()
+        throw new ApiError(`upload failed: ${text}`, res.status, "UPLOAD_FAILED")
+      }
+      return StorageObjectSchema.parse(await res.json())
+    },
+  },
   // Build URL pattern for "View full trace" link-out (to runtime UI).
   traceUrl(executionId: string): string {
     const runtimeUI = process.env.NEXT_PUBLIC_RUNTIME_UI_URL ?? "http://localhost:8081"
