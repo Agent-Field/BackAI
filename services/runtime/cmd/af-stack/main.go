@@ -23,6 +23,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
 	"github.com/Agent-Field/backai/services/runtime/internal/db"
 	"github.com/Agent-Field/backai/services/runtime/internal/logger"
+	"github.com/Agent-Field/backai/services/runtime/internal/observability"
 	"github.com/Agent-Field/backai/services/runtime/internal/server"
 )
 
@@ -63,6 +64,29 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	// Observability: set up OTel + Prometheus. Failures are non-fatal —
+	// the runtime keeps working without traces.
+	tel, telErr := observability.Setup(ctx, observability.Config{
+		OTLPEndpoint: cfg.Observability.OTLPEndpoint,
+		ServiceName:  cfg.Observability.ServiceName,
+		Version:      version,
+	})
+	if telErr != nil {
+		log.Error("observability setup failed; continuing without traces", "error", telErr)
+		tel = nil
+	} else {
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := tel.Shutdown(ctx); err != nil {
+				log.Error("observability shutdown failed", "error", err)
+			}
+		}()
+		if cfg.Observability.OTLPEndpoint != "" {
+			log.Info("OTel tracing enabled", "endpoint", cfg.Observability.OTLPEndpoint)
+		}
+	}
 
 	// Optional: connect to Postgres. If DATABASE_URL is empty, the runtime
 	// still boots — it just reports the DB as not-configured in /health.
@@ -116,8 +140,9 @@ func main() {
 	}()
 
 	srv := server.New(cfg, log, server.Deps{
-		DB: database,
-		AF: afClient,
+		DB:        database,
+		AF:        afClient,
+		Telemetry: tel,
 	})
 	if err := srv.Start(ctx); err != nil {
 		log.Error("server stopped with error", "error", err)

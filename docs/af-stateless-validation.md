@@ -1,7 +1,7 @@
 # Can AgentField run as a stateless single binary at scale?
 
 Verdict: **yes, with caveats.** AF's control plane is already a stateless Go
-binary IF you set `AGENTFIELD_STORAGE_MODE=postgresql` and disable the
+binary IF you set `AGENTFIELD_STORAGE_MODE=postgres` and disable the
 memory-fallback flags. The single-binary deploy story holds. There are a few
 sharp edges to address before claiming "horizontally scalable" in marketing.
 
@@ -176,7 +176,7 @@ Sandbox host is its own pool. S3 holds blobs. Standard 3-tier shape.
 
 Ship the suite's default deploy with:
 
-- `AGENTFIELD_STORAGE_MODE=postgresql`
+- `AGENTFIELD_STORAGE_MODE=postgres`
 - `AGENTFIELD_STORAGE_POSTGRES_ENABLE_MEMORY_FALLBACK=false`
 - `AGENTFIELD_STORAGE_POSTGRES_ENABLE_DID_FALLBACK=false`
 - `AGENTFIELD_STORAGE_POSTGRES_ENABLE_VC_FALLBACK=false`

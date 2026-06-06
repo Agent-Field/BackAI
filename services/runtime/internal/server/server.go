@@ -11,6 +11,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/agentfield"
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
 	"github.com/Agent-Field/backai/services/runtime/internal/db"
+	"github.com/Agent-Field/backai/services/runtime/internal/observability"
 )
 
 // Server holds the HTTP server and shared dependencies.
@@ -22,6 +23,7 @@ type Server struct {
 	health *Health
 	db     *db.DB
 	af     *agentfield.Client
+	tel    *observability.Telemetry
 }
 
 // Health aggregates dependency health for the /health endpoint.
@@ -32,8 +34,9 @@ type Health struct {
 // Deps groups the runtime dependencies the server uses. nil entries are
 // gracefully tolerated (the health check reports them as not-configured).
 type Deps struct {
-	DB *db.DB
-	AF *agentfield.Client
+	DB        *db.DB
+	AF        *agentfield.Client
+	Telemetry *observability.Telemetry
 }
 
 // New constructs a Server with the given config + logger + dependencies.
@@ -46,11 +49,21 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		health: &Health{StartedAt: time.Now()},
 		db:     deps.DB,
 		af:     deps.AF,
+		tel:    deps.Telemetry,
 	}
 	s.registerRoutes()
+
+	// Wrap mux with OTel tracing first, then structured logging on the outside
+	// so logs include final status code.
+	handler := http.Handler(mux)
+	if deps.Telemetry != nil {
+		handler = observability.TraceMiddleware(cfg.Observability.ServiceName)(handler)
+	}
+	handler = withLogging(log, handler)
+
 	s.srv = &http.Server{
 		Addr:              cfg.Server.HTTPAddr,
-		Handler:           withLogging(log, mux),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       60 * time.Second,
 		WriteTimeout:      60 * time.Second,
@@ -65,6 +78,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /ready", s.handleReady)
 	s.mux.HandleFunc("GET /openapi.json", s.handleOpenAPI)
 	s.mux.HandleFunc("GET /api/v1/agents", s.handleListAgents)
+	if s.tel != nil {
+		s.mux.Handle("GET /metrics", s.tel.MetricsHandler())
+	}
 }
 
 // Start runs the HTTP server. Blocks until ctx is cancelled, then drains
