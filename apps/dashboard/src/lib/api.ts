@@ -14,8 +14,12 @@ const isServer = typeof window === "undefined"
 
 function baseUrl(): string {
   if (isServer) {
+    // On the server, prefer internal Docker DNS / loopback.
     return process.env.RUNTIME_URL ?? "http://localhost:8080"
   }
+  // In the browser, go through the dashboard's same-origin proxy
+  // (see next.config.ts rewrites). This avoids CORS and keeps the
+  // runtime URL invisible to the client.
   return ""
 }
 

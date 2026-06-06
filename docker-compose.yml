@@ -98,6 +98,31 @@ services:
     # health rather than an exec healthcheck. Compose will treat the
     # container as healthy once it stays up.
 
+  # Next.js operator console. Reaches the runtime over docker DNS;
+  # browser hits localhost. Auth (better-auth) shares the same Postgres.
+  dashboard:
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+    environment:
+      DATABASE_URL: postgres://afstack:afstack@postgres:5432/afstack?sslmode=disable
+      AF_STACK_AUTH_SECRET: ${AF_STACK_AUTH_SECRET:-dev-secret-change-me-in-prod}
+      # Server-side fetches use Docker DNS.
+      RUNTIME_URL: http://runtime:8080
+      # Client-side fetches use the host-mapped runtime port.
+      NEXT_PUBLIC_RUNTIME_URL: http://localhost:${AF_STACK_PORT:-8080}
+      NEXT_PUBLIC_RUNTIME_UI_URL: http://localhost:8081
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+    ports:
+      - "${AF_STACK_DASHBOARD_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      runtime:
+        condition: service_started
+    restart: unless-stopped
+
   # Sample AgentField agent. The 60-second quickstart calls this via the
   # gateway to prove end-to-end connectivity. Replace with your own agents
   # in apps/backend/agents/<your-agent>/ to customise.

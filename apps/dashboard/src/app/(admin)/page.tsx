@@ -100,28 +100,28 @@ export default async function HomePage() {
           label="Requests / min"
           value={formatCompact(data.requests_per_minute)}
           description="Trailing 60 minutes."
-          icon={Activity}
+          icon={<Activity className="size-4" />}
           sparkline={data.request_sparkline}
         />
         <KpiCard
           label="Error rate"
           value={formatPercent(data.error_rate)}
           description="Trailing 60 minutes."
-          icon={AlertTriangle}
+          icon={<AlertTriangle className="size-4" />}
           sparkline={data.error_sparkline}
         />
         <KpiCard
           label="Cost today"
           value={formatCurrency(data.cost_today_usd)}
           description="Resets at 00:00 UTC."
-          icon={CircleDollarSign}
+          icon={<CircleDollarSign className="size-4" />}
           sparkline={data.cost_sparkline}
         />
         <KpiCard
           label="Queue depth"
           value={formatCompact(data.queue_depth)}
           description="Jobs waiting to run."
-          icon={Boxes}
+          icon={<Boxes className="size-4" />}
           sparkline={data.queue_sparkline}
         />
       </div>

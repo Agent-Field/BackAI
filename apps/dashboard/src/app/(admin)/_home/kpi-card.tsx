@@ -6,8 +6,8 @@
 // from the `home.*_sparkline` fields). Renders cleanly with an empty
 // array — the area just stays at zero baseline.
 
+import type { ReactNode } from "react"
 import { Area, AreaChart } from "recharts"
-import type { LucideIcon } from "lucide-react"
 
 import { ChartContainer, type ChartConfig } from "@/components/ui/chart"
 import {
@@ -29,7 +29,10 @@ type KpiCardProps = {
   label: string
   value: string
   description?: string
-  icon: LucideIcon
+  /** Icon JSX, e.g. `<Activity className="size-4" />`. Rendered by the
+   * parent (Server Component) so we don't serialize a function across
+   * the server→client boundary. */
+  icon: ReactNode
   sparkline: number[]
 }
 
@@ -37,7 +40,7 @@ export function KpiCard({
   label,
   value,
   description,
-  icon: Icon,
+  icon,
   sparkline,
 }: KpiCardProps) {
   const data = (sparkline ?? []).map((v, i) => ({ i, value: v }))
@@ -47,7 +50,7 @@ export function KpiCard({
     <Card>
       <CardHeader>
         <CardDescription className="flex items-center gap-2">
-          <Icon className="size-4" />
+          {icon}
           {label}
         </CardDescription>
         <CardTitle className="text-3xl tabular-nums">{value}</CardTitle>

@@ -1,30 +1,22 @@
 // better-auth configuration wired against the dashboard's Postgres database.
 //
-// We share the same database as the runtime (see TECH-SPEC §3), and let
-// better-auth manage its own `user` / `session` / `account` / `verification`
-// tables. Operator data is mirrored into `suite_users` by the dashboard so
-// that the runtime sees newly created operators too.
+// We share the same database as the runtime (see TECH-SPEC §3). better-auth
+// manages four tables itself: `user`, `session`, `account`, `verification`.
+// They're created by the runtime migration 00002_better_auth.sql.
 //
-// Operator role: the first signup becomes the operator. Subsequent signups
-// require an invitation (the dashboard gates this; better-auth is not aware).
-//
-// Lazy initialisation: we don't construct the auth instance until something
-// actually calls it. This lets the dashboard build during CI without needing
-// a live database.
+// At build time DATABASE_URL may be missing — we tolerate that with a stub
+// that throws at request time, so the build can prerender static pages
+// without a live database.
 
 import { betterAuth } from "better-auth"
 import { magicLink } from "better-auth/plugins"
 import { Pool } from "pg"
 
-let _auth: ReturnType<typeof buildAuth> | undefined
-
-function buildAuth() {
+function makeAuth() {
   const databaseUrl =
     process.env.DATABASE_URL ?? process.env.AF_STACK_DATABASE_URL
   if (!databaseUrl) {
-    throw new Error(
-      "DATABASE_URL or AF_STACK_DATABASE_URL must be set for better-auth.",
-    )
+    return null
   }
   const pool = new Pool({ connectionString: databaseUrl })
 
@@ -34,6 +26,7 @@ function buildAuth() {
     emailAndPassword: {
       enabled: true,
       autoSignIn: true,
+      minPasswordLength: 8,
     },
     socialProviders: {
       google:
@@ -47,8 +40,8 @@ function buildAuth() {
     plugins: [
       magicLink({
         sendMagicLink: async ({ email, url }) => {
-          // Dev fallback: log the link. Notifications module wires real
-          // delivery in Phase 10.
+          // Dev fallback: log the link. The notifications module wires
+          // real delivery in Phase 10.
           console.log(`[magic-link] ${email}: ${url}`)
         },
       }),
@@ -62,14 +55,22 @@ function buildAuth() {
   })
 }
 
-export const auth = new Proxy(
-  {} as ReturnType<typeof buildAuth>,
-  {
-    get(_target, prop, receiver) {
-      _auth ??= buildAuth()
-      return Reflect.get(_auth, prop, receiver)
-    },
-  },
-)
+const instance = makeAuth()
 
-export type Auth = ReturnType<typeof buildAuth>
+// `auth` is the live better-auth instance when DATABASE_URL is set, and a
+// trap that throws a useful error at request time when it isn't (so the
+// build can still prerender static pages).
+export const auth =
+  instance ??
+  (new Proxy(
+    {},
+    {
+      get() {
+        throw new Error(
+          "DATABASE_URL or AF_STACK_DATABASE_URL must be set for better-auth.",
+        )
+      },
+    },
+  ) as ReturnType<typeof betterAuth>)
+
+export type Auth = ReturnType<typeof betterAuth>

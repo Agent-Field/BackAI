@@ -34,3 +34,48 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Add a plugin
+
+A plugin is a contributor-owned folder under `apps/dashboard/plugins/<id>/`.
+The shell auto-discovers it — no edits to `nav.ts`, the sidebar, or the
+command palette.
+
+A plugin is two files:
+
+```
+apps/dashboard/plugins/<id>/
+├── plugin.ts   # manifest — default-exports definePlugin({...})
+└── page.tsx    # page — default-exports a React component (server or client)
+```
+
+Example (`apps/dashboard/plugins/hello/plugin.ts`):
+
+```ts
+import { Sparkles } from "lucide-react"
+import { definePlugin } from "@/lib/plugins"
+
+export default definePlugin({
+  id: "hello",
+  label: "Hello",
+  icon: Sparkles,
+  description: "Example plugin",
+  group: "system", // build | operate | customers | system
+})
+```
+
+The next `pnpm dev` or `pnpm build` runs
+`scripts/generate-plugins-manifest.mjs`, which:
+
+1. Regenerates `src/lib/plugins.generated.ts` (the manifest `loadPlugins()` reads).
+2. Writes a route proxy at `src/app/(admin)/plugins/<id>/page.tsx` so the page
+   inherits the dashboard chrome (sidebar, topbar, auth gate).
+
+Both generated paths are gitignored. The plugin appears in the sidebar group
+chosen by `group`, in ⌘K, and on the Settings → Plugins tab.
+
+To regenerate manually:
+
+```bash
+pnpm generate:plugins
+```

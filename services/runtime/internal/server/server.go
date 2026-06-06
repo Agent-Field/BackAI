@@ -55,12 +55,14 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 	s.registerRoutes()
 
 	// Wrap mux with OTel tracing first, then structured logging on the outside
-	// so logs include final status code.
+	// so logs include final status code. CORS wraps last so OPTIONS preflights
+	// short-circuit before hitting the routes.
 	handler := http.Handler(mux)
 	if deps.Telemetry != nil {
 		handler = observability.TraceMiddleware(cfg.Observability.ServiceName)(handler)
 	}
 	handler = withLogging(log, handler)
+	handler = withCORS(handler)
 
 	s.srv = &http.Server{
 		Addr:              cfg.Server.HTTPAddr,
@@ -413,6 +415,31 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// withCORS allows the dashboard (and other in-stack browsers) to call the
+// runtime's REST API from the operator's machine. Phase 6 narrows the
+// allow-list per tenant; for now any origin is accepted since auth is
+// per-cookie at the dashboard layer.
+func withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Allow-Methods",
+				"GET,POST,PUT,DELETE,OPTIONS,PATCH")
+			w.Header().Set("Access-Control-Allow-Headers",
+				"Content-Type,Authorization,X-Request-ID,traceparent,X-AF-Stack-Tenant-ID")
+			w.Header().Set("Access-Control-Max-Age", "600")
+		}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // withLogging is a tiny structured-log middleware. OTel tracing comes in 1.7.

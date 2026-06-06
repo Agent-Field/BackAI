@@ -53,6 +53,24 @@ through AF so identity, traces, cost, policy, and audit are preserved.
 
 Plus a REST + OpenAPI surface so any language works.
 
+## The operator console
+
+<div align="center">
+
+<img src="dashboard-screenshots/home.png" alt="AF Stack Home — KPI strip, recent runs, cost" width="900" />
+
+<sub>Home: requests/min · error rate · cost today · queue depth · live runs</sub>
+
+<img src="dashboard-screenshots/runs.png" alt="AF Stack Runs — execution list with link-out trace" width="900" />
+
+<sub>Operate → Runs: filter by agent / tenant / status, link out to full trace</sub>
+
+<img src="dashboard-screenshots/cost.png" alt="AF Stack Cost dashboard" width="900" />
+
+<sub>Operate → Cost: spend by model · agent · tenant · day, with budgets and forecast</sub>
+
+</div>
+
 ## Quickstart (under 60 seconds)
 
 ```bash

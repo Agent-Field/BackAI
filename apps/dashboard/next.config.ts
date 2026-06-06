@@ -1,7 +1,9 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from "next"
 
 const nextConfig: NextConfig = {
-  /* config options here */
-};
+  // /api/v1/* is proxied to the runtime via the dynamic Route Handler at
+  // src/app/api/v1/[...path]/route.ts (so RUNTIME_URL is resolved at
+  // request time, not baked at build time).
+}
 
-export default nextConfig;
+export default nextConfig

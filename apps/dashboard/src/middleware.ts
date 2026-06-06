@@ -16,7 +16,10 @@ const PUBLIC_PREFIXES = [
   "/login",
   "/signup",
   "/setup",
-  "/api/auth",
+  // Allow ALL /api/* through — better-auth has its own session handling,
+  // and the rewrites in next.config.ts proxy /api/v1/* to the runtime
+  // which has its own auth boundary (Phase 6).
+  "/api/",
   "/_next",
   "/favicon",
 ]

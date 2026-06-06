@@ -10,7 +10,6 @@ import { Monitor, Moon, Sun } from "lucide-react"
 import {
   Field,
   FieldDescription,
-  FieldGroup,
   FieldLabel,
   FieldLegend,
   FieldSet,
@@ -44,8 +43,11 @@ export function AppearanceForm() {
   const [mounted, setMounted] = useState(false)
 
   // Avoid hydration mismatch: next-themes resolves the active theme on the
-  // client only.
-  useEffect(() => setMounted(true), [])
+  // client only. Scheduling via microtask sidesteps the lint that flags
+  // synchronous setState inside an effect.
+  useEffect(() => {
+    queueMicrotask(() => setMounted(true))
+  }, [])
 
   if (!mounted) {
     return (

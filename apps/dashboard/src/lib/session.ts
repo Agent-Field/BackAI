@@ -30,6 +30,8 @@ export async function operatorCount(): Promise<number> {
       'select count(*)::text as count from "user"',
     )
     return Number(result.rows[0]?.count ?? "0")
+    // Column case is preserved by quoting in the better-auth migration; this
+    // query only counts rows so column-case doesn't matter here.
   } catch {
     // Tables may not exist yet on first boot before migrations.
     return 0
