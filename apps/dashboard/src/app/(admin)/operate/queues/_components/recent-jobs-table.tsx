@@ -11,6 +11,7 @@
 // queue summary). The table doesn't refetch on its own.
 
 import * as React from "react"
+import { useRouter } from "next/navigation"
 import {
   flexRender,
   getCoreRowModel,
@@ -42,7 +43,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { ListChecks } from "lucide-react"
-import type { QueueSummary } from "@/lib/api"
+import { api, ApiError, type QueueSummary } from "@/lib/api"
 
 import { formatRelative } from "../../_lib/format"
 import { QueueStatusBadge } from "./queue-status-badge"
@@ -185,19 +186,41 @@ function ErrorCell({ error }: { error: string | null }) {
 }
 
 function RetryCell({ job }: { job: Job }) {
+  const router = useRouter()
+  const [pending, setPending] = React.useState(false)
+
   if (job.status !== "failed") return null
+
+  const handleRetry = async () => {
+    setPending(true)
+    try {
+      await api.jobs.retry(job.id)
+      toast.success("Job re-queued", {
+        description: `${job.name} will be retried by the runtime.`,
+      })
+      router.refresh()
+    } catch (e) {
+      const message =
+        e instanceof ApiError
+          ? `${e.code}: ${e.message}`
+          : e instanceof Error
+            ? e.message
+            : "Retry failed"
+      toast.error("Could not retry job", { description: message })
+    } finally {
+      setPending(false)
+    }
+  }
+
   return (
     <Button
       variant="outline"
       size="sm"
-      onClick={() => {
-        toast.info("Retry will be wired in Phase 5", {
-          description: `Job ${job.name} (${job.id}) is queued for retry once the runtime endpoint lands.`,
-        })
-      }}
+      onClick={handleRetry}
+      disabled={pending}
     >
-      <RotateCw />
-      Retry
+      <RotateCw className={pending ? "animate-spin" : undefined} />
+      {pending ? "Retrying…" : "Retry"}
     </Button>
   )
 }

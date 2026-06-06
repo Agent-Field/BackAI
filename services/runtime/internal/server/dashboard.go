@@ -659,23 +659,67 @@ type queueEntry struct {
 	LastError  *string `json:"last_error"` // nullable per schema
 }
 
-// handleQueueSummary returns the jobs queue summary. Phase 4 returns
-// zeros and an empty list since River isn't wired up yet (Phase 5).
-// Schema MUST still validate — note `last_error` is nullable and the
-// `recent` array is required (empty is fine).
+// handleQueueSummary returns the jobs queue summary backed by River.
+//
+// Reads the live counts (pending/running/failed/succeeded_today) and the
+// most recent N rows from the jobs Manager. When the Manager isn't wired
+// (no DB / Phase 4 boot) we return zeros + an empty list so the dashboard
+// renders skeletons rather than errors.
 func (s *Server) handleQueueSummary(w http.ResponseWriter, r *http.Request) {
-	_, span := s.dashTracer().Start(r.Context(), "dashboard.queues.summary")
+	ctx, span := s.dashTracer().Start(r.Context(), "dashboard.queues.summary")
 	defer span.End()
 
-	// TODO Phase 5: read from River's job table once jobs module lands.
-	resp := queueSummaryResponse{
-		Pending:        0,
-		Running:        0,
-		Failed:         0,
-		SucceededToday: 0,
-		Recent:         []queueEntry{},
+	resp := queueSummaryResponse{Recent: []queueEntry{}}
+	if s.jobs == nil {
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	summary, err := s.jobs.Summary(ctx, 50)
+	if err != nil {
+		span.RecordError(err)
+		s.log.Warn("queue summary failed", "error", err)
+		// Still return zeros so the dashboard doesn't error out.
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	resp.Pending = summary.Pending
+	resp.Running = summary.Running
+	resp.Failed = summary.Failed
+	resp.SucceededToday = summary.SucceededToday
+	for _, row := range summary.Recent {
+		entry := queueEntry{
+			ID:         strconv.FormatInt(row.ID, 10),
+			Name:       row.Kind,
+			Status:     mapJobStateForSummary(string(row.State)),
+			EnqueuedAt: row.CreatedAt.UTC().Format(time.RFC3339Nano),
+			Attempts:   row.Attempt,
+		}
+		if len(row.Errors) > 0 {
+			msg := row.Errors[len(row.Errors)-1].Error
+			entry.LastError = &msg
+		}
+		resp.Recent = append(resp.Recent, entry)
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// mapJobStateForSummary maps a River JobState to the smaller status enum
+// used by the queue summary schema (which only has 5 values).
+func mapJobStateForSummary(state string) string {
+	switch state {
+	case "available", "scheduled", "retryable", "pending":
+		return "pending"
+	case "running":
+		return "running"
+	case "completed":
+		return "succeeded"
+	case "discarded":
+		return "failed"
+	case "cancelled":
+		return "cancelled"
+	default:
+		return "pending"
+	}
 }
 
 // ─── Compile-time safety net ──────────────────────────────────────────────

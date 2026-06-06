@@ -21,6 +21,25 @@ type Config struct {
 	Logging       LoggingConfig        `yaml:"logging"`
 	Observability ObservabilityConfig  `yaml:"observability"`
 	Modules       ModulesConfig        `yaml:"modules"`
+	Storage       StorageConfig        `yaml:"storage"`
+}
+
+// StorageConfig holds object-storage settings. Populated from env vars
+// `AF_STACK_S3_*`. When Endpoint is empty, the storage adapter is not
+// wired and /api/v1/storage/* returns 503.
+type StorageConfig struct {
+	// Adapter picks the wiring path: "minio" (TLS off by default) or "s3"
+	// (TLS on). Both go through the same underlying minio-go client.
+	Adapter   string `yaml:"adapter"`
+	Endpoint  string `yaml:"endpoint"`
+	Bucket    string `yaml:"bucket"`
+	AccessKey string `yaml:"access_key"`
+	SecretKey string `yaml:"secret_key"`
+	Region    string `yaml:"region"`
+	// TenantPrefix is prepended to every object key. Phase 5 default is
+	// "" — multi-tenancy module not enabled. When enabled, set to
+	// "tenants/<id>" per-request (server.Deps will be tenant-scoped).
+	TenantPrefix string `yaml:"tenant_prefix"`
 }
 
 // ModulesConfig declares which suite modules are enabled and which
@@ -103,6 +122,10 @@ func Default() Config {
 			ServiceName: "af-stack",
 			Enabled:     true,
 		},
+		Storage: StorageConfig{
+			Adapter: "minio",
+			Region:  "us-east-1",
+		},
 	}
 }
 
@@ -166,6 +189,29 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("OTEL_SERVICE_NAME"); v != "" {
 		cfg.Observability.ServiceName = v
+	}
+
+	// Storage. AF_STACK_S3_* mirrors the .env.example contract.
+	if v := os.Getenv("AF_STACK_S3_ADAPTER"); v != "" {
+		cfg.Storage.Adapter = strings.ToLower(v)
+	}
+	if v := os.Getenv("AF_STACK_S3_ENDPOINT"); v != "" {
+		cfg.Storage.Endpoint = v
+	}
+	if v := os.Getenv("AF_STACK_S3_BUCKET"); v != "" {
+		cfg.Storage.Bucket = v
+	}
+	if v := os.Getenv("AF_STACK_S3_ACCESS_KEY"); v != "" {
+		cfg.Storage.AccessKey = v
+	}
+	if v := os.Getenv("AF_STACK_S3_SECRET_KEY"); v != "" {
+		cfg.Storage.SecretKey = v
+	}
+	if v := os.Getenv("AF_STACK_S3_REGION"); v != "" {
+		cfg.Storage.Region = v
+	}
+	if v := os.Getenv("AF_STACK_S3_TENANT_PREFIX"); v != "" {
+		cfg.Storage.TenantPrefix = v
 	}
 }
 

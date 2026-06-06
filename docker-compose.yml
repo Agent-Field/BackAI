@@ -80,6 +80,16 @@ services:
       AF_STACK_METRICS_ADDR: ":9090"
       AF_STACK_DATABASE_URL: postgres://afstack:afstack@postgres:5432/afstack?sslmode=disable
       AF_STACK_AGENTFIELD_URL: http://agentfield:8080
+      # KMS for the secrets vault (envelope encryption). Override in
+      # production with `openssl rand -hex 32`.
+      AF_STACK_KMS_KEY: ${AF_STACK_KMS_KEY:-dev-secret-change-me}
+      # MinIO-backed object storage.
+      AF_STACK_S3_ADAPTER: minio
+      AF_STACK_S3_ENDPOINT: minio:9000
+      AF_STACK_S3_BUCKET: ${AF_STACK_S3_BUCKET:-af-stack}
+      AF_STACK_S3_ACCESS_KEY: ${AF_STACK_S3_ACCESS_KEY:-minio}
+      AF_STACK_S3_SECRET_KEY: ${AF_STACK_S3_SECRET_KEY:-minio-secret}
+      AF_STACK_S3_REGION: us-east-1
       LOG_FORMAT: json
       LOG_LEVEL: info
       # Optional: enable OTel by uncommenting after OTel collector lands.

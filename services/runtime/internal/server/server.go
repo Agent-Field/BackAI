@@ -12,19 +12,28 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/agentfield"
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
 	"github.com/Agent-Field/backai/services/runtime/internal/db"
+	"github.com/Agent-Field/backai/services/runtime/internal/hooks"
+	"github.com/Agent-Field/backai/services/runtime/internal/jobs"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
+	"github.com/Agent-Field/backai/services/runtime/internal/secrets"
+	"github.com/Agent-Field/backai/services/runtime/internal/storage"
 )
 
 // Server holds the HTTP server and shared dependencies.
 type Server struct {
-	cfg    config.Config
-	log    *slog.Logger
-	mux    *http.ServeMux
-	srv    *http.Server
-	health *Health
-	db     *db.DB
-	af     *agentfield.Client
-	tel    *observability.Telemetry
+	cfg           config.Config
+	log           *slog.Logger
+	mux           *http.ServeMux
+	srv           *http.Server
+	health        *Health
+	db            *db.DB
+	af            *agentfield.Client
+	tel           *observability.Telemetry
+	hooks         *hooks.Engine
+	storage       storage.Storage
+	storagePrefix string // tenant key-prefix when multi-tenancy is on; "" otherwise
+	secrets       *secrets.Vault
+	jobs          *jobs.Manager
 }
 
 // Health aggregates dependency health for the /health endpoint.
@@ -34,23 +43,43 @@ type Health struct {
 
 // Deps groups the runtime dependencies the server uses. nil entries are
 // gracefully tolerated (the health check reports them as not-configured).
+//
+// StoragePrefix is the tenant key-prefix applied to every storage key (e.g.
+// "tenants/default"). Phase 5 multi-tenancy is off by default; leave empty
+// and keys pass through untouched. When MT lands, this will be derived
+// per-request from the tenant context.
 type Deps struct {
-	DB        *db.DB
-	AF        *agentfield.Client
-	Telemetry *observability.Telemetry
+	DB            *db.DB
+	AF            *agentfield.Client
+	Telemetry     *observability.Telemetry
+	Hooks         *hooks.Engine
+	Storage       storage.Storage
+	StoragePrefix string
+	// Secrets is the AES-GCM-encrypted secrets vault. nil means the
+	// endpoints return 503; main.go constructs one when both DB and a
+	// KEK (env AF_STACK_KMS_KEY or dev fallback) are available.
+	Secrets *secrets.Vault
+	// Jobs is the River-backed jobs manager. nil means the endpoints
+	// return tolerant empty responses (Phase 4 boot mode).
+	Jobs *jobs.Manager
 }
 
 // New constructs a Server with the given config + logger + dependencies.
 func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 	mux := http.NewServeMux()
 	s := &Server{
-		cfg:    cfg,
-		log:    log,
-		mux:    mux,
-		health: &Health{StartedAt: time.Now()},
-		db:     deps.DB,
-		af:     deps.AF,
-		tel:    deps.Telemetry,
+		cfg:           cfg,
+		log:           log,
+		mux:           mux,
+		health:        &Health{StartedAt: time.Now()},
+		db:            deps.DB,
+		af:            deps.AF,
+		tel:           deps.Telemetry,
+		hooks:         deps.Hooks,
+		storage:       deps.Storage,
+		storagePrefix: deps.StoragePrefix,
+		secrets:       deps.Secrets,
+		jobs:          deps.Jobs,
 	}
 	s.registerRoutes()
 
@@ -96,6 +125,20 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/cost", s.handleCostSummary)
 	s.mux.HandleFunc("GET /api/v1/modules", s.handleModulesState)
 	s.mux.HandleFunc("GET /api/v1/queues/summary", s.handleQueueSummary)
+
+	// Storage (Phase 5). Endpoints return 503 when no adapter is wired.
+	s.registerStorageRoutes()
+
+	// Secrets vault (Phase 5). Endpoints return 503 when no vault is wired.
+	s.registerSecretsRoutes()
+
+	// Jobs queue (Phase 5). Endpoints return tolerant empty responses when
+	// no manager is wired (no DB present at boot time).
+	s.mux.HandleFunc("POST /api/v1/jobs", s.handleEnqueueJob)
+	s.mux.HandleFunc("GET /api/v1/jobs", s.handleListJobs)
+	s.mux.HandleFunc("GET /api/v1/jobs/definitions", s.handleJobDefinitions)
+	s.mux.HandleFunc("GET /api/v1/jobs/{id}", s.handleGetJob)
+	s.mux.HandleFunc("POST /api/v1/jobs/{id}/retry", s.handleRetryJob)
 
 	if s.tel != nil {
 		s.mux.Handle("GET /metrics", s.tel.MetricsHandler())

@@ -37,10 +37,48 @@ export {
   type DenyOptions,
 } from "./agents.js"
 export { SuiteError, type HttpOptions, type SseEvent } from "./_http.js"
+export {
+  jobs,
+  enqueue as enqueueJob,
+  get as getJob,
+  retry as retryJob,
+  list as listJobs,
+  JobSchema,
+  JobListSchema,
+  JobStateSchema,
+  type Job,
+  type JobList,
+  type JobState,
+  type EnqueueJobOptions,
+  type ListJobsOptions,
+} from "./jobs.js"
+export { secrets, get as getSecret } from "./secrets.js"
+export {
+  storage,
+  upload as uploadObject,
+  download as downloadObject,
+  signedURL as signedObjectURL,
+  delete as deleteObject,
+  list as listObjects,
+  StorageObjectSchema,
+  StorageListSchema,
+  SignedURLSchema,
+  type StorageObject,
+  type StorageList,
+  type SignedURL,
+  type UploadOptions,
+  type ListStorageOptions,
+} from "./storage.js"
 
 import { agents } from "./agents.js"
+import { jobs } from "./jobs.js"
+import { secrets } from "./secrets.js"
+import { storage } from "./storage.js"
 
-/** Top-level namespace: `suite.agents.*` (and future `suite.jobs.*`, etc.). */
+/** Top-level namespace: `suite.agents.*`, `suite.jobs.*`, `suite.secrets.*`, `suite.storage.*`. */
 export const suite = {
   agents,
+  jobs,
+  secrets,
+  storage,
 } as const

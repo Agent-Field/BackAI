@@ -25,15 +25,19 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from . import agents
+from . import agents, jobs, secrets, storage
 from .ctx import RequestContext, bind, ctx, current, reset, scope
 
 __version__ = "0.0.1"
 
 # ``suite`` is a namespace object so users can write the canonical
-# ``suite.agents.call(...)`` form. Future modules (jobs, secrets,
-# storage, ...) will be attached here as they land.
-suite = SimpleNamespace(agents=agents)
+# ``suite.agents.call(...)`` form. Each module is attached as it lands.
+suite = SimpleNamespace(
+    agents=agents,
+    jobs=jobs,
+    secrets=secrets,
+    storage=storage,
+)
 
 
 __all__ = [
@@ -43,7 +47,10 @@ __all__ = [
     "bind",
     "ctx",
     "current",
+    "jobs",
     "reset",
     "scope",
+    "secrets",
+    "storage",
     "suite",
 ]

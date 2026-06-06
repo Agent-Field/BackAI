@@ -84,12 +84,50 @@ async function capture() {
     fullPage: false,
   })
 
-  // ── 5. Runs (bonus screenshot — shows live data nicely)
+  // ── 5. Runs
   console.log("→ Runs")
   await page.goto(`${DASHBOARD_URL}/operate/runs`, { waitUntil: "networkidle" })
   await page.waitForTimeout(2000)
   await page.screenshot({
     path: resolve(OUT_DIR, "runs.png"),
+    fullPage: false,
+  })
+
+  // ── 6. Queues (Phase 5: real River data)
+  console.log("→ Queues")
+  await page.goto(`${DASHBOARD_URL}/operate/queues`, {
+    waitUntil: "networkidle",
+  })
+  await page.waitForTimeout(2000)
+  await page.screenshot({
+    path: resolve(OUT_DIR, "queues.png"),
+    fullPage: false,
+  })
+
+  // ── 7. Build → Jobs (definitions list + enqueue Sheet)
+  console.log("→ Jobs")
+  await page.goto(`${DASHBOARD_URL}/build/jobs`, { waitUntil: "networkidle" })
+  await page.waitForTimeout(2000)
+  await page.screenshot({
+    path: resolve(OUT_DIR, "jobs.png"),
+    fullPage: false,
+  })
+
+  // ── 8. Build → Secrets
+  console.log("→ Secrets")
+  await page.goto(`${DASHBOARD_URL}/build/secrets`, { waitUntil: "networkidle" })
+  await page.waitForTimeout(2000)
+  await page.screenshot({
+    path: resolve(OUT_DIR, "secrets.png"),
+    fullPage: false,
+  })
+
+  // ── 9. Build → Storage
+  console.log("→ Storage")
+  await page.goto(`${DASHBOARD_URL}/build/storage`, { waitUntil: "networkidle" })
+  await page.waitForTimeout(2000)
+  await page.screenshot({
+    path: resolve(OUT_DIR, "storage.png"),
     fullPage: false,
   })
 
