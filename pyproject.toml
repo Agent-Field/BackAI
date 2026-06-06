@@ -13,8 +13,9 @@ package = false  # this is a workspace, not a publishable package
 members = [
     "packages/sdk-py",
     "apps/backend",
-    "examples/*",
 ]
+# `examples/*` will be added back to the workspace as individual examples
+# scaffold their own pyproject.toml (Phase 13).
 
 [tool.ruff]
 line-length = 100

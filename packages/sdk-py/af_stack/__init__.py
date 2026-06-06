@@ -1,21 +1,49 @@
 """AF Stack — Suite SDK for Python.
 
-The suite SDK exposes the operational verbs an app uses daily:
+The suite SDK exposes the operational verbs an app uses daily. Both of
+these imports work and are equivalent::
 
     from af_stack import suite, ctx
-
-    # Call an agent
     result = await suite.agents.call("notable-ai.summarize", {"text": "..."})
 
-    # Read tenant context
-    tenant_id = ctx.tenant_id
+    from af_stack import agents, ctx
+    result = await agents.call("notable-ai.summarize", {"text": "..."})
 
-Inside an AgentField agent process, use the AgentField SDK (``agentfield.Agent``)
-to *define* agents. Use this suite SDK to *call* them and to use suite
-infrastructure (jobs, secrets, storage, notifications, billing, sandbox, etc.).
+``ctx`` is the request-scoped context (tenant, user, request id) — set by
+middleware on every entry point. ``agents`` invokes AgentField via the
+suite gateway; all model calls flow through AF (no bypass path).
+
+Inside an AgentField agent process, use the AgentField SDK
+(``agentfield.Agent``) to *define* agents. Use this suite SDK to *call*
+them and to use suite infrastructure (jobs, secrets, storage,
+notifications, billing, sandbox, etc.) — which arrive in later phases.
 
 See https://github.com/Agent-Field/backai for full docs.
 """
 
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+from . import agents
+from .ctx import RequestContext, bind, ctx, current, reset, scope
+
 __version__ = "0.0.1"
-__all__ = ["__version__"]
+
+# ``suite`` is a namespace object so users can write the canonical
+# ``suite.agents.call(...)`` form. Future modules (jobs, secrets,
+# storage, ...) will be attached here as they land.
+suite = SimpleNamespace(agents=agents)
+
+
+__all__ = [
+    "RequestContext",
+    "__version__",
+    "agents",
+    "bind",
+    "ctx",
+    "current",
+    "reset",
+    "scope",
+    "suite",
+]
