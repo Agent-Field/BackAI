@@ -134,3 +134,80 @@ func (c *Client) Discover(ctx context.Context) ([]AgentInfo, error) {
 func (c *Client) BaseURL() string {
 	return c.baseURL
 }
+
+// Execute calls an AF agent reasoner synchronously.
+//
+// path is the AF endpoint path (e.g. "/api/v1/execute/sample.echo"); body
+// is the request payload (already JSON-encoded). Returns AF's raw response
+// body, status code, and the X-Execution-ID header if present.
+func (c *Client) Execute(ctx context.Context, path string, body []byte) (ExecuteResponse, error) {
+	if c.baseURL == "" {
+		return ExecuteResponse{}, errors.New("agentfield: URL not configured")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, strings.NewReader(string(body)))
+	if err != nil {
+		return ExecuteResponse{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return ExecuteResponse{}, fmt.Errorf("agentfield: execute %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	return ExecuteResponse{
+		StatusCode:  resp.StatusCode,
+		Body:        respBody,
+		ContentType: resp.Header.Get("Content-Type"),
+		ExecutionID: resp.Header.Get("X-Execution-ID"),
+	}, nil
+}
+
+// ExecuteResponse holds the raw response returned by AF for a sync execute.
+type ExecuteResponse struct {
+	StatusCode  int
+	Body        []byte
+	ContentType string
+	ExecutionID string
+}
+
+// GetExecution queries the status of a previously-started async execution.
+func (c *Client) GetExecution(ctx context.Context, id string) (ExecuteResponse, error) {
+	if c.baseURL == "" {
+		return ExecuteResponse{}, errors.New("agentfield: URL not configured")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/executions/"+id, nil)
+	if err != nil {
+		return ExecuteResponse{}, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return ExecuteResponse{}, fmt.Errorf("agentfield: get exec %s: %w", id, err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	return ExecuteResponse{
+		StatusCode:  resp.StatusCode,
+		Body:        body,
+		ContentType: resp.Header.Get("Content-Type"),
+	}, nil
+}
+
+// CancelExecution cancels a running async execution.
+func (c *Client) CancelExecution(ctx context.Context, id string) (ExecuteResponse, error) {
+	if c.baseURL == "" {
+		return ExecuteResponse{}, errors.New("agentfield: URL not configured")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+"/api/v1/executions/"+id, nil)
+	if err != nil {
+		return ExecuteResponse{}, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return ExecuteResponse{}, fmt.Errorf("agentfield: cancel %s: %w", id, err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	return ExecuteResponse{StatusCode: resp.StatusCode, Body: body}, nil
+}

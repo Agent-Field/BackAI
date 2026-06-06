@@ -98,6 +98,25 @@ services:
     # health rather than an exec healthcheck. Compose will treat the
     # container as healthy once it stays up.
 
+  # Sample AgentField agent. The 60-second quickstart calls this via the
+  # gateway to prove end-to-end connectivity. Replace with your own agents
+  # in apps/backend/agents/<your-agent>/ to customise.
+  sample-agent:
+    build:
+      context: apps/backend/agents/sample
+      dockerfile: Dockerfile
+    environment:
+      AGENTFIELD_SERVER: http://agentfield:8080
+      NODE_ID: sample
+      AGENT_CALLBACK_URL: http://sample-agent:8090
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    depends_on:
+      agentfield:
+        condition: service_started
+    restart: unless-stopped
+
   # OpenTelemetry collector (Phase 1.7). Bundled but commented until runtime ships.
   # otel-collector:
   #   image: otel/opentelemetry-collector-contrib:latest
