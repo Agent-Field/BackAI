@@ -87,6 +87,14 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/executions/{id}", s.handleGetExecution)
 	s.mux.HandleFunc("DELETE /api/v1/executions/{id}", s.handleCancelExecution)
 
+	// Dashboard read-only endpoints (see internal/server/dashboard.go).
+	// Phase 4: no admin auth gating yet — Phase 6 wires that.
+	s.mux.HandleFunc("GET /api/v1/runs", s.handleListRuns)
+	s.mux.HandleFunc("GET /api/v1/home/overview", s.handleHomeOverview)
+	s.mux.HandleFunc("GET /api/v1/cost", s.handleCostSummary)
+	s.mux.HandleFunc("GET /api/v1/modules", s.handleModulesState)
+	s.mux.HandleFunc("GET /api/v1/queues/summary", s.handleQueueSummary)
+
 	if s.tel != nil {
 		s.mux.Handle("GET /metrics", s.tel.MetricsHandler())
 	}
@@ -229,6 +237,7 @@ func (s *Server) handleAgentCallAsync(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) forwardAgentCall(w http.ResponseWriter, r *http.Request, afPrefix string) {
+	start := time.Now()
 	if s.af == nil {
 		writeJSON(w, http.StatusServiceUnavailable, errEnvelope("AGENTFIELD_NOT_CONFIGURED", "agentfield client not configured"))
 		return
@@ -249,9 +258,11 @@ func (s *Server) forwardAgentCall(w http.ResponseWriter, r *http.Request, afPref
 		return
 	}
 
-	afResp, err := s.af.Execute(r.Context(), afPrefix+call, body)
+	endpoint := afPrefix + call
+	afResp, err := s.af.Execute(r.Context(), endpoint, body)
 	if err != nil {
 		s.log.Error("agent forward failed", "call", call, "error", err)
+		s.logGatewayRequest(r, endpoint, http.StatusBadGateway, len(body), 0, "", start)
 		writeJSON(w, http.StatusBadGateway, errEnvelope("AGENTFIELD_UNREACHABLE", err.Error()))
 		return
 	}
@@ -264,6 +275,56 @@ func (s *Server) forwardAgentCall(w http.ResponseWriter, r *http.Request, afPref
 	}
 	w.WriteHeader(afResp.StatusCode)
 	_, _ = w.Write(afResp.Body)
+
+	s.logGatewayRequest(r, endpoint, afResp.StatusCode, len(body), len(afResp.Body),
+		afResp.ExecutionID, start)
+}
+
+// logGatewayRequest writes a row into suite_gateway_requests so the
+// dashboard's /api/v1/runs and home overview endpoints have data.
+//
+// Best-effort: a write failure is logged but never blocks the response.
+func (s *Server) logGatewayRequest(
+	r *http.Request,
+	endpoint string,
+	status int,
+	requestBytes int,
+	responseBytes int,
+	executionID string,
+	startedAt time.Time,
+) {
+	if s.db == nil || s.db.Pool == nil {
+		return
+	}
+	durationMS := int(time.Since(startedAt).Milliseconds())
+
+	// Use a fresh, short-lived context so a slow write doesn't tie up the
+	// response goroutine.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	var execIDPtr *string
+	if executionID != "" {
+		execIDPtr = &executionID
+	}
+	_, err := s.db.Pool.Exec(ctx, `
+        insert into suite_gateway_requests
+            (endpoint, method, status_code, duration_ms,
+             request_bytes, response_bytes, af_execution_id, user_agent)
+        values ($1, $2, $3, $4, $5, $6, $7, $8)
+    `,
+		endpoint,
+		r.Method,
+		status,
+		durationMS,
+		requestBytes,
+		responseBytes,
+		execIDPtr,
+		r.Header.Get("User-Agent"),
+	)
+	if err != nil {
+		s.log.Warn("failed to log gateway request", "endpoint", endpoint, "error", err)
+	}
 }
 
 // handleGetExecution proxies execution status from AF.

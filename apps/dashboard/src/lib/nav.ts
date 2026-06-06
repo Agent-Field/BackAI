@@ -1,6 +1,12 @@
 // Source of truth for the dashboard navigation.
 // Mirrors docs/dashboard-ia.md exactly. Sidebar + ⌘K both read from here.
+//
+// Plugins extend nav at render time via `getNavGroupsWithPlugins()` /
+// `getSettingsNavWithPlugins()` / `getAllNavItemsWithPlugins()`. The static
+// `NAV_GROUPS`, `NAV_HOME`, `NAV_SETTINGS`, and `ALL_NAV_ITEMS` exports remain
+// for any caller that wants the shell-only view.
 
+import { loadPlugins } from "./plugins"
 import {
   Activity,
   Boxes,
@@ -254,9 +260,58 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   NAV_SETTINGS,
 ]
 
+/**
+ * Returns the four primary nav groups (build / operate / customers + an extra
+ * `system` group for plugins) with plugin items merged into the group each
+ * plugin requested. Pure: safe to call from server or client components.
+ *
+ * - Plugins whose `group` is `build|operate|customers` are appended to the
+ *   matching static group's items.
+ * - Plugins whose `group` is `system` form a new "System" group that is only
+ *   returned when at least one plugin uses it (otherwise the sidebar keeps the
+ *   default shape).
+ */
+export function getNavGroupsWithPlugins(): NavGroup[] {
+  const plugins = loadPlugins()
+  if (plugins.length === 0) return NAV_GROUPS
+
+  const groups = NAV_GROUPS.map((g) => ({ ...g, items: [...g.items] }))
+  const systemItems: NavItem[] = []
+
+  for (const plugin of plugins) {
+    const item: NavItem = {
+      id: `plugin-${plugin.id}`,
+      label: plugin.label,
+      href: plugin.href,
+      icon: plugin.icon,
+      description: plugin.description,
+    }
+    if (plugin.group === "system") {
+      systemItems.push(item)
+      continue
+    }
+    const target = groups.find((g) => g.id === plugin.group)
+    if (target) target.items.push(item)
+  }
+
+  if (systemItems.length > 0) {
+    groups.push({ id: "system", label: "System", items: systemItems })
+  }
+  return groups
+}
+
+/** Flat list including plugin nav items. Used by ⌘K to find anything. */
+export function getAllNavItemsWithPlugins(): NavItem[] {
+  return [
+    NAV_HOME,
+    ...getNavGroupsWithPlugins().flatMap((g) => g.items),
+    NAV_SETTINGS,
+  ]
+}
+
 /** Look up a nav item by route prefix. Used for breadcrumbs and highlight. */
 export function findActiveNav(pathname: string): NavItem | undefined {
-  return ALL_NAV_ITEMS.find(
+  return getAllNavItemsWithPlugins().find(
     (item) => pathname === item.href || pathname.startsWith(item.href + "/"),
   )
 }

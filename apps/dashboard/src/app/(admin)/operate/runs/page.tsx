@@ -1,15 +1,16 @@
-import { Workflow } from "lucide-react"
+import { PageHeader } from "@/components/layout/page-header"
+import { RunsView } from "./_components/runs-view"
 
-import { ComingSoon } from "@/components/layout/tab-stub"
+export const dynamic = "force-dynamic"
 
 export default function Page() {
   return (
-    <ComingSoon
-      title="Runs"
-      description="Agent executions with logs and traces"
-      icon={Workflow}
-      bodyTitle="No runs yet"
-      bodyDescription="Invoke an agent to see runs here."
-    />
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        title="Runs"
+        description="Agent executions with filters, summary, and a deep-link to the runtime trace."
+      />
+      <RunsView />
+    </div>
   )
 }

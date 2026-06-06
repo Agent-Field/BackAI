@@ -12,7 +12,11 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command"
-import { NAV_GROUPS, NAV_HOME, NAV_SETTINGS } from "@/lib/nav"
+import {
+  getNavGroupsWithPlugins,
+  NAV_HOME,
+  NAV_SETTINGS,
+} from "@/lib/nav"
 import type { NavItem } from "@/lib/nav"
 
 type CommandPaletteProps = {
@@ -23,6 +27,7 @@ type CommandPaletteProps = {
 export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const router = useRouter()
   const [value, setValue] = useState("")
+  const navGroups = getNavGroupsWithPlugins()
 
   useEffect(() => {
     if (!open) setValue("")
@@ -64,7 +69,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       <CommandList>
         <CommandEmpty>No results.</CommandEmpty>
         <CommandGroup heading="Overview">{navItem(NAV_HOME)}</CommandGroup>
-        {NAV_GROUPS.map((group) => (
+        {navGroups.map((group) => (
           <div key={group.id}>
             <CommandSeparator />
             <CommandGroup heading={group.label}>
@@ -73,7 +78,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           </div>
         ))}
         <CommandSeparator />
-        <CommandGroup heading="System">{navItem(NAV_SETTINGS)}</CommandGroup>
+        <CommandGroup heading="Settings">{navItem(NAV_SETTINGS)}</CommandGroup>
       </CommandList>
     </CommandDialog>
   )

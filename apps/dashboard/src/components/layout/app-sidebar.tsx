@@ -17,7 +17,12 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import { Badge } from "@/components/ui/badge"
-import { NAV_GROUPS, NAV_HOME, NAV_SETTINGS, type NavItem } from "@/lib/nav"
+import {
+  getNavGroupsWithPlugins,
+  NAV_HOME,
+  NAV_SETTINGS,
+  type NavItem,
+} from "@/lib/nav"
 
 function isActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/"
@@ -49,6 +54,7 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
 
 export function AppSidebar() {
   const pathname = usePathname()
+  const navGroups = getNavGroupsWithPlugins()
 
   return (
     <Sidebar collapsible="icon">
@@ -86,7 +92,7 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {NAV_GROUPS.map((group) => (
+        {navGroups.map((group) => (
           <SidebarGroup key={group.id}>
             <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
             <SidebarGroupContent>

@@ -20,6 +20,26 @@ type Config struct {
 	AgentField    AgentFieldConfig     `yaml:"agentfield"`
 	Logging       LoggingConfig        `yaml:"logging"`
 	Observability ObservabilityConfig  `yaml:"observability"`
+	Modules       ModulesConfig        `yaml:"modules"`
+}
+
+// ModulesConfig declares which suite modules are enabled and which
+// workload (domain-specific) modules are loaded alongside them.
+//
+// The dashboard reads this via GET /api/v1/modules to render the
+// modules page and to decide whether multi-tenancy tabs render real
+// content or an "Enable multi-tenancy" empty state.
+type ModulesConfig struct {
+	// Enabled maps module ID -> on/off. When a module is not present in
+	// the map, the runtime falls back to a per-module v1 default (see
+	// ModuleState.DefaultEnabled).
+	Enabled map[string]bool `yaml:"enabled"`
+	// Adapters maps module ID -> adapter implementation choice (e.g.
+	// "storage" -> "s3", "secrets-vault" -> "env").
+	Adapters map[string]string `yaml:"adapters"`
+	// WorkloadModules lists domain modules loaded on top of the core
+	// suite (e.g. "agent-commerce", "interior-design").
+	WorkloadModules []string `yaml:"workload_modules"`
 }
 
 // ServerConfig holds HTTP listener settings.
