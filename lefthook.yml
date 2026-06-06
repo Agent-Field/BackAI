@@ -1,0 +1,50 @@
+# Lefthook config — fast pre-commit checks across Go, Python, and TypeScript.
+#
+# Install:
+#   brew install lefthook   # or scoop / pkg / npm
+#   lefthook install
+#
+# Skip a hook one time: LEFTHOOK=0 git commit ...
+
+pre-commit:
+  parallel: true
+  commands:
+    gofmt:
+      glob: "*.go"
+      run: gofmt -l {staged_files} | (! grep .)
+      fail_text: "Run: gofmt -w {staged_files}"
+
+    govet:
+      glob: "*.go"
+      run: go vet ./...
+      fail_text: "go vet errors above"
+
+    ruff-check:
+      glob: "*.{py,pyi}"
+      run: ruff check {staged_files}
+
+    ruff-format:
+      glob: "*.{py,pyi}"
+      run: ruff format --check {staged_files}
+
+    prettier:
+      glob: "*.{ts,tsx,js,jsx,json,yaml,yml,md}"
+      run: pnpm exec prettier --check {staged_files}
+      fail_text: "Run: pnpm exec prettier --write {staged_files}"
+
+    eslint:
+      glob: "*.{ts,tsx}"
+      run: pnpm exec eslint {staged_files} --max-warnings 0 || true
+
+commit-msg:
+  commands:
+    conventional:
+      run: |
+        # Enforce Conventional Commits: feat|fix|chore|docs|refactor|test|perf|ci
+        head -n1 {1} | grep -qE '^(feat|fix|chore|docs|refactor|test|perf|ci|build|style|revert)(\(.+\))?!?: .+'
+      fail_text: |
+        Commit message must follow Conventional Commits format:
+          feat: add new sandbox adapter
+          fix(runtime): handle nil config gracefully
+          chore: bump deps
+        Allowed types: feat, fix, chore, docs, refactor, test, perf, ci, build, style, revert

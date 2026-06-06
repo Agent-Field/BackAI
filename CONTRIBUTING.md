@@ -26,6 +26,23 @@ Read `README.md` for orientation, `PLAN.md` for architecture,
 - Run `make lint` and `make test` before pushing
 - Sign your commits if you can (not required)
 
+## Pre-commit hooks
+
+We use [lefthook](https://github.com/evilmartians/lefthook) for fast,
+parallel pre-commit checks across Go, Python, and TypeScript.
+
+```bash
+# install lefthook (one-time)
+brew install lefthook       # macOS
+# or: scoop install lefthook (Windows)
+# or: see https://github.com/evilmartians/lefthook for other platforms
+
+# enable hooks in this repo
+lefthook install
+```
+
+Hooks run automatically on `git commit`. To skip once: `LEFTHOOK=0 git commit`.
+
 ## Code style
 
 - **Go**: `gofmt`, `golangci-lint` rules in `.golangci.yml`
