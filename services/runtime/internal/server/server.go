@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Agent-Field/backai/services/runtime/internal/agentfield"
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
+	"github.com/Agent-Field/backai/services/runtime/internal/db"
 )
 
 // Server holds the HTTP server and shared dependencies.
@@ -18,6 +20,8 @@ type Server struct {
 	mux    *http.ServeMux
 	srv    *http.Server
 	health *Health
+	db     *db.DB
+	af     *agentfield.Client
 }
 
 // Health aggregates dependency health for the /health endpoint.
@@ -25,14 +29,23 @@ type Health struct {
 	StartedAt time.Time
 }
 
-// New constructs a Server with the given config + logger.
-func New(cfg config.Config, log *slog.Logger) *Server {
+// Deps groups the runtime dependencies the server uses. nil entries are
+// gracefully tolerated (the health check reports them as not-configured).
+type Deps struct {
+	DB *db.DB
+	AF *agentfield.Client
+}
+
+// New constructs a Server with the given config + logger + dependencies.
+func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 	mux := http.NewServeMux()
 	s := &Server{
 		cfg:    cfg,
 		log:    log,
 		mux:    mux,
 		health: &Health{StartedAt: time.Now()},
+		db:     deps.DB,
+		af:     deps.AF,
 	}
 	s.registerRoutes()
 	s.srv = &http.Server{
@@ -51,6 +64,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("GET /ready", s.handleReady)
 	s.mux.HandleFunc("GET /openapi.json", s.handleOpenAPI)
+	s.mux.HandleFunc("GET /api/v1/agents", s.handleListAgents)
 }
 
 // Start runs the HTTP server. Blocks until ctx is cancelled, then drains
@@ -83,18 +97,70 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 }
 
-func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	checks := map[string]any{
+		"runtime": map[string]any{"status": "ok"},
+	}
+	overall := "ok"
+
+	if s.db != nil {
+		if err := s.db.Health(r.Context()); err != nil {
+			checks["database"] = map[string]any{"status": "down", "error": err.Error()}
+			overall = "degraded"
+		} else {
+			checks["database"] = map[string]any{"status": "ok"}
+		}
+	} else {
+		checks["database"] = map[string]any{"status": "not_configured"}
+	}
+
+	if s.af != nil {
+		if _, err := s.af.Health(r.Context()); err != nil {
+			checks["agentfield"] = map[string]any{
+				"status": "down",
+				"url":    s.af.BaseURL(),
+				"error":  err.Error(),
+			}
+			overall = "degraded"
+		} else {
+			checks["agentfield"] = map[string]any{
+				"status": "ok",
+				"url":    s.af.BaseURL(),
+			}
+		}
+	} else {
+		checks["agentfield"] = map[string]any{"status": "not_configured"}
+	}
+
 	resp := map[string]any{
-		"status":     "ok",
+		"status":     overall,
 		"started_at": s.health.StartedAt.UTC().Format(time.RFC3339),
 		"uptime_s":   int(time.Since(s.health.StartedAt).Seconds()),
+		"checks":     checks,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
-	// Phase 1.3 will probe PG; Phase 1.4 will probe AF.
-	// For now, ready == health.
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+	// Ready = DB connected AND AF healthy (when both configured).
+	if s.db != nil {
+		if err := s.db.Health(r.Context()); err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"status": "not_ready",
+				"reason": "database unhealthy",
+			})
+			return
+		}
+	}
+	if s.af != nil {
+		if _, err := s.af.Health(r.Context()); err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"status": "not_ready",
+				"reason": "agentfield unhealthy",
+			})
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
@@ -105,9 +171,37 @@ func (s *Server) handleOpenAPI(w http.ResponseWriter, _ *http.Request) {
 			"title":   "AF Stack",
 			"version": "0.0.1",
 		},
-		"paths": map[string]any{},
+		"paths": map[string]any{
+			"/health": map[string]any{
+				"get": map[string]any{"summary": "Service health"},
+			},
+			"/ready": map[string]any{
+				"get": map[string]any{"summary": "Service readiness"},
+			},
+			"/api/v1/agents": map[string]any{
+				"get": map[string]any{"summary": "Discover registered AgentField agents"},
+			},
+		},
 	}
 	writeJSON(w, http.StatusOK, stub)
+}
+
+func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
+	if s.af == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "agentfield not configured",
+		})
+		return
+	}
+	agents, err := s.af.Discover(r.Context())
+	if err != nil {
+		s.log.Error("agentfield discover failed", "error", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"error": "agentfield unreachable",
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"agents": agents})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
