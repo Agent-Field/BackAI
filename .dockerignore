@@ -1,0 +1,36 @@
+.git
+.github
+.cursor
+.claude
+.vscode
+.idea
+
+# Build artifacts
+bin
+dist
+build
+out
+*.log
+node_modules
+.next
+.venv
+.venv-*
+__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache
+coverage
+test-reports
+
+# Docs and ancillary
+*.md
+docs
+examples
+deploy
+scripts
+
+# Don't ignore the runtime Dockerfile context
+!services
+!packages/sdk-go
+!go.mod
+!go.sum
