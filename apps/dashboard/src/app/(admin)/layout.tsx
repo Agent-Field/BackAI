@@ -5,6 +5,10 @@ import { AppSidebar } from "@/components/layout/app-sidebar"
 import { Topbar } from "@/components/layout/topbar"
 import { getServerSession, operatorCount } from "@/lib/session"
 
+// Admin routes are session-dependent and runtime-data-backed. Never
+// prerender — every request needs a fresh session check + live data.
+export const dynamic = "force-dynamic"
+
 export default async function AdminLayout({
   children,
 }: {
