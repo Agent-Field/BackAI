@@ -53,19 +53,42 @@ through AF so identity, traces, cost, policy, and audit are preserved.
 
 Plus a REST + OpenAPI surface so any language works.
 
-## Quickstart
+## Quickstart (under 60 seconds)
 
-> Coming as Phase 2 lands. Expected shape:
->
-> ```bash
-> git clone https://github.com/Agent-Field/backai my-app
-> cd my-app
-> cp .env.example .env
-> # edit .env: set OPENROUTER_API_KEY
-> docker compose up
-> # Dashboard at http://localhost:3000
-> # API at http://localhost:8080
-> ```
+```bash
+git clone https://github.com/Agent-Field/backai my-app
+cd my-app
+cp .env.example .env
+# (optional) edit .env: set OPENROUTER_API_KEY to enable LLM features
+docker compose up
+```
+
+Then in another terminal, call the bundled sample agent through the
+gateway:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/agents/sample.echo \
+  -H "Content-Type: application/json" \
+  -d '{"input":{"payload":{"message":"hello world"}}}'
+# → {"status":"succeeded","result":{"echoed":{"message":"hello world"}}, ...}
+```
+
+Endpoints once up:
+
+- Suite gateway: `http://localhost:8080/api/v1/`
+- Health + metrics: `http://localhost:8080/health` · `/ready` · `/metrics`
+- AgentField control plane: `http://localhost:8081/`
+- MinIO console: `http://localhost:9001/`
+
+Dashboard (Next.js) lands in Phase 3.
+
+### Make it your own
+
+Replace the sample agent with your own at `apps/backend/agents/<name>/` —
+each subfolder is its own container that registers with AgentField on
+startup. Edit `apps/backend/config.yaml` to enable / disable suite
+modules. Customize as you like; everything in this repo is yours after
+the fork.
 
 ## Status
 

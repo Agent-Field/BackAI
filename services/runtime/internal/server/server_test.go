@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/agentfield"
@@ -72,6 +73,106 @@ func TestListAgentsWithoutAFReturns503(t *testing.T) {
 	s.mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("expected 503, got %d", rec.Code)
+	}
+}
+
+func TestAgentCallForwardsToAFAndPreservesStatus(t *testing.T) {
+	afSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/execute/sample.echo" {
+			t.Errorf("unexpected path: %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Execution-ID", "exec-123")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"echoed":{"x":1}}`))
+	}))
+	defer afSrv.Close()
+
+	srv := New(config.Default(), slog.Default(), Deps{
+		AF: agentfield.New(agentfield.Config{URL: afSrv.URL}),
+	})
+	req := httptest.NewRequest("POST", "/api/v1/agents/sample.echo",
+		strings.NewReader(`{"input":{"x":1}}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("X-Execution-ID") != "exec-123" {
+		t.Errorf("expected X-Execution-ID passthrough, got %q", rec.Header().Get("X-Execution-ID"))
+	}
+	if !strings.Contains(rec.Body.String(), "echoed") {
+		t.Errorf("expected body passthrough, got %s", rec.Body.String())
+	}
+}
+
+func TestAgentCallRejectsInvalidName(t *testing.T) {
+	srv := New(config.Default(), slog.Default(), Deps{
+		AF: agentfield.New(agentfield.Config{URL: "http://example"}),
+	})
+	req := httptest.NewRequest("POST", "/api/v1/agents/bad..name!", nil)
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestAgentCallReturns503WithoutAF(t *testing.T) {
+	srv := newBareTestServer(t)
+	req := httptest.NewRequest("POST", "/api/v1/agents/sample.echo",
+		strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", rec.Code)
+	}
+}
+
+func TestAsyncAgentCallUsesAFAsyncEndpoint(t *testing.T) {
+	gotPath := ""
+	afSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"execution_id":"exec-async-1"}`))
+	}))
+	defer afSrv.Close()
+
+	srv := New(config.Default(), slog.Default(), Deps{
+		AF: agentfield.New(agentfield.Config{URL: afSrv.URL}),
+	})
+	req := httptest.NewRequest("POST", "/api/v1/agents/async/sample.echo",
+		strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Errorf("expected 202, got %d", rec.Code)
+	}
+	if gotPath != "/api/v1/execute/async/sample.echo" {
+		t.Errorf("expected async path forward, got %q", gotPath)
+	}
+}
+
+func TestValidAgentName(t *testing.T) {
+	cases := []struct {
+		name string
+		ok   bool
+	}{
+		{"sample.echo", true},
+		{"ns.func_v2", true},
+		{"a-b.c-d", true},
+		{"", false},
+		{"missing-dot", true}, // still valid characters; AF will 404
+		{"has/slash", false},
+		{"has space", false},
+		{"a..b", true}, // valid chars; semantic invalid handled by AF
+	}
+	for _, c := range cases {
+		got := validAgentName(c.name)
+		if got != c.ok {
+			t.Errorf("validAgentName(%q) = %v, want %v", c.name, got, c.ok)
+		}
 	}
 }
 

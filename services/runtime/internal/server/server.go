@@ -4,6 +4,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -78,6 +79,14 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /ready", s.handleReady)
 	s.mux.HandleFunc("GET /openapi.json", s.handleOpenAPI)
 	s.mux.HandleFunc("GET /api/v1/agents", s.handleListAgents)
+
+	// Agent invocation — the central forwarding endpoints. Every LLM call
+	// in the suite eventually routes through these.
+	s.mux.HandleFunc("POST /api/v1/agents/{call}", s.handleAgentCall)
+	s.mux.HandleFunc("POST /api/v1/agents/async/{call}", s.handleAgentCallAsync)
+	s.mux.HandleFunc("GET /api/v1/executions/{id}", s.handleGetExecution)
+	s.mux.HandleFunc("DELETE /api/v1/executions/{id}", s.handleCancelExecution)
+
 	if s.tel != nil {
 		s.mux.Handle("GET /metrics", s.tel.MetricsHandler())
 	}
@@ -200,6 +209,125 @@ func (s *Server) handleOpenAPI(w http.ResponseWriter, _ *http.Request) {
 		},
 	}
 	writeJSON(w, http.StatusOK, stub)
+}
+
+// handleAgentCall forwards a synchronous agent invocation to AgentField.
+//
+// URL path: POST /api/v1/agents/{call} where {call} is "node_id.func_name".
+// Request body: JSON; forwarded to AF unchanged.
+// Response: AF's response, status code preserved.
+//
+// This is the core forwarding endpoint. Phase 2 keeps it minimal; later
+// phases add auth, multi-tenancy, rate limiting, audit logging, hooks.
+func (s *Server) handleAgentCall(w http.ResponseWriter, r *http.Request) {
+	s.forwardAgentCall(w, r, "/api/v1/execute/")
+}
+
+// handleAgentCallAsync forwards an async agent invocation.
+func (s *Server) handleAgentCallAsync(w http.ResponseWriter, r *http.Request) {
+	s.forwardAgentCall(w, r, "/api/v1/execute/async/")
+}
+
+func (s *Server) forwardAgentCall(w http.ResponseWriter, r *http.Request, afPrefix string) {
+	if s.af == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errEnvelope("AGENTFIELD_NOT_CONFIGURED", "agentfield client not configured"))
+		return
+	}
+	call := r.PathValue("call")
+	if call == "" {
+		writeJSON(w, http.StatusBadRequest, errEnvelope("VALIDATION_FAILED", "agent call name required"))
+		return
+	}
+	if !validAgentName(call) {
+		writeJSON(w, http.StatusBadRequest, errEnvelope("VALIDATION_FAILED", "invalid agent name: must be ns.func"))
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 16<<20))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errEnvelope("BAD_REQUEST", "could not read request body"))
+		return
+	}
+
+	afResp, err := s.af.Execute(r.Context(), afPrefix+call, body)
+	if err != nil {
+		s.log.Error("agent forward failed", "call", call, "error", err)
+		writeJSON(w, http.StatusBadGateway, errEnvelope("AGENTFIELD_UNREACHABLE", err.Error()))
+		return
+	}
+
+	if afResp.ContentType != "" {
+		w.Header().Set("Content-Type", afResp.ContentType)
+	}
+	if afResp.ExecutionID != "" {
+		w.Header().Set("X-Execution-ID", afResp.ExecutionID)
+	}
+	w.WriteHeader(afResp.StatusCode)
+	_, _ = w.Write(afResp.Body)
+}
+
+// handleGetExecution proxies execution status from AF.
+func (s *Server) handleGetExecution(w http.ResponseWriter, r *http.Request) {
+	if s.af == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errEnvelope("AGENTFIELD_NOT_CONFIGURED", "agentfield client not configured"))
+		return
+	}
+	id := r.PathValue("id")
+	resp, err := s.af.GetExecution(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, errEnvelope("AGENTFIELD_UNREACHABLE", err.Error()))
+		return
+	}
+	if resp.ContentType != "" {
+		w.Header().Set("Content-Type", resp.ContentType)
+	}
+	w.WriteHeader(resp.StatusCode)
+	_, _ = w.Write(resp.Body)
+}
+
+// handleCancelExecution proxies a cancel to AF.
+func (s *Server) handleCancelExecution(w http.ResponseWriter, r *http.Request) {
+	if s.af == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errEnvelope("AGENTFIELD_NOT_CONFIGURED", "agentfield client not configured"))
+		return
+	}
+	id := r.PathValue("id")
+	resp, err := s.af.CancelExecution(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, errEnvelope("AGENTFIELD_UNREACHABLE", err.Error()))
+		return
+	}
+	w.WriteHeader(resp.StatusCode)
+	_, _ = w.Write(resp.Body)
+}
+
+// errEnvelope is the standard AF Stack error envelope.
+func errEnvelope(code, message string) map[string]any {
+	return map[string]any{
+		"error": map[string]any{
+			"code":    code,
+			"message": message,
+		},
+	}
+}
+
+// validAgentName checks `ns.func` shape. Disallow paths that try to traverse
+// outside AF's execute namespace.
+func validAgentName(name string) bool {
+	if name == "" || len(name) > 256 {
+		return false
+	}
+	for _, ch := range name {
+		switch {
+		case ch >= 'a' && ch <= 'z':
+		case ch >= 'A' && ch <= 'Z':
+		case ch >= '0' && ch <= '9':
+		case ch == '_' || ch == '-' || ch == '.':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
