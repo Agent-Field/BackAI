@@ -1,0 +1,40 @@
+{
+  "name": "@af-stack/sdk",
+  "version": "0.0.1",
+  "description": "AF Stack — Suite SDK for TypeScript. Call agents and use suite infrastructure from any TS runtime.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src --max-warnings 0 || true",
+    "format": "prettier --write \"src/**/*.ts\""
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.5",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.1"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Agent-Field/backai.git",
+    "directory": "packages/sdk-ts"
+  }
+}

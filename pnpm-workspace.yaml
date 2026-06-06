@@ -1,0 +1,9 @@
+packages:
+  - apps/dashboard
+  - packages/sdk-ts
+  - packages/ui
+  - packages/auth
+  - packages/db
+  - packages/gateway-client
+  - workload-modules/*
+  - examples/*/dashboard

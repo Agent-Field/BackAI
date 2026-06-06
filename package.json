@@ -1,0 +1,28 @@
+{
+  "name": "af-stack",
+  "version": "0.0.1",
+  "private": true,
+  "description": "The open backend platform for the AI era. Self-host AgentField with everything else needed to ship a real product.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Agent-Field/backai.git"
+  },
+  "homepage": "https://github.com/Agent-Field/backai",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "build": "pnpm -r run build",
+    "test": "pnpm -r run test",
+    "lint": "pnpm -r run lint",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yaml,yml}\""
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.3"
+  }
+}
