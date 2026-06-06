@@ -94,8 +94,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
-        with:
-          enable-cache: true
       - run: uv python install 3.11
       - run: uv tool install ruff
       - run: ruff check .
@@ -109,8 +107,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
-        with:
-          enable-cache: true
       - run: uv python install 3.11
       - run: uv sync --all-packages
         continue-on-error: true  # OK while packages are empty
@@ -129,8 +125,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -149,8 +143,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
