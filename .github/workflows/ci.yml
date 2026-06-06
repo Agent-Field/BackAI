@@ -1,10 +1,14 @@
 name: CI
 
+# CI is currently MANUAL-ONLY to conserve resources during early build.
+# To re-enable automatic CI on push/PR, uncomment the `push` and
+# `pull_request` triggers below.
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
+  # push:
+  #   branches: [main]
+  # pull_request:
+  #   branches: [main]
 
 permissions:
   contents: read
@@ -63,7 +67,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: "1.23"
           cache: true
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
@@ -82,7 +86,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: "1.23"
           cache: true
       - run: go test ./... -race -cover
 
@@ -109,7 +113,7 @@ jobs:
       - uses: astral-sh/setup-uv@v3
       - run: uv python install 3.11
       - run: uv sync --all-packages
-        continue-on-error: true  # OK while packages are empty
+        continue-on-error: true # OK while packages are empty
       - run: |
           if find packages/sdk-py/tests apps/backend/tests -name 'test_*.py' 2>/dev/null | grep -q .; then
             uv run pytest -q
@@ -127,10 +131,10 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'pnpm'
+          node-version: "20"
+          cache: "pnpm"
       - run: pnpm install --frozen-lockfile
-        continue-on-error: true  # OK before lockfile exists
+        continue-on-error: true # OK before lockfile exists
       - run: pnpm install
       - run: pnpm -r lint || echo "no TS lint scripts yet"
       - run: pnpm exec prettier --check "**/*.{ts,tsx,js,jsx,json,md,yaml,yml}" || true
@@ -145,8 +149,8 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'pnpm'
+          node-version: "20"
+          cache: "pnpm"
       - run: pnpm install
       - run: pnpm -r test || echo "no TS tests yet"
 
@@ -180,7 +184,17 @@ jobs:
 
   ci-success:
     name: CI Success
-    needs: [lint-go, test-go, lint-python, test-python, lint-typescript, test-typescript, validate-compose, docs-lint]
+    needs:
+      [
+        lint-go,
+        test-go,
+        lint-python,
+        test-python,
+        lint-typescript,
+        test-typescript,
+        validate-compose,
+        docs-lint,
+      ]
     if: always()
     runs-on: ubuntu-latest
     steps:
