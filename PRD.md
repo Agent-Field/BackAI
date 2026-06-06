@@ -199,21 +199,47 @@ All six compute shapes are first-class:
 
 ### 6.3 Dashboard
 
-Single Next.js app, two audiences:
+Single Next.js app, **operator-only** in v1. Customer-facing scaffold
+lands in Phase 13.
 
-**Operator dashboard** — five hero tabs at Linear-grade polish:
-1. Database (Supabase Studio components embedded)
-2. Agent runs (AF DAG, traces, replay)
-3. LLM gateway (cost, cache, budgets)
-4. Sandboxes (pool, runs, costs)
-5. Tenants (per-customer drilldown)
+See `docs/dashboard-ia.md` for the complete information architecture.
 
-Functional CRUD for: Auth, API Keys, Jobs, Crons, Webhooks, Notifications,
-Billing, Secrets, Modules, Logs, Metrics, Storage, MCP, Skills.
+**Top-level navigation** (mental-mode groups, not feature categories):
 
-**End-user dashboard scaffold** — Next.js routes platform-owners customize
-for their customers. Ships: login, settings, members, usage, audit. Empty
-space for product UI.
+```
+[Home]   Build   Operate   Customers   [Settings]
+```
+
+- **Home** — overview dashboard (requests/min, errors, cost today, queue
+  depth, recent runs, alerts)
+- **Build** — configuring your product: Agents · Integrations · Database
+  · Storage · Secrets · Webhooks · Auth · Billing · Jobs · Sandboxes ·
+  Modules (read-only)
+- **Operate** — observing what runs: Runs · Logs · Queues · Cost ·
+  Sandbox Activity · Webhook Activity
+- **Customers** — your end users: Tenants · Users · API Keys · Customer
+  Billing · Audit. Always visible; each tab shows an empty state with
+  "Enable multi-tenancy" CTA when MT is off.
+- **Settings** — suite-level operator settings (account, theme, plugins,
+  flags). Not your product config.
+
+**Two hero tabs** at Linear/Vercel-grade polish:
+
+1. **Home** — first screen, viral screenshot
+2. **Operate → Cost** — differentiator vs Supabase + Helicone separately
+
+Every other tab uses standard shadcn components, ships shadcn-clean,
+no extra polish budget.
+
+**Generic vocabulary throughout** — "agents," "runs," "tools" — never
+vendor-specific. The runtime is an implementation detail.
+
+**Link out, don't rebuild** — the per-run page shows a summary card with
+"View full trace →" linking to the runtime's existing DAG view. We do
+not duplicate the graph.
+
+**Not in the dashboard**: eval/regression UI, prompt management,
+workflow designer, deploy UI. See `docs/dashboard-ia.md`.
 
 ### 6.4 SDKs
 
@@ -506,15 +532,25 @@ Acceptance:
 
 ### 9.18 Dashboard
 
-- **R-DB-1**: Next.js 15+ App Router, shadcn/ui + Tremor + Lucide icons
-- **R-DB-2**: Five hero tabs at production polish (Database, Agent Runs,
-  LLM Gateway, Sandboxes, Tenants)
-- **R-DB-3**: Functional CRUD for all other tabs in scope
+- **R-DB-1**: Next.js 15+ App Router, **shadcn/ui only** for components
+  (no custom UI primitives), Tremor for charts, lucide-react for icons,
+  React Flow for any graph viz, TanStack Table for tables >50 rows
+- **R-DB-2**: Three top-level groups (Build, Operate, Customers) + Home +
+  Settings; ⌘K command palette navigation
+- **R-DB-3**: Two hero tabs at production polish (Home, Operate → Cost);
+  every other tab shadcn-clean
 - **R-DB-4**: Dark mode default with light mode toggle
-- **R-DB-5**: Auth via better-auth, operator role required
-- **R-DB-6**: End-user routes (`/(workspace)/[slug]/*`) scoped by MT context
-- **R-DB-7**: Plugin system: drop files in `apps/dashboard/plugins/<name>/`
+- **R-DB-5**: Auth via better-auth, operator role required for all admin routes
+- **R-DB-6**: `Customers` group always visible; tabs show "Enable
+  multi-tenancy" empty state when MT module disabled
+- **R-DB-7**: `Build → Modules` is read-only (config edits go through
+  `config.yaml`, git-tracked); UI offers a reload button only
+- **R-DB-8**: Plugin system: drop files in `apps/dashboard/plugins/<name>/`
   to add tabs without forking
+- **R-DB-9**: Per-run detail page provides a "View full trace →" link to
+  the runtime's existing DAG view (we don't recreate the graph)
+- **R-DB-10**: Customer-facing dashboard scaffold is deferred to Phase 13
+  (not part of v1 dashboard)
 
 ### 9.19 CLI
 

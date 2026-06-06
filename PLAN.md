@@ -179,41 +179,55 @@ adapter doesn't support (e.g., Lambda's 15-min timeout).
 
 ## Dashboard
 
-Single Next.js app, two audiences:
+Single Next.js app, operator-only in v1 (customer-facing scaffold lands in
+Phase 13). Three mental-mode groups + Home + Settings.
 
-### Operator dashboard (you, the platform owner)
+See [`docs/dashboard-ia.md`](docs/dashboard-ia.md) for the full IA.
 
-Five top-level groups:
+### Top-level navigation
 
-| Group | Tabs |
-|---|---|
-| **Build** | Agents · MCP · Memory · Database · Storage |
-| **Run** | Agent runs · Jobs · Crons · Sandboxes · LLM Gateway · Workflows |
-| **Connect** | API Gateway · Webhooks · Notifications |
-| **Manage** | Auth · Tenants · API Keys · Billing · Secrets · Modules |
-| **Observe** | Logs · Metrics · Traces · Alerts · Cost |
+```
+[Home]   Build   Operate   Customers              ⌘K   [user]
+```
 
-**Five hero tabs** (best-in-class polish):
+- **Home** (standalone) — overview dashboard, viral hero
+- **Build** — configuring your product (Agents, Integrations, Database,
+  Storage, Secrets, Webhooks, Auth, Billing, Jobs, Sandboxes, Modules)
+- **Operate** — observing what runs (Runs, Logs, Queues, Cost,
+  Sandbox Activity, Webhook Activity)
+- **Customers** — your end users (Tenants, Users, API Keys,
+  Customer Billing, Audit). Always visible; gated by multi-tenancy: each
+  tab shows an empty state with an "Enable multi-tenancy" CTA when MT is off.
+- **Settings** (standalone) — suite-level operator settings, not product config
 
-1. Database (Supabase Studio embed): everyone uses it
-2. Agent runs: AF showcase, the viral screenshot
-3. LLM gateway: cost story, standalone viral wedge
-4. Sandboxes: SWE-AF showcase, dramatic visual
-5. Tenants: SaaS-builder hero, per-customer drilldown
+### Hero tabs (polish budget)
 
-Other tabs ship as functional CRUD (no polish budget in v1).
+Two only:
 
-### End-user dashboard (your customer, when MT is on)
+1. **Home** — first screen, the viral screenshot
+2. **Operate → Cost** — differentiator vs every non-AI backend platform
 
-Same Next.js app, scoped routes. Ships as minimal scaffold:
+Every other tab ships shadcn-clean but not hero polish.
 
-- Login / signup
-- Account settings (profile, API keys, members, billing portal)
-- Usage (their tokens, their compute, their costs)
-- Audit log (their actions)
-- Empty space for the platform owner's product UI
+### Generic naming
 
-The platform owner adds their product views (e.g., "my builds" for SWE-AF).
+The dashboard uses **generic AI-backend vocabulary** throughout: "agents,"
+"runs," "tools." No vendor-specific terminology. The runtime is an
+implementation detail.
+
+### Don't rebuild what's already excellent
+
+Where the agent runtime ships a polished view (e.g., the execution DAG),
+the dashboard provides a summary card with a "View full trace →" link
+that opens the runtime UI. No duplicated graph code.
+
+### What's NOT in the dashboard
+
+- Eval / regression UI (means different things per workload)
+- Prompt management (devs version in git)
+- Workflow designer / visual builder (code is the interface)
+- Deploy, migration, adapter-swap UIs (CLI + config files)
+- Multi-region admin (v2)
 
 ### Action coverage promise
 

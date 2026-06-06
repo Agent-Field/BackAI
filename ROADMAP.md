@@ -88,51 +88,90 @@ acceptance criterion. Each phase is independently demoable.
 
 **Goal**: dashboard you can log into, see something useful.
 
+See `docs/dashboard-ia.md` for the full IA.
+
 ### Deliverables
 
-- [ ] better-auth integrated with PG
+- [ ] better-auth integrated with PG (`suite_users`, `suite_memberships`,
+      `suite_tenants` tables already exist from Phase 1)
 - [ ] Email+password, magic link, Google OAuth working
 - [ ] Sessions (cookies) + bearer tokens
-- [ ] Next.js dashboard scaffolded with shadcn/ui + Tremor
+- [ ] Next.js dashboard scaffolded with **shadcn/ui only** + Tremor charts
+      + lucide-react icons (no custom UI primitives)
 - [ ] Login page, account settings page
-- [ ] Operator role check on `/(admin)/*` routes
-- [ ] Sidebar navigation matches the 5 groups (Build/Run/Connect/Manage/Observe)
-- [ ] All tabs present as routes (empty if not ready)
-- [ ] Dashboard reads from suite runtime via REST
-- [ ] Dark mode default
+- [ ] Operator role check via middleware on `/(admin)/*` routes
+- [ ] Top-nav matches the IA: Home / Build / Operate / Customers / Settings
+- [ ] All tabs present as routes (empty state placeholders if not implemented)
+- [ ] `Customers` group always visible; each tab shows an
+      "Enable multi-tenancy" CTA when MT module is disabled
+- [ ] Dashboard reads from suite runtime via shared `lib/api.ts` typed client
+- [ ] ⌘K command palette for navigation
+- [ ] Dark mode default with light mode toggle
 - [ ] First-run setup: create initial operator account
+- [ ] Plugin loader: drops at `apps/dashboard/plugins/<name>/` register tabs
 
 ### Acceptance
 
 - Open `:3000` in browser, signup, log in
-- Land on dashboard, see all five groups in sidebar
+- Land on **Home**, see overview stats (even if mostly zero)
+- Top nav shows Build, Operate, Customers, Settings
+- Click each — every tab loads (empty states where needed)
+- Customers tabs all render an "Enable multi-tenancy" prompt
+- ⌘K opens command palette, search jumps to any tab
 - Account settings page works (edit name, change password)
 
 **Milestone**: dashboard story exists, ready for hero tabs.
 
-## Phase 4: Hero tab 1 — Agent Runs (2 weeks)
+## Phase 4: Hero tab 1 — Home + Operate / Cost (2 weeks)
 
-**Goal**: AF DAG visualization at production polish.
+**Goal**: the two hero tabs at Linear/Vercel polish.
 
-### Deliverables
+Reframe from earlier draft: we ship **Home** and **Cost** as the polished
+heros. Runs, Logs, Queues ship as functional shadcn-clean. The deep
+execution graph already exists in the runtime UI — we link to it from
+per-run summary cards rather than rebuilding.
 
-- [ ] `/(admin)/agents` page: agent catalog from AF discover API
-- [ ] Per-agent detail: reasoners list, recent runs, P50/P99 latency, cost
-- [ ] `/(admin)/agents/runs` page: paginated run list with filters
-- [ ] Per-run detail: DAG visualization (D3 or React Flow), node click → details
-- [ ] Token stream live view for running executions
-- [ ] Replay button (calls AF replay endpoint with edits)
-- [ ] Trace tab: full call tree, durations, costs
-- [ ] Filters: tenant, agent, status, time range, cost range
-- [ ] Functional CRUD for: AF schemas, AF discover
+### Deliverables — Home
+
+- [ ] Overview KPIs (requests/min, error rate, cost today, queue depth)
+      with sparklines
+- [ ] Recent runs strip (last 20, click → detail)
+- [ ] Recent webhook deliveries strip
+- [ ] Alert banner area (budget exceeded, queue lag, AF unreachable, etc.)
+- [ ] Charts via Tremor; data fetched through `lib/api.ts`
+- [ ] Skeleton loading states + thoughtful empty states
+
+### Deliverables — Cost (Operate group)
+
+- [ ] Headline: total spend this period, vs previous, vs budget
+- [ ] Breakdown by model, by agent, by tenant, by day
+- [ ] Time series charts (stacked area per dimension)
+- [ ] Per-tenant budget alerts with thresholds
+- [ ] Forecast for current period based on trend
+- [ ] Export to CSV
+- [ ] Filters: time range, tenant, agent, model
+
+### Deliverables — Runs + per-run detail (functional, not hero)
+
+- [ ] Runs list (paginated) with filters: tenant, agent, status, cost, time
+- [ ] Per-run summary card: input/output, status, duration, cost, tenant
+- [ ] Inline logs for the run (no graph rebuild)
+- [ ] "View full trace →" button opens the runtime's DAG view in a new tab
+
+### Deliverables — Logs + Queues (functional)
+
+- [ ] Logs: live tail, search by tenant/agent/request_id, filter by level
+- [ ] Queues: pending/running/failed counts, recent jobs table, retry action
 
 ### Acceptance
 
-- Run a sample agent, see it appear live in dashboard
-- Click into DAG, navigate tree, see costs and durations
-- Hit replay, modify input, see new run appear
+- Home renders production-quality with sample-agent data populating it
+- Cost shows realistic spend even at small scale (sample agent calls)
+- Click a run → see summary + logs → "View full trace" opens runtime UI
+- Logs search works against live data
+- Two screenshots good enough to put in the README hero
 
-**Milestone**: AF showcase is live. First viral screenshot is possible.
+**Milestone**: viral screenshots possible.
 
 ## Phase 5: Jobs + secrets + storage (3 weeks)
 
