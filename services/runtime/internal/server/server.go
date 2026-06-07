@@ -1203,3 +1203,20 @@ func (s *statusWriter) WriteHeader(code int) {
 	s.status = code
 	s.ResponseWriter.WriteHeader(code)
 }
+
+// Flush propagates to the underlying writer so SSE handlers
+// (LLM streaming, future agent progress channels) still work behind
+// this middleware. Standard Go middleware pattern; without it,
+// the gateway's `w.(http.Flusher)` cast fails after the logging
+// middleware wraps the writer.
+func (s *statusWriter) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap lets the stdlib's ResponseController find the underlying
+// hijacker / pusher / flusher implementations on Go 1.20+.
+func (s *statusWriter) Unwrap() http.ResponseWriter {
+	return s.ResponseWriter
+}
