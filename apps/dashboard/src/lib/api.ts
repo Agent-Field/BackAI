@@ -445,6 +445,263 @@ export const SandboxPoolStatsSchema = z.object({
 })
 export type SandboxPoolStats = z.infer<typeof SandboxPoolStatsSchema>
 
+// ─── Notifications (Phase 10.1) ──────────────────────────────────────────
+//
+// Outbox-style notifications. `notifications.send()` enqueues a row in
+// suite_notifications which a background worker drains via the configured
+// adapter (log-stub for dev, Resend for prod). The dashboard reads from
+// the outbox + status table so operators can see what's been sent,
+// queued, or failed.
+
+export const NotificationKindSchema = z.enum(["email", "sms", "push", "log"])
+export type NotificationKind = z.infer<typeof NotificationKindSchema>
+
+export const NotificationStatusSchema = z.enum([
+  "queued",
+  "sending",
+  "sent",
+  "failed",
+  "skipped",
+])
+export type NotificationStatus = z.infer<typeof NotificationStatusSchema>
+
+export const NotificationSchema = z.object({
+  id: z.string(),
+  tenant_id: z.string().nullable(),
+  kind: NotificationKindSchema,
+  // Adapter that handled (or will handle) this notification: "log",
+  // "resend", etc. nullable until the worker picks it up.
+  adapter: z.string().nullable(),
+  // Free-form template slug — e.g. "welcome-email", "budget-alert". The
+  // template is rendered by the worker, NOT the dashboard.
+  template: z.string(),
+  // Recipient address. Email for kind=email, phone for sms, etc.
+  to: z.string(),
+  // Optional from address override. When null the adapter's default applies.
+  from: z.string().nullable(),
+  subject: z.string().nullable(),
+  // Structured payload passed into the template renderer. Kept opaque
+  // here — the worker validates against the template's expected shape.
+  data: z.record(z.string(), z.unknown()),
+  status: NotificationStatusSchema,
+  // Adapter-side message id (e.g. Resend's message id). Useful for
+  // deep-linking from the dashboard into the provider's UI.
+  provider_message_id: z.string().nullable(),
+  attempts: z.number(),
+  last_error: z.string().nullable(),
+  scheduled_at: z.string(),
+  sent_at: z.string().nullable(),
+  created_at: z.string(),
+})
+export type Notification = z.infer<typeof NotificationSchema>
+
+export const NotificationListSchema = z.object({
+  notifications: z.array(NotificationSchema),
+  total: z.number(),
+  has_more: z.boolean(),
+})
+export type NotificationList = z.infer<typeof NotificationListSchema>
+
+export const SendNotificationInputSchema = z.object({
+  kind: NotificationKindSchema.default("email"),
+  template: z.string(),
+  to: z.string(),
+  from: z.string().optional(),
+  subject: z.string().optional(),
+  data: z.record(z.string(), z.unknown()).optional(),
+  // ISO 8601 schedule time. Omit = send immediately.
+  scheduled_at: z.string().optional(),
+})
+export type SendNotificationInput = z.infer<typeof SendNotificationInputSchema>
+
+export const NotificationStatsSchema = z.object({
+  // Per-status counts for the active range (default last 24h).
+  by_status: z.record(NotificationStatusSchema, z.number()),
+  // Per-adapter counts so the dashboard can show a stacked bar.
+  by_adapter: z.array(z.object({ adapter: z.string(), count: z.number() })),
+  // sent_today + failed_today are convenience aggregates surfaced as KPI tiles.
+  sent_today: z.number(),
+  failed_today: z.number(),
+})
+export type NotificationStats = z.infer<typeof NotificationStatsSchema>
+
+// ─── Webhooks (Phase 10.2 + 10.3) ────────────────────────────────────────
+//
+// Two surfaces:
+//   1. INBOUND  — endpoints declared in `gateway.yaml` (or via the
+//      `webhooks.endpoint()` SDK). The runtime stores raw payloads,
+//      verifies HMAC, and forwards to a handler. The dashboard shows the
+//      delivery log.
+//   2. OUTBOUND — `webhooks.send()` enqueues a delivery in the PG outbox
+//      which a retry worker drains. We expose both halves under the same
+//      `webhooks.*` API so the dashboard can show a single unified feed
+//      with a `direction` filter.
+
+export const WebhookDirectionSchema = z.enum(["inbound", "outbound"])
+export type WebhookDirection = z.infer<typeof WebhookDirectionSchema>
+
+export const WebhookEndpointSchema = z.object({
+  id: z.string(),
+  // Slug used in URLs: /webhooks/in/<slug>. Globally unique.
+  slug: z.string(),
+  tenant_id: z.string().nullable(),
+  // Provider hint for documentation only ("github", "stripe", "custom").
+  provider: z.string(),
+  // HMAC verification settings. We store the secret reference (a key in
+  // the secrets vault) NOT the raw secret here.
+  secret_key_ref: z.string().nullable(),
+  // Algorithm name as the provider documents it ("sha256", "sha1", etc).
+  signature_algorithm: z.string().nullable(),
+  // Header name the provider puts its signature in (e.g.
+  // "X-Hub-Signature-256" for GitHub).
+  signature_header: z.string().nullable(),
+  // Where to forward the verified payload. Either an HTTP URL (proxied
+  // through to an internal service) or an agent id ("af://agents/<name>").
+  forward_to: z.string(),
+  // Number of seconds the runtime keeps dedup tokens for.
+  dedup_window_s: z.number(),
+  is_active: z.boolean(),
+  created_at: z.string(),
+})
+export type WebhookEndpoint = z.infer<typeof WebhookEndpointSchema>
+
+export const WebhookEndpointListSchema = z.object({
+  endpoints: z.array(WebhookEndpointSchema),
+})
+export type WebhookEndpointList = z.infer<typeof WebhookEndpointListSchema>
+
+export const WebhookDeliverySchema = z.object({
+  id: z.string(),
+  endpoint_id: z.string().nullable(),
+  // direction = inbound for received-from-provider, outbound for
+  // emitted-by-app deliveries.
+  direction: WebhookDirectionSchema,
+  // Provider/Subscriber URL (outbound) or remote IP + path (inbound).
+  destination: z.string(),
+  event_type: z.string(),
+  status: z.enum([
+    "queued",
+    "delivering",
+    "succeeded",
+    "failed",
+    "dropped_duplicate",
+    "dropped_invalid_signature",
+  ]),
+  attempts: z.number(),
+  // HTTP status the upstream returned (outbound), or the status we
+  // returned (inbound). nullable when never attempted.
+  response_status: z.number().nullable(),
+  response_ms: z.number().nullable(),
+  // Truncated request body preview for the dashboard list view. Full
+  // body lives in object storage referenced by body_storage_url.
+  body_preview: z.string().nullable(),
+  body_storage_url: z.string().nullable(),
+  last_error: z.string().nullable(),
+  scheduled_at: z.string(),
+  delivered_at: z.string().nullable(),
+  created_at: z.string(),
+})
+export type WebhookDelivery = z.infer<typeof WebhookDeliverySchema>
+
+export const WebhookDeliveryListSchema = z.object({
+  deliveries: z.array(WebhookDeliverySchema),
+  total: z.number(),
+  has_more: z.boolean(),
+})
+export type WebhookDeliveryList = z.infer<typeof WebhookDeliveryListSchema>
+
+export const CreateEndpointInputSchema = z.object({
+  slug: z.string(),
+  provider: z.string(),
+  forward_to: z.string(),
+  secret_key_ref: z.string().nullable().optional(),
+  signature_algorithm: z.string().optional(),
+  signature_header: z.string().optional(),
+  dedup_window_s: z.number().optional(),
+})
+export type CreateEndpointInput = z.infer<typeof CreateEndpointInputSchema>
+
+export const SendWebhookInputSchema = z.object({
+  // Destination URL. We trust the caller — outbound dispatch is intended
+  // for tenant-owned services, not arbitrary internet hosts. Egress
+  // policy enforcement is the operator's responsibility.
+  url: z.string(),
+  event_type: z.string(),
+  body: z.unknown(),
+  headers: z.record(z.string(), z.string()).optional(),
+  // When omitted, "queued" — when set, "delivering" right away.
+  immediate: z.boolean().optional(),
+})
+export type SendWebhookInput = z.infer<typeof SendWebhookInputSchema>
+
+// ─── Billing (Phase 10.4) ────────────────────────────────────────────────
+//
+// Stripe-first billing. The runtime mirrors customers/subscriptions
+// locally so we don't make an API call per page load, and aggregates
+// usage events into a meter table. The dashboard shows per-tenant
+// usage + a Stripe portal link.
+
+export const BillingCustomerSchema = z.object({
+  tenant_id: z.string(),
+  // Stripe customer id. nullable when MT is on but the tenant hasn't
+  // been provisioned in Stripe yet.
+  stripe_customer_id: z.string().nullable(),
+  email: z.string().nullable(),
+  // Active subscription plan ("free", "pro", "enterprise"). Free is the
+  // implicit default and is NOT stored in Stripe.
+  plan: z.string(),
+  // ISO 8601 trial expiry. nullable when no trial.
+  trial_ends_at: z.string().nullable(),
+  // When the next invoice is expected (subscription period end).
+  current_period_end: z.string().nullable(),
+  // Stripe subscription status as Stripe sends it ("active", "past_due",
+  // "canceled", "trialing", etc).
+  subscription_status: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+})
+export type BillingCustomer = z.infer<typeof BillingCustomerSchema>
+
+export const BillingCustomerListSchema = z.object({
+  customers: z.array(BillingCustomerSchema),
+})
+export type BillingCustomerList = z.infer<typeof BillingCustomerListSchema>
+
+export const UsageMeterSchema = z.object({
+  // Meter name as defined in code ("llm_tokens", "sandbox_seconds", etc).
+  meter: z.string(),
+  tenant_id: z.string(),
+  // Aggregation period — defaults to current month, can be a specific
+  // ISO date for a daily slice when queried with ?bucket=day.
+  period_start: z.string(),
+  period_end: z.string(),
+  // Total quantity in the meter's native units.
+  quantity: z.number(),
+  // Computed cost in USD when the meter has a price attached. nullable
+  // when the meter is purely informational.
+  cost_usd: z.number().nullable(),
+  // Stripe meter id if synced; nullable until first sync.
+  stripe_meter_id: z.string().nullable(),
+  // When the value was last pushed to Stripe.
+  last_synced_at: z.string().nullable(),
+})
+export type UsageMeter = z.infer<typeof UsageMeterSchema>
+
+export const UsageMeterListSchema = z.object({
+  meters: z.array(UsageMeterSchema),
+  // Sum of cost_usd across all meters for the period. Convenience so the
+  // dashboard doesn't have to do it.
+  total_cost_usd: z.number(),
+})
+export type UsageMeterList = z.infer<typeof UsageMeterListSchema>
+
+export const PortalLinkSchema = z.object({
+  // Stripe Customer Portal URL. Short-lived (~24h).
+  url: z.string(),
+  expires_at: z.string(),
+})
+export type PortalLink = z.infer<typeof PortalLinkSchema>
+
 // ─── Database studio + memory (Phase 8) ──────────────────────────────────
 
 export const DBTableSchema = z.object({
@@ -944,6 +1201,149 @@ export const api = {
         `/api/v1/sandbox/runs/${id}`,
         { method: "DELETE" },
         z.object({ stopped: z.boolean() }),
+      ),
+  },
+
+  // ─── Notifications (Phase 10.1) ───
+  notifications: {
+    stats: () =>
+      request(
+        "/api/v1/notifications/stats",
+        undefined,
+        NotificationStatsSchema,
+      ),
+    list: (params?: {
+      tenant?: string
+      status?: NotificationStatus
+      kind?: NotificationKind
+      limit?: number
+      offset?: number
+    }) => {
+      const qs = new URLSearchParams()
+      if (params?.tenant) qs.set("tenant", params.tenant)
+      if (params?.status) qs.set("status", params.status)
+      if (params?.kind) qs.set("kind", params.kind)
+      if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+      if (params?.offset !== undefined) qs.set("offset", String(params.offset))
+      const q = qs.toString()
+      return request(
+        `/api/v1/notifications${q ? "?" + q : ""}`,
+        undefined,
+        NotificationListSchema,
+      )
+    },
+    get: (id: string) =>
+      request(
+        `/api/v1/notifications/${id}`,
+        undefined,
+        NotificationSchema,
+      ),
+    send: (input: SendNotificationInput) =>
+      request(
+        "/api/v1/notifications",
+        { method: "POST", json: input },
+        NotificationSchema,
+      ),
+  },
+
+  // ─── Webhooks (Phase 10.2 + 10.3) ───
+  webhooks: {
+    endpoints: () =>
+      request(
+        "/api/v1/webhooks/endpoints",
+        undefined,
+        WebhookEndpointListSchema,
+      ),
+    createEndpoint: (input: CreateEndpointInput) =>
+      request(
+        "/api/v1/webhooks/endpoints",
+        { method: "POST", json: input },
+        WebhookEndpointSchema,
+      ),
+    deleteEndpoint: (id: string) =>
+      request(
+        `/api/v1/webhooks/endpoints/${id}`,
+        { method: "DELETE" },
+        z.object({ deleted: z.boolean() }),
+      ),
+    deliveries: (params?: {
+      direction?: WebhookDirection
+      endpoint_id?: string
+      tenant?: string
+      status?: string
+      limit?: number
+      offset?: number
+    }) => {
+      const qs = new URLSearchParams()
+      if (params?.direction) qs.set("direction", params.direction)
+      if (params?.endpoint_id) qs.set("endpoint_id", params.endpoint_id)
+      if (params?.tenant) qs.set("tenant", params.tenant)
+      if (params?.status) qs.set("status", params.status)
+      if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+      if (params?.offset !== undefined) qs.set("offset", String(params.offset))
+      const q = qs.toString()
+      return request(
+        `/api/v1/webhooks/deliveries${q ? "?" + q : ""}`,
+        undefined,
+        WebhookDeliveryListSchema,
+      )
+    },
+    delivery: (id: string) =>
+      request(
+        `/api/v1/webhooks/deliveries/${id}`,
+        undefined,
+        WebhookDeliverySchema,
+      ),
+    send: (input: SendWebhookInput) =>
+      request(
+        "/api/v1/webhooks/send",
+        { method: "POST", json: input },
+        WebhookDeliverySchema,
+      ),
+    retry: (id: string) =>
+      request(
+        `/api/v1/webhooks/deliveries/${id}/retry`,
+        { method: "POST" },
+        WebhookDeliverySchema,
+      ),
+  },
+
+  // ─── Billing (Phase 10.4) ───
+  billing: {
+    customers: () =>
+      request(
+        "/api/v1/billing/customers",
+        undefined,
+        BillingCustomerListSchema,
+      ),
+    customer: (tenantId: string) =>
+      request(
+        `/api/v1/billing/customers/${encodeURIComponent(tenantId)}`,
+        undefined,
+        BillingCustomerSchema,
+      ),
+    meters: (params?: {
+      tenant?: string
+      // ISO date — defaults to current month.
+      period_start?: string
+      bucket?: "month" | "day"
+    }) => {
+      const qs = new URLSearchParams()
+      if (params?.tenant) qs.set("tenant", params.tenant)
+      if (params?.period_start) qs.set("period_start", params.period_start)
+      if (params?.bucket) qs.set("bucket", params.bucket)
+      const q = qs.toString()
+      return request(
+        `/api/v1/billing/meters${q ? "?" + q : ""}`,
+        undefined,
+        UsageMeterListSchema,
+      )
+    },
+    portalLink: (tenantId: string) =>
+      request(
+        `/api/v1/billing/customers/${encodeURIComponent(tenantId)}/portal`,
+        { method: "POST" },
+        PortalLinkSchema,
       ),
   },
 

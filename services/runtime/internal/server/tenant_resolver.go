@@ -96,6 +96,16 @@ var publicPrefixes = []string{
 	// resolved tenant is read from the request when MT is on but the
 	// endpoint set itself doesn't require API-key auth.
 	"/api/v1/sandbox",
+	// Notifications outbox view (Phase 10.1). Send is gated by tenant
+	// auth like other writes; list/stats fall under dashboard auth.
+	"/api/v1/notifications",
+	// Webhooks (Phase 10.2 + 10.3) — endpoint configuration and delivery
+	// log. /webhooks/in/* (inbound public endpoints) lives at the
+	// gateway level and isn't covered by this prefix.
+	"/api/v1/webhooks",
+	// Billing dashboard surface (Phase 10.4). Same auth shape as
+	// admin/* — the dashboard's session gates it.
+	"/api/v1/billing",
 }
 
 func isPublicPath(p string) bool {
