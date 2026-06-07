@@ -24,6 +24,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
 	"github.com/Agent-Field/backai/services/runtime/internal/ratelimit"
+	"github.com/Agent-Field/backai/services/runtime/internal/sandbox"
 	"github.com/Agent-Field/backai/services/runtime/internal/secrets"
 	"github.com/Agent-Field/backai/services/runtime/internal/storage"
 	"github.com/Agent-Field/backai/services/runtime/internal/tenancy"
@@ -63,6 +64,10 @@ type Server struct {
 	// authority for the cost summary's BudgetUSD field. nil disables
 	// budget endpoints (they return 503).
 	budgets *cost.Budgets
+	// sandbox powers /api/v1/sandbox/*. nil = endpoints either return
+	// 503 SANDBOX_NOT_CONFIGURED (mutating) or tolerant empty
+	// responses (reads).
+	sandbox *sandbox.Service
 }
 
 // Health aggregates dependency health for the /health endpoint.
@@ -129,6 +134,10 @@ type Deps struct {
 	// Budgets is the per-tenant monthly budget store. nil disables
 	// the /api/v1/admin/budgets endpoints (which return 503).
 	Budgets *cost.Budgets
+	// Sandbox is the Phase 9.1 sandbox runs service. nil = the
+	// /api/v1/sandbox/* endpoints either 503 (mutating) or return
+	// tolerant empty responses (reads).
+	Sandbox *sandbox.Service
 }
 
 // New constructs a Server with the given config + logger + dependencies.
@@ -171,6 +180,7 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		dbStudio:      deps.DBStudio,
 		costAgg:       deps.CostAggregate,
 		budgets:       deps.Budgets,
+		sandbox:       deps.Sandbox,
 	}
 	s.registerRoutes()
 
@@ -345,6 +355,11 @@ func (s *Server) registerRoutes() {
 	// by the multi-tenancy module flag and return 503 otherwise.
 	s.registerCostRoutes()
 	s.registerCostOpenAPI()
+
+	// Sandboxes (Phase 9.1). Endpoints return 503 when no adapter is
+	// wired; reads degrade to empty pages.
+	s.registerSandboxRoutes()
+	s.registerSandboxOpenAPI()
 
 	if s.tel != nil {
 		s.mux.Handle("GET /metrics", s.tel.MetricsHandler())

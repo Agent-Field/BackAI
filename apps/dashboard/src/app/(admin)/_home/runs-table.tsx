@@ -113,8 +113,12 @@ export function RunsTable({ runs }: RunsTableProps) {
                     {run.status}
                   </Badge>
                 </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {run.tenant_id ?? "—"}
+                <TableCell className="text-muted-foreground font-mono text-xs">
+                  {run.tenant_id
+                    ? run.tenant_id === "00000000-0000-0000-0000-000000000000"
+                      ? "Default"
+                      : run.tenant_id.slice(0, 8)
+                    : "—"}
                 </TableCell>
                 <TableCell className="text-muted-foreground">
                   {fmtStarted(run.started_at)}

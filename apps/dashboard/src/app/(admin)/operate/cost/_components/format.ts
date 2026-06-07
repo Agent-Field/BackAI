@@ -2,24 +2,31 @@
 // file makes the page consistent (every dollar value formats the same)
 // and easy to tweak later.
 
+// Currency formatter that adapts precision to magnitude. Sub-cent values
+// (where 2-digit precision would round to $0.00) get extra decimals so the
+// operator can actually see what they spent.
 export function formatCurrency(usd: number): string {
   if (!Number.isFinite(usd)) return "$0.00"
+  const abs = Math.abs(usd)
+  const digits = abs === 0 ? 2 : abs < 0.0001 ? 6 : abs < 0.01 ? 4 : 2
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
   }).format(usd)
 }
 
 export function formatCurrencyCompact(usd: number): string {
   if (!Number.isFinite(usd)) return "$0"
-  if (Math.abs(usd) < 1000) {
+  const abs = Math.abs(usd)
+  if (abs < 1000) {
+    const digits = abs === 0 ? 2 : abs < 0.0001 ? 6 : abs < 0.01 ? 4 : 2
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD",
-      minimumFractionDigits: usd >= 1 ? 2 : 4,
-      maximumFractionDigits: 4,
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
     }).format(usd)
   }
   return new Intl.NumberFormat("en-US", {

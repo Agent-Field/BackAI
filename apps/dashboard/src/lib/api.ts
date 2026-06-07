@@ -37,6 +37,24 @@ export class ApiError extends Error {
 
 type RequestInitWithJson = Omit<RequestInit, "body"> & { json?: unknown }
 
+// Server-side, attach the incoming request's cookie header so the runtime
+// can resolve the operator's better-auth session into a tenant. Without
+// this every server-rendered page would 401 once multi-tenancy is on.
+async function serverCookieHeader(): Promise<string | undefined> {
+  if (!isServer) return undefined
+  try {
+    const { cookies } = await import("next/headers")
+    const store = await cookies()
+    return store
+      .getAll()
+      .map((c) => `${c.name}=${c.value}`)
+      .join("; ")
+  } catch {
+    // Outside a request scope (e.g. boot-time render) — no cookies.
+    return undefined
+  }
+}
+
 async function request<T>(
   path: string,
   init: RequestInitWithJson | undefined,
@@ -47,6 +65,10 @@ async function request<T>(
   if (init?.json !== undefined) {
     headers.set("Content-Type", "application/json")
     body = JSON.stringify(init.json)
+  }
+  const cookieHeader = await serverCookieHeader()
+  if (cookieHeader && !headers.has("cookie")) {
+    headers.set("cookie", cookieHeader)
   }
   const res = await fetch(`${baseUrl()}${path}`, {
     ...init,

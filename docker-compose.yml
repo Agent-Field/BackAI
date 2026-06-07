@@ -102,17 +102,31 @@ services:
       AF_STACK_S3_REGION: us-east-1
       LOG_FORMAT: json
       LOG_LEVEL: info
+      # Sandbox adapter (Phase 9.1). docker = local Docker daemon;
+      # requires /var/run/docker.sock mounted below. Set to "noop" or
+      # leave the socket unmounted to disable sandbox in CI.
+      AF_STACK_SANDBOX_ADAPTER: ${AF_STACK_SANDBOX_ADAPTER:-docker}
       # Optional: enable OTel by uncommenting after OTel collector lands.
       # OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
       # OTEL_SERVICE_NAME: af-stack
     ports:
       - "${AF_STACK_PORT:-8080}:8080"
       - "${AF_STACK_METRICS_PORT:-9090}:9090"
+    # The Docker sandbox adapter needs to talk to the host daemon over the
+    # mounted socket. The distroless image ships with a nonroot user, but
+    # the macOS docker.sock is owned by the host uid (typically 501), so
+    # we drop to root here in DEV ONLY. Production should use the gVisor,
+    # Firecracker, or e2b adapter instead — none of which need docker.sock.
+    user: "0:0"
     volumes:
       # Mount the app's config.yaml (module enable flags, adapter choices)
       # at the runtime's expected lookup path. Optional — when missing
       # the runtime falls back to defaults + env overrides.
       - ./apps/backend/config.yaml:/config.yaml:ro
+      # Docker socket for the sandbox adapter. Without this mount the
+      # sandbox falls back to "unconfigured" and run endpoints return 503.
+      # In production, prefer gVisor or e2b for stronger isolation.
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:
         condition: service_healthy

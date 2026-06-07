@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from . import admin, agents, cost, jobs, llm, memory, secrets, storage
+from . import admin, agents, cost, jobs, llm, memory, sandbox, secrets, storage
 from .ctx import RequestContext, bind, ctx, current, reset, scope
 
 __version__ = "0.0.1"
@@ -42,6 +42,7 @@ suite = SimpleNamespace(
     llm=llm,
     cost=cost,
     memory=memory,
+    sandbox=sandbox,
     admin=SimpleNamespace(
         tenants=admin.tenants,
         users=admin.users,
@@ -66,6 +67,7 @@ __all__ = [
     "llm",
     "memory",
     "reset",
+    "sandbox",
     "scope",
     "secrets",
     "storage",

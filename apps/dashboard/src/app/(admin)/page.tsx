@@ -32,11 +32,13 @@ import { WebhookList } from "./_home/webhook-list"
 export const dynamic = "force-dynamic"
 
 function formatCurrency(usd: number): string {
+  const abs = Math.abs(usd)
+  const digits = abs === 0 ? 2 : abs < 0.0001 ? 6 : abs < 0.01 ? 4 : 2
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-    minimumFractionDigits: usd >= 1 ? 2 : 4,
-    maximumFractionDigits: 4,
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
   }).format(usd)
 }
 

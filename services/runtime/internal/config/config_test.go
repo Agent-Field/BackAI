@@ -93,3 +93,31 @@ func TestLoadMissingFileIsOK(t *testing.T) {
 		t.Errorf("expected default :8080, got %q", cfg.Server.HTTPAddr)
 	}
 }
+
+func TestSandboxDefaults(t *testing.T) {
+	cfg := Default()
+	if cfg.Sandbox.Adapter != "docker" {
+		t.Errorf("default sandbox adapter = %q, want docker", cfg.Sandbox.Adapter)
+	}
+}
+
+func TestSandboxEnvOverrides(t *testing.T) {
+	t.Setenv("AF_STACK_AGENTFIELD_URL", "http://af:8081")
+	t.Setenv("AF_STACK_SANDBOX_ADAPTER", "E2B")
+	t.Setenv("E2B_API_KEY", "sk-test-123")
+	t.Setenv("AF_STACK_E2B_BASE_URL", "https://api.e2b.dev")
+
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Sandbox.Adapter != "e2b" {
+		t.Errorf("adapter = %q, want e2b (lowercased)", cfg.Sandbox.Adapter)
+	}
+	if cfg.Sandbox.E2BAPIKey != "sk-test-123" {
+		t.Errorf("E2BAPIKey = %q, want sk-test-123", cfg.Sandbox.E2BAPIKey)
+	}
+	if cfg.Sandbox.E2BBaseURL != "https://api.e2b.dev" {
+		t.Errorf("E2BBaseURL = %q, want https://api.e2b.dev", cfg.Sandbox.E2BBaseURL)
+	}
+}

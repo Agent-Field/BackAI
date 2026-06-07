@@ -211,6 +211,56 @@ End-to-end tests:
 ./scripts/test-memory.sh
 ```
 
+## Phase 9 — Sandboxes
+
+Every AF Stack deployment ships a managed code-execution sandbox so
+agents and jobs can run arbitrary commands, build artifacts, or test
+generated code without the operator wiring docker into their app code.
+Four pluggable adapters (`docker` for local dev, `firecracker` for
+single-host isolation, `e2b` and `modal` for managed remote sandboxes)
+share one API; each tenant gets its own pool with isolated filesystems,
+egress controls, and timeout/CPU/memory caps. Every run is cost-tracked
+per-tenant alongside LLM spend so a tenant's monthly budget covers both
+inference and compute.
+
+<div align="center">
+<img src="dashboard-screenshots/sandbox-activity.png" alt="AF Stack Sandbox Activity — recent runs, pool stats, cost today" width="900" />
+<sub>Operate → Sandbox Activity: recent runs · adapter pool (warm / active / queued) · CPU-seconds and cost today</sub>
+</div>
+
+**Python (Suite SDK):**
+
+```python
+from af_stack import suite
+
+result = await suite.sandbox.run(
+    image="python:3.12-slim",
+    command=["python", "-c", "print(2 + 2)"],
+    timeout_s=30,
+)
+print(result.exit_code, result.duration_s, result.cost_usd)
+```
+
+**TypeScript (Suite SDK):**
+
+```ts
+import { suite } from "@af-stack/sdk"
+
+const result = await suite.sandbox.run({
+  image: "node:20-alpine",
+  command: ["node", "-e", "console.log(2 + 2)"],
+  timeout_s: 30,
+})
+console.log(result.exit_code, result.duration_s, result.cost_usd)
+```
+
+End-to-end test:
+
+```bash
+# Sandbox API: happy path, pool stats, run list, failing exit code, timeout
+./scripts/test-sandbox.sh
+```
+
 ### Make it your own
 
 Replace the sample agent with your own at `apps/backend/agents/<name>/` —

@@ -180,6 +180,31 @@ export {
   type SearchMemoryOptions,
 } from "./memory.js"
 
+// ─── Sandbox (Phase 9.3) ──────────────────────────────────────────────────
+
+export {
+  sandbox,
+  run as runSandbox,
+  list as listSandboxRuns,
+  get as getSandboxRun,
+  stop as stopSandboxRun,
+  pool as sandboxPool,
+  SandboxStatusSchema,
+  SandboxNetworkSchema,
+  SandboxCapabilitiesSchema,
+  SandboxRunSchema,
+  SandboxRunListSchema,
+  SandboxPoolStatsSchema,
+  type SandboxStatus,
+  type SandboxNetwork,
+  type SandboxCapabilities,
+  type SandboxRun,
+  type SandboxRunList,
+  type SandboxPoolStats,
+  type RunSandboxOptions,
+  type ListSandboxRunsOptions,
+} from "./sandbox.js"
+
 import { agents } from "./agents.js"
 import { jobs } from "./jobs.js"
 import { secrets } from "./secrets.js"
@@ -188,8 +213,9 @@ import { admin } from "./admin/index.js"
 import { llm } from "./llm.js"
 import { cost } from "./cost.js"
 import { memory } from "./memory.js"
+import { sandbox } from "./sandbox.js"
 
-/** Top-level namespace: `suite.agents.*`, `suite.jobs.*`, `suite.secrets.*`, `suite.storage.*`, `suite.llm.*`, `suite.cost.*`, `suite.memory.*`, `suite.admin.*`. */
+/** Top-level namespace: `suite.agents.*`, `suite.jobs.*`, `suite.secrets.*`, `suite.storage.*`, `suite.llm.*`, `suite.cost.*`, `suite.memory.*`, `suite.sandbox.*`, `suite.admin.*`. */
 export const suite = {
   agents,
   jobs,
@@ -198,5 +224,6 @@ export const suite = {
   llm,
   cost,
   memory,
+  sandbox,
   admin,
 } as const

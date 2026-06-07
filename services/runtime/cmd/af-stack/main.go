@@ -36,6 +36,11 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
 	"github.com/Agent-Field/backai/services/runtime/internal/ratelimit"
 	"github.com/Agent-Field/backai/services/runtime/internal/secrets"
+	"github.com/Agent-Field/backai/services/runtime/internal/sandbox"
+	dockersandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/docker"
+	e2bsandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/e2b"
+	firecrackersandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/firecracker"
+	gvisorsandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/gvisor"
 	"github.com/Agent-Field/backai/services/runtime/internal/server"
 	"github.com/Agent-Field/backai/services/runtime/internal/storage"
 	minioadapter "github.com/Agent-Field/backai/services/runtime/internal/storage/adapters/minio"
@@ -190,6 +195,43 @@ func main() {
 		}
 	} else {
 		log.Info("storage adapter not configured (AF_STACK_S3_ENDPOINT empty); storage endpoints will return 503")
+	}
+
+	// Sandbox adapter (Phase 9). Constructed unconditionally; init
+	// failures are non-fatal — the runtime keeps booting and the
+	// sandbox endpoints surface 503 SANDBOX_NOT_CONFIGURED.
+	//
+	// For the docker adapter we additionally Ping the daemon: a
+	// machine without a reachable Docker socket leaves sb=nil so the
+	// dashboard renders "Sandbox module disabled" rather than failing
+	// every Run call at the first ContainerCreate.
+	sb, sbErr := newSandbox(cfg.Sandbox, store, log)
+	if sbErr != nil {
+		log.Error("sandbox adapter init failed; continuing without sandbox",
+			"adapter", cfg.Sandbox.Adapter,
+			"error", sbErr,
+		)
+		sb = nil
+	}
+	if sb != nil {
+		if dockerAdapter, ok := sb.(*dockersandbox.Adapter); ok {
+			pingCtx, pingCancel := context.WithTimeout(ctx, 3*time.Second)
+			if pingErr := dockerAdapter.Ping(pingCtx); pingErr != nil {
+				log.Warn("sandbox: docker daemon not reachable; sandbox disabled",
+					"error", pingErr)
+				sb = nil
+			}
+			pingCancel()
+		}
+	}
+	if sb != nil {
+		caps := sb.Capabilities()
+		log.Info("sandbox adapter ready",
+			"adapter", caps.Adapter,
+			"max_timeout_s", caps.MaxTimeoutS,
+			"supports_gpu", caps.SupportsGPU,
+			"cold_start_ms", caps.ColdStartMS,
+		)
 	}
 
 	// Secrets vault. Requires PG (for the suite_secrets table) and a
@@ -376,6 +418,19 @@ func main() {
 		log.Info("memory store not configured (no database); /api/v1/memory/* will return 503")
 	}
 
+	// Sandbox service composes adapter + recorder (DB) + cost recorder.
+	// adapter==nil leaves sandboxSvc=nil; the server tolerates a missing
+	// sandbox service across all endpoints (reads degrade to empty
+	// pages; mutating endpoints return 503).
+	var sandboxSvc *sandbox.Service
+	if sb != nil {
+		var sandboxRecorder *sandbox.Recorder
+		if database != nil && database.Pool != nil {
+			sandboxRecorder = sandbox.NewRecorder(database.Pool, log)
+		}
+		sandboxSvc = sandbox.NewService(sb, sandboxRecorder, costRecorder, log)
+	}
+
 	srv := server.New(cfg, log, server.Deps{
 		DB:            database,
 		AF:            afClient,
@@ -393,6 +448,7 @@ func main() {
 		Memory:        memoryStore,
 		CostAggregate: costAggregate,
 		Budgets:       costBudgets,
+		Sandbox:       sandboxSvc,
 	})
 	if err := srv.Start(ctx); err != nil {
 		log.Error("server stopped with error", "error", err)
@@ -426,6 +482,41 @@ func newStorage(cfg config.StorageConfig) (storage.Storage, error) {
 		})
 	default:
 		return nil, fmt.Errorf("storage: unknown adapter %q", cfg.Adapter)
+	}
+}
+
+// newSandbox constructs the sandbox adapter selected by cfg.Adapter.
+//
+// Returns (nil, nil) when the e2b adapter is selected but the API key is
+// missing — that's a known "not configured" state that should leave the
+// sandbox endpoints serving 503, not crash the runtime. Any other error
+// (unknown adapter name, etc.) is fatal at the caller's discretion.
+//
+// See docs/sandbox-adapters.md for the per-adapter trade-offs.
+func newSandbox(cfg config.SandboxConfig, store storage.Storage, log *slog.Logger) (sandbox.Sandbox, error) {
+	switch cfg.Adapter {
+	case "", "docker":
+		return dockersandbox.New(dockersandbox.Config{
+			Storage: store,
+			Logger:  log,
+		})
+	case "gvisor":
+		return gvisorsandbox.New(gvisorsandbox.Config{})
+	case "firecracker":
+		return firecrackersandbox.New(firecrackersandbox.Config{})
+	case "e2b":
+		if cfg.E2BAPIKey == "" {
+			// Not configured rather than misconfigured; surface a clear
+			// nil result so the caller logs "not configured" rather than
+			// "init failed".
+			return nil, nil
+		}
+		return e2bsandbox.New(e2bsandbox.Config{
+			APIKey:  cfg.E2BAPIKey,
+			BaseURL: cfg.E2BBaseURL,
+		})
+	default:
+		return nil, fmt.Errorf("sandbox: unknown adapter %q (want docker|gvisor|firecracker|e2b)", cfg.Adapter)
 	}
 }
 

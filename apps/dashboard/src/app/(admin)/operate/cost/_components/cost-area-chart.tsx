@@ -57,9 +57,12 @@ function formatDayLabel(iso: string): string {
 }
 
 function formatCurrencyTick(usd: number): string {
-  if (usd === 0) return "$0"
-  if (Math.abs(usd) < 1) return `$${usd.toFixed(2)}`
-  if (Math.abs(usd) < 1000) return `$${usd.toFixed(0)}`
+  const abs = Math.abs(usd)
+  if (abs === 0) return "$0"
+  if (abs < 0.0001) return `$${usd.toFixed(6)}`
+  if (abs < 0.01) return `$${usd.toFixed(4)}`
+  if (abs < 1) return `$${usd.toFixed(2)}`
+  if (abs < 1000) return `$${usd.toFixed(0)}`
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",

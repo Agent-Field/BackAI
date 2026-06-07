@@ -92,6 +92,10 @@ var publicPrefixes = []string{
 	// dashboard. Tenant scoping is enforced at the Store layer via
 	// the resolved tenant context when scope=tenant.
 	"/api/v1/memory",
+	// Sandboxes (Phase 9.1). Dashboard-driven operator surface; the
+	// resolved tenant is read from the request when MT is on but the
+	// endpoint set itself doesn't require API-key auth.
+	"/api/v1/sandbox",
 }
 
 func isPublicPath(p string) bool {
@@ -288,6 +292,12 @@ func (s *Server) resolveSession(ctx context.Context, r *http.Request) (tenantID,
 	}
 	if token == "" {
 		return "", "", errNoSession
+	}
+	// better-auth signs cookies as "<token>.<base64-hmac>". The token row
+	// in the `session` table only stores the bare token portion, so strip
+	// any signature suffix before querying.
+	if i := strings.IndexByte(token, '.'); i >= 0 {
+		token = token[:i]
 	}
 
 	// Resolve session -> better-auth user id -> suite_users.id via

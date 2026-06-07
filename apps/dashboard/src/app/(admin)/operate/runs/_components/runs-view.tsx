@@ -155,11 +155,19 @@ export function RunsView() {
       {
         id: "tenant_id",
         header: "Tenant",
-        cell: ({ row }) => (
-          <span className="text-muted-foreground text-xs">
-            {row.original.tenant_id || "—"}
-          </span>
-        ),
+        cell: ({ row }) => {
+          const id = row.original.tenant_id
+          if (!id) return <span className="text-muted-foreground text-xs">—</span>
+          const label =
+            id === "00000000-0000-0000-0000-000000000000"
+              ? "Default"
+              : id.slice(0, 8)
+          return (
+            <span className="text-muted-foreground font-mono text-xs">
+              {label}
+            </span>
+          )
+        },
       },
       {
         id: "started_at",

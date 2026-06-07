@@ -243,6 +243,37 @@ async function capture() {
     fullPage: false,
   })
 
+  // ── 15. Operate → Sandbox Activity (Phase 9.4)
+  //
+  // The activity page lists recent sandbox runs (per-tenant when MT is on),
+  // adapter pool stats (warm / active / queued), and cost-today rollups.
+  // When the runtime hasn't wired /api/v1/sandbox/* yet the page falls
+  // back to an empty-state CTA — still a useful canary screenshot.
+  console.log("→ Operate → Sandbox Activity")
+  await page.goto(`${DASHBOARD_URL}/operate/sandbox-activity`, {
+    waitUntil: "networkidle",
+  })
+  await page.waitForTimeout(2000)
+  await page.screenshot({
+    path: resolve(OUT_DIR, "sandbox-activity.png"),
+    fullPage: false,
+  })
+
+  // ── 16. Build → Sandboxes (config)
+  //
+  // The configuration page for the sandbox module: adapter selection
+  // (docker / firecracker / e2b / modal), default limits (cpu, memory,
+  // timeout), egress policy, and image allowlist.
+  console.log("→ Build → Sandboxes")
+  await page.goto(`${DASHBOARD_URL}/build/sandboxes`, {
+    waitUntil: "networkidle",
+  })
+  await page.waitForTimeout(2000)
+  await page.screenshot({
+    path: resolve(OUT_DIR, "sandbox-config.png"),
+    fullPage: false,
+  })
+
   await browser.close()
   console.log(`saved screenshots to ${OUT_DIR}`)
 }

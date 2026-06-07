@@ -121,3 +121,42 @@ func (s *Server) registerMemoryOpenAPI() {
 // NOTE: registerAdminOpenAPI lives in admin.go (alongside the handler
 // declarations). It used to be here, but co-locating it with the
 // handlers makes future param/response schema edits easier.
+
+// registerSandboxOpenAPI describes /api/v1/sandbox/* routes.
+func (s *Server) registerSandboxOpenAPI() {
+	b := s.openapi
+	b.AddTag("sandbox", "Sandboxed code execution")
+	b.Register("POST", "/api/v1/sandbox/run", openapi.RouteMeta{
+		Summary: "Run a sandboxed command (sync)", Tags: []string{"sandbox"},
+	})
+	b.Register("GET", "/api/v1/sandbox/runs", openapi.RouteMeta{
+		Summary: "List sandbox runs", Tags: []string{"sandbox"},
+		Parameters: []openapi.Parameter{
+			{Name: "tenant", In: "query", Schema: map[string]any{"type": "string"}},
+			{Name: "status", In: "query", Schema: map[string]any{"type": "string"}},
+			{Name: "limit", In: "query", Schema: map[string]any{"type": "integer"}},
+			{Name: "offset", In: "query", Schema: map[string]any{"type": "integer"}},
+		},
+	})
+	b.Register("GET", "/api/v1/sandbox/runs/{id}", openapi.RouteMeta{
+		Summary: "Get a single sandbox run", Tags: []string{"sandbox"},
+		Parameters: []openapi.Parameter{
+			{Name: "id", In: "path", Required: true, Schema: map[string]any{"type": "string"}},
+		},
+	})
+	b.Register("DELETE", "/api/v1/sandbox/runs/{id}", openapi.RouteMeta{
+		Summary: "Stop a running sandbox", Tags: []string{"sandbox"},
+		Parameters: []openapi.Parameter{
+			{Name: "id", In: "path", Required: true, Schema: map[string]any{"type": "string"}},
+		},
+	})
+	b.Register("GET", "/api/v1/sandbox/pool", openapi.RouteMeta{
+		Summary: "Sandbox pool stats + adapter capabilities", Tags: []string{"sandbox"},
+	})
+	b.Register("GET", "/api/v1/sandbox/runs/{id}/logs", openapi.RouteMeta{
+		Summary: "SSE log stream from a running sandbox", Tags: []string{"sandbox"},
+		Parameters: []openapi.Parameter{
+			{Name: "id", In: "path", Required: true, Schema: map[string]any{"type": "string"}},
+		},
+	})
+}

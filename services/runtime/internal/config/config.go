@@ -22,6 +22,22 @@ type Config struct {
 	Observability ObservabilityConfig  `yaml:"observability"`
 	Modules       ModulesConfig        `yaml:"modules"`
 	Storage       StorageConfig        `yaml:"storage"`
+	Sandbox       SandboxConfig        `yaml:"sandbox"`
+}
+
+// SandboxConfig holds sandbox-adapter settings. The Adapter field picks
+// which implementation main.newSandbox() constructs:
+//
+//   - "docker"       — local Docker daemon (default; Phase 9.1)
+//   - "gvisor"       — local Docker daemon w/ runsc runtime (Phase 9.2)
+//   - "firecracker"  — micro-VM via Flintlock (Phase 9.2 scaffold)
+//   - "e2b"          — e2b.dev hosted sandboxes (Phase 9.2)
+//
+// E2BAPIKey / E2BBaseURL are only consumed when Adapter="e2b".
+type SandboxConfig struct {
+	Adapter    string `yaml:"adapter"`
+	E2BAPIKey  string `yaml:"e2b_api_key"`
+	E2BBaseURL string `yaml:"e2b_base_url"`
 }
 
 // StorageConfig holds object-storage settings. Populated from env vars
@@ -125,6 +141,9 @@ func Default() Config {
 		Storage: StorageConfig{
 			Adapter: "minio",
 			Region:  "us-east-1",
+		},
+		Sandbox: SandboxConfig{
+			Adapter: "docker",
 		},
 	}
 }
@@ -236,6 +255,17 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("AF_STACK_S3_TENANT_PREFIX"); v != "" {
 		cfg.Storage.TenantPrefix = v
+	}
+
+	// Sandbox adapter selection + e2b credentials.
+	if v := os.Getenv("AF_STACK_SANDBOX_ADAPTER"); v != "" {
+		cfg.Sandbox.Adapter = strings.ToLower(v)
+	}
+	if v := os.Getenv("E2B_API_KEY"); v != "" {
+		cfg.Sandbox.E2BAPIKey = v
+	}
+	if v := os.Getenv("AF_STACK_E2B_BASE_URL"); v != "" {
+		cfg.Sandbox.E2BBaseURL = v
 	}
 }
 

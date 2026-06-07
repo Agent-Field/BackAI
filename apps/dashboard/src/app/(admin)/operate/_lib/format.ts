@@ -22,7 +22,9 @@ export function formatDuration(ms: number | undefined | null): string {
 
 export function formatCost(usd: number | undefined | null): string {
   if (usd === undefined || usd === null) return "—"
-  if (usd === 0) return "$0.00"
-  if (usd < 0.01) return "<$0.01"
+  const abs = Math.abs(usd)
+  if (abs === 0) return "$0.00"
+  if (abs < 0.0001) return `$${usd.toFixed(6)}`
+  if (abs < 0.01) return `$${usd.toFixed(4)}`
   return `$${usd.toFixed(2)}`
 }

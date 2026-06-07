@@ -184,7 +184,12 @@ export function CostFilters({
         onValueChange={(v) => pushParam("tenant", String(v))}
       >
         <SelectTrigger className="min-w-[9rem]">
-          <SelectValue placeholder="All tenants" />
+          <SelectValue>
+            {initialTenant
+              ? (tenantOptions.find((o) => o.value === initialTenant)?.label ??
+                initialTenant)
+              : "All tenants"}
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
           <SelectItem value={ALL}>All tenants</SelectItem>
@@ -201,7 +206,12 @@ export function CostFilters({
         onValueChange={(v) => pushParam("agent", String(v))}
       >
         <SelectTrigger className="min-w-[9rem]">
-          <SelectValue placeholder="All agents" />
+          <SelectValue>
+            {initialAgent
+              ? (agentOptions.find((o) => o.value === initialAgent)?.label ??
+                initialAgent)
+              : "All agents"}
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
           <SelectItem value={ALL}>All agents</SelectItem>
@@ -218,7 +228,12 @@ export function CostFilters({
         onValueChange={(v) => pushParam("model", String(v))}
       >
         <SelectTrigger className="min-w-[9rem]">
-          <SelectValue placeholder="All models" />
+          <SelectValue>
+            {initialModel
+              ? (modelOptions.find((o) => o.value === initialModel)?.label ??
+                initialModel)
+              : "All models"}
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
           <SelectItem value={ALL}>All models</SelectItem>
