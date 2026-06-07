@@ -347,6 +347,149 @@ export const SignedURLSchema = z.object({
 })
 export type SignedURL = z.infer<typeof SignedURLSchema>
 
+// ─── Database studio + memory (Phase 8) ──────────────────────────────────
+
+export const DBTableSchema = z.object({
+  schema: z.string(),
+  name: z.string(),
+  kind: z.enum(["table", "view", "matview"]),
+  estimated_rows: z.number(),
+  size_bytes: z.number(),
+  has_rls: z.boolean(),
+})
+export type DBTable = z.infer<typeof DBTableSchema>
+
+export const DBTableListSchema = z.object({
+  tables: z.array(DBTableSchema),
+})
+export type DBTableList = z.infer<typeof DBTableListSchema>
+
+export const DBColumnSchema = z.object({
+  name: z.string(),
+  data_type: z.string(),
+  is_nullable: z.boolean(),
+  default_value: z.string().nullable(),
+  is_primary_key: z.boolean(),
+  is_unique: z.boolean(),
+})
+export type DBColumn = z.infer<typeof DBColumnSchema>
+
+export const DBIndexSchema = z.object({
+  name: z.string(),
+  definition: z.string(),
+  is_unique: z.boolean(),
+  is_primary: z.boolean(),
+})
+export type DBIndex = z.infer<typeof DBIndexSchema>
+
+export const RLSPolicySchema = z.object({
+  name: z.string(),
+  cmd: z.enum(["SELECT", "INSERT", "UPDATE", "DELETE", "ALL"]),
+  permissive: z.boolean(),
+  roles: z.array(z.string()),
+  using_expression: z.string().nullable(),
+  with_check_expression: z.string().nullable(),
+})
+export type RLSPolicy = z.infer<typeof RLSPolicySchema>
+
+export const DBTableDetailSchema = z.object({
+  schema: z.string(),
+  name: z.string(),
+  kind: z.string(),
+  columns: z.array(DBColumnSchema),
+  indexes: z.array(DBIndexSchema),
+  rls_enabled: z.boolean(),
+  rls_forced: z.boolean(),
+  policies: z.array(RLSPolicySchema),
+})
+export type DBTableDetail = z.infer<typeof DBTableDetailSchema>
+
+export const SQLRunRequestSchema = z.object({
+  statement: z.string().min(1),
+  // safety: read-only when true (caller asserts; runtime double-checks)
+  read_only: z.boolean().default(true),
+  limit: z.number().int().min(1).max(10000).default(500),
+})
+export type SQLRunRequest = z.infer<typeof SQLRunRequestSchema>
+
+export const SQLRunResultSchema = z.object({
+  columns: z.array(z.string()),
+  rows: z.array(z.array(z.unknown())),
+  row_count: z.number(),
+  truncated: z.boolean(),
+  duration_ms: z.number(),
+})
+export type SQLRunResult = z.infer<typeof SQLRunResultSchema>
+
+export const TableRowsRequestSchema = z.object({
+  schema: z.string().default("public"),
+  table: z.string(),
+  limit: z.number().int().min(1).max(1000).default(100),
+  offset: z.number().int().min(0).default(0),
+})
+export type TableRowsRequest = z.infer<typeof TableRowsRequestSchema>
+
+// Memory primitives (proxied to AgentField or stored in PG)
+export const MemoryScopeEnum = z.enum([
+  "global",
+  "tenant",
+  "agent",
+  "session",
+  "run",
+])
+export type MemoryScope = z.infer<typeof MemoryScopeEnum>
+
+export const MemoryEntrySchema = z.object({
+  scope: MemoryScopeEnum,
+  scope_id: z.string().nullable(),
+  key: z.string(),
+  value: z.unknown(),
+  metadata: z.record(z.string(), z.unknown()),
+  has_embedding: z.boolean(),
+  created_at: z.string(),
+  updated_at: z.string(),
+})
+export type MemoryEntry = z.infer<typeof MemoryEntrySchema>
+
+export const MemoryListSchema = z.object({
+  entries: z.array(MemoryEntrySchema),
+  total: z.number(),
+  has_more: z.boolean(),
+})
+export type MemoryList = z.infer<typeof MemoryListSchema>
+
+export const MemoryPutInputSchema = z.object({
+  scope: MemoryScopeEnum,
+  scope_id: z.string().optional(),
+  key: z.string().min(1),
+  value: z.unknown(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  embed: z.boolean().default(false),
+})
+export type MemoryPutInput = z.infer<typeof MemoryPutInputSchema>
+
+export const MemorySearchRequestSchema = z.object({
+  query: z.string().min(1),
+  scope: MemoryScopeEnum.optional(),
+  scope_id: z.string().optional(),
+  top_k: z.number().int().min(1).max(50).default(10),
+  threshold: z.number().min(0).max(1).optional(),
+})
+export type MemorySearchRequest = z.infer<typeof MemorySearchRequestSchema>
+
+export const MemorySearchHitSchema = z.object({
+  entry: MemoryEntrySchema,
+  similarity: z.number(),
+  distance: z.number(),
+})
+export type MemorySearchHit = z.infer<typeof MemorySearchHitSchema>
+
+export const MemorySearchResultSchema = z.object({
+  hits: z.array(MemorySearchHitSchema),
+  duration_ms: z.number(),
+})
+export type MemorySearchResult = z.infer<typeof MemorySearchResultSchema>
+
 // ─── LLM Gateway + Cost (Phase 7) ─────────────────────────────────────────
 
 export const CostEventSchema = z.object({
@@ -665,6 +808,76 @@ export const api = {
         `/api/v1/secrets/${encodeURIComponent(key)}/rotate`,
         { method: "POST", json: input },
         SecretMetadataSchema,
+      ),
+  },
+
+  // ─── Database studio + memory (Phase 8) ───
+  db: {
+    tables: () => request("/api/v1/db/tables", undefined, DBTableListSchema),
+    table: (schema: string, name: string) =>
+      request(
+        `/api/v1/db/tables/${encodeURIComponent(schema)}/${encodeURIComponent(name)}`,
+        undefined,
+        DBTableDetailSchema,
+      ),
+    rows: (input: TableRowsRequest) => {
+      const qs = new URLSearchParams({
+        schema: input.schema,
+        table: input.table,
+        limit: String(input.limit),
+        offset: String(input.offset),
+      })
+      return request(`/api/v1/db/rows?${qs}`, undefined, SQLRunResultSchema)
+    },
+    sql: (input: SQLRunRequest) =>
+      request("/api/v1/db/sql", { method: "POST", json: input }, SQLRunResultSchema),
+  },
+  memory: {
+    list: (params?: {
+      scope?: string
+      scope_id?: string
+      prefix?: string
+      limit?: number
+      offset?: number
+    }) => {
+      const qs = new URLSearchParams()
+      if (params?.scope) qs.set("scope", params.scope)
+      if (params?.scope_id) qs.set("scope_id", params.scope_id)
+      if (params?.prefix) qs.set("prefix", params.prefix)
+      if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+      if (params?.offset !== undefined) qs.set("offset", String(params.offset))
+      const q = qs.toString()
+      return request(
+        `/api/v1/memory${q ? "?" + q : ""}`,
+        undefined,
+        MemoryListSchema,
+      )
+    },
+    get: (scope: string, key: string, scopeId?: string) => {
+      const qs = new URLSearchParams({ scope, key })
+      if (scopeId) qs.set("scope_id", scopeId)
+      return request(`/api/v1/memory/get?${qs}`, undefined, MemoryEntrySchema)
+    },
+    put: (input: MemoryPutInput) =>
+      request(
+        "/api/v1/memory",
+        { method: "PUT", json: input },
+        MemoryEntrySchema,
+      ),
+    delete: (scope: string, key: string, scopeId?: string) => {
+      const qs = new URLSearchParams({ scope, key })
+      if (scopeId) qs.set("scope_id", scopeId)
+      return request(
+        `/api/v1/memory?${qs}`,
+        { method: "DELETE" },
+        z.object({ deleted: z.boolean() }),
+      )
+    },
+    search: (input: MemorySearchRequest) =>
+      request(
+        "/api/v1/memory/search",
+        { method: "POST", json: input },
+        MemorySearchResultSchema,
       ),
   },
 
