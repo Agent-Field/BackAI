@@ -1,0 +1,135 @@
+# Example 03: LLM Gateway Only.
+#
+# A stripped-down AF Stack: just the OpenAI-compatible LLM gateway, the
+# cost ledger, the in-memory cache, and a read-only dashboard so you can
+# see spend tick up.
+#
+# No sandbox. No multi-tenancy. No MinIO. No jobs queue. The runtime
+# binary is the same one used by the root docker-compose.yml — modules
+# are flipped off via env + config.yaml.
+#
+# Quickstart:
+#   cp .env.example .env
+#   # paste OPENROUTER_API_KEY into .env
+#   docker compose up
+#   ./scripts/test-call.sh
+
+services:
+  postgres:
+    # The runtime + agentfield + dashboard all need Postgres. We keep
+    # pgvector so swapping into Example 01 later (multi-tenancy +
+    # memory) is a one-line config change, not an image change.
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: afstack
+      POSTGRES_PASSWORD: afstack
+      POSTGRES_MULTIPLE_DATABASES: afstack,agentfield
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../../scripts/postgres-init.sh:/docker-entrypoint-initdb.d/postgres-init.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U afstack"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  agentfield:
+    # The runtime calls AgentField for /health and identity checks even
+    # when multi-tenancy is off. Cheaper to include it than to teach the
+    # runtime to run without it.
+    image: agentfield/control-plane:latest
+    environment:
+      AGENTFIELD_STORAGE_MODE: postgres
+      AGENTFIELD_STORAGE_POSTGRES_URL: postgres://afstack:afstack@postgres:5432/agentfield?sslmode=disable
+      AGENTFIELD_STORAGE_POSTGRES_ENABLE_MEMORY_FALLBACK: "false"
+      AGENTFIELD_STORAGE_POSTGRES_ENABLE_DID_FALLBACK: "false"
+      AGENTFIELD_STORAGE_POSTGRES_ENABLE_VC_FALLBACK: "false"
+      AGENTFIELD_STORAGE_POSTGRES_ENABLE_AUTO_MIGRATION: "true"
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    ports:
+      - "8081:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  runtime:
+    # The af-stack runtime binary — same image as the root compose, only
+    # the module flags + mounts differ.
+    build:
+      context: ../..
+      dockerfile: services/runtime/Dockerfile
+    environment:
+      AF_STACK_HTTP_ADDR: ":8080"
+      AF_STACK_METRICS_ADDR: ":9090"
+      AF_STACK_DATABASE_URL: postgres://afstack:afstack@postgres:5432/afstack?sslmode=disable
+      AF_STACK_AGENTFIELD_URL: http://agentfield:8080
+
+      # Module flags — these override config.yaml. Multi-tenancy off
+      # means no per-tenant API key required; the gateway accepts any
+      # bearer (including a placeholder like "not-needed-mt-off").
+      AF_STACK_MODULE_MULTI_TENANCY: "false"
+      AF_STACK_MODULE_LLM_GATEWAY: "true"
+      AF_STACK_MODULE_LLM_CACHE: "true"
+      AF_STACK_MODULE_SANDBOX: "false"
+      AF_STACK_MODULE_JOBS: "false"
+      AF_STACK_MODULE_SECRETS: "false"
+
+      # Sandbox adapter forced off — no docker.sock mount in this example.
+      AF_STACK_SANDBOX_ADAPTER: noop
+
+      # LLM provider keys. The runtime picks the first one set in this
+      # order: openrouter → openai → anthropic. Override via .env.
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+
+      # KMS key is required even with the secrets module off (the
+      # vault is initialised lazily). Override in production.
+      AF_STACK_KMS_KEY: ${AF_STACK_KMS_KEY:-dev-secret-change-me}
+
+      LOG_FORMAT: json
+      LOG_LEVEL: info
+    ports:
+      - "${AF_STACK_PORT:-8080}:8080"
+      - "${AF_STACK_METRICS_PORT:-9090}:9090"
+    volumes:
+      # Mount THIS example's stripped-down config.yaml — NOT the repo's
+      # default apps/backend/config.yaml.
+      - ./config.yaml:/config.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      agentfield:
+        condition: service_started
+    restart: unless-stopped
+
+  dashboard:
+    # Read-only operator view: lets you watch /api/v1/cost tick up as
+    # calls land. The dashboard hits the runtime over Docker DNS for
+    # server-side fetches and localhost for client-side.
+    build:
+      context: ../..
+      dockerfile: apps/dashboard/Dockerfile
+    environment:
+      DATABASE_URL: postgres://afstack:afstack@postgres:5432/afstack?sslmode=disable
+      AF_STACK_AUTH_SECRET: ${AF_STACK_AUTH_SECRET:-dev-secret-change-me-in-prod}
+      BETTER_AUTH_URL: http://localhost:${AF_STACK_DASHBOARD_PORT:-3000}
+      RUNTIME_URL: http://runtime:8080
+      NEXT_PUBLIC_RUNTIME_URL: http://localhost:${AF_STACK_PORT:-8080}
+      NEXT_PUBLIC_RUNTIME_UI_URL: http://localhost:8081
+    ports:
+      - "${AF_STACK_DASHBOARD_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      runtime:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

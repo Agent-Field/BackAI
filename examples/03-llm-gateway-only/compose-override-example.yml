@@ -1,0 +1,28 @@
+# Override file — swap OpenRouter for OpenAI direct.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f compose-override-example.yml up
+#
+# Or copy this to compose.override.yml (the default override name) and
+# `docker compose up` will pick it up automatically.
+#
+# The runtime picks providers in order: openrouter -> openai -> anthropic.
+# Unset OPENROUTER_API_KEY (or leave it blank in .env) and set
+# OPENAI_API_KEY instead — the gateway will route to the OpenAI upstream
+# without any code change.
+
+services:
+  runtime:
+    environment:
+      # Force OpenRouter off even if it leaked in from .env.
+      OPENROUTER_API_KEY: ""
+      # Required for the OpenAI upstream.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Optional: also wire Anthropic as the second-choice upstream.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+
+  agentfield:
+    environment:
+      OPENROUTER_API_KEY: ""
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}

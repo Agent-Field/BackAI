@@ -1,0 +1,219 @@
+# Notable — Notion-with-AI on AF Stack.
+#
+# This compose file is *standalone* — it doesn't extend the root one.
+# That's deliberate: examples should be runnable from anywhere via
+#   docker compose -f examples/01-notable/docker-compose.yml up
+# without needing every root service. Where we share a runtime knob, we
+# read it from the same env names so the dev only sets keys once.
+#
+# Stack:
+#   - postgres        : same image as root; afstack + agentfield DBs.
+#   - minio           : object storage for note attachments.
+#   - agentfield      : control plane (LLM gateway + agent registry).
+#   - runtime         : AF Stack runtime, multi-tenancy ON, billing ON.
+#   - dashboard       : Next.js operator UI (loads the notable plugin).
+#   - notable-agents  : the 3 Notable AF reasoners in one process.
+#   - notable-api     : the FastAPI handler service (note CRUD + stats).
+#
+# Apply Notable's migrations on first boot via a one-shot init container
+# (notable-migrate). The runtime does its own migrations against
+# suite_*; we run ours against the same DB with a separate baseline.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: afstack
+      POSTGRES_PASSWORD: afstack
+      POSTGRES_MULTIPLE_DATABASES: afstack,agentfield
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Reuse the root project's multi-DB bootstrap script.
+      - ../../scripts/postgres-init.sh:/docker-entrypoint-initdb.d/postgres-init.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U afstack"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${AF_STACK_S3_ACCESS_KEY:-minio}
+      MINIO_ROOT_PASSWORD: ${AF_STACK_S3_SECRET_KEY:-minio-secret}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  agentfield:
+    image: agentfield/control-plane:latest
+    environment:
+      AGENTFIELD_STORAGE_MODE: postgres
+      AGENTFIELD_STORAGE_POSTGRES_URL: postgres://afstack:afstack@postgres:5432/agentfield?sslmode=disable
+      AGENTFIELD_STORAGE_POSTGRES_ENABLE_AUTO_MIGRATION: "true"
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    ports:
+      - "8081:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # One-shot migration container. Runs the example's SQL after Postgres
+  # is ready and exits 0; the API service waits on it. Idempotent because
+  # every CREATE / POLICY uses IF NOT EXISTS / DROP IF EXISTS.
+  notable-migrate:
+    image: postgres:16-alpine
+    environment:
+      PGPASSWORD: afstack
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "Applying Notable migrations..."
+        for f in /migrations/*.sql; do
+          echo " - $$f"
+          psql -h postgres -U afstack -d afstack -v ON_ERROR_STOP=1 -f "$$f"
+        done
+        echo "Notable migrations applied."
+    volumes:
+      - ./migrations:/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  runtime:
+    # Build from the root project so we get the in-flight runtime, not a
+    # released image. Adjust when you publish a pinned tag.
+    build:
+      context: ../..
+      dockerfile: services/runtime/Dockerfile
+    environment:
+      AF_STACK_HTTP_ADDR: ":8080"
+      AF_STACK_METRICS_ADDR: ":9090"
+      AF_STACK_DATABASE_URL: postgres://afstack:afstack@postgres:5432/afstack?sslmode=disable
+      AF_STACK_AGENTFIELD_URL: http://agentfield:8080
+      AF_STACK_KMS_KEY: ${AF_STACK_KMS_KEY:-dev-secret-change-me}
+      # Multi-tenancy ON — Notable's whole point.
+      AF_STACK_MODULE_MULTI_TENANCY: "true"
+      AF_STACK_MODULE_BILLING: "true"
+      AF_STACK_MODULE_LLM_GATEWAY: "true"
+      AF_STACK_MODULE_MEMORY: "true"
+      # Billing: stub mode unless the operator sets a real key.
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AF_STACK_S3_ADAPTER: minio
+      AF_STACK_S3_ENDPOINT: minio:9000
+      AF_STACK_S3_BUCKET: ${AF_STACK_S3_BUCKET:-notable}
+      AF_STACK_S3_ACCESS_KEY: ${AF_STACK_S3_ACCESS_KEY:-minio}
+      AF_STACK_S3_SECRET_KEY: ${AF_STACK_S3_SECRET_KEY:-minio-secret}
+      AF_STACK_S3_REGION: us-east-1
+      AF_STACK_SANDBOX_ADAPTER: noop
+      LOG_FORMAT: json
+      LOG_LEVEL: info
+    ports:
+      - "${AF_STACK_PORT:-8080}:8080"
+      - "9090:9090"
+    user: "0:0"
+    volumes:
+      - ./config.yaml:/config.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      agentfield:
+        condition: service_started
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: ../..
+      dockerfile: apps/dashboard/Dockerfile
+    environment:
+      DATABASE_URL: postgres://afstack:afstack@postgres:5432/afstack?sslmode=disable
+      AF_STACK_AUTH_SECRET: ${AF_STACK_AUTH_SECRET:-dev-secret-change-me-in-prod}
+      BETTER_AUTH_URL: http://localhost:${AF_STACK_DASHBOARD_PORT:-3000}
+      RUNTIME_URL: http://runtime:8080
+      NEXT_PUBLIC_RUNTIME_URL: http://localhost:${AF_STACK_PORT:-8080}
+      # The plugin reads /notable/stats from the API service directly so
+      # the dashboard server-side fetch needs the in-network URL.
+      NOTABLE_API_URL: http://notable-api:8090
+    ports:
+      - "${AF_STACK_DASHBOARD_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      runtime:
+        condition: service_started
+    restart: unless-stopped
+
+  # The 3 Notable reasoners (summarize, suggest_tags, todo_completer) in
+  # one process. Each registers a separate node.reasoner pair with the
+  # AgentField control plane.
+  notable-agents:
+    build:
+      context: ./agents
+      dockerfile: Dockerfile
+    environment:
+      AGENTFIELD_SERVER: http://agentfield:8080
+      NODE_ID: notable-ai
+      AGENT_CALLBACK_URL: http://notable-agents:8090
+      # Same env names the SDK respects so we don't fork the contract.
+      AF_STACK_URL: http://runtime:8080
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      NOTABLE_MODEL: ${NOTABLE_MODEL:-}
+    depends_on:
+      agentfield:
+        condition: service_started
+      runtime:
+        condition: service_started
+    restart: unless-stopped
+
+  # Notable HTTP API — note CRUD + agent invocations + stats.
+  notable-api:
+    build:
+      context: ./handlers
+      dockerfile: Dockerfile
+    environment:
+      NOTABLE_DATABASE_URL: postgres://afstack:afstack@postgres:5432/afstack?sslmode=disable
+      AF_STACK_URL: http://runtime:8080
+      NOTABLE_API_PORT: "8090"
+      LOG_LEVEL: info
+    ports:
+      - "${NOTABLE_API_PORT:-8090}:8090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      notable-migrate:
+        condition: service_completed_successfully
+      runtime:
+        condition: service_started
+      notable-agents:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8090/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  minio-data:

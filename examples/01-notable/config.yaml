@@ -1,0 +1,67 @@
+# Notable runtime config — opinionated SaaS shape.
+#
+# What this turns on:
+#   - multi-tenancy:  every request is tenant-scoped via PG RLS
+#   - billing:        Stripe direct (stub when STRIPE_SECRET_KEY is unset)
+#   - llm-gateway:    OpenAI-compatible shim so agents + handlers share
+#                     one cost-tracked path to model providers
+#   - memory:         scoped k/v + vector store; suggest_tags reads per-user
+#                     tag history from here
+#   - storage:        MinIO adapter for note attachments (S3 in prod)
+#
+# Everything else stays at its v1 default. The runtime treats absent module
+# entries as "v1 default state" — we list the ones that need to be ON or
+# whose adapter we want to pin.
+
+modules:
+  enabled:
+    multi-tenancy: true
+    billing: true
+    llm-gateway: true
+    memory: true
+    storage: true
+    # Identity stays on by default (better-auth). Listing for clarity.
+    identity: true
+
+  adapters:
+    # MinIO in dev, swap to "s3" in prod with the same env vars.
+    storage: minio
+    # In-memory vector store keeps the example self-contained. Production
+    # deployments swap to "pgvector" by enabling the pgvector extension
+    # (the postgres image already supports it).
+    memory: pgvector
+    # Stripe direct. Stub kicks in automatically when no key is set.
+    billing: stripe
+
+  # No workload modules — Notable ships its app routes as a separate
+  # service (notable-api in docker-compose.yml). When Phase 13.4's
+  # workload-module loader lands, the notable handlers can move to
+  # workload-modules/notes/ and this list becomes [notes].
+  workload_modules: []
+
+suite:
+  modules:
+    multi-tenancy:
+      enabled: true
+      strategy: pg-rls
+    billing:
+      enabled: true
+      # Plan caps that has_budget() compares against. "free" gates
+      # spend at $10/mo, "pro" at $500/mo, "enterprise" is unlimited.
+      plans:
+        - id: free
+          monthly_cap_usd: 10
+        - id: pro
+          monthly_cap_usd: 500
+        - id: enterprise
+          monthly_cap_usd: 0
+    llm-gateway:
+      enabled: true
+      # Default model for OpenAI-compatible calls that don't specify one.
+      # Qwen 2.5 72B is the cost-discipline default.
+      default_model: openrouter/qwen/qwen-2.5-72b-instruct
+    memory:
+      enabled: true
+    storage:
+      enabled: true
+      adapter: minio

@@ -1,0 +1,14 @@
+# Local env overrides — every dev's machine has its own keys.
+.env
+
+# plandb local state — task graph is per-checkout, not shared.
+.plandb.db
+
+# Python bytecode + virtualenvs left over from local agent dev.
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Editor scratch.
+.DS_Store

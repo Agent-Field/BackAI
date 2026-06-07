@@ -1,0 +1,44 @@
+# AF Stack runtime config — Example 03: LLM Gateway Only.
+#
+# This config strips AF Stack down to one job: be an OpenAI-compatible
+# LLM gateway with per-call cost tracking and an in-memory cache.
+#
+# Modules ON:
+#   - llm-gateway   POST /api/v1/llm/chat/completions (etc.)
+#   - llm-cache     in-memory cache for repeated prompts
+#
+# Modules OFF:
+#   - multi-tenancy no per-tenant scoping, no API keys to issue
+#   - sandbox       no Docker socket mount, no code execution
+#   - jobs          no River queue, no schedulers
+#   - secrets       no vault (provider keys come from env)
+#
+# Module flags are also overridable via env (AF_STACK_MODULE_<UPPER_SNAKE>).
+# docker-compose.yml sets the ones that matter at the container layer.
+
+modules:
+  enabled:
+    llm-gateway: true
+    llm-cache: true
+    multi-tenancy: false
+    sandbox: false
+    jobs: false
+    secrets: false
+  adapters: {}
+  workload_modules: []
+
+suite:
+  modules:
+    llm-gateway:
+      enabled: true
+    llm-cache:
+      enabled: true
+      # in-memory adapter is the default; nothing else to wire.
+    multi-tenancy:
+      enabled: false
+    sandbox:
+      enabled: false
+    jobs:
+      enabled: false
+    secrets:
+      enabled: false

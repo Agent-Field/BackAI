@@ -1,0 +1,2 @@
+agentfield>=0.1
+pydantic>=2.0

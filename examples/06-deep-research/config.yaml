@@ -1,0 +1,30 @@
+# Researcher example runtime config.
+#
+# Single-user demo: multi-tenancy off so the operator doesn't need to
+# wire identities just to kick off a research run. LLM gateway is on
+# (the agent calls `.ai()` and `.harness()`), memory is on (findings
+# accumulate at run scope), harnesses are on (claude-code is probed,
+# falls back to mock if missing).
+#
+# Drop this in as `config.yaml` at the root if you want to use the
+# example's settings instead of `apps/backend/config.yaml`.
+
+modules:
+  enabled:
+    multi-tenancy: false
+    llm-gateway: true
+    memory: true
+    harnesses: true
+  adapters: {}
+  workload_modules: []
+
+suite:
+  modules:
+    multi-tenancy:
+      enabled: false
+    llm-gateway:
+      enabled: true
+    memory:
+      enabled: true
+    harnesses:
+      enabled: true

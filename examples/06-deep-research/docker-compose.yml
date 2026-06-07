@@ -1,0 +1,59 @@
+# Deep Research example — long-running agent on top of the root AF Stack.
+#
+# This compose file `include`s the root docker-compose.yml so a single
+# `docker compose -f examples/06-deep-research/docker-compose.yml up`
+# brings up postgres + agentfield + runtime + dashboard + the researcher
+# agent in one go. The researcher service registers as `researcher` with
+# the control plane and exposes the `research` reasoner.
+#
+# We deliberately do NOT bundle a real harness (claude-code / codex /
+# gemini / opencode) — the agent probes once at startup and routes to a
+# mock fallback when none is installed, so the example always runs.
+#
+# Quickstart:
+#   cd examples/06-deep-research
+#   cp .env.example .env
+#   # edit .env: set OPENROUTER_API_KEY
+#   docker compose -f docker-compose.yml up --build
+#   ./scripts/run-research.sh
+
+include:
+  # Path is relative to this file. The root compose defines postgres,
+  # minio, agentfield, runtime, dashboard, and the sample-agent — we
+  # piggyback on all of them.
+  - ../../docker-compose.yml
+
+services:
+  researcher:
+    build:
+      # Build context is the example root so the Dockerfile can COPY
+      # both agents/researcher/main.py and agents/researcher/mocks/.
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      # Standard AgentField agent env. Same shape as the sample agent.
+      AGENTFIELD_SERVER: http://agentfield:8080
+      NODE_ID: researcher
+      AGENT_CALLBACK_URL: http://researcher:8090
+
+      # LLM gateway keys — Qwen 2.5 72B via OpenRouter is the default
+      # because it's strong on structured output, supports tool calling,
+      # and keeps the whole research run sub-cent.
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+
+      # Harness configuration. Default is claude-code; the agent probes
+      # on startup and falls back to mock if the binary isn't installed.
+      RESEARCHER_HARNESS: ${RESEARCHER_HARNESS:-claude-code}
+      RESEARCHER_HARNESS_MAX_TURNS: ${RESEARCHER_HARNESS_MAX_TURNS:-5}
+      RESEARCHER_HARNESS_BUDGET_USD: ${RESEARCHER_HARNESS_BUDGET_USD:-0.50}
+
+      # Override model selection if you want to test pricing.
+      # RESEARCHER_MODEL: openrouter/qwen/qwen-2.5-72b-instruct
+
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      agentfield:
+        condition: service_started
+    restart: unless-stopped
