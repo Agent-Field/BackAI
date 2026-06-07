@@ -38,7 +38,7 @@ export default async function AdminLayout({
             email: session.user.email,
           }}
         />
-        <div className="flex-1 p-6">{children}</div>
+        <div className="min-w-0 flex-1 overflow-x-hidden p-6">{children}</div>
       </SidebarInset>
     </SidebarProvider>
   )
