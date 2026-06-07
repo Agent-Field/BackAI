@@ -1,0 +1,102 @@
+# What this gets you in 3 bullets:
+#   - Runtime (Go) on Fly Machines v2, auto-scaling 1..4, health-gated.
+#   - External Postgres + S3 (Neon/Supabase/Tigris). No Fly Postgres needed.
+#   - Dashboard is shipped as a SEPARATE app; see deploy/fly/README.md.
+#
+# Why a second app for the dashboard? Fly per-app routing maps one external
+# port (80/443) to one internal port. Running runtime:8080 + dashboard:3000
+# on the same machine forces a supervisor + odd port layouts. Two apps is the
+# native idiom in 2026: `fly launch` once per app, share secrets via
+# `fly secrets set --app`.
+#
+# Template fields you MUST replace before `fly launch`:
+#   <app-name>           e.g. afstack-prod-runtime
+#   <primary-region>     e.g. iad, lhr, sjc — `fly platform regions`
+#
+# Secrets are set out-of-band, not in this file. See README.md.
+
+app           = "<app-name>"
+primary_region = "<primary-region>"
+kill_signal   = "SIGINT"
+kill_timeout  = "30s"
+
+[build]
+  dockerfile = "services/runtime/Dockerfile"
+
+[env]
+  AF_STACK_HTTP_ADDR           = ":8080"
+  AF_STACK_METRICS_ADDR        = ":9090"
+  AF_STACK_MODULE_MULTI_TENANCY = "true"
+  AF_STACK_SANDBOX_ADAPTER     = "e2b"
+  AF_STACK_S3_ADAPTER          = "s3"
+  AF_STACK_S3_REGION           = "us-east-1"
+  LOG_FORMAT                   = "json"
+  LOG_LEVEL                    = "info"
+  PORT                         = "8080"
+
+# Public service: runtime HTTP on :8080 -> Fly edge :80/:443.
+[[services]]
+  internal_port = 8080
+  protocol      = "tcp"
+  auto_stop_machines  = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+  max_machines_running = 4
+
+  [[services.ports]]
+    port     = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port     = 443
+    handlers = ["tls", "http"]
+
+  [services.concurrency]
+    type       = "requests"
+    soft_limit = 200
+    hard_limit = 400
+
+  [[services.tcp_checks]]
+    interval     = "15s"
+    timeout      = "2s"
+    grace_period = "10s"
+
+  [[services.http_checks]]
+    interval      = "15s"
+    timeout       = "2s"
+    grace_period  = "20s"
+    method        = "GET"
+    path          = "/health"
+    protocol      = "http"
+
+  [[services.http_checks]]
+    interval      = "5s"
+    timeout       = "2s"
+    grace_period  = "20s"
+    method        = "GET"
+    path          = "/ready"
+    protocol      = "http"
+
+# Metrics on :9090 — exposed only to Fly's metrics scraper, not the public.
+[[metrics]]
+  port = 9090
+  path = "/metrics"
+
+# Volume for sandbox artefacts. Comment out when sandbox=off / e2b — e2b runs
+# sandboxes off-box so nothing needs to land on local disk.
+# [mounts]
+#   source      = "af_stack_sandbox"
+#   destination = "/var/lib/af-stack/sandbox"
+#   initial_size = "10gb"
+
+[deploy]
+  strategy           = "rolling"
+  wait_timeout       = "5m"
+  release_command    = "/usr/local/bin/af-stack migrate up"
+
+[[vm]]
+  size      = "shared-cpu-2x"
+  memory    = "1gb"
+  cpu_kind  = "shared"
+  cpus      = 2

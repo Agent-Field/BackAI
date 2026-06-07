@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "af-stack.runtime.fullname" . }}
+  labels:
+    {{- include "af-stack.runtime.labels" . | nindent 4 }}
+  {{- with .Values.service.runtime.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.runtime.type }}
+  ports:
+    - name: http
+      port: {{ .Values.service.runtime.httpPort }}
+      targetPort: http
+      protocol: TCP
+    - name: metrics
+      port: {{ .Values.service.runtime.metricsPort }}
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    {{- include "af-stack.runtime.selectorLabels" . | nindent 4 }}

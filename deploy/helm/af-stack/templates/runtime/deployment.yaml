@@ -1,0 +1,127 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "af-stack.runtime.fullname" . }}
+  labels:
+    {{- include "af-stack.runtime.labels" . | nindent 4 }}
+spec:
+  {{- /*
+    Replicas are managed by the HPA when autoscaling.runtime.enabled is
+    true. Setting `replicas` here would cause helm upgrade to fight the
+    HPA on every reconcile.
+  */}}
+  {{- if not .Values.autoscaling.runtime.enabled }}
+  replicas: {{ .Values.replicaCount.runtime }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "af-stack.runtime.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        {{- include "af-stack.runtime.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Roll the pods when the config / inline secret changes.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if eq (include "af-stack.needsInlineSecret" .) "true" }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "af-stack.serviceAccountName" . }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      containers:
+        - name: runtime
+          image: "{{ .Values.image.runtime.repository }}:{{ .Values.image.runtime.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.runtime.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          env:
+            - name: AF_STACK_HTTP_ADDR
+              value: ":8080"
+            - name: AF_STACK_METRICS_ADDR
+              value: ":9090"
+            - name: LOG_FORMAT
+              value: json
+            {{- include "af-stack.databaseEnv" . | nindent 12 }}
+            {{- include "af-stack.storageEnv" . | nindent 12 }}
+            {{- include "af-stack.kmsEnv" . | nindent 12 }}
+            {{- include "af-stack.llmEnv" . | nindent 12 }}
+            {{- include "af-stack.moduleEnv" . | nindent 12 }}
+            {{- with .Values.extraEnv.runtime }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: {{ .Values.probes.runtime.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.runtime.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.runtime.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.runtime.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: {{ .Values.probes.runtime.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.runtime.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.runtime.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.runtime.readiness.failureThreshold }}
+          lifecycle:
+            preStop:
+              # Kubernetes 1.29+ has a native `sleep` preStop action that
+              # works on distroless (no shell required). It pauses the
+              # pod long enough for /ready to flip to NotReady and for
+              # the Service endpoints controller to remove this pod
+              # before SIGTERM lands. Required because the chart targets
+              # k8s >= 1.25 — older clusters will silently no-op the
+              # field. If you're on a pre-1.29 cluster and still see
+              # request drops on rollout, set
+              # `terminationGracePeriodSeconds: 90` and the runtime's
+              # own SIGTERM handler will drain.
+              sleep:
+                seconds: {{ .Values.preStopSleepSeconds }}
+          resources:
+            {{- toYaml .Values.resources.runtime | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /config.yaml
+              subPath: config.yaml
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "af-stack.fullname" . }}-config
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

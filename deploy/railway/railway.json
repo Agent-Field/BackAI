@@ -1,0 +1,166 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "templateMetadata": {
+    "name": "AF Stack",
+    "description": "Self-hostable backend for AI agent products. Runtime (Go) + dashboard (Next.js) + managed Postgres. External S3 (Tigris/R2/AWS). External LLM provider.",
+    "category": "ai-ml",
+    "tags": ["agents", "ai", "go", "nextjs", "postgres"],
+    "icon": "https://raw.githubusercontent.com/agentfield/af-stack/main/apps/dashboard/public/icon.png",
+    "repository": "https://github.com/agentfield/af-stack",
+    "readme": "deploy/railway/README.md"
+  },
+  "services": [
+    {
+      "name": "postgres",
+      "source": {
+        "image": "pgvector/pgvector:pg16"
+      },
+      "variables": {
+        "POSTGRES_USER": "afstack",
+        "POSTGRES_PASSWORD": {
+          "generator": "secret",
+          "length": 32,
+          "description": "Postgres superuser password — generated once at deploy time."
+        },
+        "POSTGRES_DB": "afstack"
+      },
+      "volumes": [
+        {
+          "mountPath": "/var/lib/postgresql/data",
+          "name": "postgres-data"
+        }
+      ]
+    },
+    {
+      "name": "runtime",
+      "source": {
+        "repo": "agentfield/af-stack",
+        "rootDirectory": "."
+      },
+      "build": {
+        "builder": "DOCKERFILE",
+        "dockerfilePath": "services/runtime/Dockerfile"
+      },
+      "deploy": {
+        "startCommand": "/usr/local/bin/af-stack",
+        "healthcheckPath": "/health",
+        "healthcheckTimeout": 30,
+        "restartPolicyType": "ON_FAILURE",
+        "restartPolicyMaxRetries": 10,
+        "numReplicas": 1
+      },
+      "variables": {
+        "AF_STACK_HTTP_ADDR": ":8080",
+        "AF_STACK_METRICS_ADDR": ":9090",
+        "AF_STACK_MODULE_MULTI_TENANCY": "true",
+        "AF_STACK_SANDBOX_ADAPTER": "e2b",
+        "AF_STACK_S3_ADAPTER": "s3",
+        "AF_STACK_S3_REGION": "us-east-1",
+        "LOG_FORMAT": "json",
+        "LOG_LEVEL": "info",
+        "PORT": "8080",
+        "AF_STACK_DATABASE_URL": {
+          "default": "${{ postgres.DATABASE_URL }}",
+          "description": "Postgres connection string. Defaults to the bundled Postgres service."
+        },
+        "AF_STACK_KMS_KEY": {
+          "generator": "secret",
+          "length": 64,
+          "isSecret": true,
+          "description": "Hex-encoded 32-byte key for the secrets vault. Generated once."
+        },
+        "AF_STACK_AUTH_SECRET": {
+          "generator": "secret",
+          "length": 64,
+          "isSecret": true,
+          "description": "Session signing secret. Generated once."
+        },
+        "AF_STACK_S3_ENDPOINT": {
+          "description": "S3-compatible endpoint (Tigris: https://fly.storage.tigris.dev, R2: https://<account>.r2.cloudflarestorage.com).",
+          "isSecret": false
+        },
+        "AF_STACK_S3_BUCKET": {
+          "description": "S3 bucket name for sandbox artefacts and uploads.",
+          "isSecret": false
+        },
+        "AF_STACK_S3_ACCESS_KEY": {
+          "description": "S3 access key.",
+          "isSecret": true
+        },
+        "AF_STACK_S3_SECRET_KEY": {
+          "description": "S3 secret key.",
+          "isSecret": true
+        },
+        "OPENROUTER_API_KEY": {
+          "description": "OpenRouter API key (one key, many models). Optional if you set OPENAI_API_KEY or ANTHROPIC_API_KEY.",
+          "isSecret": true
+        },
+        "ANTHROPIC_API_KEY": {
+          "description": "Optional. Direct Anthropic provider key.",
+          "isSecret": true
+        },
+        "OPENAI_API_KEY": {
+          "description": "Optional. Direct OpenAI provider key.",
+          "isSecret": true
+        },
+        "E2B_API_KEY": {
+          "description": "Sandbox adapter key. Required when AF_STACK_SANDBOX_ADAPTER=e2b.",
+          "isSecret": true
+        }
+      }
+    },
+    {
+      "name": "dashboard",
+      "source": {
+        "repo": "agentfield/af-stack",
+        "rootDirectory": "."
+      },
+      "build": {
+        "builder": "DOCKERFILE",
+        "dockerfilePath": "apps/dashboard/Dockerfile"
+      },
+      "deploy": {
+        "startCommand": "node_modules/.bin/next start -p 3000",
+        "healthcheckPath": "/",
+        "healthcheckTimeout": 30,
+        "restartPolicyType": "ON_FAILURE",
+        "restartPolicyMaxRetries": 10,
+        "numReplicas": 1
+      },
+      "variables": {
+        "PORT": "3000",
+        "NODE_ENV": "production",
+        "NEXT_TELEMETRY_DISABLED": "1",
+        "DATABASE_URL": {
+          "default": "${{ postgres.DATABASE_URL }}",
+          "description": "Shared with the runtime — better-auth uses this pool."
+        },
+        "RUNTIME_URL": {
+          "default": "${{ runtime.RAILWAY_PRIVATE_DOMAIN }}:8080",
+          "description": "Server-side fetches use Railway's private network."
+        },
+        "NEXT_PUBLIC_RUNTIME_URL": {
+          "default": "https://${{ runtime.RAILWAY_PUBLIC_DOMAIN }}",
+          "description": "Client-side fetches use the public runtime URL."
+        },
+        "AF_STACK_AUTH_SECRET": {
+          "default": "${{ runtime.AF_STACK_AUTH_SECRET }}",
+          "isSecret": true,
+          "description": "Shared with runtime — both sign session tokens with this key."
+        },
+        "BETTER_AUTH_URL": {
+          "default": "https://${{ RAILWAY_PUBLIC_DOMAIN }}",
+          "description": "Public dashboard URL — used by better-auth callback handling."
+        },
+        "GOOGLE_CLIENT_ID": {
+          "description": "Optional. Google OAuth client ID for SSO.",
+          "isSecret": false
+        },
+        "GOOGLE_CLIENT_SECRET": {
+          "description": "Optional. Google OAuth client secret.",
+          "isSecret": true
+        }
+      }
+    }
+  ]
+}

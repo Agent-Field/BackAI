@@ -1,0 +1,172 @@
+# AF Stack production docker-compose.
+#
+# What this gets you in 3 bullets:
+#   - Runtime + dashboard + AgentField control plane behind Caddy with
+#     automatic Let's Encrypt TLS on {$AF_STACK_DOMAIN}.
+#   - NO Postgres or MinIO services — point at managed/external ones via
+#     AF_STACK_DATABASE_URL + AF_STACK_S3_*.
+#   - NO docker.sock mount on the runtime. Sandbox runs via e2b (default)
+#     or gvisor adapter. Stronger isolation, no privileged container.
+#
+# Required env (set in .env next to this file):
+#   AF_STACK_DOMAIN              public hostname for Caddy
+#   ACME_EMAIL                   Let's Encrypt registration email
+#   AF_STACK_DATABASE_URL        postgres://user:pass@host:5432/afstack?sslmode=require
+#   AGENTFIELD_STORAGE_POSTGRES_URL  postgres://user:pass@host:5432/agentfield?sslmode=require
+#   AF_STACK_KMS_KEY             openssl rand -hex 32
+#   AF_STACK_AUTH_SECRET         openssl rand -hex 32
+#   AF_STACK_S3_ENDPOINT         https://fly.storage.tigris.dev (or R2/AWS)
+#   AF_STACK_S3_BUCKET           af-stack-prod
+#   AF_STACK_S3_ACCESS_KEY       <s3 access key>
+#   AF_STACK_S3_SECRET_KEY       <s3 secret key>
+#   OPENROUTER_API_KEY           (or ANTHROPIC_API_KEY / OPENAI_API_KEY)
+#   E2B_API_KEY                  required when AF_STACK_SANDBOX_ADAPTER=e2b
+#
+# Verify the file BEFORE deploying:
+#   docker compose -f docker-compose.prod.yml config --quiet
+#
+# Bring up:
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Notes on resource limits:
+#   `deploy.resources.limits` are enforced ONLY in swarm mode. In plain
+#   `docker compose up` they are advisory. To enforce on a single node,
+#   either run `docker stack deploy -c docker-compose.prod.yml af-stack`
+#   or migrate the limits to `mem_limit` / `cpus` (compose v2.x supports
+#   both natively; we keep `deploy.resources.limits` so a swarm upgrade is
+#   a one-liner).
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # HTTP/3
+    environment:
+      AF_STACK_DOMAIN: ${AF_STACK_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+      METRICS_ALLOW: ${METRICS_ALLOW:-10.0.0.0/8}
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - frontend
+    depends_on:
+      - runtime
+      - dashboard
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: "256M"
+
+  agentfield:
+    image: agentfield/control-plane:latest
+    restart: unless-stopped
+    environment:
+      AGENTFIELD_STORAGE_MODE: postgres
+      AGENTFIELD_STORAGE_POSTGRES_URL: ${AGENTFIELD_STORAGE_POSTGRES_URL}
+      AGENTFIELD_STORAGE_POSTGRES_ENABLE_MEMORY_FALLBACK: "false"
+      AGENTFIELD_STORAGE_POSTGRES_ENABLE_DID_FALLBACK: "false"
+      AGENTFIELD_STORAGE_POSTGRES_ENABLE_VC_FALLBACK: "false"
+      AGENTFIELD_STORAGE_POSTGRES_ENABLE_AUTO_MIGRATION: "true"
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "512M"
+
+  runtime:
+    image: ghcr.io/agentfield/af-stack-runtime:latest
+    restart: unless-stopped
+    environment:
+      AF_STACK_HTTP_ADDR: ":8080"
+      AF_STACK_METRICS_ADDR: ":9090"
+      AF_STACK_DATABASE_URL: ${AF_STACK_DATABASE_URL}
+      AF_STACK_AGENTFIELD_URL: http://agentfield:8080
+      AF_STACK_KMS_KEY: ${AF_STACK_KMS_KEY}
+      AF_STACK_MODULE_MULTI_TENANCY: ${AF_STACK_MODULE_MULTI_TENANCY:-true}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # External S3 (Tigris/R2/AWS) — NOT MinIO.
+      AF_STACK_S3_ADAPTER: s3
+      AF_STACK_S3_ENDPOINT: ${AF_STACK_S3_ENDPOINT}
+      AF_STACK_S3_BUCKET: ${AF_STACK_S3_BUCKET}
+      AF_STACK_S3_ACCESS_KEY: ${AF_STACK_S3_ACCESS_KEY}
+      AF_STACK_S3_SECRET_KEY: ${AF_STACK_S3_SECRET_KEY}
+      AF_STACK_S3_REGION: ${AF_STACK_S3_REGION:-us-east-1}
+      # Sandbox: e2b by default (hosted, strong isolation, no docker.sock).
+      # Trade-off vs docker adapter:
+      #   - e2b:    no privileged mount, no host kernel exposure, costs per
+      #             sandbox-second, requires E2B_API_KEY.
+      #   - gvisor: stays on-box, user-space kernel, free, requires gvisor
+      #             installed on host (Phase 9.2).
+      #   - docker: easiest in dev, NEVER in prod — full host kernel exposed
+      #             via /var/run/docker.sock.
+      AF_STACK_SANDBOX_ADAPTER: ${AF_STACK_SANDBOX_ADAPTER:-e2b}
+      E2B_API_KEY: ${E2B_API_KEY:-}
+      AF_STACK_E2B_BASE_URL: ${AF_STACK_E2B_BASE_URL:-https://api.e2b.dev}
+      LOG_FORMAT: json
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SERVICE_NAME: af-stack-runtime
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      - agentfield
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: "1G"
+    # NOTE: NO `user: "0:0"` override here. The distroless image's nonroot
+    # user (uid 65532) is used. NO docker.sock mount.
+
+  dashboard:
+    image: ghcr.io/agentfield/af-stack-dashboard:latest
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${AF_STACK_DATABASE_URL}
+      AF_STACK_AUTH_SECRET: ${AF_STACK_AUTH_SECRET}
+      BETTER_AUTH_URL: https://${AF_STACK_DOMAIN}
+      BETTER_AUTH_TRUSTED_ORIGINS: ${BETTER_AUTH_TRUSTED_ORIGINS:-}
+      RUNTIME_URL: http://runtime:8080
+      NEXT_PUBLIC_RUNTIME_URL: https://${AF_STACK_DOMAIN}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+    networks:
+      - frontend
+    depends_on:
+      - runtime
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "512M"
+
+networks:
+  # Caddy <-> runtime/dashboard. Public-facing edge.
+  frontend:
+    driver: bridge
+  # runtime <-> agentfield (+ external Postgres / S3 over the host network).
+  # Dashboard is NOT on this network.
+  backend:
+    driver: bridge
+
+volumes:
+  caddy-data:
+  caddy-config:

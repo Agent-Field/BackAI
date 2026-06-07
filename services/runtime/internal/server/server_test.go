@@ -30,22 +30,45 @@ func TestHealthReturnsOKWithoutDeps(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body["status"] != "ok" {
-		t.Errorf("expected status=ok, got %v", body["status"])
+	// Phase 14.3: /health is liveness only — status is "alive" and
+	// the body carries uptime_s + started_at, NOT a checks block.
+	if body["status"] != "alive" {
+		t.Errorf("expected status=alive, got %v", body["status"])
 	}
-	checks, _ := body["checks"].(map[string]any)
-	if checks == nil {
-		t.Fatal("expected checks block in response")
+	if _, ok := body["uptime_s"]; !ok {
+		t.Fatal("expected uptime_s in response")
 	}
 }
 
-func TestReadyReturnsOKWithoutDeps(t *testing.T) {
+func TestReadyReturns503BeforeMarkReady(t *testing.T) {
+	// Phase 14.3: /ready is 503 booting until MarkReady() is called.
 	s := newBareTestServer(t)
 	req := httptest.NewRequest("GET", "/ready", nil)
 	rec := httptest.NewRecorder()
 	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 before MarkReady, got %d", rec.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["status"] != "booting" {
+		t.Errorf("expected status=booting, got %v", body["status"])
+	}
+	if rec.Header().Get("Retry-After") == "" {
+		t.Errorf("expected Retry-After header on 503 booting")
+	}
+}
+
+func TestReadyReturnsOKAfterMarkReady(t *testing.T) {
+	s := newBareTestServer(t)
+	s.MarkReady()
+	req := httptest.NewRequest("GET", "/ready", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
+		t.Errorf("expected 200 after MarkReady, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

@@ -1,0 +1,46 @@
+{{- /*
+Renders config.yaml from .Values.modules. Mounted into the runtime pod
+at /config.yaml; the runtime parses module enable flags from this file
+in addition to the AF_STACK_MODULE_* env vars (which take precedence).
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "af-stack.fullname" . }}-config
+  labels:
+    {{- include "af-stack.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    modules:
+      enabled:
+        multi-tenancy: {{ .Values.modules.multiTenancy.enabled }}
+        sandbox: {{ .Values.modules.sandbox.enabled }}
+        llm-gateway: {{ .Values.modules.llmGateway.enabled }}
+        llm-cache: {{ .Values.modules.llmCache.enabled }}
+        memory: {{ .Values.modules.memory.enabled }}
+        billing: {{ .Values.modules.billing.enabled }}
+        notifications: {{ .Values.modules.notifications.enabled }}
+        webhooks: {{ .Values.modules.webhooks.enabled }}
+      adapters: {}
+      workload_modules: []
+
+    suite:
+      modules:
+        multi-tenancy:
+          enabled: {{ .Values.modules.multiTenancy.enabled }}
+          strategy: {{ .Values.modules.multiTenancy.strategy | quote }}
+        sandbox:
+          enabled: {{ .Values.modules.sandbox.enabled }}
+          adapter: {{ .Values.modules.sandbox.adapter | quote }}
+        llm-gateway:
+          enabled: {{ .Values.modules.llmGateway.enabled }}
+        llm-cache:
+          enabled: {{ .Values.modules.llmCache.enabled }}
+        memory:
+          enabled: {{ .Values.modules.memory.enabled }}
+        billing:
+          enabled: {{ .Values.modules.billing.enabled }}
+        notifications:
+          enabled: {{ .Values.modules.notifications.enabled }}
+        webhooks:
+          enabled: {{ .Values.modules.webhooks.enabled }}

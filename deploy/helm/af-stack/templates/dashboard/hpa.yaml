@@ -1,0 +1,32 @@
+{{- if .Values.autoscaling.dashboard.enabled -}}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "af-stack.dashboard.fullname" . }}
+  labels:
+    {{- include "af-stack.dashboard.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "af-stack.dashboard.fullname" . }}
+  minReplicas: {{ .Values.autoscaling.dashboard.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.dashboard.maxReplicas }}
+  metrics:
+    {{- if .Values.autoscaling.dashboard.targetCPUUtilization }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.dashboard.targetCPUUtilization }}
+    {{- end }}
+    {{- if .Values.autoscaling.dashboard.targetMemoryUtilization }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.dashboard.targetMemoryUtilization }}
+    {{- end }}
+{{- end }}

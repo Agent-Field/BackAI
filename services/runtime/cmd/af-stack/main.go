@@ -142,8 +142,28 @@ func main() {
 		"agentfield_url", cfg.AgentField.URL,
 	)
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
+	// Phase 14.3 graceful shutdown.
+	//
+	// We use TWO contexts here so the shutdown sequence can be
+	// orchestrated explicitly:
+	//
+	//   workersCtx — cancelled to stop background workers (notifications,
+	//                webhooks, crons, MCP refresh, llmcache eviction).
+	//                Cancelled by the SIGTERM handler AFTER the HTTP
+	//                drain completes, so workers don't go away while
+	//                in-flight requests are still hitting them.
+	//   sigCtx     — driven by signal.NotifyContext; we observe it via
+	//                a separate goroutine that runs the drain sequence
+	//                end-to-end and then cancels workersCtx.
+	//
+	// rootCtx (alias of workersCtx) is what gets passed into the
+	// startup probes + worker goroutines below; the shutdown handler
+	// below is the only thing that cancels it.
+	sigCtx, sigCancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer sigCancel()
+	workersCtx, workersCancel := context.WithCancel(context.Background())
+	defer workersCancel()
+	ctx := workersCtx
 
 	// Observability: set up OTel + Prometheus. Failures are non-fatal —
 	// the runtime keeps working without traces.
@@ -713,9 +733,117 @@ func main() {
 		LogRing:         logRing,
 		Version:         version,
 	})
-	if err := srv.Start(ctx); err != nil {
-		log.Error("server stopped with error", "error", err)
-		os.Exit(1)
+
+	// Phase 14.3: ordered graceful shutdown.
+	//
+	// Listener runs on its own goroutine so the main goroutine can
+	// orchestrate the multi-step shutdown without racing the listener.
+	//
+	// Sequence on SIGTERM/SIGINT:
+	//   1. drain.Start() — /ready flips to 503, new requests rejected
+	//      with 503 + Connection: close. Existing requests run to
+	//      completion or until drain timeout.
+	//   2. httpServer.Shutdown(ctx) — stop accepting new connections,
+	//      close idle ones, wait for active conns to finish.
+	//   3. Cancel workersCtx — every background worker (notifications,
+	//      webhooks outbound, crons scheduler, MCP refresh, llmcache
+	//      eviction) returns from its select-on-ctx.Done() loop.
+	//   4. mcpPool.Shutdown() — close every external MCP adapter
+	//      connection (stdio child processes, SSE clients).
+	//   5. jobs manager Stop() / DB Close / storage.Close — handled by
+	//      their deferred close functions registered above.
+	//
+	// drain timeout is taken from cfg.Server.ShutdownTimeout (default
+	// 30s; overridable via AF_STACK_SHUTDOWN_TIMEOUT). Steps 2-5 share
+	// the same budget — if step 1 burns the full window, steps 2-5
+	// proceed with whatever remains (at minimum 1s each).
+	drainTimeout := cfg.Server.ShutdownTimeout
+	if drainTimeout <= 0 {
+		drainTimeout = 30 * time.Second
+	}
+
+	// Start listener.
+	listenerErr := make(chan error, 1)
+	go func() {
+		log.Info("http server listening", "addr", cfg.Server.HTTPAddr)
+		err := srv.HTTPServer().ListenAndServe()
+		if err != nil && err.Error() != "http: Server closed" {
+			listenerErr <- err
+			return
+		}
+		listenerErr <- nil
+	}()
+
+	// Mark ready — at this point all migrations applied, workers
+	// spawned, listener up. /ready now returns 200.
+	srv.MarkReady()
+	log.Info("af-stack ready", "drain_timeout", drainTimeout)
+
+	// Wait for either listener error or signal.
+	select {
+	case err := <-listenerErr:
+		if err != nil {
+			log.Error("http listener failed", "error", err)
+			workersCancel()
+			os.Exit(1)
+		}
+	case <-sigCtx.Done():
+		log.Info("draining mode entered", "signal_received", true)
+
+		// Step 1: drain HTTP.
+		drainCtx, drainCancel := context.WithTimeout(context.Background(), drainTimeout)
+		drainErr := srv.Drain().Start(drainCtx)
+		drainCancel()
+		if drainErr != nil {
+			log.Warn("drain timed out with in-flight requests; proceeding",
+				"active_requests", srv.Drain().Active(),
+				"error", drainErr,
+			)
+		} else {
+			log.Info("drain complete; all in-flight requests finished",
+				"active_requests", srv.Drain().Active())
+		}
+
+		// Step 2: http server shutdown — stops accepting new
+		// connections, closes idle ones, gives active conns up to
+		// the ctx budget to finish writing their response.
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), drainTimeout)
+		if err := srv.HTTPServer().Shutdown(shutdownCtx); err != nil {
+			log.Warn("http shutdown returned error", "error", err)
+		}
+		shutdownCancel()
+
+		// Step 3: stop background workers via context cancel.
+		// Workers read ctx.Done() in their select loops and exit
+		// promptly (notifications: next tick; webhooks outbound:
+		// in-flight POST timeout; crons: next minute; MCP refresh:
+		// next tick; llmcache eviction: next 5min tick — but the
+		// goroutine itself returns from ctx.Done immediately).
+		log.Info("stopping background workers")
+		workersCancel()
+
+		// Step 4: explicit MCP pool close — Shutdown() is NOT
+		// driven by context cancel; it tears down adapter
+		// connections + stdio child processes. Safe to call after
+		// workersCancel since the refresh loop has already
+		// returned.
+		if mcpPool != nil {
+			log.Info("closing MCP adapter connections")
+			mcpPool.Shutdown()
+		}
+
+		// Step 5: jobs / DB / storage / observability close via
+		// their deferred functions registered above. We exit
+		// normally here so the defers fire in reverse order:
+		//   - defer mcpPool.Shutdown (already called above; idempotent)
+		//   - defer jobsManager.Stop
+		//   - defer database.Close
+		//   - defer tel.Shutdown
+		// storage adapter has no Close() in the storage.Storage
+		// interface; nothing to do at the runtime level.
+
+		log.Info("shutdown complete")
+		return
 	}
 	log.Info("af-stack exited cleanly")
 }

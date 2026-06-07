@@ -1,0 +1,131 @@
+# What this gets you in 3 bullets:
+#   - Runtime + dashboard web services on Render, both built from this repo.
+#   - Managed Render Postgres (pgvector enabled) wired in via fromDatabase.
+#   - Env groups for LLM keys + S3 creds so you set them ONCE for both services.
+#
+# Deploy button URL (drop into your repo README):
+#   https://render.com/deploy?repo=https://github.com/<you>/af-stack
+
+databases:
+  - name: af-stack-postgres
+    plan: standard
+    databaseName: afstack
+    user: afstack
+    postgresMajorVersion: 16
+    # pgvector ships preinstalled on Render's Postgres 16+; AgentField vector
+    # memory works out of the box.
+
+envVarGroups:
+  - name: af-stack-llm
+    envVars:
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+  - name: af-stack-s3
+    envVars:
+      - key: AF_STACK_S3_ENDPOINT
+        sync: false
+      - key: AF_STACK_S3_BUCKET
+        sync: false
+      - key: AF_STACK_S3_ACCESS_KEY
+        sync: false
+      - key: AF_STACK_S3_SECRET_KEY
+        sync: false
+      - key: AF_STACK_S3_REGION
+        value: us-east-1
+  - name: af-stack-sandbox
+    envVars:
+      - key: AF_STACK_SANDBOX_ADAPTER
+        value: e2b
+      - key: E2B_API_KEY
+        sync: false
+
+services:
+  - type: web
+    name: af-stack-runtime
+    runtime: docker
+    dockerfilePath: ./services/runtime/Dockerfile
+    dockerContext: .
+    plan: standard
+    region: oregon
+    autoDeploy: true
+    branch: main
+    healthCheckPath: /health
+    numInstances: 1
+    envVars:
+      - key: AF_STACK_HTTP_ADDR
+        value: ":8080"
+      - key: AF_STACK_METRICS_ADDR
+        value: ":9090"
+      - key: AF_STACK_MODULE_MULTI_TENANCY
+        value: "true"
+      - key: AF_STACK_S3_ADAPTER
+        value: s3
+      - key: LOG_FORMAT
+        value: json
+      - key: LOG_LEVEL
+        value: info
+      - key: PORT
+        value: "8080"
+      - key: AF_STACK_DATABASE_URL
+        fromDatabase:
+          name: af-stack-postgres
+          property: connectionString
+      - key: AF_STACK_KMS_KEY
+        generateValue: true
+      - key: AF_STACK_AUTH_SECRET
+        generateValue: true
+    envVarGroups:
+      - af-stack-llm
+      - af-stack-s3
+      - af-stack-sandbox
+
+  - type: web
+    name: af-stack-dashboard
+    runtime: docker
+    dockerfilePath: ./apps/dashboard/Dockerfile
+    dockerContext: .
+    plan: standard
+    region: oregon
+    autoDeploy: true
+    branch: main
+    healthCheckPath: /
+    numInstances: 1
+    envVars:
+      - key: PORT
+        value: "3000"
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_TELEMETRY_DISABLED
+        value: "1"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: af-stack-postgres
+          property: connectionString
+      - key: RUNTIME_URL
+        fromService:
+          type: web
+          name: af-stack-runtime
+          property: hostport
+      - key: NEXT_PUBLIC_RUNTIME_URL
+        fromService:
+          type: web
+          name: af-stack-runtime
+          property: host
+      - key: AF_STACK_AUTH_SECRET
+        fromService:
+          type: web
+          name: af-stack-runtime
+          envVarKey: AF_STACK_AUTH_SECRET
+      - key: BETTER_AUTH_URL
+        fromService:
+          type: web
+          name: af-stack-dashboard
+          property: host
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false

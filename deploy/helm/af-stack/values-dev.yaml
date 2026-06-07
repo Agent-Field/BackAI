@@ -1,0 +1,132 @@
+# values-dev.yaml — single-node / k3d / kind preset.
+#
+# install:
+#   helm dep update deploy/helm/af-stack
+#   helm install af-stack deploy/helm/af-stack -f deploy/helm/af-stack/values-dev.yaml
+#
+# Trade-offs vs production:
+#   - In-chart Postgres + MinIO (no managed services required)
+#   - emptyDir storage for the sub-charts (data lost on pod restart)
+#   - Single replica each, autoscaling off
+#   - NetworkPolicy off (k3d/kind don't ship with a controller by default)
+#   - PDB off (a single replica can't satisfy minAvailable=1 during voluntary disruption)
+#   - traefik ingress class (k3d's default)
+#   - multi-tenancy off (simpler dev experience; flip on for tenant tests)
+
+replicaCount:
+  runtime: 1
+  dashboard: 1
+
+autoscaling:
+  runtime:
+    enabled: false
+  dashboard:
+    enabled: false
+
+podDisruptionBudget:
+  runtime:
+    enabled: false
+  dashboard:
+    enabled: false
+
+networkPolicy:
+  enabled: false
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations: {}
+  hosts:
+    - host: af-stack.localtest.me   # resolves to 127.0.0.1, perfect for k3d
+      paths:
+        - path: /api
+          pathType: Prefix
+          service: runtime
+        - path: /openapi.json
+          pathType: Exact
+          service: runtime
+        - path: /health
+          pathType: Exact
+          service: runtime
+        - path: /ready
+          pathType: Exact
+          service: runtime
+        - path: /
+          pathType: Prefix
+          service: dashboard
+  tls: []
+
+postgresql:
+  enabled: true
+  auth:
+    username: afstack
+    password: afstack
+    database: afstack
+  primary:
+    persistence:
+      enabled: false       # emptyDir — restart loses data
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+
+storage:
+  mode: minio
+  minio:
+    enabled: true
+    auth:
+      rootUser: minio
+      rootPassword: minio-secret
+    defaultBuckets: "af-stack"
+    persistence:
+      enabled: false
+      size: 1Gi
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+
+modules:
+  multiTenancy:
+    enabled: false
+  sandbox:
+    enabled: false
+    adapter: noop
+  llmGateway:
+    enabled: true
+  llmCache:
+    enabled: false
+  memory:
+    enabled: true
+  billing:
+    enabled: false
+  notifications:
+    enabled: false
+  webhooks:
+    enabled: false
+
+# Dev-only inline secrets. NEVER commit real values; use a values-secret.yaml
+# excluded from git for anything you care about.
+secrets:
+  kmsKey: "dev-kms-key-change-me-0000000000000000000000000000000000000000"
+  authSecret: "dev-auth-secret-change-me-0000000000000000000000000000000000"
+
+llm:
+  # Set via --set llm.openrouterApiKey=... or a values-secret.yaml.
+  openrouterApiKey: ""
+
+resources:
+  runtime:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  dashboard:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 512Mi

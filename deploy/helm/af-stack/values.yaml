@@ -1,0 +1,351 @@
+# Default values for AF Stack.
+#
+# These defaults target a production install: external Postgres, external
+# S3, autoscaler on, network policy on, PDB on. See values-dev.yaml for a
+# single-node / kind / k3d preset, and values-prod.yaml for a tighter
+# example with cert-manager + nginx-ingress + serviceMonitor on.
+#
+# Each top-level key has a short comment explaining its purpose.
+
+# ---------------------------------------------------------------------------
+# Naming / chart overrides
+# ---------------------------------------------------------------------------
+nameOverride: ""
+fullnameOverride: ""
+
+# ---------------------------------------------------------------------------
+# Container images
+# ---------------------------------------------------------------------------
+image:
+  # Pull secrets for private registries.
+  pullSecrets: []
+  runtime:
+    repository: ghcr.io/agentfield/af-stack-runtime
+    tag: ""               # Defaults to .Chart.AppVersion when empty.
+    pullPolicy: IfNotPresent
+  dashboard:
+    repository: ghcr.io/agentfield/af-stack-dashboard
+    tag: ""
+    pullPolicy: IfNotPresent
+
+# ---------------------------------------------------------------------------
+# Replica counts (ignored when autoscaling.<workload>.enabled is true)
+# ---------------------------------------------------------------------------
+replicaCount:
+  runtime: 2
+  dashboard: 2
+
+# ---------------------------------------------------------------------------
+# Autoscaling
+# ---------------------------------------------------------------------------
+autoscaling:
+  runtime:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilization: 70
+    targetMemoryUtilization: 80
+  dashboard:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilization: 70
+    targetMemoryUtilization: 80
+
+# ---------------------------------------------------------------------------
+# Pod Disruption Budgets — keep at least N replicas during voluntary
+# disruption (node drains, cluster upgrades).
+# ---------------------------------------------------------------------------
+podDisruptionBudget:
+  runtime:
+    enabled: true
+    minAvailable: 1
+  dashboard:
+    enabled: true
+    minAvailable: 1
+
+# ---------------------------------------------------------------------------
+# ServiceAccount
+# ---------------------------------------------------------------------------
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# ---------------------------------------------------------------------------
+# Pod security context (applied to runtime + dashboard pods)
+# ---------------------------------------------------------------------------
+podSecurityContext:
+  runAsNonRoot: true
+  fsGroup: 65532
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65532
+
+# ---------------------------------------------------------------------------
+# Resources — conservative defaults. Tune for your traffic.
+# ---------------------------------------------------------------------------
+resources:
+  runtime:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+  dashboard:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+# ---------------------------------------------------------------------------
+# Services
+# ---------------------------------------------------------------------------
+service:
+  runtime:
+    type: ClusterIP
+    httpPort: 8080
+    metricsPort: 9090
+    annotations: {}
+  dashboard:
+    type: ClusterIP
+    port: 3000
+    annotations: {}
+
+# ---------------------------------------------------------------------------
+# Ingress — fronts both runtime + dashboard.
+# Runtime is routed for /api, /openapi.json, /health, /ready. Everything
+# else falls through to the dashboard.
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "25m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+    # cert-manager: operators using a different cluster issuer should
+    # override this annotation.
+    cert-manager.io/cluster-issuer: ""
+  hosts:
+    - host: af-stack.local
+      paths:
+        # Backend prefixes — order matters: more specific first.
+        - path: /api
+          pathType: Prefix
+          service: runtime
+        - path: /openapi.json
+          pathType: Exact
+          service: runtime
+        - path: /health
+          pathType: Exact
+          service: runtime
+        - path: /ready
+          pathType: Exact
+          service: runtime
+        - path: /
+          pathType: Prefix
+          service: dashboard
+  tls: []
+  # - hosts:
+  #     - af-stack.example.com
+  #   secretName: af-stack-tls
+
+# ---------------------------------------------------------------------------
+# Database — by default the chart expects an external Postgres reachable
+# at .Values.postgresql.external.url, supplied either inline or via a
+# secret reference (preferred).
+# ---------------------------------------------------------------------------
+postgresql:
+  # When true, the bitnami/postgresql sub-chart is deployed in-cluster.
+  # Suitable for dev/CI; production should leave this false and provide
+  # a managed Postgres URL via external.urlSecretRef.
+  enabled: false
+  external:
+    # Plain URL — only use when you accept the URL being baked into a
+    # ConfigMap / Secret rendered by Helm.
+    url: ""
+    # Preferred: refer to an existing Secret you manage out-of-band.
+    # The Secret must have a key holding the Postgres URL.
+    urlSecretRef:
+      name: ""
+      key: AF_STACK_DATABASE_URL
+  # Settings forwarded to bitnami/postgresql when enabled=true.
+  auth:
+    username: afstack
+    password: ""           # generated automatically if empty
+    database: afstack
+  primary:
+    persistence:
+      enabled: true
+      size: 8Gi
+  image:
+    # pgvector-enabled Postgres so AgentField's vector memory works.
+    repository: pgvector/pgvector
+    tag: pg16
+
+# ---------------------------------------------------------------------------
+# Object storage
+# ---------------------------------------------------------------------------
+storage:
+  # off  — disable; runtime returns 503 for blob endpoints.
+  # s3   — talk to a managed S3-compatible bucket.
+  # minio — deploy the bitnami/minio sub-chart in-cluster.
+  mode: s3
+  s3:
+    bucket: af-stack
+    region: us-east-1
+    endpoint: ""            # leave empty for AWS S3; set for R2 / MinIO.
+    # Inline credentials. Prefer secretRef for production.
+    accessKey: ""
+    secretKey: ""
+    # Use an existing Secret (recommended). The Secret must contain
+    # AF_STACK_S3_ACCESS_KEY and AF_STACK_S3_SECRET_KEY keys.
+    credentialsSecretRef:
+      name: ""
+      accessKeyKey: AF_STACK_S3_ACCESS_KEY
+      secretKeyKey: AF_STACK_S3_SECRET_KEY
+  minio:
+    # When true, the bitnami/minio sub-chart is deployed.
+    enabled: false
+    auth:
+      rootUser: minio
+      rootPassword: ""      # auto-generated if empty
+    defaultBuckets: "af-stack"
+    persistence:
+      size: 10Gi
+
+# ---------------------------------------------------------------------------
+# Module enable flags — mirror apps/backend/config.yaml. Rendered into a
+# ConfigMap and mounted at /config.yaml in the runtime pod, in addition to
+# the AF_STACK_MODULE_<NAME> env vars for redundancy.
+# ---------------------------------------------------------------------------
+modules:
+  multiTenancy:
+    enabled: true
+    strategy: pg-rls
+  sandbox:
+    enabled: false
+    adapter: noop          # docker | gvisor | firecracker | e2b | noop
+  llmGateway:
+    enabled: true
+  llmCache:
+    enabled: false
+  memory:
+    enabled: true
+  billing:
+    enabled: false
+  notifications:
+    enabled: false
+  webhooks:
+    enabled: false
+
+# ---------------------------------------------------------------------------
+# Secrets — KMS key, LLM provider keys, auth secret. Prefer secretRef for
+# production; inline values are rendered into a Secret created by the chart.
+# ---------------------------------------------------------------------------
+secrets:
+  # KMS key for the secrets vault (envelope encryption). Required.
+  kmsKey: ""
+  kmsKeySecretRef:
+    name: ""
+    key: AF_STACK_KMS_KEY
+  # Dashboard session signing secret.
+  authSecret: ""
+  authSecretSecretRef:
+    name: ""
+    key: AF_STACK_AUTH_SECRET
+
+# LLM provider keys. One of openrouter / anthropic / openai / google is
+# usually enough — set what you use.
+llm:
+  openrouterApiKey: ""
+  anthropicApiKey: ""
+  openaiApiKey: ""
+  googleApiKey: ""
+  # Refer to an existing Secret. Keys: OPENROUTER_API_KEY etc.
+  providerSecretRef:
+    name: ""
+
+# ---------------------------------------------------------------------------
+# Monitoring
+# ---------------------------------------------------------------------------
+monitoring:
+  serviceMonitor:
+    # Set true if Prometheus Operator is installed.
+    enabled: false
+    namespace: ""           # defaults to release namespace
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}              # extra labels for Prometheus discovery
+
+# ---------------------------------------------------------------------------
+# NetworkPolicy — restrict ingress + egress on both workloads.
+# Disable if your cluster doesn't have a NetworkPolicy controller, or
+# during initial install when you're still debugging connectivity.
+# ---------------------------------------------------------------------------
+networkPolicy:
+  enabled: true
+  # Pod selector labels for the ingress controller. Override per cluster.
+  ingressControllerSelector:
+    matchLabels:
+      app.kubernetes.io/name: ingress-nginx
+  ingressControllerNamespace: ingress-nginx
+
+# ---------------------------------------------------------------------------
+# Pod scheduling
+# ---------------------------------------------------------------------------
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# ---------------------------------------------------------------------------
+# Lifecycle / probes — tunable thresholds. Defaults match Phase 14.3
+# readiness behavior: 5s initial delay, 5s period, 3 failures = unready.
+# ---------------------------------------------------------------------------
+probes:
+  runtime:
+    liveness:
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+    readiness:
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+  dashboard:
+    liveness:
+      initialDelaySeconds: 15
+      periodSeconds: 20
+      timeoutSeconds: 3
+      failureThreshold: 3
+    readiness:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+
+# Graceful shutdown: give /ready time to flip to 503 before the kubelet
+# sends SIGTERM. terminationGracePeriodSeconds should be > preStop sleep +
+# in-flight request timeout.
+terminationGracePeriodSeconds: 60
+preStopSleepSeconds: 5
+
+# ---------------------------------------------------------------------------
+# Extra environment variables for either workload. Useful for OTel,
+# log level overrides, feature flags.
+# ---------------------------------------------------------------------------
+extraEnv:
+  runtime: []
+  # - name: LOG_LEVEL
+  #   value: info
+  dashboard: []

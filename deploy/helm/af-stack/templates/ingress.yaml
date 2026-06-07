@@ -1,0 +1,45 @@
+{{- if .Values.ingress.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "af-stack.fullname" . }}
+  labels:
+    {{- include "af-stack.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- range $k, $v := . }}
+    {{- if $v }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+    {{- end }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path | quote }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                {{- if eq .service "runtime" }}
+                name: {{ include "af-stack.runtime.fullname" $ }}
+                port:
+                  number: {{ $.Values.service.runtime.httpPort }}
+                {{- else }}
+                name: {{ include "af-stack.dashboard.fullname" $ }}
+                port:
+                  number: {{ $.Values.service.dashboard.port }}
+                {{- end }}
+          {{- end }}
+    {{- end }}
+{{- end }}

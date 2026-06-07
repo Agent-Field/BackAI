@@ -1,0 +1,43 @@
+AF Stack {{ .Chart.AppVersion }} has been installed.
+
+Release:    {{ .Release.Name }}
+Namespace:  {{ .Release.Namespace }}
+
+Workloads:
+  runtime     — {{ include "af-stack.runtime.fullname" . }} (replicas: {{ if .Values.autoscaling.runtime.enabled }}HPA {{ .Values.autoscaling.runtime.minReplicas }}-{{ .Values.autoscaling.runtime.maxReplicas }}{{ else }}{{ .Values.replicaCount.runtime }}{{ end }})
+  dashboard   — {{ include "af-stack.dashboard.fullname" . }} (replicas: {{ if .Values.autoscaling.dashboard.enabled }}HPA {{ .Values.autoscaling.dashboard.minReplicas }}-{{ .Values.autoscaling.dashboard.maxReplicas }}{{ else }}{{ .Values.replicaCount.dashboard }}{{ end }})
+
+{{- if .Values.ingress.enabled }}
+
+Endpoints (via Ingress, class={{ .Values.ingress.className }}):
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}/        — dashboard
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}/api     — runtime
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}/health  — runtime liveness
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}/ready   — runtime readiness
+{{- end }}
+{{- else }}
+
+Ingress is disabled. Port-forward to reach the runtime:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "af-stack.runtime.fullname" . }} 8080:{{ .Values.service.runtime.httpPort }}
+{{- end }}
+
+{{- if .Values.postgresql.enabled }}
+
+In-chart Postgres is enabled. The database URL is computed automatically from
+the bitnami/postgresql sub-chart and injected into both workloads.
+{{- else if not .Values.postgresql.external.urlSecretRef.name }}
+{{- if not .Values.postgresql.external.url }}
+
+WARNING: postgresql.enabled is false but no external URL was provided.
+The runtime will fail to start. Set either:
+  - postgresql.enabled=true
+  - postgresql.external.url=postgres://...   (rendered into a chart Secret)
+  - postgresql.external.urlSecretRef.name=my-secret   (recommended for prod)
+{{- end }}
+{{- end }}
+
+Next steps:
+  1. Verify the rollout:  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+  2. Tail runtime logs:   kubectl -n {{ .Release.Namespace }} logs -f deploy/{{ include "af-stack.runtime.fullname" . }}
+  3. Hit /ready:          kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "af-stack.runtime.fullname" . }} -- /usr/local/bin/af-stack version

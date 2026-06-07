@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "af-stack.dashboard.fullname" . }}
+  labels:
+    {{- include "af-stack.dashboard.labels" . | nindent 4 }}
+  {{- with .Values.service.dashboard.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.dashboard.type }}
+  ports:
+    - name: http
+      port: {{ .Values.service.dashboard.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "af-stack.dashboard.selectorLabels" . | nindent 4 }}

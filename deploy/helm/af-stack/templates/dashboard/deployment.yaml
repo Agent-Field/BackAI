@@ -1,0 +1,137 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "af-stack.dashboard.fullname" . }}
+  labels:
+    {{- include "af-stack.dashboard.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.dashboard.enabled }}
+  replicas: {{ .Values.replicaCount.dashboard }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "af-stack.dashboard.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        {{- include "af-stack.dashboard.selectorLabels" . | nindent 8 }}
+      annotations:
+        {{- if eq (include "af-stack.needsInlineSecret" .) "true" }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "af-stack.serviceAccountName" . }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        # Dashboard image runs as uid 1001 (set in Dockerfile), not 65532.
+        runAsNonRoot: true
+        fsGroup: 1001
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      containers:
+        - name: dashboard
+          image: "{{ .Values.image.dashboard.repository }}:{{ .Values.image.dashboard.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.dashboard.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            # Next.js writes to .next/cache at runtime — leave the root
+            # filesystem writable for now. Tighten with an emptyDir mount
+            # at /app/apps/dashboard/.next/cache in a future hardening pass.
+            readOnlyRootFilesystem: false
+            runAsNonRoot: true
+            runAsUser: 1001
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "3000"
+            - name: HOSTNAME
+              value: "0.0.0.0"
+            # Dashboard talks to the runtime over the in-cluster service.
+            - name: RUNTIME_URL
+              value: "http://{{ include "af-stack.runtime.fullname" . }}:{{ .Values.service.runtime.httpPort }}"
+            # Shares the same database as the runtime.
+            {{- include "af-stack.databaseEnv" . | nindent 12 }}
+            {{- /* better-auth reuses AF_STACK_DATABASE_URL via DATABASE_URL. */}}
+            {{- if eq (include "af-stack.databaseUrlSource" .) "internal" }}
+            - name: DATABASE_URL
+              value: {{ include "af-stack.internalPostgresUrl" . | quote }}
+            {{- else if eq (include "af-stack.databaseUrlSource" .) "secretRef" }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgresql.external.urlSecretRef.name | quote }}
+                  key: {{ .Values.postgresql.external.urlSecretRef.key | quote }}
+            {{- else }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "af-stack.secretName" . | quote }}
+                  key: AF_STACK_DATABASE_URL
+            {{- end }}
+            {{- if or .Values.secrets.authSecret .Values.secrets.authSecretSecretRef.name }}
+            - name: AF_STACK_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.secrets.authSecretSecretRef.name }}
+                  name: {{ .Values.secrets.authSecretSecretRef.name | quote }}
+                  key: {{ .Values.secrets.authSecretSecretRef.key | quote }}
+                  {{- else }}
+                  name: {{ include "af-stack.secretName" . | quote }}
+                  key: AF_STACK_AUTH_SECRET
+                  {{- end }}
+            {{- end }}
+            {{- with (index .Values.ingress.hosts 0) }}
+            - name: BETTER_AUTH_URL
+              value: "https://{{ .host }}"
+            {{- end }}
+            {{- with .Values.extraEnv.dashboard }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: {{ .Values.probes.dashboard.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.dashboard.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.dashboard.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.dashboard.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: {{ .Values.probes.dashboard.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.dashboard.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.dashboard.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.dashboard.readiness.failureThreshold }}
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: {{ .Values.preStopSleepSeconds }}
+          resources:
+            {{- toYaml .Values.resources.dashboard | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

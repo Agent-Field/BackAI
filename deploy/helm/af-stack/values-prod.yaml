@@ -1,0 +1,170 @@
+# values-prod.yaml — production preset.
+#
+# install:
+#   helm dep update deploy/helm/af-stack
+#   helm install af-stack deploy/helm/af-stack \
+#     -f deploy/helm/af-stack/values-prod.yaml \
+#     -f your-secrets-values.yaml \
+#     --namespace af-stack --create-namespace
+#
+# Assumes:
+#   - Managed Postgres reachable from the cluster (URL provided via a Secret)
+#   - S3-compatible bucket + credentials provided via a Secret
+#   - cert-manager + ingress-nginx installed
+#   - kube-prometheus-stack installed (for ServiceMonitor)
+
+replicaCount:
+  runtime: 3
+  dashboard: 2
+
+autoscaling:
+  runtime:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 15
+    targetCPUUtilization: 65
+    targetMemoryUtilization: 75
+  dashboard:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilization: 70
+    targetMemoryUtilization: 80
+
+podDisruptionBudget:
+  runtime:
+    enabled: true
+    minAvailable: 2
+  dashboard:
+    enabled: true
+    minAvailable: 1
+
+networkPolicy:
+  enabled: true
+  ingressControllerSelector:
+    matchLabels:
+      app.kubernetes.io/name: ingress-nginx
+  ingressControllerNamespace: ingress-nginx
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "25m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+    # Force TLS.
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: af-stack.example.com
+      paths:
+        - path: /api
+          pathType: Prefix
+          service: runtime
+        - path: /openapi.json
+          pathType: Exact
+          service: runtime
+        - path: /health
+          pathType: Exact
+          service: runtime
+        - path: /ready
+          pathType: Exact
+          service: runtime
+        - path: /
+          pathType: Prefix
+          service: dashboard
+  tls:
+    - hosts:
+        - af-stack.example.com
+      secretName: af-stack-tls
+
+# External Postgres — operator provides URL via an existing Secret.
+postgresql:
+  enabled: false
+  external:
+    urlSecretRef:
+      name: af-stack-database      # operator-managed Secret
+      key: AF_STACK_DATABASE_URL
+
+# External S3 — operator provides credentials via an existing Secret.
+storage:
+  mode: s3
+  s3:
+    bucket: af-stack-prod
+    region: us-east-1
+    endpoint: ""                   # leave empty for AWS S3
+    credentialsSecretRef:
+      name: af-stack-s3
+      accessKeyKey: AF_STACK_S3_ACCESS_KEY
+      secretKeyKey: AF_STACK_S3_SECRET_KEY
+
+modules:
+  multiTenancy:
+    enabled: true
+    strategy: pg-rls
+  sandbox:
+    enabled: true
+    adapter: e2b                   # production-safe; docker socket is dev-only
+  llmGateway:
+    enabled: true
+  llmCache:
+    enabled: true
+  memory:
+    enabled: true
+  billing:
+    enabled: false                 # turn on when Stripe creds are wired
+  notifications:
+    enabled: true
+  webhooks:
+    enabled: true
+
+# KMS key + auth secret — references existing Secrets only. Never inline.
+secrets:
+  kmsKeySecretRef:
+    name: af-stack-kms
+    key: AF_STACK_KMS_KEY
+  authSecretSecretRef:
+    name: af-stack-auth
+    key: AF_STACK_AUTH_SECRET
+
+# LLM provider keys — single Secret with one or more provider keys.
+llm:
+  providerSecretRef:
+    name: af-stack-llm-providers
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+    labels:
+      release: prometheus          # kube-prometheus-stack convention
+
+resources:
+  runtime:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+  dashboard:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+# Spread runtime pods across nodes for HA.
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: af-stack
+              app.kubernetes.io/component: runtime
+          topologyKey: kubernetes.io/hostname

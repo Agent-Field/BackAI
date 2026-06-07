@@ -1,0 +1,13 @@
+{{- if .Values.podDisruptionBudget.runtime.enabled -}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "af-stack.runtime.fullname" . }}
+  labels:
+    {{- include "af-stack.runtime.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.runtime.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "af-stack.runtime.selectorLabels" . | nindent 6 }}
+{{- end }}

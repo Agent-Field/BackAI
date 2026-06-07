@@ -1,0 +1,66 @@
+{{- if .Values.networkPolicy.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "af-stack.runtime.fullname" . }}
+  labels:
+    {{- include "af-stack.runtime.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "af-stack.runtime.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow the dashboard pods to call the runtime API (server-side fetch).
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "af-stack.dashboard.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 8080
+    # Allow the ingress controller to reach :8080.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressControllerNamespace | quote }}
+          podSelector:
+            {{- toYaml .Values.networkPolicy.ingressControllerSelector | nindent 12 }}
+      ports:
+        - protocol: TCP
+          port: 8080
+    # Allow Prometheus to scrape :9090 from any pod in the cluster
+    # (operators usually constrain this with a podSelector — kept open
+    # here so the default install Just Works with kube-prometheus-stack).
+    - ports:
+        - protocol: TCP
+          port: 9090
+  egress:
+    # DNS — every pod needs this.
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Postgres — either the in-cluster sub-chart or external (port 5432
+    # to anywhere). Operators with stricter requirements should narrow
+    # the egress destination CIDR for their managed Postgres.
+    - ports:
+        - protocol: TCP
+          port: 5432
+    # S3 / MinIO — HTTPS to anywhere for managed S3, plus port 9000 for
+    # in-cluster MinIO.
+    - ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 9000
+    # AgentField control plane (HTTP, in-cluster) — typically port 8080.
+    - ports:
+        - protocol: TCP
+          port: 8080
+{{- end }}

@@ -1,0 +1,39 @@
+apiVersion: v2
+name: af-stack
+description: |
+  AF Stack — a single-binary AgentField runtime with a Next.js operator
+  dashboard. Deploys both workloads, an Ingress fronting them, optional
+  Postgres + MinIO sub-charts for dev, HPA + PDB + NetworkPolicy + an
+  optional Prometheus ServiceMonitor for production.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.25.0-0"
+keywords:
+  - agentfield
+  - llm
+  - agents
+  - multi-tenant
+home: https://github.com/agentfield/af-stack
+sources:
+  - https://github.com/agentfield/af-stack
+maintainers:
+  - name: AgentField
+    email: support@agentfield.ai
+icon: https://agentfield.ai/favicon.ico
+
+# Optional sub-charts. Both are off by default — the production preset
+# wires the runtime to an externally-managed Postgres (RDS / Cloud SQL /
+# Crunchy Operator) and an external S3-compatible bucket. The dev preset
+# flips them on.
+dependencies:
+  - name: postgresql
+    version: "15.5.20"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled
+    alias: postgresql
+  - name: minio
+    version: "14.7.10"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: storage.minio.enabled
+    alias: minio

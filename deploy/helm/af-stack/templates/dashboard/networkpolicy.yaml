@@ -1,0 +1,51 @@
+{{- if .Values.networkPolicy.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "af-stack.dashboard.fullname" . }}
+  labels:
+    {{- include "af-stack.dashboard.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "af-stack.dashboard.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Only the ingress controller talks to the dashboard.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressControllerNamespace | quote }}
+          podSelector:
+            {{- toYaml .Values.networkPolicy.ingressControllerSelector | nindent 12 }}
+      ports:
+        - protocol: TCP
+          port: 3000
+  egress:
+    # DNS.
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Runtime API (server-side fetches).
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "af-stack.runtime.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 8080
+    # Postgres (better-auth shares the runtime DB).
+    - ports:
+        - protocol: TCP
+          port: 5432
+    # OAuth providers (Google etc.) over HTTPS.
+    - ports:
+        - protocol: TCP
+          port: 443
+{{- end }}

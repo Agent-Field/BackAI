@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/agentfield"
@@ -46,6 +47,16 @@ type Server struct {
 	mux           *http.ServeMux
 	srv           *http.Server
 	health        *Health
+	// drain is the Phase 14.3 graceful-shutdown controller. Always
+	// constructed in New(); main.go calls drain.Start() from its
+	// SIGTERM handler. The drain middleware (outermost in the chain)
+	// shares it so probes can report draining state and new requests
+	// are rejected once drain begins.
+	drain *Drain
+	// ready is set to true by MarkReady() once main.go has finished
+	// startup (migrations applied, workers spawned). Until then
+	// /ready returns 503 {"status":"booting"}.
+	ready atomic.Bool
 	db            *db.DB
 	af            *agentfield.Client
 	tel           *observability.Telemetry
@@ -269,6 +280,7 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		log:           log,
 		mux:           mux,
 		health:        &Health{StartedAt: time.Now()},
+		drain:         NewDrain(cfg.Server.ShutdownTimeout),
 		db:            deps.DB,
 		af:            deps.AF,
 		tel:           deps.Telemetry,
@@ -322,6 +334,12 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 	}
 	handler = withLogging(log, s.metricsRing, handler)
 	handler = withCORS(handler)
+	// withDrain is the outermost middleware so it runs before CORS,
+	// logging, tracing — every other layer. This guarantees a draining
+	// server short-circuits requests with minimal work, and that the
+	// active-request counter is incremented before any per-request
+	// allocation happens.
+	handler = withDrain(s.drain, handler)
 
 	s.srv = &http.Server{
 		Addr:              cfg.Server.HTTPAddr,
@@ -546,8 +564,25 @@ func (s *Server) registerRoutes() {
 	}
 }
 
-// Start runs the HTTP server. Blocks until ctx is cancelled, then drains
-// in-flight requests up to the configured shutdown timeout.
+// Start runs the HTTP server. Blocks until ctx is cancelled, then
+// orchestrates graceful shutdown:
+//
+//  1. drain.Start() — /ready flips to 503 {"status":"draining"} and
+//     new requests get rejected with 503 + Connection: close.
+//  2. Wait up to cfg.Server.ShutdownTimeout for in-flight requests to
+//     complete.
+//  3. http.Server.Shutdown() — close listener, drain idle conns.
+//
+// Background workers + DB pool + storage adapter shutdown is the
+// caller's responsibility (see main.go). This method only owns the
+// HTTP listener lifecycle so tests can use it directly without
+// wiring every dependency.
+//
+// Phase 14.3 note: the SIGTERM handler in main.go calls drain.Start()
+// + shutdown of background workers BEFORE cancelling ctx. By the
+// time we reach the ctx.Done() branch here drain is already in
+// flight and the active counter may already be zero — that's fine,
+// we just call http.Server.Shutdown() which is idempotent.
 func (s *Server) Start(ctx context.Context) error {
 	errCh := make(chan error, 1)
 	go func() {
@@ -563,87 +598,164 @@ func (s *Server) Start(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		s.log.Info("shutdown requested, draining")
+		// If main.go hasn't already called drain.Start(), do it now
+		// so /ready flips and new requests are shed. Start() is
+		// idempotent (sync.Once) so a duplicate call from main.go's
+		// SIGTERM handler is harmless.
+		drainCtx, drainCancel := context.WithTimeout(context.Background(), s.cfg.Server.ShutdownTimeout)
+		drainErr := s.drain.Start(drainCtx)
+		drainCancel()
+		if drainErr != nil {
+			s.log.Warn("drain timed out with in-flight requests",
+				"active_requests", s.drain.Active(),
+				"error", drainErr)
+		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), s.cfg.Server.ShutdownTimeout)
 		defer cancel()
 		if err := s.srv.Shutdown(shutdownCtx); err != nil {
-			s.log.Error("shutdown failed", "error", err)
+			s.log.Error("http shutdown failed", "error", err)
 			return err
 		}
-		s.log.Info("shutdown complete")
+		s.log.Info("http shutdown complete")
 		return nil
 	case err := <-errCh:
 		return err
 	}
 }
 
-func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	checks := map[string]any{
-		"runtime": map[string]any{"status": "ok"},
-	}
-	overall := "ok"
-
-	if s.db != nil {
-		if err := s.db.Health(r.Context()); err != nil {
-			checks["database"] = map[string]any{"status": "down", "error": err.Error()}
-			overall = "degraded"
-		} else {
-			checks["database"] = map[string]any{"status": "ok"}
-		}
-	} else {
-		checks["database"] = map[string]any{"status": "not_configured"}
-	}
-
-	if s.af != nil {
-		if _, err := s.af.Health(r.Context()); err != nil {
-			checks["agentfield"] = map[string]any{
-				"status": "down",
-				"url":    s.af.BaseURL(),
-				"error":  err.Error(),
-			}
-			overall = "degraded"
-		} else {
-			checks["agentfield"] = map[string]any{
-				"status": "ok",
-				"url":    s.af.BaseURL(),
-			}
-		}
-	} else {
-		checks["agentfield"] = map[string]any{"status": "not_configured"}
-	}
-
-	resp := map[string]any{
-		"status":     overall,
-		"started_at": s.health.StartedAt.UTC().Format(time.RFC3339),
+// handleHealth is the Kubernetes-style liveness probe. It returns 200
+// as long as the process is responsive — it does NOT check downstream
+// dependencies (DB, AF, etc.) because a transient DB blip should not
+// cause the orchestrator to kill the pod. That's the job of /ready.
+//
+// Cheap by design: no DB calls, no AF calls, no allocation beyond the
+// response body. Kubernetes default liveness period is 10s; this
+// handler should respond in microseconds.
+//
+// Response shape (stable contract — do not change without versioning):
+//
+//	{
+//	  "status":     "alive",
+//	  "uptime_s":   42,
+//	  "started_at": "2026-06-07T12:00:00Z"
+//	}
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":     "alive",
 		"uptime_s":   int(time.Since(s.health.StartedAt).Seconds()),
-		"checks":     checks,
-	}
-	writeJSON(w, http.StatusOK, resp)
+		"started_at": s.health.StartedAt.UTC().Format(time.RFC3339),
+	})
 }
 
+// handleReady is the Kubernetes-style readiness probe. It returns 200
+// ONLY when:
+//
+//  1. The process has finished startup (MarkReady() has been called by
+//     main.go after migrations + worker startup).
+//  2. The DB is reachable (when configured).
+//  3. The process is NOT in drain mode.
+//
+// Otherwise it returns 503 with a payload that tells operators (and
+// load-balancer probes) WHY the pod isn't ready:
+//
+//	{"status": "booting" | "draining" | "db_unavailable", "since_s": N}
+//
+// The Retry-After header is set when draining so well-behaved clients
+// know how long to wait before retrying. Booting / db_unavailable use
+// a conservative 5s.
+//
+// 503 responses use the standard error envelope under the hood (so
+// SDK clients keep their existing error.code branching) AND surface
+// the same fields at the top level so naive readiness-probe parsers
+// don't need to dig into error.details. Belt-and-braces.
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
-	// Ready = DB connected AND AF healthy (when both configured).
-	//
-	// 503 responses use the standard error envelope (Phase 6 contract)
-	// so every non-2xx body from the runtime is machine-parsable by the
-	// same {error: {code, message, details?}} shape the dashboard +
-	// SDKs already branch on.
+	// Draining wins over every other state — once we've started
+	// shedding load, the LB needs to see 503 immediately regardless
+	// of DB state.
+	if s.drain != nil && s.drain.IsDraining() {
+		started := s.drain.DrainStart()
+		since := time.Since(started)
+		remaining := s.drain.Timeout() - since
+		if remaining < time.Second {
+			remaining = time.Second
+		}
+		w.Header().Set("Retry-After", strconv.Itoa(int(remaining.Seconds())))
+		writeReadyError(w, "draining", "server is draining; retry on another instance", map[string]any{
+			"since_s":         int(since.Seconds()),
+			"timeout_s":       int(s.drain.Timeout().Seconds()),
+			"active_requests": s.drain.Active(),
+		})
+		return
+	}
+
+	// Still booting — main.go hasn't called MarkReady() yet (migrations
+	// or worker startup in progress). Kubernetes will keep probing
+	// every readinessProbe.periodSeconds; 5s is a reasonable hint.
+	if !s.ready.Load() {
+		since := time.Since(s.health.StartedAt)
+		w.Header().Set("Retry-After", "5")
+		writeReadyError(w, "booting", "server has not finished startup", map[string]any{
+			"since_s": int(since.Seconds()),
+		})
+		return
+	}
+
+	// DB check — uses a short timeout via db.Health (2s internal).
+	// We DON'T check AF here because /ready is about whether THIS
+	// pod can serve traffic; AF unreachability is degraded service,
+	// not unready service. Surface AF state via /health checks
+	// payload instead (callers can decide based on use-case).
 	if s.db != nil {
 		if err := s.db.Health(r.Context()); err != nil {
-			writeError(w, http.StatusServiceUnavailable,
-				"NOT_READY", "database unhealthy",
-				map[string]any{"component": "database"})
+			w.Header().Set("Retry-After", "5")
+			writeReadyError(w, "db_unavailable", "database unreachable", map[string]any{
+				"db_error": err.Error(),
+			})
 			return
 		}
 	}
-	if s.af != nil {
-		if _, err := s.af.Health(r.Context()); err != nil {
-			writeError(w, http.StatusServiceUnavailable,
-				"NOT_READY", "agentfield unhealthy",
-				map[string]any{"component": "agentfield"})
-			return
-		}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":   "ready",
+		"uptime_s": int(time.Since(s.health.StartedAt).Seconds()),
+	})
+}
+
+// MarkReady flips the readiness flag. Called by main.go AFTER all
+// migrations have applied and all background workers have been
+// spawned. Until this is called /ready returns 503 {"status":"booting"}.
+//
+// Idempotent — calling twice is harmless. Safe to call from any
+// goroutine (atomic store).
+func (s *Server) MarkReady() {
+	if s == nil {
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+	s.ready.Store(true)
+}
+
+// Drain returns the drain controller. main.go uses this to trigger
+// graceful shutdown from its SIGTERM handler. Returns nil only when
+// the Server was constructed with a nil cfg (never happens in
+// production; tests that don't need drain semantics can leave it
+// alone).
+func (s *Server) Drain() *Drain {
+	if s == nil {
+		return nil
+	}
+	return s.drain
+}
+
+// HTTPServer exposes the underlying *http.Server so main.go can call
+// Shutdown(ctx) directly after the drain step. We avoid wrapping
+// Shutdown in a Server method because main.go needs to interleave it
+// between drain.Start() and the worker-shutdown sequence; cleaner to
+// hand out the *http.Server.
+func (s *Server) HTTPServer() *http.Server {
+	if s == nil {
+		return nil
+	}
+	return s.srv
 }
 
 // handleOpenAPI serves the live OpenAPI 3.1 spec generated by the
@@ -848,6 +960,44 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"agents": agents})
+}
+
+// writeReadyError emits a 503 response that is friendly to BOTH
+// Kubernetes-style readiness probes AND the SDK error-envelope
+// contract:
+//
+//	{
+//	  "status":  "draining" | "booting" | "db_unavailable",
+//	  "since_s": N,                  // top-level so probe parsers don't dig
+//	  ...detailFields...             // any extra context the caller passed
+//	  "error": {                     // Phase 6 error envelope for SDKs
+//	    "code":    "NOT_READY",
+//	    "message": "<human reason>",
+//	    "details": { "reason": status, ...detailFields }
+//	  }
+//	}
+//
+// This is the only handler that mixes the two shapes — every other
+// 503 in the runtime uses writeError() directly. /ready is special
+// because Kubernetes probes don't speak our envelope and operators
+// reading kubectl describe pod want the reason at the top.
+func writeReadyError(w http.ResponseWriter, reason, message string, details map[string]any) {
+	body := map[string]any{
+		"status": reason,
+	}
+	for k, v := range details {
+		body[k] = v
+	}
+	envelopeDetails := map[string]any{"reason": reason}
+	for k, v := range details {
+		envelopeDetails[k] = v
+	}
+	body["error"] = map[string]any{
+		"code":    "NOT_READY",
+		"message": message,
+		"details": envelopeDetails,
+	}
+	writeJSON(w, http.StatusServiceUnavailable, body)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

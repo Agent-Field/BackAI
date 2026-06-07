@@ -29,4 +29,9 @@ COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 EXPOSE 8080 9090
 USER nonroot:nonroot
+# Phase 14.3: exec form is REQUIRED so SIGTERM reaches the af-stack
+# process directly. Shell form (no brackets) would interpose /bin/sh,
+# which swallows signals — Kubernetes would then escalate to SIGKILL
+# after terminationGracePeriodSeconds and graceful drain would never
+# happen.
 ENTRYPOINT ["/usr/local/bin/af-stack"]

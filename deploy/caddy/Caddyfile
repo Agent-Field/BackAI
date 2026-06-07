@@ -1,0 +1,81 @@
+# What this gets you in 3 bullets:
+#   - Automatic Let's Encrypt TLS on {$AF_STACK_DOMAIN}.
+#   - API paths (/api/*, /openapi.json, /health, /ready, /metrics)
+#     proxied to runtime:8080. Everything else falls through to
+#     dashboard:3000 (Next.js SSR + static).
+#   - Reasonable security headers, zstd + gzip compression, and a
+#     dedicated /metrics matcher kept behind a Caddy IP allowlist hook.
+#
+# Required env:
+#   AF_STACK_DOMAIN   e.g. af.example.com
+#   ACME_EMAIL        e.g. ops@example.com  (used by Let's Encrypt)
+#
+# Optional env:
+#   METRICS_ALLOW     CIDR for /metrics scrapers (default: 10.0.0.0/8)
+
+{
+	email {$ACME_EMAIL}
+	# Set servers explicitly so the admin API is bound to loopback only.
+	admin off
+	# H2c upstream is fine: both runtime + dashboard are HTTP/1.1 on the
+	# private network; Caddy terminates HTTP/2 + 3 at the edge.
+	servers {
+		protocols h1 h2 h3
+	}
+}
+
+{$AF_STACK_DOMAIN} {
+	encode zstd gzip
+
+	# Block direct /metrics access from the public — Prometheus runs on a
+	# private network.
+	@metrics path /metrics
+	handle @metrics {
+		@allowed remote_ip {$METRICS_ALLOW:10.0.0.0/8}
+		handle @allowed {
+			reverse_proxy runtime:9090
+		}
+		handle {
+			respond "Forbidden" 403
+		}
+	}
+
+	# Runtime owns: /api/v1/*, /openapi.json, /health, /ready.
+	@api path /api/* /openapi.json /health /ready
+	handle @api {
+		reverse_proxy runtime:8080 {
+			# X-Forwarded-* + Host are passed by default. Add X-Real-IP
+			# for downstream logging convenience.
+			header_up X-Real-IP {remote_host}
+			# Streaming endpoints (SSE for run logs) need long timeouts +
+			# no buffering.
+			flush_interval -1
+			transport http {
+				read_timeout 1h
+				write_timeout 1h
+			}
+		}
+	}
+
+	# Everything else -> Next.js dashboard (SSR, static, auth callbacks).
+	handle {
+		reverse_proxy dashboard:3000 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		X-Content-Type-Options    "nosniff"
+		X-Frame-Options           "DENY"
+		Referrer-Policy           "strict-origin-when-cross-origin"
+		Permissions-Policy        "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	log {
+		output stdout
+		format json
+		level INFO
+	}
+}

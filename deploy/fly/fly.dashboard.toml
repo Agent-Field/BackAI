@@ -1,0 +1,66 @@
+# What this gets you in 3 bullets:
+#   - Dashboard (Next.js) on Fly Machines v2, auto-scaling 1..2.
+#   - Talks to the runtime app over Fly's private 6PN network.
+#   - Shares the same external Postgres via better-auth.
+#
+# Template fields you MUST replace before `fly launch`:
+#   <dashboard-app-name>   e.g. afstack-prod-dashboard
+#   <runtime-app-name>     the value of `app` in fly.toml
+#   <primary-region>       same region as the runtime app
+
+app           = "<dashboard-app-name>"
+primary_region = "<primary-region>"
+kill_signal   = "SIGINT"
+kill_timeout  = "10s"
+
+[build]
+  dockerfile = "apps/dashboard/Dockerfile"
+
+[env]
+  PORT                 = "3000"
+  NODE_ENV             = "production"
+  NEXT_TELEMETRY_DISABLED = "1"
+  # Runtime is reachable on Fly's private 6PN network at <app>.flycast.
+  RUNTIME_URL          = "http://<runtime-app-name>.flycast:8080"
+  # The browser hits the runtime through its public Fly URL.
+  NEXT_PUBLIC_RUNTIME_URL = "https://<runtime-app-name>.fly.dev"
+
+[[services]]
+  internal_port = 3000
+  protocol      = "tcp"
+  auto_stop_machines  = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+  max_machines_running = 2
+
+  [[services.ports]]
+    port     = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port     = 443
+    handlers = ["tls", "http"]
+
+  [services.concurrency]
+    type       = "requests"
+    soft_limit = 100
+    hard_limit = 200
+
+  [[services.http_checks]]
+    interval      = "15s"
+    timeout       = "2s"
+    grace_period  = "30s"
+    method        = "GET"
+    path          = "/"
+    protocol      = "http"
+
+[deploy]
+  strategy     = "rolling"
+  wait_timeout = "5m"
+
+[[vm]]
+  size      = "shared-cpu-1x"
+  memory    = "512mb"
+  cpu_kind  = "shared"
+  cpus      = 1
