@@ -11,7 +11,7 @@
 //      endpoints never return it).
 
 import * as React from "react"
-import { useForm } from "react-hook-form"
+import { Controller, useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import {
@@ -71,6 +71,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
+import { DateTimePicker } from "@/components/ui/datetime-picker"
 import {
   Field,
   FieldDescription,
@@ -591,10 +592,16 @@ function IssueKeyDialog({
             </Field>
             <Field>
               <FieldLabel htmlFor="issue-expires">Expires at</FieldLabel>
-              <Input
-                id="issue-expires"
-                type="datetime-local"
-                {...form.register("expires_at")}
+              <Controller
+                control={form.control}
+                name="expires_at"
+                render={({ field }) => (
+                  <DateTimePicker
+                    value={field.value ?? ""}
+                    onChange={field.onChange}
+                    placeholder="Never expires"
+                  />
+                )}
               />
               <FieldDescription>
                 Optional. Leave blank for a non-expiring key.

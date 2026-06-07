@@ -2,41 +2,43 @@
 
 // service.go — top-level Service facade for the webhook package.
 //
-// CO-OWNED. Phase 10.2 adds the inbound surface (EndpointStore +
-// InboundService); Phase 10.3 contributes the outbound surface
-// (OutboundService driven by the background worker). The Service binds
-// every surface behind one struct so the runtime's server.Deps keeps a
-// single field for the whole package — the dashboard's unified
-// deliveries feed becomes a single call into Service.List().
+// The package has TWO data sources after OSS-AUDIT item #2:
 //
-// The facade is intentionally thin: every method either delegates to
-// the DeliveryStore (for reads) or to the OutboundService / EndpointStore
-// (for mutating writes). The inbound HTTP handler reaches its dependency
-// through Service.Inbound() and never short-circuits the facade.
+//   - INBOUND: still lives in our Postgres (suite_webhook_deliveries).
+//     The InboundService writes rows; the DeliveryStore reads them.
+//
+//   - OUTBOUND: lives in Svix (sidecar Docker container). The
+//     OutboundService is a thin HTTP proxy that translates the Svix wire
+//     format back to our Delivery struct so the dashboard sees no drift.
+//
+// This file is the seam: callers reach into Service.List / Service.Get /
+// Service.Enqueue / Service.Retry without caring which side answers.
+// When the caller filters by direction, we route to one source; when
+// they don't filter, we merge.
 package webhooks
 
 import (
 	"context"
 	"log/slog"
+	"sort"
 )
 
-// Service is the dashboard-facing facade. It composes the shared
-// DeliveryStore with the per-surface services so the HTTP layer can
-// route every webhook verb through one dependency without growing
-// server.Deps with parallel fields.
+// Service is the dashboard-facing facade. It composes the per-surface
+// services so the HTTP layer routes every webhook verb through one
+// dependency.
 type Service struct {
-	store     *DeliveryStore
-	outbound  *OutboundService
+	store     *DeliveryStore   // inbound rows
+	outbound  *OutboundService // Svix proxy
 	endpoints *EndpointStore
 	inbound   *InboundService
 	log       *slog.Logger
 }
 
 // NewService composes the facade. Every argument may be nil — a nil
-// outbound leaves Configured() false so the HTTP layer surfaces 503 on
-// /send + /retry; a nil endpoints leaves Endpoints() == nil so the
-// inbound CRUD endpoints surface 503; a nil store leaves the list +
-// get endpoints serving an empty page.
+// outbound proxy leaves Configured() false so the HTTP layer surfaces
+// 503 on /send + /retry; a nil endpoints leaves Endpoints() == nil so
+// the inbound CRUD endpoints surface 503; a nil store leaves the
+// inbound deliveries list empty.
 func NewService(
 	store *DeliveryStore,
 	outbound *OutboundService,
@@ -56,16 +58,15 @@ func NewService(
 	}
 }
 
-// Configured reports whether the outbound surface (the only mutating
-// path Phase 10.3 owns) can write deliveries. The inbound surface has
-// its own Configured() check; callers that need it should reach
-// through Service.Inbound() and call there.
+// Configured reports whether the outbound (Svix) surface can accept a
+// send. The inbound surface has its own Configured() check; callers
+// that need it should reach through Service.Inbound() and call there.
 func (s *Service) Configured() bool {
 	return s != nil && s.outbound != nil && s.outbound.Configured()
 }
 
-// Outbound exposes the OutboundService for the worker (which only
-// needs the outbound surface).
+// Outbound exposes the OutboundService. Useful for tests; the HTTP
+// layer goes through Service.Enqueue / Service.Retry / Service.List.
 func (s *Service) Outbound() *OutboundService {
 	if s == nil {
 		return nil
@@ -74,7 +75,7 @@ func (s *Service) Outbound() *OutboundService {
 }
 
 // Endpoints exposes the EndpointStore for the inbound CRUD handlers.
-// nil when Phase 10.2's inbound module isn't wired.
+// nil when inbound is not wired.
 func (s *Service) Endpoints() *EndpointStore {
 	if s == nil {
 		return nil
@@ -83,7 +84,7 @@ func (s *Service) Endpoints() *EndpointStore {
 }
 
 // Inbound exposes the InboundService for the public /webhooks/in/{slug}
-// receiver. nil when Phase 10.2's inbound module isn't wired.
+// receiver. nil when inbound is not wired.
 func (s *Service) Inbound() *InboundService {
 	if s == nil {
 		return nil
@@ -93,7 +94,8 @@ func (s *Service) Inbound() *InboundService {
 
 // Store exposes the underlying DeliveryStore for advanced callers (the
 // inbound handler needs it directly when it lands rows for unknown
-// endpoints during dry-run mode).
+// endpoints during dry-run mode). Post-Svix migration, the store holds
+// ONLY inbound rows.
 func (s *Service) Store() *DeliveryStore {
 	if s == nil {
 		return nil
@@ -101,7 +103,7 @@ func (s *Service) Store() *DeliveryStore {
 	return s.store
 }
 
-// Enqueue forwards to the OutboundService.
+// Enqueue forwards to the OutboundService (Svix proxy).
 func (s *Service) Enqueue(ctx context.Context, in SendInput) (*Delivery, error) {
 	if s == nil || s.outbound == nil {
 		return nil, ErrNotConfigured
@@ -117,20 +119,105 @@ func (s *Service) Retry(ctx context.Context, id string) (*Delivery, error) {
 	return s.outbound.Retry(ctx, id)
 }
 
-// List returns a page of deliveries matching the filters. Returns an
-// empty page (not 503) when no store is wired so the dashboard renders
-// the empty state.
+// List returns a page of deliveries matching the filters. The data
+// source depends on the direction filter:
+//
+//   - f.Direction == "inbound"  -> the local DeliveryStore.
+//   - f.Direction == "outbound" -> Svix (via OutboundService).
+//   - f.Direction == ""         -> both, merged by created_at desc.
+//
+// Returns an empty page (not 503) when nothing is wired so the
+// dashboard renders the empty state.
 func (s *Service) List(ctx context.Context, f ListFilters) (*ListResult, error) {
-	if s == nil || s.store == nil {
+	if s == nil {
 		return &ListResult{Deliveries: []Delivery{}}, nil
 	}
-	return s.store.List(ctx, f)
+
+	switch f.Direction {
+	case DirectionInbound:
+		if s.store == nil {
+			return &ListResult{Deliveries: []Delivery{}}, nil
+		}
+		return s.store.List(ctx, f)
+	case DirectionOutbound:
+		if s.outbound == nil {
+			return &ListResult{Deliveries: []Delivery{}}, nil
+		}
+		return s.outbound.List(ctx, f)
+	}
+
+	// Unified list: pull from both sources and merge. We split the
+	// limit roughly down the middle so neither side starves the other.
+	half := f.Limit
+	if half <= 0 {
+		half = 50
+	}
+	inFilter := f
+	inFilter.Direction = DirectionInbound
+	inFilter.Limit = half
+	outFilter := f
+	outFilter.Direction = DirectionOutbound
+	outFilter.Limit = half
+
+	var (
+		inboundRes  = &ListResult{Deliveries: []Delivery{}}
+		outboundRes = &ListResult{Deliveries: []Delivery{}}
+		err         error
+	)
+	if s.store != nil {
+		inboundRes, err = s.store.List(ctx, inFilter)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if s.outbound != nil {
+		outboundRes, err = s.outbound.List(ctx, outFilter)
+		if err != nil {
+			// Don't fail the whole list if Svix is briefly down — show
+			// inbound anyway so the dashboard isn't blank.
+			s.log.Warn("webhooks: outbound list failed; serving inbound only",
+				"error", err)
+			outboundRes = &ListResult{Deliveries: []Delivery{}}
+		}
+	}
+
+	merged := make([]Delivery, 0, len(inboundRes.Deliveries)+len(outboundRes.Deliveries))
+	merged = append(merged, inboundRes.Deliveries...)
+	merged = append(merged, outboundRes.Deliveries...)
+	sort.SliceStable(merged, func(i, j int) bool {
+		return merged[i].CreatedAt > merged[j].CreatedAt
+	})
+	if f.Limit > 0 && len(merged) > f.Limit {
+		merged = merged[:f.Limit]
+	}
+	return &ListResult{
+		Deliveries: merged,
+		Total:      inboundRes.Total + outboundRes.Total,
+		HasMore:    inboundRes.HasMore || outboundRes.HasMore,
+	}, nil
 }
 
-// Get loads a single delivery row.
+// Get loads a single delivery by ID. We try the outbound (Svix) side
+// first because Svix message IDs are the common case for retry-from-
+// dashboard flows; if Svix returns not-found we fall through to the
+// local inbound store.
 func (s *Service) Get(ctx context.Context, id string) (*Delivery, error) {
-	if s == nil || s.store == nil {
+	if s == nil {
 		return nil, ErrNotFound
 	}
-	return s.store.Get(ctx, id)
+	if s.outbound != nil && s.outbound.Configured() {
+		d, err := s.outbound.Get(ctx, id)
+		if err == nil {
+			return d, nil
+		}
+		// Fall through on not-found; surface other errors.
+		if err != ErrNotFound {
+			s.log.Debug("webhooks: outbound get miss",
+				"id", id, "error", err)
+		}
+	}
+	if s.store != nil {
+		return s.store.Get(ctx, id)
+	}
+	return nil, ErrNotFound
 }

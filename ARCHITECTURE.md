@@ -85,7 +85,7 @@ backends.
 ### Outbound to external providers
 
 ```
-LLM Gateway → LiteLLM (NEXT) → 100+ providers
+LLM Gateway → LiteLLM (sidecar) → 100+ providers
                                   OpenRouter / OpenAI / Anthropic /
                                   Google / Mistral / DeepSeek / Groq /
                                   Cohere / Bedrock / etc.
@@ -122,7 +122,7 @@ reimplement):
 | **MinIO + AWS SDK** | Storage | One adapter shape covers both |
 | **Scalar API Reference** | API browser | Modern OpenAPI viewer |
 | **Caddy** | Reverse proxy with auto-TLS | Drop-in, no Let's Encrypt scripting |
-| **LiteLLM (planned)** | Multi-provider LLM routing | Gives us 100+ providers for the cost of one integration |
+| **LiteLLM** | Multi-provider LLM routing (sidecar) | Gives us 100+ providers for the cost of one integration. Runs as a docker-compose sidecar; AF Stack forwards `/api/v1/llm/*` to it and keeps tenant resolution, cost ledger, budgets, cache, and hooks on its side. |
 
 **Pieces we wrote** (where we add AI-native value):
 
@@ -232,26 +232,25 @@ agents have harness X ready?" rather than probing its own PATH.
 
 This refactor is queued — should land in the next push.
 
-## Where LiteLLM belongs
+## How LiteLLM is wired
 
-The current model: `services/runtime/internal/llmgateway/providers/`
-has hand-rolled OpenRouter / OpenAI / Anthropic / Google clients.
+The gateway no longer ships hand-rolled OpenRouter / OpenAI /
+Anthropic / Google clients. AF Stack runs a **LiteLLM Proxy sidecar**
+(image `ghcr.io/berriai/litellm:main-stable`) in docker-compose; the
+runtime forwards every `/api/v1/llm/*` call to it. LiteLLM handles
+100+ upstream providers via `apps/backend/litellm-config.yaml`.
 
-The correct model: spin up LiteLLM as a sidecar (or embed via its
-Python proxy mode), and our gateway calls LiteLLM instead of speaking
-each provider's API directly. We keep:
+AF Stack keeps on its side (where the AI-native value sits):
 
-- Our cost ledger / budgets / cache layer (the AF-native value)
-- Per-tenant API keys, rate limits, hooks
-- The OpenAI-compatible shape we expose to customers
+- Per-tenant API keys, rate limits, cost attribution
+- Cost ledger / budgets / cache layer
+- Pre/post-call hooks
+- The OpenAI-compatible shape customers point their SDK at
 
-We drop:
-
-- 4 hand-maintained provider clients
-- The manual model catalogue (`pricing.go`)
-
-Net: ~100+ models work without us shipping a config per model. This is
-also queued for the next push.
+LiteLLM is purely an internal routing layer — customers never see it
+directly. Adding a new provider is now a config edit, not a code
+change. See `services/runtime/internal/llmgateway/litellm_provider.go`
+for the runtime wiring.
 
 ## When you'd run the customer-app SEPARATELY
 
@@ -279,9 +278,10 @@ plugins live inside the dashboard fork). Tradeoff.
 In order of impact:
 
 1. **Harnesses → AgentField agent layer** (you flagged this twice now)
-2. **LLM Gateway → LiteLLM** (delete 4 hand-rolled provider clients)
-3. **Notable plugin → moved to example** (done in this commit — was
+2. **Notable plugin → moved to example** (done in this commit — was
    leaking into operator console)
-4. **Skills installer → real local-path support** (in progress)
-5. **MCP → bundle uv in agent container so uvx-based servers work**
-6. **Deep research example → wire end-to-end**
+3. **Skills installer → real local-path support** (in progress)
+4. **MCP → bundle uv in agent container so uvx-based servers work**
+5. **Deep research example → wire end-to-end**
+
+_LLM Gateway → LiteLLM landed — see `How LiteLLM is wired` above._

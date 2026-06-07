@@ -45,6 +45,35 @@ services:
       timeout: 5s
       retries: 5
 
+  # LiteLLM Proxy — handles every upstream LLM provider so the runtime
+  # doesn't ship a hand-rolled client per vendor. AF Stack forwards
+  # /api/v1/llm/* to this sidecar; LiteLLM routes to OpenRouter / OpenAI /
+  # Anthropic / Google / Mistral / DeepSeek / Groq / Cohere / Bedrock / etc.
+  # based on apps/backend/litellm-config.yaml. AF Stack keeps tenant
+  # resolution, cost ledger, budgets, cache, and hooks on its side.
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    ports:
+      - "${LITELLM_PORT:-4000}:4000"
+    volumes:
+      - ./apps/backend/litellm-config.yaml:/app/config.yaml:ro
+    environment:
+      # Upstream provider keys. Only the ones you set actually get used —
+      # LiteLLM activates a model entry only when its required key is present.
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      # Internal sidecar auth. Shared with the runtime container only.
+      # Customers never see this key — they authenticate with their AF
+      # Stack tenant API key one layer earlier.
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-litellm-dev}
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    restart: unless-stopped
+
   agentfield:
     image: agentfield/control-plane:latest
     environment:
@@ -88,11 +117,14 @@ services:
       # docker-compose where file mounts may not be readable by the
       # distroless nonroot user.
       AF_STACK_MODULE_MULTI_TENANCY: ${AF_STACK_MODULE_MULTI_TENANCY:-false}
-      # LLM provider keys for the gateway (Phase 7). The runtime picks
-      # the first one set in this order: openrouter → openai → anthropic.
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # LLM gateway (Phase 7) — points at the LiteLLM sidecar. Customers
+      # call /api/v1/llm/* on this runtime; we forward to LiteLLM which
+      # routes to OpenRouter / OpenAI / Anthropic / Google / Mistral /
+      # DeepSeek / Groq / Cohere / Bedrock / etc. based on the keys you
+      # set on the litellm service above. The master key is internal
+      # sidecar auth; customers never see it.
+      AF_STACK_LITELLM_URL: ${AF_STACK_LITELLM_URL:-http://litellm:4000}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-litellm-dev}
       # MinIO-backed object storage.
       AF_STACK_S3_ADAPTER: minio
       AF_STACK_S3_ENDPOINT: minio:9000
@@ -106,6 +138,12 @@ services:
       # requires /var/run/docker.sock mounted below. Set to "noop" or
       # leave the socket unmounted to disable sandbox in CI.
       AF_STACK_SANDBOX_ADAPTER: ${AF_STACK_SANDBOX_ADAPTER:-docker}
+      # Svix (outbound webhook fabric). The runtime's POST
+      # /api/v1/webhooks/send proxies to this. Empty -> the runtime
+      # surfaces 503 on /send and an empty page on /deliveries.
+      AF_STACK_SVIX_URL: ${AF_STACK_SVIX_URL:-http://svix-server:8071}
+      AF_STACK_SVIX_TOKEN: ${AF_STACK_SVIX_TOKEN:-}
+      AF_STACK_SVIX_JWT_SECRET: ${SVIX_JWT_SECRET:-svix-dev-secret-change-me-in-prod-32-bytes}
       # Optional: enable OTel by uncommenting after OTel collector lands.
       # OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
       # OTEL_SERVICE_NAME: af-stack
@@ -131,6 +169,10 @@ services:
       postgres:
         condition: service_healthy
       agentfield:
+        condition: service_started
+      litellm:
+        condition: service_started
+      svix-server:
         condition: service_started
     restart: unless-stopped
     # Note: distroless image has no shell, so we rely on Docker process
@@ -194,23 +236,53 @@ services:
   #     - "4317:4317"  # OTLP gRPC
   #     - "4318:4318"  # OTLP HTTP
 
-  # Svix incoming webhook fabric (Phase 10).
-  # svix:
-  #   image: svix/svix-server:latest
-  #   environment:
-  #     WAIT_FOR: "true"
-  #     SVIX_REDIS_DSN: redis://svix-redis:6379
-  #     SVIX_DB_DSN: postgres://afstack:afstack@postgres:5432/svix?sslmode=disable
-  #     SVIX_JWT_SECRET: ${SVIX_JWT_SECRET:-change-me-svix-secret}
-  #   ports:
-  #     - "8071:8071"
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
+  # Svix — outbound webhook delivery (OSS audit item #2).
   #
-  # svix-redis:
-  #   image: redis:7-alpine
-  #   command: redis-server --save "" --appendonly no
+  # AF Stack uses Svix as a sidecar for outbound webhook delivery: the
+  # runtime's POST /api/v1/webhooks/send proxies to svix-server, which
+  # owns the delivery queue, retries, signing, replay protection, and the
+  # message log. We keep the inbound side (/webhooks/in/{slug}) ourselves
+  # because it's tied to our forward_to semantics.
+  #
+  # Svix needs its own Postgres + Redis (its data model is independent
+  # of ours; keeping it isolated lets us swap or upgrade Svix without
+  # touching the suite schema).
+  svix-server:
+    image: svix/svix-server:v1.40
+    environment:
+      WAIT_FOR: "true"
+      SVIX_REDIS_DSN: redis://svix-redis:6379
+      SVIX_DB_DSN: postgresql://svix:svix@svix-postgres:5432/svix
+      SVIX_JWT_SECRET: ${SVIX_JWT_SECRET:-svix-dev-secret-change-me-in-prod-32-bytes}
+      SVIX_LOG_LEVEL: info
+    ports:
+      - "${SVIX_PORT:-8071}:8071"
+    depends_on:
+      svix-postgres:
+        condition: service_healthy
+      svix-redis:
+        condition: service_started
+    restart: unless-stopped
+
+  svix-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: svix
+      POSTGRES_PASSWORD: svix
+      POSTGRES_DB: svix
+    volumes:
+      - svix-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U svix"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  svix-redis:
+    image: redis:7-alpine
+    command: redis-server --save "" --appendonly no
+    volumes:
+      - svix-redis-data:/data
 
   # Caddy reverse proxy + automatic TLS (production only).
   # See docker-compose.prod.yml.
@@ -218,3 +290,5 @@ services:
 volumes:
   postgres-data:
   minio-data:
+  svix-pg-data:
+  svix-redis-data:

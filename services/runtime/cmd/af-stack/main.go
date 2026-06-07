@@ -424,13 +424,12 @@ func main() {
 		log.Info("llmcache not configured (no database); LLM gateway will not cache")
 	}
 
-	// LLM gateway (Phase 7.1). Routes every /api/v1/llm/* call through
-	// AgentField in spirit, but the docker-compose AF instance does not
-	// yet expose a built-in `__llm.chat` reasoner — so the MVP path
-	// proxies directly to an OpenAI-compatible upstream (OpenRouter by
-	// default, OpenAI/Anthropic when their key is set). The public
-	// contract still says "routes through AF"; swap to
-	// llmgateway.NewAFProvider once AF ships the built-in handler.
+	// LLM gateway (Phase 7.1). Customers point the OpenAI SDK at
+	// /api/v1/llm; the runtime forwards each call to a LiteLLM Proxy
+	// sidecar (image ghcr.io/berriai/litellm:main-stable) which fans
+	// out to 100+ providers based on apps/backend/litellm-config.yaml.
+	// AF Stack keeps tenant resolution, cost ledger, budgets, cache,
+	// and pre/post-call hooks on this side.
 	llmGW := buildLLMGateway(log, afClient)
 
 	// Cost ledger + budgets (Phase 7). The Recorder + Budgets are
@@ -532,30 +531,32 @@ func main() {
 		go worker.Run(ctx)
 	}
 
-	// Webhooks (Phase 10.2 inbound + Phase 10.3 outbound). The facade
+	// Webhooks (Phase 10.2 inbound + Svix-backed outbound). The facade
 	// composes:
-	//   - DeliveryStore : shared by inbound (verify -> persist) and the
-	//                     outbound worker. Persists every delivery row.
-	//   - EndpointStore : Phase 10.2 inbound endpoint CRUD.
-	//   - InboundService: verifies HMAC, dedups, forwards to the
-	//                     endpoint's forward_to target (http(s)://...
-	//                     or af://agents/<name>).
-	//   - OutboundService: Phase 10.3 outbound enqueue + retry worker.
+	//   - DeliveryStore  : INBOUND deliveries only. The legacy outbound
+	//                      rows were dropped in migration 00015 when we
+	//                      moved outbound to Svix.
+	//   - EndpointStore  : Phase 10.2 inbound endpoint CRUD.
+	//   - InboundService : verifies HMAC, dedups, forwards to the
+	//                      endpoint's forward_to target (http(s)://... or
+	//                      af://agents/<name>).
+	//   - OutboundService: thin proxy to the Svix sidecar. Talks to
+	//                      AF_STACK_SVIX_URL. Returns 503 when the URL
+	//                      is unset.
 	//
-	// A nil DB pool leaves every store at HasPool()==false; the server
-	// surfaces 503 / empty pages accordingly.
+	// A nil DB pool leaves every inbound store at HasPool()==false; the
+	// server surfaces 503 / empty pages accordingly. The outbound side
+	// is independent of the DB — it only needs the Svix URL.
 	var webhooksSvc *webhooks.Service
 	{
 		var (
 			deliveryStore  *webhooks.DeliveryStore
 			endpointStore  *webhooks.EndpointStore
-			outboundSvc    *webhooks.OutboundService
 			inboundSvc     *webhooks.InboundService
 		)
 		if database != nil && database.Pool != nil {
 			deliveryStore = webhooks.NewDeliveryStore(database.Pool, log)
 			endpointStore = webhooks.NewEndpointStore(database.Pool, log)
-			outboundSvc = webhooks.NewOutboundService(deliveryStore, log)
 			// InboundService needs the secrets vault for HMAC verify
 			// and the agentfield client for af://agents/... forwards.
 			// vault / afClient may be nil — InboundService logs a
@@ -579,23 +580,21 @@ func main() {
 				Agents:     agentsRef,
 				Logger:     log,
 			})
-
-			// Phase 10.3: outbound webhook retry worker. Drains
-			// suite_webhook_deliveries WHERE direction='outbound' AND
-			// status IN ('queued','failed') AND attempts < MaxAttempts
-			// AND scheduled_at <= now() every PollInterval. The worker
-			// no-ops gracefully when ctx is cancelled (graceful shutdown
-			// flushes any in-flight POST via the per-row timeout).
-			outboundWorker := webhooks.NewOutboundWorker(outboundSvc, deliveryStore, log)
-			go outboundWorker.Run(ctx)
-			log.Info("webhooks: outbound worker scheduled",
-				"poll_interval", webhooks.PollInterval,
-				"batch_size", webhooks.BatchSize,
-				"max_attempts", webhooks.MaxAttempts,
-			)
 		} else {
-			log.Info("webhooks: no database; /api/v1/webhooks/* + /webhooks/in/* will return 503")
+			log.Info("webhooks: no database; /webhooks/in/* + endpoint CRUD will return 503")
 		}
+
+		// Outbound: thin Svix proxy. Config is read from env; if
+		// AF_STACK_SVIX_URL is unset the service stays unconfigured and
+		// /api/v1/webhooks/send returns 503.
+		outboundSvc := webhooks.NewOutboundService(deliveryStore, log)
+		if outboundSvc.Configured() {
+			log.Info("webhooks: outbound proxy wired to svix",
+				"svix_url", os.Getenv("AF_STACK_SVIX_URL"))
+		} else {
+			log.Info("webhooks: AF_STACK_SVIX_URL unset; /api/v1/webhooks/send will return 503")
+		}
+
 		webhooksSvc = webhooks.NewService(deliveryStore, outboundSvc, endpointStore, inboundSvc, log)
 	}
 
@@ -748,8 +747,9 @@ func main() {
 	//   2. httpServer.Shutdown(ctx) — stop accepting new connections,
 	//      close idle ones, wait for active conns to finish.
 	//   3. Cancel workersCtx — every background worker (notifications,
-	//      webhooks outbound, crons scheduler, MCP refresh, llmcache
-	//      eviction) returns from its select-on-ctx.Done() loop.
+	//      crons scheduler, MCP refresh, llmcache eviction) returns from
+	//      its select-on-ctx.Done() loop. Outbound webhook delivery is
+	//      owned by the Svix sidecar (OSS-AUDIT #2).
 	//   4. mcpPool.Shutdown() — close every external MCP adapter
 	//      connection (stdio child processes, SSE clients).
 	//   5. jobs manager Stop() / DB Close / storage.Close — handled by
@@ -817,10 +817,12 @@ func main() {
 
 		// Step 3: stop background workers via context cancel.
 		// Workers read ctx.Done() in their select loops and exit
-		// promptly (notifications: next tick; webhooks outbound:
-		// in-flight POST timeout; crons: next minute; MCP refresh:
-		// next tick; llmcache eviction: next 5min tick — but the
-		// goroutine itself returns from ctx.Done immediately).
+		// promptly (notifications: next tick; crons: next minute;
+		// MCP refresh: next tick; llmcache eviction: next 5min tick
+		// — but the goroutine itself returns from ctx.Done
+		// immediately). Outbound webhook delivery is owned by the Svix
+		// sidecar (OSS-AUDIT #2), so there's no AF Stack worker to
+		// drain on the outbound path.
 		log.Info("stopping background workers")
 		workersCancel()
 
@@ -950,66 +952,45 @@ func buildNotificationsAdapter(log *slog.Logger) notifications.Adapter {
 	}
 }
 
-// buildLLMGateway constructs the Phase-7 LLM gateway.
+// buildLLMGateway constructs the LLM gateway.
 //
-// The public contract says every LLM call routes through AgentField.
-// In practice the docker-compose AF instance does not yet expose a
-// built-in OpenAI-compat reasoner, so the MVP path is a direct
-// upstream proxy. We pick the first provider whose API key is set
-// from the environment, preferring OpenRouter (broadest model
-// catalogue at lowest cost) when multiple keys are present.
+// The runtime no longer hand-rolls a client per upstream provider —
+// it forwards every /api/v1/llm/* call to a LiteLLM Proxy sidecar
+// (image `ghcr.io/berriai/litellm:main-stable`) which handles 100+
+// providers (OpenRouter, OpenAI, Anthropic, Google, Mistral, DeepSeek,
+// Groq, Cohere, Bedrock, ...) via its standard config.
 //
-// When NO key is set the gateway is still constructed against
-// OpenRouter so /api/v1/llm/models returns the static catalog —
-// only actual completion calls will fail with a clear
-// "no provider key configured" upstream error.
+// AF Stack keeps tenant resolution, the cost ledger, budgets, cache,
+// and hooks on its side; LiteLLM is purely upstream routing.
 //
-// Switch to llmgateway.NewAFProvider(afClient, llmgateway.AFProviderConfig{})
-// once AgentField ships the `__llm.chat` reasoner.
+// Wiring:
+//   - AF_STACK_LITELLM_URL — sidecar URL (default http://litellm:4000
+//     for docker-compose; set to http://localhost:4000 for bare-metal).
+//   - LITELLM_MASTER_KEY  — internal sidecar bearer token shared with
+//     the LiteLLM container at compose-time; customers never see it.
+//     Defaults to "sk-litellm-dev" so a fresh checkout boots without
+//     extra config — override in production.
+//
+// afClient is kept in the signature for forward-compat (future
+// AF-native fallback) but is no longer used by the gateway itself.
 func buildLLMGateway(log *slog.Logger, afClient *agentfield.Client) *llmgateway.Gateway {
-	// Suppress unused warning until we switch to AF-routed mode.
-	_ = afClient
+	_ = afClient // reserved for forward-compat
 
-	openrouterKey := os.Getenv("OPENROUTER_API_KEY")
-	openaiKey := os.Getenv("OPENAI_API_KEY")
-	anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
-
-	switch {
-	case openrouterKey != "":
-		log.Info("llmgateway: provider=openrouter (Phase-7 MVP path; AF-native routing pending)")
-		return llmgateway.New(llmgateway.NewOpenAICompatProvider(llmgateway.OpenAICompatConfig{
-			ProviderID: "openrouter",
-			BaseURL:    "https://openrouter.ai/api/v1",
-			APIKey:     openrouterKey,
-			ExtraHeaders: map[string]string{
-				"HTTP-Referer": "https://github.com/Agent-Field/backai",
-				"X-Title":      "AF Stack",
-			},
-		}))
-	case openaiKey != "":
-		log.Info("llmgateway: provider=openai (Phase-7 MVP path)")
-		return llmgateway.New(llmgateway.NewOpenAICompatProvider(llmgateway.OpenAICompatConfig{
-			ProviderID: "openai",
-			BaseURL:    "https://api.openai.com/v1",
-			APIKey:     openaiKey,
-		}))
-	case anthropicKey != "":
-		// Anthropic's OpenAI-compat endpoint lives at /v1.
-		log.Info("llmgateway: provider=anthropic (Phase-7 MVP path)")
-		return llmgateway.New(llmgateway.NewOpenAICompatProvider(llmgateway.OpenAICompatConfig{
-			ProviderID: "anthropic",
-			BaseURL:    "https://api.anthropic.com/v1",
-			APIKey:     anthropicKey,
-		}))
-	default:
-		log.Warn("llmgateway: no provider API key found in env " +
-			"(OPENROUTER_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY); " +
-			"models endpoint will still work, but chat/embeddings/images will fail upstream")
-		return llmgateway.New(llmgateway.NewOpenAICompatProvider(llmgateway.OpenAICompatConfig{
-			ProviderID: "openrouter",
-			BaseURL:    "https://openrouter.ai/api/v1",
-		}))
+	url := os.Getenv("AF_STACK_LITELLM_URL")
+	if url == "" {
+		url = "http://litellm:4000"
 	}
+	masterKey := os.Getenv("LITELLM_MASTER_KEY")
+	if masterKey == "" {
+		masterKey = "sk-litellm-dev"
+	}
+
+	log.Info("llm gateway: litellm sidecar", "url", url)
+	return llmgateway.New(llmgateway.NewLiteLLMProvider(llmgateway.LiteLLMConfig{
+		ProviderID: "litellm",
+		BaseURL:    url,
+		MasterKey:  masterKey,
+	}))
 }
 
 // startJobsManager runs the River migrations idempotently, registers built-in

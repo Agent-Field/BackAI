@@ -11,30 +11,23 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Agent-Field/backai/services/runtime/internal/agentfield"
 	"github.com/Agent-Field/backai/services/runtime/internal/pricing"
 )
 
 // Gateway is the public façade for OpenAI-compatible LLM calls.
 //
 // Architecture: Gateway is provider-agnostic — it delegates the actual
-// upstream HTTP call to a ProviderClient. Two implementations exist:
+// upstream HTTP call to a ProviderClient. The shipping implementation
+// is LiteLLMProvider, which talks to a LiteLLM Proxy sidecar
+// (`ghcr.io/berriai/litellm:main-stable`). LiteLLM handles the 100+
+// upstream providers (OpenRouter, OpenAI, Anthropic, Google, Mistral,
+// DeepSeek, Groq, Cohere, Bedrock, ...) so the runtime no longer ships
+// a hand-rolled client per provider.
 //
-//   - AFProvider:      Routes the call into AgentField's built-in
-//                      LLM-gateway reasoner. This is the canonical
-//                      path and the one the public contract names.
-//                      Wired by passing an *agentfield.Client and an
-//                      AFReasonerCall (e.g. "__llm.chat").
-//
-//   - OpenAIProvider:  Calls an OpenAI-compatible HTTPS endpoint
-//                      directly (OpenRouter, OpenAI, etc.). Used as
-//                      the Phase-7 MVP path because the AgentField
-//                      instance shipped in `docker compose` does not
-//                      yet expose a `__llm.chat` reasoner. This is an
-//                      INTERNAL implementation detail — the public
-//                      contract still says "routes through AF". Swap
-//                      to AFProvider once AF gains the built-in
-//                      handler.
+// The customer-visible surface is unchanged: callers point the OpenAI
+// SDK at `/api/v1/llm`, and AF Stack keeps tenant resolution, cost
+// ledger, budgets, cache, and hooks. LiteLLM is purely an internal
+// implementation detail — customers never see it directly.
 //
 // Cost + hook orchestration (estimate, fire pre/post-call hooks,
 // resolve tenant) belongs in the HTTP handler layer (server/llm.go),
@@ -44,11 +37,11 @@ type Gateway struct {
 }
 
 // ProviderClient is the abstraction Gateway delegates to. Tests can
-// supply a fake; production wires an AF-routed or direct-OpenAI impl.
+// supply a fake; production wires a LiteLLM-backed impl.
 type ProviderClient interface {
 	// Name identifies the provider in logs + the cost-event payload
-	// emitted by HookLLMPostCall. Examples: "agentfield", "openrouter",
-	// "openai", "anthropic", "fake".
+	// emitted by HookLLMPostCall. Production value is "litellm";
+	// tests typically use "fake".
 	Name() string
 	// Chat performs a non-streaming chat completion.
 	Chat(ctx context.Context, req ChatRequest) (ChatResponse, error)
@@ -65,8 +58,8 @@ type ProviderClient interface {
 
 // New constructs a Gateway with the given provider client.
 //
-// Pass NewOpenAICompatProvider(...) for the Phase-7 MVP path, or
-// NewAFProvider(...) once AgentField exposes the built-in handler.
+// Production wires NewLiteLLMProvider(...) pointed at the LiteLLM
+// sidecar URL; tests pass a fakeProvider.
 func New(provider ProviderClient) *Gateway {
 	return &Gateway{provider: provider}
 }
@@ -258,11 +251,6 @@ func readBodyLimited(r io.Reader, maxBytes int64) ([]byte, error) {
 	}
 	return io.ReadAll(io.LimitReader(r, maxBytes))
 }
-
-// Compile-time guard: ensure agentfield.Client is in our import set
-// even when AFProvider hasn't been instantiated yet (so the import is
-// not removed by goimports on a fresh checkout).
-var _ = (*agentfield.Client)(nil)
 
 // Now is the time source for the gateway. Overridable in tests so
 // `Created` is deterministic.

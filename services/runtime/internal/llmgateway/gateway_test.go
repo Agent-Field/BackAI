@@ -192,9 +192,12 @@ func TestGatewayEstimateCostUnknownModel(t *testing.T) {
 	}
 }
 
-// ─── OpenAICompatProvider tests using httptest upstream stubs ─────────────
+// ─── LiteLLMProvider tests using httptest upstream stubs ─────────────────
+//
+// Tests stand up a small httptest server that mimics the LiteLLM Proxy
+// OpenAI-compatible surface (and its response_cost extension).
 
-func TestOpenAICompatProviderChatHappyPath(t *testing.T) {
+func TestLiteLLMProviderChatHappyPath(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {
 			t.Errorf("unexpected path: %q", r.URL.Path)
@@ -218,8 +221,8 @@ func TestOpenAICompatProviderChatHappyPath(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p := NewOpenAICompatProvider(OpenAICompatConfig{
-		ProviderID: "test", BaseURL: upstream.URL, APIKey: "test-key",
+	p := NewLiteLLMProvider(LiteLLMConfig{
+		ProviderID: "test", BaseURL: upstream.URL, MasterKey: "test-key",
 	})
 	resp, err := p.Chat(context.Background(), ChatRequest{
 		Model:    "x",
@@ -236,14 +239,46 @@ func TestOpenAICompatProviderChatHappyPath(t *testing.T) {
 	}
 }
 
-func TestOpenAICompatProviderChatUpstream5xx(t *testing.T) {
+// LiteLLM injects `response_cost` (USD float) at the top level when its
+// config has model pricing. The provider lifts it into Usage so the
+// post-call hook can prefer it over the static pricing.EstimateCostUSD
+// fallback.
+func TestLiteLLMProviderChatResponseCostPassthrough(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-rc","object":"chat.completion","created":1,"model":"x",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15},
+			"response_cost":0.0042
+		}`))
+	}))
+	defer upstream.Close()
+
+	p := NewLiteLLMProvider(LiteLLMConfig{BaseURL: upstream.URL})
+	resp, err := p.Chat(context.Background(), ChatRequest{
+		Model:    "x",
+		Messages: []ChatMessage{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Usage == nil || resp.Usage.ResponseCostUSD == nil {
+		t.Fatalf("expected response_cost surfaced into Usage, got %+v", resp.Usage)
+	}
+	if got := *resp.Usage.ResponseCostUSD; got != 0.0042 {
+		t.Errorf("expected response_cost=0.0042, got %f", got)
+	}
+}
+
+func TestLiteLLMProviderChatUpstream5xx(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 		_, _ = w.Write([]byte(`{"error":{"message":"upstream pile-up"}}`))
 	}))
 	defer upstream.Close()
 
-	p := NewOpenAICompatProvider(OpenAICompatConfig{BaseURL: upstream.URL})
+	p := NewLiteLLMProvider(LiteLLMConfig{BaseURL: upstream.URL})
 	_, err := p.Chat(context.Background(), ChatRequest{
 		Model: "m", Messages: []ChatMessage{{Role: "user", Content: "x"}},
 	})
@@ -259,14 +294,14 @@ func TestOpenAICompatProviderChatUpstream5xx(t *testing.T) {
 	}
 }
 
-func TestOpenAICompatProviderChat429Maps(t *testing.T) {
+func TestLiteLLMProviderChat429Maps(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write([]byte(`{"error":{"message":"slow down"}}`))
 	}))
 	defer upstream.Close()
 
-	p := NewOpenAICompatProvider(OpenAICompatConfig{BaseURL: upstream.URL})
+	p := NewLiteLLMProvider(LiteLLMConfig{BaseURL: upstream.URL})
 	_, err := p.Chat(context.Background(), ChatRequest{
 		Model: "m", Messages: []ChatMessage{{Role: "user", Content: "x"}},
 	})
@@ -279,14 +314,14 @@ func TestOpenAICompatProviderChat429Maps(t *testing.T) {
 	}
 }
 
-func TestOpenAICompatProviderChat404Maps(t *testing.T) {
+func TestLiteLLMProviderChat404Maps(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"error":{"message":"no such model"}}`))
 	}))
 	defer upstream.Close()
 
-	p := NewOpenAICompatProvider(OpenAICompatConfig{BaseURL: upstream.URL})
+	p := NewLiteLLMProvider(LiteLLMConfig{BaseURL: upstream.URL})
 	_, err := p.Chat(context.Background(), ChatRequest{
 		Model: "m", Messages: []ChatMessage{{Role: "user", Content: "x"}},
 	})
@@ -296,7 +331,7 @@ func TestOpenAICompatProviderChat404Maps(t *testing.T) {
 	}
 }
 
-func TestOpenAICompatProviderChatStream(t *testing.T) {
+func TestLiteLLMProviderChatStream(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
@@ -314,7 +349,7 @@ func TestOpenAICompatProviderChatStream(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p := NewOpenAICompatProvider(OpenAICompatConfig{BaseURL: upstream.URL})
+	p := NewLiteLLMProvider(LiteLLMConfig{BaseURL: upstream.URL})
 	chunkCh, errCh := p.ChatStream(context.Background(), ChatRequest{
 		Model:    "m",
 		Messages: []ChatMessage{{Role: "user", Content: "hi"}},
@@ -336,14 +371,14 @@ func TestOpenAICompatProviderChatStream(t *testing.T) {
 	}
 }
 
-func TestOpenAICompatProviderChatStreamUpstreamFail(t *testing.T) {
+func TestLiteLLMProviderChatStreamUpstreamFail(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"error":{"message":"boom"}}`))
 	}))
 	defer upstream.Close()
 
-	p := NewOpenAICompatProvider(OpenAICompatConfig{BaseURL: upstream.URL})
+	p := NewLiteLLMProvider(LiteLLMConfig{BaseURL: upstream.URL})
 	chunkCh, errCh := p.ChatStream(context.Background(), ChatRequest{
 		Model: "m", Messages: []ChatMessage{{Role: "user", Content: "x"}},
 		Stream: true,
@@ -364,7 +399,7 @@ func TestOpenAICompatProviderChatStreamUpstreamFail(t *testing.T) {
 	}
 }
 
-func TestOpenAICompatProviderEmbeddingsHappyPath(t *testing.T) {
+func TestLiteLLMProviderEmbeddingsHappyPath(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/embeddings" {
 			t.Errorf("unexpected path: %q", r.URL.Path)
@@ -378,7 +413,7 @@ func TestOpenAICompatProviderEmbeddingsHappyPath(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p := NewOpenAICompatProvider(OpenAICompatConfig{BaseURL: upstream.URL})
+	p := NewLiteLLMProvider(LiteLLMConfig{BaseURL: upstream.URL})
 	resp, err := p.Embeddings(context.Background(), EmbeddingsRequest{Model: "m", Input: "hi"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -388,7 +423,7 @@ func TestOpenAICompatProviderEmbeddingsHappyPath(t *testing.T) {
 	}
 }
 
-func TestOpenAICompatProviderImagesHappyPath(t *testing.T) {
+func TestLiteLLMProviderImagesHappyPath(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/images/generations" {
 			t.Errorf("unexpected path: %q", r.URL.Path)
@@ -397,7 +432,7 @@ func TestOpenAICompatProviderImagesHappyPath(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p := NewOpenAICompatProvider(OpenAICompatConfig{BaseURL: upstream.URL})
+	p := NewLiteLLMProvider(LiteLLMConfig{BaseURL: upstream.URL})
 	resp, err := p.Images(context.Background(), ImagesRequest{Prompt: "a cat"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -408,9 +443,16 @@ func TestOpenAICompatProviderImagesHappyPath(t *testing.T) {
 }
 
 func TestProviderNameUsedAsCostLabel(t *testing.T) {
-	p := NewOpenAICompatProvider(OpenAICompatConfig{ProviderID: "openrouter", BaseURL: "http://x"})
-	if p.Name() != "openrouter" {
-		t.Errorf("expected openrouter, got %q", p.Name())
+	p := NewLiteLLMProvider(LiteLLMConfig{ProviderID: "litellm", BaseURL: "http://x"})
+	if p.Name() != "litellm" {
+		t.Errorf("expected litellm, got %q", p.Name())
+	}
+}
+
+func TestProviderNameDefaultsToLiteLLM(t *testing.T) {
+	p := NewLiteLLMProvider(LiteLLMConfig{BaseURL: "http://x"})
+	if p.Name() != "litellm" {
+		t.Errorf("expected default name 'litellm', got %q", p.Name())
 	}
 }
 
@@ -565,48 +607,37 @@ func TestPreviewBodyTruncates(t *testing.T) {
 	}
 }
 
-// ─── AF provider stub-mode coverage ─────────────────────────────────────
+// ─── response_cost extraction ────────────────────────────────────────────
 
-func TestAFProviderStreamingNotImplemented(t *testing.T) {
-	p := NewAFProvider(nil, AFProviderConfig{})
-	chunkCh, errCh := p.ChatStream(context.Background(), ChatRequest{
-		Model: "m", Messages: []ChatMessage{{Role: "user", Content: "x"}},
-	})
-	// Drain
-	for range chunkCh {
+func TestExtractResponseCostPresent(t *testing.T) {
+	cost, ok := extractResponseCost([]byte(`{"response_cost":0.012,"id":"x"}`))
+	if !ok {
+		t.Fatalf("expected response_cost to be extracted")
 	}
-	err := <-errCh
-	apiErr, ok := AsAPIError(err)
-	if !ok || apiErr.Code != "STREAMING_NOT_SUPPORTED" {
-		t.Errorf("expected STREAMING_NOT_SUPPORTED, got %v", err)
+	if cost != 0.012 {
+		t.Errorf("expected 0.012, got %f", cost)
 	}
 }
 
-func TestAFProviderNilClientChatErrors(t *testing.T) {
-	p := NewAFProvider(nil, AFProviderConfig{})
-	_, err := p.Chat(context.Background(), ChatRequest{
-		Model: "m", Messages: []ChatMessage{{Role: "user", Content: "x"}},
-	})
-	if !errors.Is(err, ErrNoProvider) {
-		t.Errorf("expected ErrNoProvider, got %v", err)
+func TestExtractResponseCostAbsent(t *testing.T) {
+	if _, ok := extractResponseCost([]byte(`{"id":"x"}`)); ok {
+		t.Errorf("expected ok=false when response_cost absent")
 	}
 }
 
-func TestExtractAFMessage(t *testing.T) {
-	got := extractAFMessage([]byte(`{"error":{"code":"BUDGET_EXCEEDED","message":"oh no"}}`), 402)
-	if !strings.Contains(got, "BUDGET_EXCEEDED") || !strings.Contains(got, "oh no") {
-		t.Errorf("expected error message extraction, got %q", got)
+func TestExtractResponseCostMalformed(t *testing.T) {
+	if _, ok := extractResponseCost([]byte("not json")); ok {
+		t.Errorf("expected ok=false on non-JSON body")
 	}
-	got = extractAFMessage([]byte(`not json`), 502)
-	if !strings.Contains(got, "502") {
-		t.Errorf("expected status in fallback, got %q", got)
+	if _, ok := extractResponseCost(nil); ok {
+		t.Errorf("expected ok=false on nil body")
 	}
 }
 
 // Verify provider.do uses configured timeout (not strictly testing the
 // timeout firing, just that the construction is correct).
 func TestProviderHasTimeout(t *testing.T) {
-	p := NewOpenAICompatProvider(OpenAICompatConfig{
+	p := NewLiteLLMProvider(LiteLLMConfig{
 		BaseURL: "http://example", Timeout: 5 * time.Second,
 	})
 	if p.client.Timeout != 5*time.Second {

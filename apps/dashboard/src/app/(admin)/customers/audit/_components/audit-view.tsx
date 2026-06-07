@@ -33,6 +33,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import { DateTimePicker } from "@/components/ui/datetime-picker"
 import {
   Empty,
   EmptyDescription,
@@ -252,18 +253,18 @@ export function AuditView() {
           onChange={(e) => setAction(e.target.value)}
           className="w-56"
         />
-        <Input
-          type="datetime-local"
+        <DateTimePicker
           value={from}
-          onChange={(e) => setFrom(e.target.value)}
+          onChange={setFrom}
           aria-label="From"
+          placeholder="From"
           className="w-56"
         />
-        <Input
-          type="datetime-local"
+        <DateTimePicker
           value={to}
-          onChange={(e) => setTo(e.target.value)}
+          onChange={setTo}
           aria-label="To"
+          placeholder="To"
           className="w-56"
         />
         <div className="ml-auto">

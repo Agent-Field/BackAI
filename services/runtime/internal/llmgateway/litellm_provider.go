@@ -14,54 +14,59 @@ import (
 	"time"
 )
 
-// OpenAICompatProvider talks to an OpenAI-compatible HTTPS endpoint
-// (OpenRouter, OpenAI direct, Together, anything that speaks the OpenAI
-// REST shape).
+// LiteLLMProvider talks to a LiteLLM Proxy sidecar (or any OpenAI-compatible
+// HTTPS endpoint that follows the same shape).
 //
-// IMPORTANT CONTRACT NOTE — this is the Phase-7 MVP path. Public
-// contract still says "every LLM call routes through AgentField". This
-// provider exists purely because the AgentField instance running in
-// `docker compose` does not yet expose a built-in `__llm.chat`
-// reasoner. When AF gains that reasoner, swap this for AFProvider and
-// the public API contract holds without a single caller-visible
-// change.
+// Architecture: AF Stack runs LiteLLM as a sidecar container
+// (image `ghcr.io/berriai/litellm:main-stable`). LiteLLM handles the
+// 100+ upstream providers (OpenRouter, OpenAI, Anthropic, Google,
+// Mistral, DeepSeek, Groq, Cohere, Bedrock, ...) — our gateway no
+// longer hand-rolls a client per provider.
 //
-// Provider id is reported as the `Name` field on construction so the
-// cost-event payload (Phase 7.2) carries the right provider label
-// (`openrouter`, `openai`, `anthropic`).
-type OpenAICompatProvider struct {
-	cfg    OpenAICompatConfig
+// The customer-visible surface (`/api/v1/llm/*`) is unchanged. AF Stack
+// keeps tenant resolution, cost ledger, budgets, cache, hooks, and the
+// OpenAI-compatible shape on its side; LiteLLM is purely upstream
+// multi-provider routing.
+//
+// Cost: when LiteLLM is configured with model pricing it injects
+// `response_cost` and `_response_ms` into the response JSON. The gateway
+// surfaces this via Usage extension when present, and falls back to
+// the static pricing.EstimateCostUSD table otherwise.
+type LiteLLMProvider struct {
+	cfg    LiteLLMConfig
 	client *http.Client
 }
 
-// OpenAICompatConfig configures one OpenAI-compatible upstream.
-type OpenAICompatConfig struct {
+// LiteLLMConfig configures the LiteLLM sidecar URL + auth.
+type LiteLLMConfig struct {
 	// ProviderID is the value reported by Name() — used as the
-	// `provider` field in CostEvent records (Phase 7.2).
+	// `provider` field in CostEvent records. Defaults to "litellm".
 	ProviderID string
-	// BaseURL is the upstream root (e.g. https://openrouter.ai/api/v1).
+	// BaseURL is the LiteLLM proxy root (e.g. http://litellm:4000).
 	// Trailing slash is stripped.
 	BaseURL string
-	// APIKey is the bearer token sent to the upstream.
-	APIKey string
-	// ExtraHeaders are added to every outbound request (used e.g. for
-	// OpenRouter's HTTP-Referer + X-Title hints).
+	// MasterKey is the LITELLM_MASTER_KEY shared with the sidecar.
+	// Internal sidecar auth — NOT exposed to customers.
+	MasterKey string
+	// ExtraHeaders are added to every outbound request. Reserved for
+	// future tagging (e.g. tenant id surfacing into LiteLLM's
+	// per-customer logging when needed).
 	ExtraHeaders map[string]string
 	// Timeout for non-streaming calls. Default 60s.
 	Timeout time.Duration
 }
 
-// NewOpenAICompatProvider constructs a provider that proxies to the
-// given OpenAI-compatible endpoint.
-func NewOpenAICompatProvider(cfg OpenAICompatConfig) *OpenAICompatProvider {
+// NewLiteLLMProvider constructs a provider that proxies to the given
+// LiteLLM sidecar.
+func NewLiteLLMProvider(cfg LiteLLMConfig) *LiteLLMProvider {
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 60 * time.Second
 	}
 	cfg.BaseURL = strings.TrimRight(cfg.BaseURL, "/")
 	if cfg.ProviderID == "" {
-		cfg.ProviderID = "openai-compat"
+		cfg.ProviderID = "litellm"
 	}
-	return &OpenAICompatProvider{
+	return &LiteLLMProvider{
 		cfg: cfg,
 		client: &http.Client{
 			Timeout: cfg.Timeout,
@@ -70,12 +75,12 @@ func NewOpenAICompatProvider(cfg OpenAICompatConfig) *OpenAICompatProvider {
 }
 
 // Name returns the provider id (used in cost-event labelling).
-func (p *OpenAICompatProvider) Name() string {
+func (p *LiteLLMProvider) Name() string {
 	return p.cfg.ProviderID
 }
 
-// Chat performs a non-streaming chat completion.
-func (p *OpenAICompatProvider) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
+// Chat performs a non-streaming chat completion via LiteLLM.
+func (p *LiteLLMProvider) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
 	// Force stream=false; the streaming path has its own method.
 	body := chatRequestBody(req, false)
 
@@ -96,12 +101,23 @@ func (p *OpenAICompatProvider) Chat(ctx context.Context, req ChatRequest) (ChatR
 			Details: map[string]any{"upstream_body_preview": previewBody(respBody)},
 		}
 	}
+
+	// LiteLLM injects `response_cost` (USD) and `_response_ms` at the
+	// top level when its config has pricing for the requested model.
+	// Surface them via Usage so the gateway hook layer can prefer
+	// LiteLLM's number over the static pricing.EstimateCostUSD fallback.
+	if cost, ok := extractResponseCost(respBody); ok {
+		if out.Usage == nil {
+			out.Usage = &Usage{}
+		}
+		out.Usage.ResponseCostUSD = &cost
+	}
 	return out, nil
 }
 
 // ChatStream performs a streaming chat completion. Chunks are emitted
-// as the upstream's SSE stream produces them.
-func (p *OpenAICompatProvider) ChatStream(ctx context.Context, req ChatRequest) (<-chan ChatStreamChunk, <-chan error) {
+// as LiteLLM's SSE stream produces them.
+func (p *LiteLLMProvider) ChatStream(ctx context.Context, req ChatRequest) (<-chan ChatStreamChunk, <-chan error) {
 	chunkCh := make(chan ChatStreamChunk, 16)
 	errCh := make(chan error, 1)
 
@@ -139,7 +155,7 @@ func (p *OpenAICompatProvider) ChatStream(ctx context.Context, req ChatRequest) 
 		}
 
 		// Walk the SSE stream line by line, splitting on `data: `
-		// prefixes. OpenAI terminates with `data: [DONE]`.
+		// prefixes. LiteLLM (like OpenAI) terminates with `data: [DONE]`.
 		scanner := bufio.NewScanner(resp.Body)
 		// Allow large SSE lines (some chunks include verbose tool
 		// arguments). 1MB headroom per line is the OpenAI ceiling.
@@ -167,6 +183,14 @@ func (p *OpenAICompatProvider) ChatStream(ctx context.Context, req ChatRequest) 
 				// if the whole stream fails afterwards.
 				continue
 			}
+			// LiteLLM surfaces response_cost on the final chunk too
+			// (when it has pricing). Forward it through Usage so the
+			// gateway's post-call hook can prefer it.
+			if chunk.Usage != nil {
+				if cost, ok := extractResponseCost([]byte(payload)); ok {
+					chunk.Usage.ResponseCostUSD = &cost
+				}
+			}
 			select {
 			case <-ctx.Done():
 				errCh <- ctx.Err()
@@ -186,8 +210,8 @@ func (p *OpenAICompatProvider) ChatStream(ctx context.Context, req ChatRequest) 
 	return chunkCh, errCh
 }
 
-// Embeddings creates one or more embedding vectors.
-func (p *OpenAICompatProvider) Embeddings(ctx context.Context, req EmbeddingsRequest) (EmbeddingsResponse, error) {
+// Embeddings creates one or more embedding vectors via LiteLLM.
+func (p *LiteLLMProvider) Embeddings(ctx context.Context, req EmbeddingsRequest) (EmbeddingsResponse, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return EmbeddingsResponse{}, &APIError{
@@ -210,8 +234,8 @@ func (p *OpenAICompatProvider) Embeddings(ctx context.Context, req EmbeddingsReq
 	return out, nil
 }
 
-// Images generates one or more images.
-func (p *OpenAICompatProvider) Images(ctx context.Context, req ImagesRequest) (ImagesResponse, error) {
+// Images generates one or more images via LiteLLM.
+func (p *LiteLLMProvider) Images(ctx context.Context, req ImagesRequest) (ImagesResponse, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return ImagesResponse{}, &APIError{
@@ -236,10 +260,10 @@ func (p *OpenAICompatProvider) Images(ctx context.Context, req ImagesRequest) (I
 
 // ─── HTTP plumbing ───────────────────────────────────────────────────────
 
-func (p *OpenAICompatProvider) newRequest(ctx context.Context, method, path string, body []byte, stream bool) (*http.Request, error) {
+func (p *LiteLLMProvider) newRequest(ctx context.Context, method, path string, body []byte, stream bool) (*http.Request, error) {
 	if p.cfg.BaseURL == "" {
 		return nil, &APIError{
-			Code: ErrCodeUpstreamError, Message: "provider base URL not configured",
+			Code: ErrCodeUpstreamError, Message: "litellm base URL not configured",
 			Status: http.StatusServiceUnavailable,
 		}
 	}
@@ -254,8 +278,11 @@ func (p *OpenAICompatProvider) newRequest(ctx context.Context, method, path stri
 	} else {
 		req.Header.Set("Accept", "application/json")
 	}
-	if p.cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+p.cfg.APIKey)
+	// Internal sidecar auth. The LITELLM_MASTER_KEY is shared between
+	// the runtime and the LiteLLM container at compose-time; customers
+	// never see it. Their tenant key is checked one layer earlier.
+	if p.cfg.MasterKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.cfg.MasterKey)
 	}
 	for k, v := range p.cfg.ExtraHeaders {
 		req.Header.Set(k, v)
@@ -263,7 +290,7 @@ func (p *OpenAICompatProvider) newRequest(ctx context.Context, method, path stri
 	return req, nil
 }
 
-func (p *OpenAICompatProvider) do(ctx context.Context, method, path string, body []byte, stream bool) ([]byte, int, error) {
+func (p *LiteLLMProvider) do(ctx context.Context, method, path string, body []byte, stream bool) ([]byte, int, error) {
 	httpReq, err := p.newRequest(ctx, method, path, body, stream)
 	if err != nil {
 		return nil, 0, err
@@ -283,7 +310,7 @@ func (p *OpenAICompatProvider) do(ctx context.Context, method, path string, body
 
 // upstreamErr converts a non-2xx upstream response into an APIError
 // with the OpenAI-compat error code mapped from the status.
-func (p *OpenAICompatProvider) upstreamErr(status int, body []byte) error {
+func (p *LiteLLMProvider) upstreamErr(status int, body []byte) error {
 	code := ErrCodeUpstreamError
 	switch status {
 	case http.StatusBadRequest:
@@ -347,6 +374,30 @@ func extractUpstreamMessage(body []byte) string {
 		return ""
 	}
 	return aux.Error.Message
+}
+
+// extractResponseCost pulls LiteLLM's `response_cost` field (top-level
+// USD float) out of a JSON body. LiteLLM injects this when the proxy
+// config maps the model to a pricing entry — we surface it so the
+// runtime's cost ledger prefers LiteLLM's number over the static
+// pricing.EstimateCostUSD fallback.
+//
+// Returns (cost, true) on hit; (0, false) when the field is absent or
+// the body isn't JSON.
+func extractResponseCost(body []byte) (float64, bool) {
+	if len(body) == 0 {
+		return 0, false
+	}
+	var aux struct {
+		ResponseCost *float64 `json:"response_cost"`
+	}
+	if err := json.Unmarshal(body, &aux); err != nil {
+		return 0, false
+	}
+	if aux.ResponseCost == nil {
+		return 0, false
+	}
+	return *aux.ResponseCost, true
 }
 
 // previewBody returns a UTF-8-safe trimmed preview of the upstream's

@@ -32,7 +32,7 @@ These work the moment you `docker compose up` with just an
 
 | Surface | What runs |
 |---|---|
-| **LLM gateway** | OpenRouter / OpenAI / Anthropic / Google routing, automatic provider pick from whichever key you set, per-call cost ledger in `suite_cost_events`, in-memory cache, budget enforcement at request time |
+| **LLM gateway** | OpenAI-compatible front; LiteLLM sidecar upstream for 100+ providers (OpenRouter / OpenAI / Anthropic / Google / Mistral / DeepSeek / Groq / Cohere / Bedrock / ...). Per-call cost ledger in `suite_cost_events`, in-memory cache, budget enforcement at request time |
 | **Multi-tenancy** | PG-RLS keyed on `app.tenant_id` GUC. Buggy handlers cannot leak across tenants — the database enforces. |
 | **Memory** | `app.memory.put/get/search` with pgvector. Scope by tenant, user, agent, or run. |
 | **Sandbox runs** | Docker adapter for dev (real containers spun up via host's docker.sock, stdout/stderr captured to MinIO). gVisor / Firecracker / e2b adapters for production. |
@@ -63,7 +63,7 @@ Set the key and the same code path makes a real call.
 |---|---|---|
 | **Stripe billing** | Real Stripe needs `sk_test_…` or `sk_live_…` | Set `STRIPE_SECRET_KEY` in `.env`. Stub mode → live mode automatically. Portal links become real Stripe URLs. |
 | **Resend email** | Real email needs `RESEND_API_KEY` | Set the key + `AF_STACK_NOTIFICATIONS_ADAPTER=resend`. The log adapter becomes the resend adapter. |
-| **OpenAI / Anthropic / Google direct** | Each needs its own provider key | Set `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`. Gateway picks first one set in priority order: OpenRouter > OpenAI > Anthropic > Google. |
+| **OpenAI / Anthropic / Google / Mistral / DeepSeek / Groq direct** | Each upstream needs its own provider key | Set the matching `..._API_KEY` and the matching `model_list` entry in `apps/backend/litellm-config.yaml` activates automatically. The LiteLLM sidecar handles the routing — no code changes needed for new providers. |
 | **e2b sandbox** | Needs `E2B_API_KEY` | `AF_STACK_SANDBOX_ADAPTER=e2b` + the key. Default in prod compose. |
 | **GitHub MCP** (and other vendor MCPs) | Each MCP server needs its provider's token | Store the token in secrets vault, reference as `secret:<key>` in the server's env config. |
 | **OAuth providers** | Google / GitHub OAuth need client IDs | `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` (or GitHub equivalent). Better-auth picks them up at boot. |

@@ -19,6 +19,7 @@ holes are listed below in priority order.
 | Layer | What we use | Notes |
 |---|---|---|
 | Auth | **better-auth** | Modern Node auth with OAuth providers built in |
+| LLM provider routing | **LiteLLM** (sidecar) | 100+ upstream providers, OpenAI-compat surface |
 | Job queue | **River** | PG-backed, multi-replica, no Redis |
 | Cron parsing | **robfig/cron/v3** | Industry standard |
 | Vector store | **pgvector** | Avoids Pinecone op cost |
@@ -39,25 +40,28 @@ holes are listed below in priority order.
 
 ## Should swap (hand-rolled where OSS exists)
 
-### 1. LLM provider routing → **LiteLLM** *(highest priority)*
+### 1. LLM provider routing → **LiteLLM** — **DONE**
 
-**Today:** `services/runtime/internal/llmgateway/providers/` has four
-hand-rolled provider clients (OpenRouter, OpenAI, Anthropic, Google).
-We maintain the model catalog by hand in `pricing.go`.
+**Landed:** AF Stack runs a LiteLLM Proxy sidecar
+(`ghcr.io/berriai/litellm:main-stable`) in docker-compose. The runtime
+gateway forwards every `/api/v1/llm/*` call to it via
+`services/runtime/internal/llmgateway/litellm_provider.go`. LiteLLM
+handles 100+ upstream providers via
+`apps/backend/litellm-config.yaml`.
 
-**Should be:** spin up **LiteLLM** as a sidecar container (or use its
-Python proxy mode). Our gateway calls LiteLLM's OpenAI-compatible
-HTTP endpoint. LiteLLM handles the 100+ provider routing. We keep:
+**Kept on AF Stack's side:** cost ledger, budgets, cache, hooks,
+per-tenant API keys, the OpenAI-compatible customer surface.
 
-- Cost ledger / budgets / cache (AF-native value)
-- Per-tenant API keys, hooks, rate limits
-- The OpenAI-compatible shape we expose
+**Dropped:** 4 hand-rolled provider clients (OpenRouter, OpenAI,
+Anthropic, Google direct), per-provider key selection logic in
+`buildLLMGateway`. The static `pricing.go` catalog is kept as a
+fallback for `EstimateCostUSD` — LiteLLM injects `response_cost` on
+known models and the runtime prefers that number when present.
 
-**Drops:** 4 provider clients, manual model catalog, per-provider
-pricing maintenance.
-
-**Migration:** 1–2 days. Add `litellm` service to docker-compose, point
-gateway upstream URL at it.
+**Net:** ~600 lines of Go gone; adding a new provider is now a config
+edit, not a code change. Mistral, DeepSeek, Groq, Cohere, Bedrock,
+plus everything else LiteLLM supports, all work by dropping in an
+`..._API_KEY`.
 
 ### 2. Webhooks delivery → **Svix** *(was in original plan)*
 
@@ -182,11 +186,7 @@ script. **Verdict: keep.**
 
 ## Priority order
 
-Doing the top 2 takes ~5 days and replaces ~1500 lines of our code
-with battle-tested OSS:
-
-1. **LiteLLM** for LLM gateway — unlocks 100+ models, drops 4
-   hand-rolled provider clients (~600 lines)
+1. ~~**LiteLLM** for LLM gateway~~ — **DONE** (this push)
 2. **Svix** for webhooks outbound — drops outbox + retry worker
    (~600 lines)
 3. **uv in agent container + MCP refactor** — unlocks real

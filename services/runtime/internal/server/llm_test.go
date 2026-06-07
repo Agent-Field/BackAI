@@ -42,10 +42,10 @@ func upstreamChatServer(t *testing.T, body string, status int) *httptest.Server 
 }
 
 func gatewayFor(upstreamURL, providerID string) *llmgateway.Gateway {
-	return llmgateway.New(llmgateway.NewOpenAICompatProvider(llmgateway.OpenAICompatConfig{
+	return llmgateway.New(llmgateway.NewLiteLLMProvider(llmgateway.LiteLLMConfig{
 		ProviderID: providerID,
 		BaseURL:    upstreamURL,
-		APIKey:     "test-key",
+		MasterKey:  "test-key",
 	}))
 }
 

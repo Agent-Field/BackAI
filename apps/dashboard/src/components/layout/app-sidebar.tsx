@@ -59,7 +59,7 @@ export function AppSidebar() {
   const navGroups = getNavGroupsWithPlugins()
 
   return (
-    <Sidebar collapsible="icon">
+    <Sidebar collapsible="icon" variant="inset">
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>

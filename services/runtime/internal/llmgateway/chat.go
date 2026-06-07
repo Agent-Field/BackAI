@@ -13,19 +13,20 @@
 //
 // and have it just work, unmodified.
 //
-// The invariant: every LLM call routes through AgentField. AgentField
-// has a built-in LLM gateway (LiteLLM-backed); this shim wraps it.
-// There is no Phase-7 escape hatch.
+// Architecture: the shim forwards the request body to a LiteLLM Proxy
+// sidecar (image `ghcr.io/berriai/litellm:main-stable`) running
+// alongside the runtime in docker-compose. LiteLLM handles the 100+
+// upstream providers (OpenRouter, OpenAI, Anthropic, Google, Mistral,
+// DeepSeek, Groq, Cohere, Bedrock, ...) so AF Stack no longer ships a
+// hand-rolled client per provider.
 //
-// Current state (MVP path): the Phase-7 implementation proxies to
-// provider-native OpenAI-compatible endpoints (OpenRouter, OpenAI,
-// Anthropic-compat) because the AgentField runtime in `docker compose`
-// does not yet expose a built-in `__llm.chat` reasoner or
-// `/api/v1/llm/chat/completions` shim. The public contract still says
-// "routes through AF" — switching to the AF-native handler is purely
-// an internal change (swap ProviderClient implementations) once AF
-// lands the built-in handler. See gateway.go for the routing
-// abstraction.
+// AF Stack keeps the AI-native pieces — per-tenant API keys, cost
+// ledger, budget enforcement, response cache, and pre/post-call hooks
+// — on its side. LiteLLM is purely an upstream routing layer that
+// customers never see directly.
+//
+// See gateway.go for the ProviderClient interface and litellm_provider.go
+// for the production wiring.
 package llmgateway
 
 import "encoding/json"
@@ -123,10 +124,19 @@ type ChatChoice struct {
 // Optional in the upstream response — when a provider omits it, the
 // gateway records cost_usd=0 with an explicit "missing usage" log
 // line so the operator notices.
+//
+// ResponseCostUSD is an AF-Stack-internal field populated by the
+// LiteLLM provider when LiteLLM's proxy config maps the model to a
+// pricing entry — LiteLLM injects `response_cost` (USD) at the top
+// level of the OpenAI-shape response, and the provider lifts it into
+// Usage so the post-call hook can prefer LiteLLM's number over the
+// static pricing.EstimateCostUSD catalog. Nil when LiteLLM did not
+// emit a cost (cost path falls back to the static catalog).
 type Usage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens     int      `json:"prompt_tokens"`
+	CompletionTokens int      `json:"completion_tokens"`
+	TotalTokens      int      `json:"total_tokens"`
+	ResponseCostUSD  *float64 `json:"response_cost,omitempty"`
 }
 
 // ChatStreamChunk is one SSE event's `data: {...}` payload during a

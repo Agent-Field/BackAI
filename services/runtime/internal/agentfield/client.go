@@ -93,6 +93,37 @@ type AgentInfo struct {
 	Reasoners []string `json:"reasoners,omitempty"`
 }
 
+// AgentHarness mirrors the per-provider entry an agent emits from its
+// __capabilities__ reasoner. Field names match the shape the harnesses
+// aggregator expects (see services/runtime/internal/harnesses).
+type AgentHarness struct {
+	Provider    string   `json:"provider"`
+	IsInstalled bool     `json:"is_installed"`
+	BinaryPath  *string  `json:"binary_path"`
+	Version     *string  `json:"version"`
+	Status      string   `json:"status"` // ready|needs_auth|missing
+	LastError   *string  `json:"last_error"`
+	RequiredEnv []string `json:"required_env"`
+}
+
+// AgentMCPRunner is the per-runner entry from __capabilities__: name +
+// resolved binary + (best-effort) version. Used to gate which agents
+// can host stdio MCP servers spawned via uvx/npx.
+type AgentMCPRunner struct {
+	Name       string  `json:"name"`
+	BinaryPath string  `json:"binary_path"`
+	Version    *string `json:"version"`
+}
+
+// AgentCapabilities is the payload returned by an agent's
+// __capabilities__ reasoner. Agents that don't define the reasoner are
+// treated as having zero harnesses / runners.
+type AgentCapabilities struct {
+	NodeID     string           `json:"node_id"`
+	Harnesses  []AgentHarness   `json:"harnesses"`
+	MCPRunners []AgentMCPRunner `json:"mcp_runners"`
+}
+
 // Discover lists registered agents in AF. Used by the suite's
 // `/api/v1/agents` discovery endpoint.
 //
@@ -194,6 +225,77 @@ func (c *Client) GetExecution(ctx context.Context, id string) (ExecuteResponse, 
 		Body:        body,
 		ContentType: resp.Header.Get("Content-Type"),
 	}, nil
+}
+
+// Capabilities calls every registered agent's ``__capabilities__``
+// reasoner and returns one entry per agent.
+//
+// This is how the runtime learns what CLI harnesses and MCP runners
+// live inside each AgentField agent container. The runtime container is
+// distroless and intentionally cannot host those binaries; the
+// harnesses / mcp packages aggregate the per-agent answers returned by
+// this method.
+//
+// Agents that do not define ``__capabilities__`` are silently skipped
+// (we treat them as "has no harnesses, has no runners"). Per-agent
+// network errors are logged but do not fail the aggregate — a slow
+// agent shouldn't take out the dashboard.
+//
+// The caller's ctx applies to the whole fan-out; pass a generous
+// timeout (5–10s) so a single dead agent can't block the rest. Each
+// per-agent call is also capped at 5 seconds.
+func (c *Client) Capabilities(ctx context.Context) ([]AgentCapabilities, error) {
+	agents, err := c.Discover(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AgentCapabilities, 0, len(agents))
+	for _, a := range agents {
+		if a.NodeID == "" {
+			continue
+		}
+		caps, ok := c.fetchOneCapabilities(ctx, a.NodeID)
+		if !ok {
+			continue
+		}
+		if caps.NodeID == "" {
+			caps.NodeID = a.NodeID
+		}
+		out = append(out, caps)
+	}
+	return out, nil
+}
+
+// fetchOneCapabilities calls a single agent's __capabilities__ reasoner.
+// Returns (zero, false) when the reasoner is missing, the agent is
+// unreachable, or the response isn't JSON we can parse. The runtime
+// treats missing capabilities the same as an agent that declared none —
+// not an error, just no harnesses / runners contributed.
+func (c *Client) fetchOneCapabilities(ctx context.Context, nodeID string) (AgentCapabilities, bool) {
+	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	resp, err := c.Execute(cctx, "/api/v1/execute/"+nodeID+".__capabilities__", []byte("{}"))
+	if err != nil || resp.StatusCode >= 400 {
+		return AgentCapabilities{}, false
+	}
+	// AgentField wraps reasoner output as { "status": "success",
+	// "output": {...} }. We accept both the wrapped shape and a raw
+	// capabilities object, since the wire shape evolved across SDK
+	// versions.
+	var wrapped struct {
+		Output AgentCapabilities `json:"output"`
+	}
+	if err := json.Unmarshal(resp.Body, &wrapped); err == nil &&
+		(wrapped.Output.NodeID != "" ||
+			len(wrapped.Output.Harnesses) > 0 ||
+			len(wrapped.Output.MCPRunners) > 0) {
+		return wrapped.Output, true
+	}
+	var raw AgentCapabilities
+	if err := json.Unmarshal(resp.Body, &raw); err != nil {
+		return AgentCapabilities{}, false
+	}
+	return raw, true
 }
 
 // CancelExecution cancels a running async execution.
