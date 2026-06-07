@@ -110,6 +110,13 @@ var publicPrefixes = []string{
 	// Billing dashboard surface (Phase 10.4). Same auth shape as
 	// admin/* — the dashboard's session gates it.
 	"/api/v1/billing",
+	// MCP servers + tools (Phase 11.1). Dashboard CRUD surface; tool
+	// calls inherit the caller's tenant context.
+	"/api/v1/mcp",
+	// Skills (Phase 11.3) — install/list/attach surface.
+	"/api/v1/skills",
+	// Harnesses (Phase 11.4) — probe + list surface for the dashboard.
+	"/api/v1/harnesses",
 }
 
 func isPublicPath(p string) bool {

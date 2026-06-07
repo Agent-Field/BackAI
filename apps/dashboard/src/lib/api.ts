@@ -702,6 +702,191 @@ export const PortalLinkSchema = z.object({
 })
 export type PortalLink = z.infer<typeof PortalLinkSchema>
 
+// ─── MCP (Phase 11.1) ────────────────────────────────────────────────────
+//
+// Model Context Protocol servers are external processes (or HTTP/SSE
+// endpoints) that expose tools to agents. The suite runtime hosts a
+// pool of connections — one per configured server — and proxies tool
+// calls. Per-tenant isolation: when MT is on, each tenant can opt
+// servers in/out via the dashboard.
+//
+// Transport modes:
+//   - "stdio" — spawn a child process and talk JSON-RPC over its
+//     stdin/stdout. The canonical local-dev path.
+//   - "sse"   — long-lived HTTP+SSE stream. The canonical remote /
+//     hosted-MCP path.
+
+export const MCPTransportSchema = z.enum(["stdio", "sse"])
+export type MCPTransport = z.infer<typeof MCPTransportSchema>
+
+export const MCPServerStatusSchema = z.enum([
+  "connecting",
+  "ready",
+  "errored",
+  "disabled",
+])
+export type MCPServerStatus = z.infer<typeof MCPServerStatusSchema>
+
+export const MCPServerSchema = z.object({
+  // Stable slug used in URLs and tool calls: `tools.call_mcp("github",
+  // "search_repos", ...)`. Lowercased letters, digits, dashes.
+  name: z.string(),
+  transport: MCPTransportSchema,
+  // stdio: ["uvx", "mcp-server-github"]; sse: ignored.
+  command: z.array(z.string()),
+  // sse only: e.g. "https://mcp.acme.com/sse". stdio: null.
+  url: z.string().nullable(),
+  // Environment passed to stdio servers. Values come from the secrets
+  // vault when prefixed with "secret:<key>" — never raw secret strings.
+  env: z.record(z.string(), z.string()),
+  // Per-tenant scoping. null = available to every tenant; a uuid means
+  // only that tenant sees it.
+  tenant_id: z.string().nullable(),
+  description: z.string(),
+  is_enabled: z.boolean(),
+  status: MCPServerStatusSchema,
+  // Most-recent error message when status="errored". Truncated to ~500
+  // chars so the dashboard isn't drowned in stack traces.
+  last_error: z.string().nullable(),
+  // Last successful tool list (refreshed on connect + every 5min).
+  tools_count: z.number(),
+  installed_at: z.string(),
+  last_connected_at: z.string().nullable(),
+})
+export type MCPServer = z.infer<typeof MCPServerSchema>
+
+export const MCPServerListSchema = z.object({
+  servers: z.array(MCPServerSchema),
+})
+export type MCPServerList = z.infer<typeof MCPServerListSchema>
+
+export const MCPToolSchema = z.object({
+  // Composite id `<server>/<tool>`. Used in agent tool-use planning.
+  id: z.string(),
+  server: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  // JSON Schema for the tool's arguments. The runtime forwards as-is
+  // so agents can use it for tool-use prompting.
+  input_schema: z.record(z.string(), z.unknown()),
+})
+export type MCPTool = z.infer<typeof MCPToolSchema>
+
+export const MCPToolListSchema = z.object({
+  tools: z.array(MCPToolSchema),
+})
+export type MCPToolList = z.infer<typeof MCPToolListSchema>
+
+export const CreateMCPServerInputSchema = z.object({
+  name: z.string(),
+  transport: MCPTransportSchema,
+  command: z.array(z.string()).optional(),
+  url: z.string().optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  description: z.string().optional(),
+  tenant_id: z.string().optional(),
+})
+export type CreateMCPServerInput = z.infer<typeof CreateMCPServerInputSchema>
+
+export const CallMCPInputSchema = z.object({
+  server: z.string(),
+  tool: z.string(),
+  arguments: z.record(z.string(), z.unknown()).optional(),
+})
+export type CallMCPInput = z.infer<typeof CallMCPInputSchema>
+
+export const CallMCPResultSchema = z.object({
+  // MCP returns a `content` array of typed parts. We pass it through
+  // unchanged so the SDK can pull text / image / json parts as it
+  // pleases.
+  content: z.array(z.record(z.string(), z.unknown())),
+  is_error: z.boolean(),
+  // Round-trip duration of the MCP call, useful for the dashboard
+  // tool-call inspector and for cost rollups later.
+  duration_ms: z.number(),
+})
+export type CallMCPResult = z.infer<typeof CallMCPResultSchema>
+
+// ─── Skills (Phase 11.3) ─────────────────────────────────────────────────
+//
+// Skills are AF skillkit bundles installed into the runtime. Each one
+// declares prompt overlays + optional tool bindings; agents attach them
+// when needed. Persisted in suite_skills.
+
+export const SkillSchema = z.object({
+  // Bundle id ("af-skill://acme/security-audit@1.2.0").
+  id: z.string(),
+  name: z.string(),
+  version: z.string(),
+  // Where the bundle came from — registry URL, local path, or "embedded"
+  // for the built-in defaults.
+  source: z.string(),
+  description: z.string().nullable(),
+  // List of harnesses this skill targets ("claude-code", "codex", "any").
+  harnesses: z.array(z.string()),
+  // Tags from the skill manifest — surface for the dashboard filter.
+  tags: z.array(z.string()),
+  tenant_id: z.string().nullable(),
+  installed_at: z.string(),
+})
+export type Skill = z.infer<typeof SkillSchema>
+
+export const SkillListSchema = z.object({
+  skills: z.array(SkillSchema),
+})
+export type SkillList = z.infer<typeof SkillListSchema>
+
+export const InstallSkillInputSchema = z.object({
+  // Either an id ("af-skill://acme/x@1") or a local path. The runtime
+  // figures out which.
+  source: z.string(),
+  tenant_id: z.string().optional(),
+})
+export type InstallSkillInput = z.infer<typeof InstallSkillInputSchema>
+
+export const AttachSkillInputSchema = z.object({
+  skill_id: z.string(),
+  // Agent (slug) or harness id to bind this skill onto.
+  agent: z.string(),
+})
+export type AttachSkillInput = z.infer<typeof AttachSkillInputSchema>
+
+// ─── Harnesses (Phase 11.4) ──────────────────────────────────────────────
+//
+// Harnesses are CLI tools agents shell out to (Claude Code, Codex,
+// Gemini, OpenCode). We don't manage their state inside the runtime
+// beyond knowing whether they're installed and reachable.
+
+export const HarnessProviderSchema = z.enum([
+  "claude-code",
+  "codex",
+  "gemini",
+  "opencode",
+])
+export type HarnessProvider = z.infer<typeof HarnessProviderSchema>
+
+export const HarnessSchema = z.object({
+  provider: HarnessProviderSchema,
+  is_installed: z.boolean(),
+  // Resolved binary path when installed; nullable otherwise.
+  binary_path: z.string().nullable(),
+  version: z.string().nullable(),
+  // Result of `--help` / `--version` health probe. ready = usable from
+  // app.harness(); needs_auth = installed but no API key configured.
+  status: z.enum(["ready", "needs_auth", "missing", "errored"]),
+  last_error: z.string().nullable(),
+  // Env vars the harness needs (e.g. ANTHROPIC_API_KEY for claude-code).
+  // Dashboard surfaces these so the operator knows what's missing.
+  required_env: z.array(z.string()),
+  install_doc_url: z.string().nullable(),
+})
+export type Harness = z.infer<typeof HarnessSchema>
+
+export const HarnessListSchema = z.object({
+  harnesses: z.array(HarnessSchema),
+})
+export type HarnessList = z.infer<typeof HarnessListSchema>
+
 // ─── Database studio + memory (Phase 8) ──────────────────────────────────
 
 export const DBTableSchema = z.object({
@@ -1344,6 +1529,98 @@ export const api = {
         `/api/v1/billing/customers/${encodeURIComponent(tenantId)}/portal`,
         { method: "POST" },
         PortalLinkSchema,
+      ),
+  },
+
+  // ─── MCP servers + tools (Phase 11.1) ───
+  mcp: {
+    servers: () =>
+      request("/api/v1/mcp/servers", undefined, MCPServerListSchema),
+    server: (name: string) =>
+      request(
+        `/api/v1/mcp/servers/${encodeURIComponent(name)}`,
+        undefined,
+        MCPServerSchema,
+      ),
+    addServer: (input: CreateMCPServerInput) =>
+      request(
+        "/api/v1/mcp/servers",
+        { method: "POST", json: input },
+        MCPServerSchema,
+      ),
+    removeServer: (name: string) =>
+      request(
+        `/api/v1/mcp/servers/${encodeURIComponent(name)}`,
+        { method: "DELETE" },
+        z.object({ deleted: z.boolean() }),
+      ),
+    enableServer: (name: string, enabled: boolean) =>
+      request(
+        `/api/v1/mcp/servers/${encodeURIComponent(name)}/enabled`,
+        { method: "PUT", json: { enabled } },
+        MCPServerSchema,
+      ),
+    tools: (server?: string) => {
+      const qs = server ? `?server=${encodeURIComponent(server)}` : ""
+      return request(`/api/v1/mcp/tools${qs}`, undefined, MCPToolListSchema)
+    },
+    call: (input: CallMCPInput) =>
+      request(
+        "/api/v1/mcp/call",
+        { method: "POST", json: input },
+        CallMCPResultSchema,
+      ),
+  },
+
+  // ─── Skills (Phase 11.3) ───
+  skills: {
+    list: (params?: { tenant?: string; harness?: string }) => {
+      const qs = new URLSearchParams()
+      if (params?.tenant) qs.set("tenant", params.tenant)
+      if (params?.harness) qs.set("harness", params.harness)
+      const q = qs.toString()
+      return request(
+        `/api/v1/skills${q ? "?" + q : ""}`,
+        undefined,
+        SkillListSchema,
+      )
+    },
+    install: (input: InstallSkillInput) =>
+      request(
+        "/api/v1/skills",
+        { method: "POST", json: input },
+        SkillSchema,
+      ),
+    uninstall: (id: string) =>
+      request(
+        `/api/v1/skills/${encodeURIComponent(id)}`,
+        { method: "DELETE" },
+        z.object({ deleted: z.boolean() }),
+      ),
+    attach: (input: AttachSkillInput) =>
+      request(
+        "/api/v1/skills/attach",
+        { method: "POST", json: input },
+        z.object({ attached: z.boolean() }),
+      ),
+  },
+
+  // ─── Harnesses (Phase 11.4) ───
+  harnesses: {
+    list: () =>
+      request("/api/v1/harnesses", undefined, HarnessListSchema),
+    get: (provider: HarnessProvider) =>
+      request(
+        `/api/v1/harnesses/${encodeURIComponent(provider)}`,
+        undefined,
+        HarnessSchema,
+      ),
+    // Re-probes the harness binary and returns the refreshed status.
+    probe: (provider: HarnessProvider) =>
+      request(
+        `/api/v1/harnesses/${encodeURIComponent(provider)}/probe`,
+        { method: "POST" },
+        HarnessSchema,
       ),
   },
 
