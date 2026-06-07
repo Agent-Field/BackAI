@@ -191,6 +191,30 @@ func applyEnvOverrides(cfg *Config) {
 		cfg.Observability.ServiceName = v
 	}
 
+	// Module enable flags. Per-module env vars override the YAML map so
+	// docker-compose can flip modules without a config volume mount. Name
+	// pattern: AF_STACK_MODULE_<UPPER_SNAKE> where the suffix is the module
+	// id with `-` swapped for `_`. e.g. AF_STACK_MODULE_MULTI_TENANCY=true.
+	for _, k := range os.Environ() {
+		eq := strings.IndexByte(k, '=')
+		if eq <= 0 {
+			continue
+		}
+		name, value := k[:eq], k[eq+1:]
+		if !strings.HasPrefix(name, "AF_STACK_MODULE_") {
+			continue
+		}
+		moduleID := strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(name, "AF_STACK_MODULE_"), "_", "-"))
+		if moduleID == "" {
+			continue
+		}
+		on := value == "1" || strings.EqualFold(value, "true") || strings.EqualFold(value, "yes")
+		if cfg.Modules.Enabled == nil {
+			cfg.Modules.Enabled = make(map[string]bool)
+		}
+		cfg.Modules.Enabled[moduleID] = on
+	}
+
 	// Storage. AF_STACK_S3_* mirrors the .env.example contract.
 	if v := os.Getenv("AF_STACK_S3_ADAPTER"); v != "" {
 		cfg.Storage.Adapter = strings.ToLower(v)

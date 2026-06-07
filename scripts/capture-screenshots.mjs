@@ -131,6 +131,39 @@ async function capture() {
     fullPage: false,
   })
 
+  // ── 10-12. Customers/* (Phase 6 — only render real content when
+  //          multi-tenancy is on; the pages render an empty-state CTA
+  //          otherwise, which is also worth a screenshot.)
+  console.log("→ Customers → Tenants")
+  await page.goto(`${DASHBOARD_URL}/customers/tenants`, {
+    waitUntil: "networkidle",
+  })
+  await page.waitForTimeout(2000)
+  await page.screenshot({
+    path: resolve(OUT_DIR, "customers-tenants.png"),
+    fullPage: false,
+  })
+
+  console.log("→ Customers → API Keys")
+  await page.goto(`${DASHBOARD_URL}/customers/api-keys`, {
+    waitUntil: "networkidle",
+  })
+  await page.waitForTimeout(2000)
+  await page.screenshot({
+    path: resolve(OUT_DIR, "customers-api-keys.png"),
+    fullPage: false,
+  })
+
+  console.log("→ Customers → Audit")
+  await page.goto(`${DASHBOARD_URL}/customers/audit`, {
+    waitUntil: "networkidle",
+  })
+  await page.waitForTimeout(2000)
+  await page.screenshot({
+    path: resolve(OUT_DIR, "customers-audit.png"),
+    fullPage: false,
+  })
+
   await browser.close()
   console.log(`saved screenshots to ${OUT_DIR}`)
 }

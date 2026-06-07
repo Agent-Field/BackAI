@@ -29,11 +29,13 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/jobs"
 	"github.com/Agent-Field/backai/services/runtime/internal/logger"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
+	"github.com/Agent-Field/backai/services/runtime/internal/ratelimit"
 	"github.com/Agent-Field/backai/services/runtime/internal/secrets"
 	"github.com/Agent-Field/backai/services/runtime/internal/server"
 	"github.com/Agent-Field/backai/services/runtime/internal/storage"
 	minioadapter "github.com/Agent-Field/backai/services/runtime/internal/storage/adapters/minio"
 	s3adapter "github.com/Agent-Field/backai/services/runtime/internal/storage/adapters/s3"
+	"github.com/Agent-Field/backai/services/runtime/internal/tenancy"
 )
 
 const version = "0.0.1"
@@ -230,6 +232,52 @@ func main() {
 		log.Info("jobs manager not configured (no database); /api/v1/jobs/* will return empty responses")
 	}
 
+	// Rate limiter. Always constructed (in-process, no external deps).
+	// When DB is available, wire a QuotaSource that reads
+	// suite_tenants.quota->>'rpm' so per-tenant overrides apply. The
+	// closure swallows DB errors and returns (0, false) so a slow query
+	// can never block an inbound request.
+	var quotas ratelimit.QuotaSource
+	if database != nil && database.Pool != nil {
+		pool := database.Pool
+		quotas = func(ctx context.Context, tenantID string) (int, bool) {
+			if tenantID == "" {
+				return 0, false
+			}
+			lookupCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+			defer cancel()
+			var rpm int
+			err := pool.QueryRow(lookupCtx, `
+				select coalesce(nullif((quota->>'rpm'), '')::int, 0)
+				from suite_tenants where id = $1
+			`, tenantID).Scan(&rpm)
+			if err != nil || rpm <= 0 {
+				return 0, false
+			}
+			return rpm, true
+		}
+	}
+	limiterOpts := []ratelimit.Option{}
+	if quotas != nil {
+		limiterOpts = append(limiterOpts, ratelimit.WithQuotaSource(quotas))
+	}
+	limiter := ratelimit.NewInMemory(limiterOpts...)
+	log.Info("rate limiter ready", "default_rpm", ratelimit.DefaultRPM)
+
+	// Tenancy manager — required when the multi-tenancy module is enabled,
+	// optional otherwise (admin endpoints already gate on the flag).
+	var tenancyMgr *tenancy.Manager
+	if database != nil && database.Pool != nil {
+		var tenErr error
+		tenancyMgr, tenErr = tenancy.New(database.Pool, hookEngine, log)
+		if tenErr != nil {
+			log.Error("tenancy manager init failed", "error", tenErr)
+		} else {
+			log.Info("tenancy manager ready",
+				"multi_tenancy_enabled", cfg.Modules.Enabled["multi-tenancy"])
+		}
+	}
+
 	srv := server.New(cfg, log, server.Deps{
 		DB:            database,
 		AF:            afClient,
@@ -239,6 +287,8 @@ func main() {
 		StoragePrefix: cfg.Storage.TenantPrefix,
 		Secrets:       vault,
 		Jobs:          jobsManager,
+		RateLimiter:   limiter,
+		Tenancy:       tenancyMgr,
 	})
 	if err := srv.Start(ctx); err != nil {
 		log.Error("server stopped with error", "error", err)

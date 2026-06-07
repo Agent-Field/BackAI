@@ -69,6 +69,12 @@ Plus a REST + OpenAPI surface so any language works.
 
 <sub>Operate → Cost: spend by model · agent · tenant · day, with budgets and forecast</sub>
 
+<img src="dashboard-screenshots/customers-tenants.png" alt="AF Stack Customers — tenant list with detail drawer" width="900" />
+<sub>Customers → Tenants: per-customer drilldown with usage, members, audit</sub>
+
+<img src="dashboard-screenshots/customers-api-keys.png" alt="AF Stack Customers — API key issuance" width="900" />
+<sub>Customers → API Keys: issue / rotate / revoke with one-time-reveal</sub>
+
 </div>
 
 ## Quickstart (under 60 seconds)
@@ -99,6 +105,11 @@ Endpoints once up:
 - MinIO console: `http://localhost:9001/`
 
 Dashboard (Next.js) lands in Phase 3.
+
+To enable multi-tenancy: set `modules.multi-tenancy.enabled: true` in
+`apps/backend/config.yaml`. See [`docs/multi-tenancy.md`](docs/multi-tenancy.md)
+for the full guide, including how to run the end-to-end isolation test
+(`scripts/test-multi-tenancy.sh`).
 
 ### Make it your own
 

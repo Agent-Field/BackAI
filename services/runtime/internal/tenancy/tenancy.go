@@ -1,0 +1,277 @@
+// Package tenancy holds the multi-tenancy data model + Manager
+// implementation for AF Stack Phase 6.
+//
+// The Manager is a Postgres-backed concrete struct (NOT an interface)
+// living in manager.go. Its method surface is the contract the admin
+// REST handlers (services/runtime/internal/server/admin.go), SDKs, and
+// dashboard pages depend on.
+//
+// Wire shapes (Tenant, User, Membership, APIKey, IssuedAPIKey,
+// AuditEntry, TenantDetail) mirror the zod schemas in
+// apps/dashboard/src/lib/api.ts EXACTLY (snake_case JSON tags, nullable
+// fields emitted as JSON null via pointer types). Time-valued columns
+// here are typed as time.Time / *time.Time; the admin handlers format
+// them to RFC3339Nano UTC before serialising to the wire.
+//
+// Errors:
+//
+// We expose two layers of typed errors:
+//   - ErrNotFound / ErrConflict / ErrInvalid — coarse buckets the admin
+//     handlers map to HTTP 404 / 409 / 400 respectively. These are kept
+//     for compatibility with existing handler code.
+//   - ErrTenantNotFound / ErrSlugTaken / ErrInvalidRole / ErrKeyRevoked /
+//     ErrKeyExpired / ErrKeySecretMismatch / ErrInvalidAPIKeyFormat /
+//     ErrAPIKeyNotFound / ErrUserNotFound / ErrMembershipNotFound —
+//     fine-grained sentinels used by the resolver middleware and
+//     integration tests to discriminate failure modes. Each of these
+//     wraps one of the coarse buckets via errors.Is, so handlers that
+//     check the coarse bucket still work.
+package tenancy
+
+import (
+	"context"
+	"errors"
+	"time"
+)
+
+// ─── Sentinel errors ──────────────────────────────────────────────────────
+
+var (
+	// ErrNotFound is the coarse "lookup miss" bucket. Admin handlers
+	// map this to HTTP 404. Use errors.Is(err, ErrNotFound) to catch
+	// the more specific ErrTenantNotFound / ErrAPIKeyNotFound / etc.
+	ErrNotFound = errors.New("tenancy: not found")
+	// ErrConflict is the coarse "uniqueness or state collision" bucket
+	// (HTTP 409). Wraps ErrSlugTaken.
+	ErrConflict = errors.New("tenancy: conflict")
+	// ErrInvalid is the coarse "validation failure" bucket (HTTP 400).
+	// Wraps ErrInvalidSlug / ErrInvalidRole / ErrInvalidAPIKeyFormat.
+	ErrInvalid = errors.New("tenancy: invalid input")
+)
+
+// ErrTenantNotFound is returned by GetTenant/GetTenantDetail/Update/
+// Delete when the tenant id has no row. Wraps ErrNotFound.
+var ErrTenantNotFound = wrappedErr{base: ErrNotFound, msg: "tenancy: tenant not found"}
+
+// ErrUserNotFound: AddMembership when user_id has no row.
+var ErrUserNotFound = wrappedErr{base: ErrNotFound, msg: "tenancy: user not found"}
+
+// ErrMembershipNotFound: RemoveMembership / FirstMembershipFor.
+var ErrMembershipNotFound = wrappedErr{base: ErrNotFound, msg: "tenancy: membership not found"}
+
+// ErrAPIKeyNotFound: RevokeKey / VerifyKey when prefix doesn't match.
+var ErrAPIKeyNotFound = wrappedErr{base: ErrNotFound, msg: "tenancy: api key not found"}
+
+// ErrSlugTaken: CreateTenant when the slug already belongs to another
+// tenant. Wraps ErrConflict.
+var ErrSlugTaken = wrappedErr{base: ErrConflict, msg: "tenancy: slug already taken"}
+
+// ErrInvalidSlug: CreateTenant when slug fails the charset/length check.
+var ErrInvalidSlug = wrappedErr{base: ErrInvalid, msg: "tenancy: invalid slug"}
+
+// ErrInvalidRole: AddMembership when role is not in the allowed set.
+var ErrInvalidRole = wrappedErr{base: ErrInvalid, msg: "tenancy: invalid role"}
+
+// ErrInvalidAPIKeyFormat: VerifyKey when the token doesn't parse.
+var ErrInvalidAPIKeyFormat = wrappedErr{base: ErrInvalid, msg: "tenancy: invalid api key format"}
+
+// ErrKeyRevoked: VerifyKey matched a row whose revoked_at is set. The
+// resolver maps this AND ErrKeySecretMismatch / ErrAPIKeyNotFound to
+// HTTP 401, so the client can't distinguish revocation from a wrong
+// secret (defence against existence oracles).
+var ErrKeyRevoked = errors.New("tenancy: api key revoked")
+
+// ErrKeyExpired: VerifyKey matched a row whose expires_at is past.
+var ErrKeyExpired = errors.New("tenancy: api key expired")
+
+// ErrKeySecretMismatch: VerifyKey matched a prefix but bcrypt failed.
+var ErrKeySecretMismatch = errors.New("tenancy: api key secret mismatch")
+
+// wrappedErr is a tiny error type whose Is method returns true for its
+// `base` sentinel. Lets us define fine-grained errors that the coarse
+// buckets recognise without writing manual Unwrap chains.
+type wrappedErr struct {
+	base error
+	msg  string
+}
+
+func (e wrappedErr) Error() string { return e.msg }
+func (e wrappedErr) Is(target error) bool {
+	return target == e.base || target == e
+}
+
+// ─── Wire shapes (mirror apps/dashboard/src/lib/api.ts) ───────────────────
+
+// Tenant matches TenantSchema. Settings and Quota are free-form maps that
+// must round-trip as JSON objects (never null).
+type Tenant struct {
+	ID        string                 `json:"id"`
+	Slug      string                 `json:"slug"`
+	Name      string                 `json:"name"`
+	Plan      string                 `json:"plan"`
+	Settings  map[string]interface{} `json:"settings"`
+	Quota     map[string]interface{} `json:"quota"`
+	CreatedAt time.Time              `json:"created_at"`
+	DeletedAt *time.Time             `json:"deleted_at"`
+}
+
+// User matches UserSchema.
+type User struct {
+	ID        string     `json:"id"`
+	Email     string     `json:"email"`
+	Name      *string    `json:"name"`
+	AvatarURL *string    `json:"avatar_url"`
+	CreatedAt time.Time  `json:"created_at"`
+	DeletedAt *time.Time `json:"deleted_at"`
+}
+
+// Membership matches MembershipSchema.
+type Membership struct {
+	TenantID   string     `json:"tenant_id"`
+	UserID     string     `json:"user_id"`
+	Role       string     `json:"role"`
+	InvitedAt  time.Time  `json:"invited_at"`
+	AcceptedAt *time.Time `json:"accepted_at"`
+}
+
+// APIKey matches APIKeySchema (no plaintext).
+type APIKey struct {
+	ID         string     `json:"id"`
+	TenantID   string     `json:"tenant_id"`
+	Prefix     string     `json:"prefix"`
+	Name       *string    `json:"name"`
+	Scopes     []string   `json:"scopes"`
+	CreatedBy  *string    `json:"created_by"`
+	CreatedAt  time.Time  `json:"created_at"`
+	LastUsedAt *time.Time `json:"last_used_at"`
+	ExpiresAt  *time.Time `json:"expires_at"`
+	RevokedAt  *time.Time `json:"revoked_at"`
+}
+
+// IssuedAPIKey matches IssuedAPIKeySchema = APIKey + value (one-time reveal).
+type IssuedAPIKey struct {
+	APIKey
+	Value string `json:"value"`
+}
+
+// TenantDetailMember matches TenantDetailSchema.members[].
+type TenantDetailMember struct {
+	User User   `json:"user"`
+	Role string `json:"role"`
+}
+
+// TenantDetailUsage matches TenantDetailSchema.usage.
+type TenantDetailUsage struct {
+	Requests30D  int64   `json:"requests_30d"`
+	CostUSD30D   float64 `json:"cost_usd_30d"`
+	StorageBytes int64   `json:"storage_bytes"`
+	SecretsCount int     `json:"secrets_count"`
+}
+
+// TenantDetail matches TenantDetailSchema.
+type TenantDetail struct {
+	Tenant  Tenant               `json:"tenant"`
+	Members []TenantDetailMember `json:"members"`
+	APIKeys []APIKey             `json:"api_keys"`
+	Usage   TenantDetailUsage    `json:"usage"`
+}
+
+// AuditEntry matches AuditEntrySchema.
+type AuditEntry struct {
+	ID           string                 `json:"id"`
+	TenantID     *string                `json:"tenant_id"`
+	UserID       *string                `json:"user_id"`
+	APIKeyID     *string                `json:"api_key_id"`
+	Action       string                 `json:"action"`
+	ResourceType *string                `json:"resource_type"`
+	ResourceID   *string                `json:"resource_id"`
+	Metadata     map[string]interface{} `json:"metadata"`
+	OccurredAt   time.Time              `json:"occurred_at"`
+}
+
+// AuditPage is the result of Manager.ListAudit (matches AuditListSchema).
+type AuditPage struct {
+	Entries []AuditEntry
+	Total   int
+	HasMore bool
+}
+
+// ─── Inputs ───────────────────────────────────────────────────────────────
+
+// CreateTenantInput matches CreateTenantInputSchema. Used by the
+// CreateTenant(ctx, in) shape; the slug-name-plan positional variant
+// in manager.go is a convenience wrapper.
+type CreateTenantInput struct {
+	Slug string `json:"slug"`
+	Name string `json:"name"`
+	Plan string `json:"plan,omitempty"`
+}
+
+// UpdateTenantInput matches UpdateTenantInputSchema. Each pointer field
+// is nil when omitted by the caller.
+type UpdateTenantInput struct {
+	Name     *string                `json:"name,omitempty"`
+	Plan     *string                `json:"plan,omitempty"`
+	Settings map[string]interface{} `json:"settings,omitempty"`
+	Quota    map[string]interface{} `json:"quota,omitempty"`
+}
+
+// IssueAPIKeyInput matches IssueAPIKeyInputSchema.
+type IssueAPIKeyInput struct {
+	TenantID  string     `json:"tenant_id"`
+	Name      string     `json:"name,omitempty"`
+	Scopes    []string   `json:"scopes"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	// CreatedBy is the user id to record on the row. Optional — the
+	// admin handlers don't yet wire a principal but the SDK will.
+	CreatedBy string `json:"-"`
+}
+
+// AuditFilter scopes ListAudit.
+type AuditFilter struct {
+	TenantID string
+	Action   string
+	From     *time.Time
+	To       *time.Time
+	Limit    int
+	Offset   int
+}
+
+// ListUsersOpts is the structured form of ListUsers's filters.
+type ListUsersOpts struct {
+	TenantID string
+	Search   string
+	Limit    int
+	Offset   int
+}
+
+// ListMembershipsOpts is the structured form of ListMemberships's filters.
+type ListMembershipsOpts struct {
+	TenantID string
+	UserID   string
+	Limit    int
+	Offset   int
+}
+
+// ListKeysOpts is the structured form of ListKeys's filters.
+type ListKeysOpts struct {
+	TenantID       string
+	IncludeRevoked bool
+	Limit          int
+	Offset         int
+}
+
+// ListTenantsOpts filters ListTenants. IncludeDeleted defaults false so
+// soft-deleted tenants stay hidden unless callers opt in.
+type ListTenantsOpts struct {
+	IncludeDeleted bool
+	Limit          int
+	Offset         int
+}
+
+// ─── Compile-time check ──────────────────────────────────────────────────
+
+// Ensure context is referenced — the Manager methods take a context as
+// their first parameter. Keeping the import is defensive against future
+// refactors that move methods to other files.
+var _ = context.Background

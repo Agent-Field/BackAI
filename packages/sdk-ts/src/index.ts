@@ -70,15 +70,67 @@ export {
   type ListStorageOptions,
 } from "./storage.js"
 
+// ─── Admin sub-package ────────────────────────────────────────────────────
+//
+// Admin verbs live under their own namespace so operational and
+// administrative SDKs stay visibly separated (see docs/sdk-strategy.md).
+// All admin endpoints are gated by the runtime's `multi-tenancy` module
+// flag — calls against a disabled runtime surface as `SuiteError` with
+// `code === "MT_DISABLED"`.
+
+export {
+  admin,
+  tenants as adminTenants,
+  users as adminUsers,
+  memberships as adminMemberships,
+  keys as adminKeys,
+  audit as adminAudit,
+  TenantSchema,
+  TenantListSchema,
+  TenantDetailSchema,
+  TenantMemberSchema,
+  TenantUsageSchema,
+  UserSchema,
+  UserListSchema,
+  MembershipSchema,
+  MembershipListSchema,
+  RoleSchema,
+  APIKeySchema,
+  APIKeyListSchema,
+  IssuedAPIKeySchema,
+  AuditEntrySchema,
+  AuditListSchema,
+  type Tenant,
+  type TenantList,
+  type TenantDetail,
+  type TenantMember,
+  type TenantUsage,
+  type CreateTenantInput,
+  type UpdateTenantInput,
+  type User,
+  type UserList,
+  type Membership,
+  type MembershipList,
+  type Role,
+  type APIKey,
+  type APIKeyList,
+  type IssuedAPIKey,
+  type IssueAPIKeyInput,
+  type AuditEntry,
+  type AuditList,
+} from "./admin/index.js"
+
 import { agents } from "./agents.js"
 import { jobs } from "./jobs.js"
 import { secrets } from "./secrets.js"
 import { storage } from "./storage.js"
+import { admin } from "./admin/index.js"
 
-/** Top-level namespace: `suite.agents.*`, `suite.jobs.*`, `suite.secrets.*`, `suite.storage.*`. */
+/** Top-level namespace: `suite.agents.*`, `suite.jobs.*`, `suite.secrets.*`, `suite.storage.*`, `suite.admin.*`. */
 export const suite = {
   agents,
   jobs,
   secrets,
   storage,
+  admin,
 } as const

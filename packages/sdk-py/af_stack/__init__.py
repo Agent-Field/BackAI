@@ -25,24 +25,34 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from . import agents, jobs, secrets, storage
+from . import admin, agents, jobs, secrets, storage
 from .ctx import RequestContext, bind, ctx, current, reset, scope
 
 __version__ = "0.0.1"
 
 # ``suite`` is a namespace object so users can write the canonical
 # ``suite.agents.call(...)`` form. Each module is attached as it lands.
+# ``admin`` lives under its own sub-namespace so operational and
+# administrative verbs stay visibly separated (see docs/sdk-strategy.md).
 suite = SimpleNamespace(
     agents=agents,
     jobs=jobs,
     secrets=secrets,
     storage=storage,
+    admin=SimpleNamespace(
+        tenants=admin.tenants,
+        users=admin.users,
+        memberships=admin.memberships,
+        keys=admin.keys,
+        audit=admin.audit,
+    ),
 )
 
 
 __all__ = [
     "RequestContext",
     "__version__",
+    "admin",
     "agents",
     "bind",
     "ctx",

@@ -83,6 +83,11 @@ services:
       # KMS for the secrets vault (envelope encryption). Override in
       # production with `openssl rand -hex 32`.
       AF_STACK_KMS_KEY: ${AF_STACK_KMS_KEY:-dev-secret-change-me}
+      # Module enable flags. AF_STACK_MODULE_<UPPER_SNAKE>=true flips a
+      # module on regardless of what config.yaml says. Helpful for
+      # docker-compose where file mounts may not be readable by the
+      # distroless nonroot user.
+      AF_STACK_MODULE_MULTI_TENANCY: ${AF_STACK_MODULE_MULTI_TENANCY:-false}
       # MinIO-backed object storage.
       AF_STACK_S3_ADAPTER: minio
       AF_STACK_S3_ENDPOINT: minio:9000
@@ -98,6 +103,11 @@ services:
     ports:
       - "${AF_STACK_PORT:-8080}:8080"
       - "${AF_STACK_METRICS_PORT:-9090}:9090"
+    volumes:
+      # Mount the app's config.yaml (module enable flags, adapter choices)
+      # at the runtime's expected lookup path. Optional — when missing
+      # the runtime falls back to defaults + env overrides.
+      - ./apps/backend/config.yaml:/config.yaml:ro
     depends_on:
       postgres:
         condition: service_healthy
