@@ -205,6 +205,78 @@ export {
   type ListSandboxRunsOptions,
 } from "./sandbox.js"
 
+// ─── Billing (Phase 10.4) ─────────────────────────────────────────────────
+
+export {
+  billing,
+  customers as billingCustomers,
+  customer as billingCustomer,
+  meters as billingMeters,
+  portalLink as billingPortalLink,
+  meter as billingMeter,
+  hasBudget as billingHasBudget,
+  BillingCustomerSchema,
+  BillingCustomerListSchema,
+  UsageMeterSchema,
+  UsageMeterListSchema,
+  PortalLinkSchema,
+  type BillingCustomer,
+  type BillingCustomerList,
+  type UsageMeter,
+  type UsageMeterList,
+  type PortalLink,
+  type Bucket as BillingBucket,
+  type ListMetersOptions as ListBillingMetersOptions,
+  type PortalLinkOptions,
+  type MeterOptions as BillingMeterOptions,
+} from "./billing.js"
+
+// ─── Notifications (Phase 10.1) ───────────────────────────────────────────
+
+export {
+  notifications,
+  send as sendNotification,
+  email as sendEmail,
+  list as listNotifications,
+  get as getNotification,
+  stats as notificationStats,
+  NotificationKindSchema,
+  NotificationStatusSchema,
+  NotificationSchema,
+  NotificationListSchema,
+  NotificationStatsSchema,
+  AdapterCountSchema,
+  type NotificationKind,
+  type NotificationStatus,
+  type Notification,
+  type NotificationList,
+  type NotificationStats,
+  type AdapterCount,
+  type SendNotificationOptions,
+  type EmailNotificationOptions,
+  type ListNotificationsOptions,
+} from "./notifications.js"
+
+// ─── Webhooks (Phase 10.2 + 10.3) ────────────────────────────────────────
+
+export {
+  webhooks,
+  send as sendWebhook,
+  list as listWebhookDeliveries,
+  get as getWebhookDelivery,
+  retry as retryWebhookDelivery,
+  WebhookDirectionSchema,
+  WebhookStatusSchema,
+  WebhookDeliverySchema,
+  WebhookDeliveryListSchema,
+  type WebhookDirection,
+  type WebhookStatus,
+  type WebhookDelivery,
+  type WebhookDeliveryList,
+  type SendWebhookOptions,
+  type ListWebhookDeliveriesOptions,
+} from "./webhooks.js"
+
 import { agents } from "./agents.js"
 import { jobs } from "./jobs.js"
 import { secrets } from "./secrets.js"
@@ -214,8 +286,11 @@ import { llm } from "./llm.js"
 import { cost } from "./cost.js"
 import { memory } from "./memory.js"
 import { sandbox } from "./sandbox.js"
+import { notifications } from "./notifications.js"
+import { billing } from "./billing.js"
+import { webhooks } from "./webhooks.js"
 
-/** Top-level namespace: `suite.agents.*`, `suite.jobs.*`, `suite.secrets.*`, `suite.storage.*`, `suite.llm.*`, `suite.cost.*`, `suite.memory.*`, `suite.sandbox.*`, `suite.admin.*`. */
+/** Top-level namespace: `suite.agents.*`, `suite.jobs.*`, `suite.secrets.*`, `suite.storage.*`, `suite.llm.*`, `suite.cost.*`, `suite.memory.*`, `suite.sandbox.*`, `suite.notifications.*`, `suite.webhooks.*`, `suite.billing.*`, `suite.admin.*`. */
 export const suite = {
   agents,
   jobs,
@@ -225,5 +300,8 @@ export const suite = {
   cost,
   memory,
   sandbox,
+  notifications,
+  webhooks,
+  billing,
   admin,
 } as const

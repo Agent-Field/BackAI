@@ -25,7 +25,7 @@ export default async function Page() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Customer Billing"
-        description="Per-tenant usage and cost rollup. Real invoicing lands in Phase 10."
+        description="Stripe customers + per-tenant usage meters for the current billing period."
       />
       <CustomerBillingView />
     </div>

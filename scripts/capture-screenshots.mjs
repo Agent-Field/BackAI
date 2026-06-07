@@ -274,6 +274,39 @@ async function capture() {
     fullPage: false,
   })
 
+  // ── 17. Operate → Notifications (Phase 10.1) — stats KPI + deliveries.
+  console.log("→ Operate → Notifications")
+  await page.goto(`${DASHBOARD_URL}/operate/notifications`, {
+    waitUntil: "networkidle",
+  })
+  await page.waitForTimeout(2000)
+  await page.screenshot({
+    path: resolve(OUT_DIR, "notifications.png"),
+    fullPage: false,
+  })
+
+  // ── 18. Operate → Webhook Activity (Phase 10.2 + 10.3) — unified feed.
+  console.log("→ Operate → Webhook Activity")
+  await page.goto(`${DASHBOARD_URL}/operate/webhook-activity`, {
+    waitUntil: "networkidle",
+  })
+  await page.waitForTimeout(2000)
+  await page.screenshot({
+    path: resolve(OUT_DIR, "webhook-activity.png"),
+    fullPage: false,
+  })
+
+  // ── 19. Customers → Billing (Phase 10.4) — per-tenant Stripe billing.
+  console.log("→ Customers → Billing")
+  await page.goto(`${DASHBOARD_URL}/customers/customer-billing`, {
+    waitUntil: "networkidle",
+  })
+  await page.waitForTimeout(2000)
+  await page.screenshot({
+    path: resolve(OUT_DIR, "billing.png"),
+    fullPage: false,
+  })
+
   await browser.close()
   console.log(`saved screenshots to ${OUT_DIR}`)
 }

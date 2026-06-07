@@ -17,12 +17,14 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/agentfield"
+	"github.com/Agent-Field/backai/services/runtime/internal/billing"
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
 	"github.com/Agent-Field/backai/services/runtime/internal/cost"
 	"github.com/Agent-Field/backai/services/runtime/internal/db"
@@ -33,6 +35,9 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/llmgateway"
 	"github.com/Agent-Field/backai/services/runtime/internal/logger"
 	"github.com/Agent-Field/backai/services/runtime/internal/memory"
+	"github.com/Agent-Field/backai/services/runtime/internal/notifications"
+	notificationslog "github.com/Agent-Field/backai/services/runtime/internal/notifications/adapters/log"
+	notificationsresend "github.com/Agent-Field/backai/services/runtime/internal/notifications/adapters/resend"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
 	"github.com/Agent-Field/backai/services/runtime/internal/ratelimit"
 	"github.com/Agent-Field/backai/services/runtime/internal/secrets"
@@ -46,7 +51,30 @@ import (
 	minioadapter "github.com/Agent-Field/backai/services/runtime/internal/storage/adapters/minio"
 	s3adapter "github.com/Agent-Field/backai/services/runtime/internal/storage/adapters/s3"
 	"github.com/Agent-Field/backai/services/runtime/internal/tenancy"
+	"github.com/Agent-Field/backai/services/runtime/internal/webhooks"
 )
+
+// webhookAgentInvoker bridges the InboundService's AgentInvoker
+// contract to the runtime's *agentfield.Client. Lives in main so the
+// webhooks package doesn't take an import dependency on agentfield.
+type webhookAgentInvoker struct {
+	c *agentfield.Client
+}
+
+func (w *webhookAgentInvoker) Execute(
+	ctx context.Context,
+	path string,
+	body []byte,
+) (webhooks.AgentResponse, error) {
+	resp, err := w.c.Execute(ctx, path, body)
+	if err != nil {
+		return webhooks.AgentResponse{}, err
+	}
+	return webhooks.AgentResponse{
+		StatusCode: resp.StatusCode,
+		Body:       resp.Body,
+	}, nil
+}
 
 const version = "0.0.1"
 
@@ -431,6 +459,114 @@ func main() {
 		sandboxSvc = sandbox.NewService(sb, sandboxRecorder, costRecorder, log)
 	}
 
+	// Notifications (Phase 10.1). The adapter choice comes from
+	// AF_STACK_NOTIFICATIONS_ADAPTER (default "log"). When the chosen
+	// adapter can't be constructed (e.g. resend with no API key) we
+	// fall back to the log adapter rather than crash — operators see
+	// "log" in the dashboard and can flip the env var to switch.
+	var notificationsSvc *notifications.Service
+	{
+		adapter := buildNotificationsAdapter(log)
+		if database != nil && database.Pool != nil {
+			notificationsSvc = notifications.NewService(database.Pool, adapter, log)
+		} else {
+			notificationsSvc = notifications.NewService(nil, adapter, log)
+			log.Info("notifications: running without DB; rows will not persist")
+		}
+		// Worker drains queued rows every 2s. It no-ops gracefully when
+		// the adapter or DB are missing — Run() reports its own state.
+		worker := notifications.NewWorker(notificationsSvc, log)
+		go worker.Run(ctx)
+	}
+
+	// Webhooks (Phase 10.2 inbound + Phase 10.3 outbound). The facade
+	// composes:
+	//   - DeliveryStore : shared by inbound (verify -> persist) and the
+	//                     outbound worker. Persists every delivery row.
+	//   - EndpointStore : Phase 10.2 inbound endpoint CRUD.
+	//   - InboundService: verifies HMAC, dedups, forwards to the
+	//                     endpoint's forward_to target (http(s)://...
+	//                     or af://agents/<name>).
+	//   - OutboundService: Phase 10.3 outbound enqueue + retry worker.
+	//
+	// A nil DB pool leaves every store at HasPool()==false; the server
+	// surfaces 503 / empty pages accordingly.
+	var webhooksSvc *webhooks.Service
+	{
+		var (
+			deliveryStore  *webhooks.DeliveryStore
+			endpointStore  *webhooks.EndpointStore
+			outboundSvc    *webhooks.OutboundService
+			inboundSvc     *webhooks.InboundService
+		)
+		if database != nil && database.Pool != nil {
+			deliveryStore = webhooks.NewDeliveryStore(database.Pool, log)
+			endpointStore = webhooks.NewEndpointStore(database.Pool, log)
+			outboundSvc = webhooks.NewOutboundService(deliveryStore, log)
+			// InboundService needs the secrets vault for HMAC verify
+			// and the agentfield client for af://agents/... forwards.
+			// vault / afClient may be nil — InboundService logs a
+			// warning when a secret-ref endpoint is hit without a
+			// vault and refuses af:// forwards without an agents
+			// client.
+			var (
+				vaultRef  webhooks.SecretLookup
+				agentsRef webhooks.AgentInvoker
+			)
+			if vault != nil {
+				vaultRef = vault
+			}
+			if afClient != nil {
+				agentsRef = &webhookAgentInvoker{c: afClient}
+			}
+			inboundSvc = webhooks.NewInboundService(webhooks.InboundDeps{
+				Endpoints:  endpointStore,
+				Deliveries: deliveryStore,
+				Vault:      vaultRef,
+				Agents:     agentsRef,
+				Logger:     log,
+			})
+
+			// Phase 10.3: outbound webhook retry worker. Drains
+			// suite_webhook_deliveries WHERE direction='outbound' AND
+			// status IN ('queued','failed') AND attempts < MaxAttempts
+			// AND scheduled_at <= now() every PollInterval. The worker
+			// no-ops gracefully when ctx is cancelled (graceful shutdown
+			// flushes any in-flight POST via the per-row timeout).
+			outboundWorker := webhooks.NewOutboundWorker(outboundSvc, deliveryStore, log)
+			go outboundWorker.Run(ctx)
+			log.Info("webhooks: outbound worker scheduled",
+				"poll_interval", webhooks.PollInterval,
+				"batch_size", webhooks.BatchSize,
+				"max_attempts", webhooks.MaxAttempts,
+			)
+		} else {
+			log.Info("webhooks: no database; /api/v1/webhooks/* + /webhooks/in/* will return 503")
+		}
+		webhooksSvc = webhooks.NewService(deliveryStore, outboundSvc, endpointStore, inboundSvc, log)
+	}
+
+	// Billing (Phase 10.4). Composes:
+	//   - billing.Store  : reads/writes suite_billing_customers + suite_usage_meters.
+	//   - billing.Client : real stripe-go client when STRIPE_SECRET_KEY is
+	//                      set, otherwise a deterministic stub for dev.
+	//   - billing.Service: per-tenant verbs (meter, has_budget, portal_link)
+	//                      + the Stripe webhook dispatcher.
+	//
+	// nil DB pool leaves billing.Store at HasPool()==false; reads serve
+	// empty / synthesised rows, writes silently drop. The stub Stripe
+	// client always returns deterministic placeholder values so the
+	// dashboard renders something useful even without a real Stripe key.
+	var billingSvc *billing.Service
+	{
+		var billingStore *billing.Store
+		if database != nil && database.Pool != nil {
+			billingStore = billing.NewStore(database.Pool, log)
+		}
+		stripeClient := billing.NewClientFromEnv(log)
+		billingSvc = billing.NewService(billingStore, stripeClient, billing.NewMeterRegistry(), log)
+	}
+
 	srv := server.New(cfg, log, server.Deps{
 		DB:            database,
 		AF:            afClient,
@@ -449,6 +585,9 @@ func main() {
 		CostAggregate: costAggregate,
 		Budgets:       costBudgets,
 		Sandbox:       sandboxSvc,
+		Notifications: notificationsSvc,
+		Webhooks:      webhooksSvc,
+		Billing:       billingSvc,
 	})
 	if err := srv.Start(ctx); err != nil {
 		log.Error("server stopped with error", "error", err)
@@ -517,6 +656,43 @@ func newSandbox(cfg config.SandboxConfig, store storage.Storage, log *slog.Logge
 		})
 	default:
 		return nil, fmt.Errorf("sandbox: unknown adapter %q (want docker|gvisor|firecracker|e2b)", cfg.Adapter)
+	}
+}
+
+// buildNotificationsAdapter picks the configured notifications adapter
+// from env. Defaults to the log adapter, which is infallible and the
+// right choice for dev/CI. The Resend adapter requires RESEND_API_KEY.
+//
+// When AF_STACK_NOTIFICATIONS_ADAPTER selects an adapter that can't be
+// constructed (e.g. resend with no key), we log a warning and fall
+// back to the log adapter — better to keep the dashboard's tab live
+// than crash the runtime.
+func buildNotificationsAdapter(log *slog.Logger) notifications.Adapter {
+	choice := strings.ToLower(strings.TrimSpace(os.Getenv("AF_STACK_NOTIFICATIONS_ADAPTER")))
+	switch choice {
+	case "", "log":
+		log.Info("notifications: adapter=log (dev default; set AF_STACK_NOTIFICATIONS_ADAPTER=resend to switch)")
+		return notificationslog.New(log)
+	case "resend":
+		key := strings.TrimSpace(os.Getenv("RESEND_API_KEY"))
+		if key == "" {
+			log.Warn("notifications: adapter=resend selected but RESEND_API_KEY empty; falling back to log adapter")
+			return notificationslog.New(log)
+		}
+		adapter, err := notificationsresend.New(notificationsresend.Config{
+			APIKey:      key,
+			DefaultFrom: os.Getenv("AF_STACK_NOTIFICATIONS_FROM"),
+		})
+		if err != nil {
+			log.Warn("notifications: adapter=resend init failed; falling back to log adapter", "error", err)
+			return notificationslog.New(log)
+		}
+		log.Info("notifications: adapter=resend")
+		return adapter
+	default:
+		log.Warn("notifications: unknown adapter; falling back to log",
+			"choice", choice)
+		return notificationslog.New(log)
 	}
 }
 

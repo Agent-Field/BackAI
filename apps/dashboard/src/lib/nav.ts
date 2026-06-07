@@ -197,6 +197,13 @@ export const NAV_GROUPS: NavGroup[] = [
         description: "Live pool and recent sandbox runs",
       },
       {
+        id: "notifications",
+        label: "Notifications",
+        href: "/operate/notifications",
+        icon: Mail,
+        description: "Outbox + recent deliveries (email, SMS, push)",
+      },
+      {
         id: "webhook-activity",
         label: "Webhook Activity",
         href: "/operate/webhook-activity",

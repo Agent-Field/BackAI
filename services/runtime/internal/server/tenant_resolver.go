@@ -103,6 +103,10 @@ var publicPrefixes = []string{
 	// log. /webhooks/in/* (inbound public endpoints) lives at the
 	// gateway level and isn't covered by this prefix.
 	"/api/v1/webhooks",
+	// Phase 10.2 inbound surface. Providers POST raw payloads here;
+	// the tenant resolver bypasses because the InboundService resolves
+	// the endpoint's tenant from the slug-keyed row in PG.
+	"/webhooks",
 	// Billing dashboard surface (Phase 10.4). Same auth shape as
 	// admin/* — the dashboard's session gates it.
 	"/api/v1/billing",

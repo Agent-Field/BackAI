@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/agentfield"
+	"github.com/Agent-Field/backai/services/runtime/internal/billing"
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
 	"github.com/Agent-Field/backai/services/runtime/internal/cost"
 	"github.com/Agent-Field/backai/services/runtime/internal/db"
@@ -21,6 +22,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/llmcache"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmgateway"
 	"github.com/Agent-Field/backai/services/runtime/internal/memory"
+	"github.com/Agent-Field/backai/services/runtime/internal/notifications"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
 	"github.com/Agent-Field/backai/services/runtime/internal/ratelimit"
@@ -29,6 +31,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/storage"
 	"github.com/Agent-Field/backai/services/runtime/internal/tenancy"
 	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
+	"github.com/Agent-Field/backai/services/runtime/internal/webhooks"
 )
 
 // Server holds the HTTP server and shared dependencies.
@@ -68,6 +71,20 @@ type Server struct {
 	// 503 SANDBOX_NOT_CONFIGURED (mutating) or tolerant empty
 	// responses (reads).
 	sandbox *sandbox.Service
+	// billing powers /api/v1/billing/* + the /webhooks/in/stripe
+	// Stripe-webhook receiver. nil = the read endpoints serve empty
+	// pages and synthesised "free plan" rows; the mutating portal-link
+	// endpoint returns 503 BILLING_NOT_CONFIGURED.
+	billing *billing.Service
+	// notifications powers /api/v1/notifications/*. nil = endpoints
+	// either return 503 NOTIFICATIONS_NOT_CONFIGURED (POST) or
+	// tolerant empty responses (GET).
+	notifications *notifications.Service
+	// webhooks powers /api/v1/webhooks/* + /webhooks/in/{slug}. nil =
+	// mutating endpoints return 503 WEBHOOKS_NOT_CONFIGURED; reads
+	// degrade to empty pages. Shared facade between Phase 10.2
+	// (inbound) and Phase 10.3 (outbound).
+	webhooks *webhooks.Service
 }
 
 // Health aggregates dependency health for the /health endpoint.
@@ -138,6 +155,19 @@ type Deps struct {
 	// /api/v1/sandbox/* endpoints either 503 (mutating) or return
 	// tolerant empty responses (reads).
 	Sandbox *sandbox.Service
+	// Billing is the Phase 10.4 Stripe billing service. nil = the
+	// /api/v1/billing/* read endpoints return empty / synthesised
+	// rows; portal-link mutations return 503 BILLING_NOT_CONFIGURED.
+	Billing *billing.Service
+	// Notifications is the Phase 10.1 outbox-style notifications
+	// service. nil = the /api/v1/notifications/* endpoints either 503
+	// (POST) or return tolerant empty responses (GET).
+	Notifications *notifications.Service
+	// Webhooks is the Phase 10.2 + 10.3 webhook outbox/inbox facade.
+	// nil = the /api/v1/webhooks/* mutating endpoints return 503
+	// WEBHOOKS_NOT_CONFIGURED; the list endpoint serves an empty
+	// page (so the dashboard renders the empty state).
+	Webhooks *webhooks.Service
 }
 
 // New constructs a Server with the given config + logger + dependencies.
@@ -181,6 +211,9 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		costAgg:       deps.CostAggregate,
 		budgets:       deps.Budgets,
 		sandbox:       deps.Sandbox,
+		billing:       deps.Billing,
+		notifications: deps.Notifications,
+		webhooks:      deps.Webhooks,
 	}
 	s.registerRoutes()
 
@@ -360,6 +393,25 @@ func (s *Server) registerRoutes() {
 	// wired; reads degrade to empty pages.
 	s.registerSandboxRoutes()
 	s.registerSandboxOpenAPI()
+
+	// Notifications outbox (Phase 10.1). POST returns 503 when no
+	// adapter is wired; reads degrade to empty pages.
+	s.registerNotificationsRoutes()
+	s.registerNotificationsOpenAPI()
+
+	// Webhooks (Phase 10.2 + 10.3). Mutating endpoints (send, retry,
+	// endpoint CRUD) return 503 when no store is wired; the list
+	// endpoint degrades to an empty page.
+	s.registerWebhooksRoutes()
+	s.registerWebhooksOpenAPI()
+
+	// Billing (Phase 10.4). Read endpoints serve empty / synthesised
+	// rows when no service is wired; the portal-link mutation returns
+	// 503 BILLING_NOT_CONFIGURED. Also registers the Stripe webhook
+	// receiver at /webhooks/in/stripe — see billing.go file-level
+	// comment for the Phase 10.2 coordination note.
+	s.registerBillingRoutes()
+	s.registerBillingOpenAPI()
 
 	if s.tel != nil {
 		s.mux.Handle("GET /metrics", s.tel.MetricsHandler())

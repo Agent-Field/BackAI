@@ -12,6 +12,7 @@ require (
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.39.0
 	github.com/riverqueue/river/rivertype v0.39.0
 	github.com/robfig/cron/v3 v3.0.1
+	github.com/stripe/stripe-go/v82 v82.5.1
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.44.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.44.0

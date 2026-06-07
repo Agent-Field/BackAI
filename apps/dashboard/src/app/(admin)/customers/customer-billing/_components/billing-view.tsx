@@ -1,13 +1,17 @@
 "use client"
 
-// CustomerBillingView — per-tenant usage and cost rollup.
+// CustomerBillingView — per-tenant Stripe billing rollup (Phase 10.4).
 //
-// Pulls the tenant list and fans out to api.admin.tenants.get() in parallel
-// to materialise the usage block per row. CSV export builds the file in
-// memory and writes it to the clipboard — no server round-trip.
+// Pulls api.billing.customers() for the customer list and pairs each row
+// with a meter aggregation from api.billing.meters({ tenant }) to surface
+// usage + cost for the current billing period. The "Open Stripe Portal"
+// button mints a short-lived portal URL via api.billing.portalLink() and
+// opens it in a new tab.
 //
-// TODO(phase-10): real Stripe linkage (invoices, subscriptions, payment
-// methods). For now this is the in-house usage + cost rollup only.
+// shadcn/tailwind rules:
+//   - no space-y-*; use flex flex-col + gap-*
+//   - Badge for the plan + subscription status
+//   - the table sits inside a rounded-xl border bg-card chrome
 
 import * as React from "react"
 import {
@@ -16,10 +20,20 @@ import {
   useReactTable,
   type ColumnDef,
 } from "@tanstack/react-table"
-import { ClipboardCopy, ReceiptText, RotateCw } from "lucide-react"
+import {
+  ClipboardCopy,
+  ExternalLink,
+  ReceiptText,
+  RotateCw,
+} from "lucide-react"
 import { toast } from "sonner"
 
-import { api, ApiError, type Tenant } from "@/lib/api"
+import {
+  api,
+  ApiError,
+  type BillingCustomer,
+  type UsageMeterList,
+} from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -53,22 +67,28 @@ function planBadgeVariant(
   }
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B"
-  const units = ["B", "KB", "MB", "GB", "TB"]
-  const i = Math.min(
-    Math.floor(Math.log(bytes) / Math.log(1024)),
-    units.length - 1,
-  )
-  const value = bytes / Math.pow(1024, i)
-  return `${value.toFixed(value >= 100 || i === 0 ? 0 : 1)} ${units[i]}`
+function statusBadgeVariant(
+  status: string | null,
+): "default" | "secondary" | "outline" | "destructive" {
+  if (status === null || status === "") return "outline"
+  switch (status) {
+    case "active":
+    case "trialing":
+      return "default"
+    case "past_due":
+    case "unpaid":
+      return "destructive"
+    case "canceled":
+    case "incomplete_expired":
+      return "outline"
+    default:
+      return "secondary"
+  }
 }
 
 type BillingRow = {
-  tenant: Tenant
-  requests_30d: number
-  cost_usd_30d: number
-  storage_bytes: number
+  customer: BillingCustomer
+  usage: UsageMeterList | null
   error: string | null
 }
 
@@ -82,24 +102,25 @@ function csvEscape(value: string): string {
 function buildCsv(rows: BillingRow[]): string {
   const header = [
     "tenant_id",
-    "slug",
-    "name",
+    "stripe_customer_id",
+    "email",
     "plan",
-    "requests_30d",
-    "cost_usd_30d",
-    "storage_bytes",
+    "subscription_status",
+    "current_period_end",
+    "total_cost_usd",
   ]
   const lines = [header.join(",")]
   for (const r of rows) {
+    const total = r.usage?.total_cost_usd ?? 0
     lines.push(
       [
-        r.tenant.id,
-        r.tenant.slug,
-        r.tenant.name,
-        r.tenant.plan,
-        String(r.requests_30d),
-        r.cost_usd_30d.toFixed(2),
-        String(r.storage_bytes),
+        r.customer.tenant_id,
+        r.customer.stripe_customer_id ?? "",
+        r.customer.email ?? "",
+        r.customer.plan,
+        r.customer.subscription_status ?? "",
+        r.customer.current_period_end ?? "",
+        total.toFixed(4),
       ]
         .map(csvEscape)
         .join(","),
@@ -113,31 +134,28 @@ export function CustomerBillingView() {
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
   const [exporting, setExporting] = React.useState(false)
+  const [opening, setOpening] = React.useState<string | null>(null)
 
   const fetchRows = React.useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const list = await api.admin.tenants.list()
+      const list = await api.billing.customers()
       const details = await Promise.all(
-        list.tenants.map((t) =>
-          api.admin.tenants
-            .get(t.id)
+        list.customers.map((customer) =>
+          api.billing
+            .meters({ tenant: customer.tenant_id })
             .then(
-              (d): BillingRow => ({
-                tenant: t,
-                requests_30d: d.usage.requests_30d,
-                cost_usd_30d: d.usage.cost_usd_30d,
-                storage_bytes: d.usage.storage_bytes,
+              (usage): BillingRow => ({
+                customer,
+                usage,
                 error: null,
               }),
             )
             .catch(
               (e: unknown): BillingRow => ({
-                tenant: t,
-                requests_30d: 0,
-                cost_usd_30d: 0,
-                storage_bytes: 0,
+                customer,
+                usage: null,
                 error:
                   e instanceof Error ? e.message : "Failed to load usage",
               }),
@@ -151,7 +169,7 @@ export function CustomerBillingView() {
           ? `${e.code}: ${e.message}`
           : e instanceof Error
             ? e.message
-            : "Failed to load tenants"
+            : "Failed to load billing customers"
       setError(message)
       setRows([])
     } finally {
@@ -182,6 +200,25 @@ export function CustomerBillingView() {
     }
   }
 
+  const handleOpenPortal = async (tenantId: string) => {
+    setOpening(tenantId)
+    try {
+      const link = await api.billing.portalLink(tenantId)
+      // Open in a new tab — portal URLs are short-lived (~24h).
+      window.open(link.url, "_blank", "noopener,noreferrer")
+    } catch (e) {
+      const message =
+        e instanceof ApiError
+          ? `${e.code}: ${e.message}`
+          : e instanceof Error
+            ? e.message
+            : "Failed to open portal"
+      toast.error("Could not open Stripe portal", { description: message })
+    } finally {
+      setOpening(null)
+    }
+  }
+
   const columns = React.useMemo<ColumnDef<BillingRow>[]>(
     () => [
       {
@@ -189,9 +226,11 @@ export function CustomerBillingView() {
         header: "Tenant",
         cell: ({ row }) => (
           <div className="flex flex-col">
-            <span className="text-sm">{row.original.tenant.name}</span>
-            <span className="text-muted-foreground font-mono text-xs">
-              {row.original.tenant.slug}
+            <span className="font-mono text-xs">
+              {row.original.customer.tenant_id}
+            </span>
+            <span className="text-muted-foreground text-xs">
+              {row.original.customer.email ?? "—"}
             </span>
           </div>
         ),
@@ -200,44 +239,86 @@ export function CustomerBillingView() {
         id: "plan",
         header: "Plan",
         cell: ({ row }) => (
-          <Badge variant={planBadgeVariant(row.original.tenant.plan)}>
-            {row.original.tenant.plan}
+          <Badge variant={planBadgeVariant(row.original.customer.plan)}>
+            {row.original.customer.plan}
           </Badge>
         ),
       },
       {
-        id: "requests_30d",
-        header: "Requests 30d",
+        id: "status",
+        header: "Status",
+        cell: ({ row }) => {
+          const status = row.original.customer.subscription_status
+          return (
+            <Badge variant={statusBadgeVariant(status)}>{status ?? "—"}</Badge>
+          )
+        },
+      },
+      {
+        id: "stripe_customer_id",
+        header: "Stripe ID",
         cell: ({ row }) => (
-          <span className="tabular-nums text-xs">
-            {row.original.error
-              ? "—"
-              : row.original.requests_30d.toLocaleString()}
+          <span className="text-muted-foreground font-mono text-xs">
+            {row.original.customer.stripe_customer_id ?? "—"}
           </span>
         ),
       },
       {
-        id: "cost_usd_30d",
-        header: "Cost 30d",
-        cell: ({ row }) => (
-          <span className="tabular-nums text-xs">
-            {row.original.error
-              ? "—"
-              : `$${row.original.cost_usd_30d.toFixed(2)}`}
-          </span>
-        ),
+        id: "cost",
+        header: "Cost (period)",
+        cell: ({ row }) => {
+          if (row.original.error) {
+            return <span className="tabular-nums text-xs">—</span>
+          }
+          const usd = row.original.usage?.total_cost_usd ?? 0
+          const abs = Math.abs(usd)
+          const digits = abs === 0 ? 2 : abs < 0.0001 ? 6 : abs < 0.01 ? 4 : 2
+          return (
+            <span className="tabular-nums text-xs">
+              ${usd.toFixed(digits)}
+            </span>
+          )
+        },
       },
       {
-        id: "storage_bytes",
-        header: "Storage",
-        cell: ({ row }) => (
-          <span className="tabular-nums text-xs">
-            {row.original.error ? "—" : formatBytes(row.original.storage_bytes)}
-          </span>
-        ),
+        id: "period_end",
+        header: "Period ends",
+        cell: ({ row }) => {
+          const v = row.original.customer.current_period_end
+          if (v === null || v === "") return <span className="text-xs">—</span>
+          const d = new Date(v)
+          return (
+            <span className="text-muted-foreground text-xs tabular-nums">
+              {Number.isNaN(d.getTime()) ? v : d.toISOString().slice(0, 10)}
+            </span>
+          )
+        },
+      },
+      {
+        id: "actions",
+        header: "",
+        cell: ({ row }) => {
+          const tid = row.original.customer.tenant_id
+          const busy = opening === tid
+          return (
+            <div className="flex justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleOpenPortal(tid)}
+                disabled={busy}
+              >
+                {busy ? "Opening…" : "Open Stripe Portal"}
+                <ExternalLink />
+              </Button>
+            </div>
+          )
+        },
       },
     ],
-    [],
+    // handleOpenPortal closes over `opening` — re-create columns when it changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [opening],
   )
 
   const table = useReactTable({
@@ -253,8 +334,8 @@ export function CustomerBillingView() {
           {loading
             ? "Loading…"
             : rows.length === 0
-              ? "No tenants"
-              : `${rows.length} tenant${rows.length === 1 ? "" : "s"} · usage rollup`}
+              ? "No customers"
+              : `${rows.length} customer${rows.length === 1 ? "" : "s"} · current period`}
         </span>
         <div className="ml-auto flex items-center gap-2">
           <Button
@@ -323,8 +404,11 @@ export function CustomerBillingView() {
       </div>
 
       <p className="text-muted-foreground text-[11px]">
-        Real billing integration (invoices, subscriptions, payment methods)
-        lands in Phase 10. For now this view rolls up runtime usage only.
+        Stripe customers + per-tenant usage meters from
+        <code className="font-mono"> /api/v1/billing/*</code>. Portal links
+        are short-lived (~24h). When the runtime is in stub mode (no
+        STRIPE_SECRET_KEY), the portal opens
+        <code className="font-mono"> example.com</code> as a placeholder.
       </p>
     </div>
   )
@@ -353,7 +437,7 @@ function BillingEmpty({ error }: { error: string | null }) {
         <EmptyMedia variant="icon">
           <ReceiptText />
         </EmptyMedia>
-        <EmptyTitle>No tenants to bill yet</EmptyTitle>
+        <EmptyTitle>No billing customers yet</EmptyTitle>
         <EmptyDescription>
           {error ? (
             <>
@@ -361,7 +445,7 @@ function BillingEmpty({ error }: { error: string | null }) {
               <code className="font-mono">{error}</code>.
             </>
           ) : (
-            "Create a tenant to start seeing usage and cost here."
+            "Provision a tenant + open its Stripe portal to seed the first row."
           )}
         </EmptyDescription>
       </EmptyHeader>
