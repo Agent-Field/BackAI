@@ -128,13 +128,30 @@ var Catalog = []ModelPrice{
 	},
 }
 
-// Lookup finds pricing for a given model id. Case-insensitive. Returns
-// (price, true) on match, (Unknown, false) on miss.
+// Lookup finds pricing for a given model id. Case-insensitive. Tolerates
+// the model id with or without a provider prefix (e.g. caller passes
+// "qwen/qwen-2.5-72b-instruct"; catalog has "openrouter/qwen/qwen-2.5-72b-instruct"
+// — both match). Returns (price, true) on match, (Unknown, false) on miss.
 func Lookup(modelID string) (ModelPrice, bool) {
 	target := strings.ToLower(strings.TrimSpace(modelID))
 	for _, p := range Catalog {
-		if strings.ToLower(p.ID) == target {
+		entry := strings.ToLower(p.ID)
+		if entry == target {
 			return p, true
+		}
+		// Catalog has "provider/path" entries; tolerate callers who pass
+		// just "path" (the common OpenAI-SDK invocation pattern).
+		if i := strings.IndexByte(entry, '/'); i >= 0 {
+			if entry[i+1:] == target {
+				return p, true
+			}
+		}
+		// And the reverse: caller may have prefixed beyond what the
+		// catalog stores.
+		if i := strings.IndexByte(target, '/'); i >= 0 {
+			if target[i+1:] == entry {
+				return p, true
+			}
 		}
 	}
 	return Unknown, false

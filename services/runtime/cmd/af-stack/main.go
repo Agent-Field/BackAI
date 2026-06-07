@@ -24,9 +24,12 @@ import (
 
 	"github.com/Agent-Field/backai/services/runtime/internal/agentfield"
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
+	"github.com/Agent-Field/backai/services/runtime/internal/cost"
 	"github.com/Agent-Field/backai/services/runtime/internal/db"
 	"github.com/Agent-Field/backai/services/runtime/internal/hooks"
 	"github.com/Agent-Field/backai/services/runtime/internal/jobs"
+	"github.com/Agent-Field/backai/services/runtime/internal/llmcache"
+	"github.com/Agent-Field/backai/services/runtime/internal/llmgateway"
 	"github.com/Agent-Field/backai/services/runtime/internal/logger"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
 	"github.com/Agent-Field/backai/services/runtime/internal/ratelimit"
@@ -278,6 +281,65 @@ func main() {
 		}
 	}
 
+	// LLM response cache (Phase 7.3). Requires DB; when absent the cache
+	// is left nil and the gateway treats every call as a miss. When wired,
+	// also spawns a background eviction goroutine on a 5-minute tick so
+	// expired entries don't accumulate.
+	var llmResponseCache *llmcache.Cache
+	if database != nil && database.Pool != nil {
+		llmResponseCache, err = llmcache.New(database.Pool, log)
+		if err != nil {
+			log.Error("llmcache: init failed; LLM cache disabled", "error", err)
+			llmResponseCache = nil
+		} else {
+			go llmResponseCache.RunEviction(ctx, 5*time.Minute)
+			log.Info("llmcache: ready", "eviction_interval", "5m")
+		}
+	} else {
+		log.Info("llmcache not configured (no database); LLM gateway will not cache")
+	}
+
+	// LLM gateway (Phase 7.1). Routes every /api/v1/llm/* call through
+	// AgentField in spirit, but the docker-compose AF instance does not
+	// yet expose a built-in `__llm.chat` reasoner — so the MVP path
+	// proxies directly to an OpenAI-compatible upstream (OpenRouter by
+	// default, OpenAI/Anthropic when their key is set). The public
+	// contract still says "routes through AF"; swap to
+	// llmgateway.NewAFProvider once AF ships the built-in handler.
+	llmGW := buildLLMGateway(log, afClient)
+
+	// Cost ledger + budgets (Phase 7). The Recorder + Budgets are
+	// constructed unconditionally so the hook handlers can be
+	// registered against the hooks.Engine even when no DB is wired —
+	// in that case each method short-circuits to a permissive no-op.
+	//
+	// Hook registration translates the LLM gateway's payload (a
+	// map[string]any) into Recorder.Record / Budgets.HasBudget calls.
+	// The gateway (Phase 7.1) lives in a separate package and fires
+	// the hooks; this file only supplies the handlers.
+	var (
+		costRecorder  *cost.Recorder
+		costBudgets   *cost.Budgets
+		costAggregate *cost.Aggregate
+	)
+	if database != nil && database.Pool != nil {
+		costRecorder = cost.NewRecorder(database.Pool, log)
+		costBudgets = cost.NewBudgets(database.Pool, log)
+		costAggregate = cost.NewAggregate(database.Pool, log)
+		if hookEngine != nil {
+			if err := hookEngine.Register(hooks.HookLLMPreCall, cost.PreCallHandler(costBudgets)); err != nil {
+				log.Error("cost: pre-call hook registration failed", "error", err)
+			}
+			if err := hookEngine.Register(hooks.HookLLMPostCall, cost.PostCallHandler(costRecorder)); err != nil {
+				log.Error("cost: post-call hook registration failed", "error", err)
+			} else {
+				log.Info("cost: ledger + budget hooks registered")
+			}
+		}
+	} else {
+		log.Info("cost ledger not configured (no database); per-call cost will not be tracked")
+	}
+
 	srv := server.New(cfg, log, server.Deps{
 		DB:            database,
 		AF:            afClient,
@@ -289,6 +351,10 @@ func main() {
 		Jobs:          jobsManager,
 		RateLimiter:   limiter,
 		Tenancy:       tenancyMgr,
+		LLMCache:      llmResponseCache,
+		LLMGateway:    llmGW,
+		CostAggregate: costAggregate,
+		Budgets:       costBudgets,
 	})
 	if err := srv.Start(ctx); err != nil {
 		log.Error("server stopped with error", "error", err)
@@ -322,6 +388,68 @@ func newStorage(cfg config.StorageConfig) (storage.Storage, error) {
 		})
 	default:
 		return nil, fmt.Errorf("storage: unknown adapter %q", cfg.Adapter)
+	}
+}
+
+// buildLLMGateway constructs the Phase-7 LLM gateway.
+//
+// The public contract says every LLM call routes through AgentField.
+// In practice the docker-compose AF instance does not yet expose a
+// built-in OpenAI-compat reasoner, so the MVP path is a direct
+// upstream proxy. We pick the first provider whose API key is set
+// from the environment, preferring OpenRouter (broadest model
+// catalogue at lowest cost) when multiple keys are present.
+//
+// When NO key is set the gateway is still constructed against
+// OpenRouter so /api/v1/llm/models returns the static catalog —
+// only actual completion calls will fail with a clear
+// "no provider key configured" upstream error.
+//
+// Switch to llmgateway.NewAFProvider(afClient, llmgateway.AFProviderConfig{})
+// once AgentField ships the `__llm.chat` reasoner.
+func buildLLMGateway(log *slog.Logger, afClient *agentfield.Client) *llmgateway.Gateway {
+	// Suppress unused warning until we switch to AF-routed mode.
+	_ = afClient
+
+	openrouterKey := os.Getenv("OPENROUTER_API_KEY")
+	openaiKey := os.Getenv("OPENAI_API_KEY")
+	anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
+
+	switch {
+	case openrouterKey != "":
+		log.Info("llmgateway: provider=openrouter (Phase-7 MVP path; AF-native routing pending)")
+		return llmgateway.New(llmgateway.NewOpenAICompatProvider(llmgateway.OpenAICompatConfig{
+			ProviderID: "openrouter",
+			BaseURL:    "https://openrouter.ai/api/v1",
+			APIKey:     openrouterKey,
+			ExtraHeaders: map[string]string{
+				"HTTP-Referer": "https://github.com/Agent-Field/backai",
+				"X-Title":      "AF Stack",
+			},
+		}))
+	case openaiKey != "":
+		log.Info("llmgateway: provider=openai (Phase-7 MVP path)")
+		return llmgateway.New(llmgateway.NewOpenAICompatProvider(llmgateway.OpenAICompatConfig{
+			ProviderID: "openai",
+			BaseURL:    "https://api.openai.com/v1",
+			APIKey:     openaiKey,
+		}))
+	case anthropicKey != "":
+		// Anthropic's OpenAI-compat endpoint lives at /v1.
+		log.Info("llmgateway: provider=anthropic (Phase-7 MVP path)")
+		return llmgateway.New(llmgateway.NewOpenAICompatProvider(llmgateway.OpenAICompatConfig{
+			ProviderID: "anthropic",
+			BaseURL:    "https://api.anthropic.com/v1",
+			APIKey:     anthropicKey,
+		}))
+	default:
+		log.Warn("llmgateway: no provider API key found in env " +
+			"(OPENROUTER_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY); " +
+			"models endpoint will still work, but chat/embeddings/images will fail upstream")
+		return llmgateway.New(llmgateway.NewOpenAICompatProvider(llmgateway.OpenAICompatConfig{
+			ProviderID: "openrouter",
+			BaseURL:    "https://openrouter.ai/api/v1",
+		}))
 	}
 }
 

@@ -85,6 +85,7 @@ export {
   memberships as adminMemberships,
   keys as adminKeys,
   audit as adminAudit,
+  budgets as adminBudgets,
   TenantSchema,
   TenantListSchema,
   TenantDetailSchema,
@@ -100,6 +101,8 @@ export {
   IssuedAPIKeySchema,
   AuditEntrySchema,
   AuditListSchema,
+  BudgetSchema,
+  BudgetListSchema,
   type Tenant,
   type TenantList,
   type TenantDetail,
@@ -118,19 +121,56 @@ export {
   type IssueAPIKeyInput,
   type AuditEntry,
   type AuditList,
+  type Budget,
+  type BudgetList,
+  type SetBudgetInput,
 } from "./admin/index.js"
+
+// ─── LLM gateway + cost (Phase 7) ─────────────────────────────────────────
+
+export {
+  llm,
+  chat,
+  embed,
+  models as llmModels,
+  cacheStats as llmCacheStats,
+  LLMModelSchema,
+  LLMModelListSchema,
+  CacheStatsSchema,
+  type LLMModel,
+  type LLMModelList,
+  type CacheStats,
+  type ChatMessage,
+  type ChatChunk,
+  type ChatOptions,
+  type EmbedOptions,
+} from "./llm.js"
+
+export {
+  cost,
+  events as costEvents,
+  CostEventSchema,
+  CostEventListSchema,
+  type CostEvent,
+  type CostEventList,
+  type ListCostEventsOptions,
+} from "./cost.js"
 
 import { agents } from "./agents.js"
 import { jobs } from "./jobs.js"
 import { secrets } from "./secrets.js"
 import { storage } from "./storage.js"
 import { admin } from "./admin/index.js"
+import { llm } from "./llm.js"
+import { cost } from "./cost.js"
 
-/** Top-level namespace: `suite.agents.*`, `suite.jobs.*`, `suite.secrets.*`, `suite.storage.*`, `suite.admin.*`. */
+/** Top-level namespace: `suite.agents.*`, `suite.jobs.*`, `suite.secrets.*`, `suite.storage.*`, `suite.llm.*`, `suite.cost.*`, `suite.admin.*`. */
 export const suite = {
   agents,
   jobs,
   secrets,
   storage,
+  llm,
+  cost,
   admin,
 } as const

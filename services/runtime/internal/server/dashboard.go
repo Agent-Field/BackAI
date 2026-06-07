@@ -26,6 +26,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/Agent-Field/backai/services/runtime/internal/cost"
 )
 
 // tracerName is the OTel tracer name used for dashboard spans. Kept
@@ -134,7 +136,11 @@ func (s *Server) queryRuns(ctx context.Context, q runQuery) (runListResponse, er
 	// Build the WHERE clause. We always filter to gateway-request rows
 	// that targeted an agent execute endpoint, so this view is "agent
 	// runs" rather than every HTTP hit the gateway recorded.
-	conds := []string{"endpoint like '/api/v1/execute/%'"}
+	//
+	// Column references use the `r` alias so the same clause can be
+	// reused by both the count-only query (FROM suite_gateway_requests r)
+	// and the rows query that joins to suite_cost_events.
+	conds := []string{"r.endpoint like '/api/v1/execute/%'"}
 	args := []any{}
 	bind := func(v any) string {
 		args = append(args, v)
@@ -146,35 +152,55 @@ func (s *Server) queryRuns(ctx context.Context, q runQuery) (runListResponse, er
 		// "/api/v1/execute/async/sample.echo").
 		syncBind := bind("/api/v1/execute/" + q.Agent)
 		asyncBind := bind("/api/v1/execute/async/" + q.Agent)
-		conds = append(conds, "(endpoint = "+syncBind+" or endpoint = "+asyncBind+")")
+		conds = append(conds, "(r.endpoint = "+syncBind+" or r.endpoint = "+asyncBind+")")
 	}
 	if q.Tenant != "" {
-		conds = append(conds, "tenant_id::text = "+bind(q.Tenant))
+		conds = append(conds, "r.tenant_id::text = "+bind(q.Tenant))
 	}
 	switch q.Status {
 	case "succeeded":
-		conds = append(conds, "status_code >= 200 and status_code < 300")
+		conds = append(conds, "r.status_code >= 200 and r.status_code < 300")
 	case "failed":
-		conds = append(conds, "(status_code is null or status_code < 200 or status_code >= 300)")
+		conds = append(conds, "(r.status_code is null or r.status_code < 200 or r.status_code >= 300)")
 	}
 	where := "where " + strings.Join(conds, " and ")
 
 	// Total count for pagination.
 	var total int64
-	countSQL := "select count(*) from suite_gateway_requests " + where
+	countSQL := "select count(*) from suite_gateway_requests r " + where
 	if err := s.db.Pool.QueryRow(ctx, countSQL, args...).Scan(&total); err != nil {
 		return out, err
 	}
 	out.Total = total
 
 	// Page of rows.
+	//
+	// cost_usd is approximated by summing suite_cost_events rows that
+	// share the same tenant and arrived within a small window of the
+	// gateway request. The gateway doesn't yet stamp af_execution_id
+	// on cost events (Phase 7.1 will), so this is best-effort. Empty
+	// matches collapse to 0.
 	pageArgs := append([]any{}, args...)
 	pageArgs = append(pageArgs, q.Limit, q.Offset)
 	limitIdx := len(pageArgs) - 1
 	offsetIdx := len(pageArgs)
-	rowsSQL := "select id, coalesce(tenant_id::text, ''), endpoint, status_code, duration_ms, created_at " +
-		"from suite_gateway_requests " + where +
-		" order by created_at desc limit $" + strconv.Itoa(limitIdx) +
+	rowsSQL := `
+        select
+            r.id,
+            coalesce(r.tenant_id::text, '') as tenant_id_text,
+            r.endpoint,
+            r.status_code,
+            r.duration_ms,
+            r.created_at,
+            coalesce((
+              select sum(e.cost_usd)
+                from suite_cost_events e
+               where e.tenant_id is not distinct from r.tenant_id
+                 and e.occurred_at >= r.created_at - interval '5 seconds'
+                 and e.occurred_at <= r.created_at + interval '60 seconds'
+            ), 0) as cost_usd
+          from suite_gateway_requests r ` + where +
+		" order by r.created_at desc limit $" + strconv.Itoa(limitIdx) +
 		" offset $" + strconv.Itoa(offsetIdx)
 
 	rows, err := s.db.Pool.Query(ctx, rowsSQL, pageArgs...)
@@ -191,8 +217,9 @@ func (s *Server) queryRuns(ctx context.Context, q runQuery) (runListResponse, er
 			statusCode pgtype.Int4
 			durationMS pgtype.Int4
 			createdAt  time.Time
+			costUSD    float64
 		)
-		if err := rows.Scan(&id, &tenantID, &endpoint, &statusCode, &durationMS, &createdAt); err != nil {
+		if err := rows.Scan(&id, &tenantID, &endpoint, &statusCode, &durationMS, &createdAt, &costUSD); err != nil {
 			return out, err
 		}
 		rec := runRecord{
@@ -200,7 +227,7 @@ func (s *Server) queryRuns(ctx context.Context, q runQuery) (runListResponse, er
 			Agent:     agentFromEndpoint(endpoint),
 			Status:    classifyStatus(statusCode),
 			StartedAt: createdAt.UTC().Format(time.RFC3339Nano),
-			CostUSD:   0, // TODO Phase 7: wire real cost
+			CostUSD:   costUSD,
 		}
 		if tenantID != "" {
 			rec.TenantID = tenantID
@@ -374,16 +401,24 @@ func (s *Server) handleHomeOverview(w http.ResponseWriter, r *http.Request) {
 			resp.ErrorRate = float64(failed60) / float64(total60)
 		}
 
-		// cost_today_usd is 0 in Phase 4 — we don't track cost yet.
-		// TODO Phase 7: sum cost_usd column once it lands on
-		// suite_gateway_requests (or a sibling cost ledger).
-		resp.CostTodayUSD = 0
+		// cost_today_usd sums suite_cost_events for the calendar day
+		// (UTC) so far. Phase 7 ledger; pre-Phase-7 runs see 0.
+		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+		var costToday float64
+		err = s.db.Pool.QueryRow(ctx,
+			"select coalesce(sum(cost_usd), 0) from suite_cost_events where occurred_at >= $1",
+			todayStart).Scan(&costToday)
+		if err != nil {
+			s.log.Warn("cost today query failed", "error", err)
+			span.RecordError(err)
+		}
+		resp.CostTodayUSD = costToday
 
 		// Sparklines: bucket the last 24 hours into one-hour windows.
 		if buckets, err := s.fetchHourlyBuckets(ctx, now); err == nil {
 			resp.RequestSparkline = buckets.requests
 			resp.ErrorSparkline = buckets.errors
-			// cost sparkline stays zero — see TODO above.
+			resp.CostSparkline = buckets.cost
 		} else {
 			s.log.Warn("sparkline query failed", "error", err)
 			span.RecordError(err)
@@ -430,20 +465,27 @@ func (s *Server) handleHomeOverview(w http.ResponseWriter, r *http.Request) {
 type hourlyBuckets struct {
 	requests []float64
 	errors   []float64
+	cost     []float64
 }
 
 // fetchHourlyBuckets returns 24-element arrays where index 0 is 23 hours
-// ago and index 23 is the current hour. PG aggregates everything in one
-// round-trip using date_trunc('hour').
+// ago and index 23 is the current hour. PG aggregates request/error
+// counts from suite_gateway_requests and cost from suite_cost_events
+// in two round-trips (one per table) — joining at the bucket level is
+// cheaper than a hash join over 24h of rows.
 func (s *Server) fetchHourlyBuckets(ctx context.Context, now time.Time) (hourlyBuckets, error) {
 	out := hourlyBuckets{
 		requests: zeroSparkline(),
 		errors:   zeroSparkline(),
+		cost:     zeroSparkline(),
 	}
 	if s.db == nil || s.db.Pool == nil {
 		return out, nil
 	}
 	start := now.Add(-24 * time.Hour).Truncate(time.Hour)
+	baseHour := now.Truncate(time.Hour).Add(-23 * time.Hour)
+
+	// Requests + errors.
 	rows, err := s.db.Pool.Query(ctx,
 		"select date_trunc('hour', created_at) as bucket, "+
 			"count(*), "+
@@ -458,7 +500,6 @@ func (s *Server) fetchHourlyBuckets(ctx context.Context, now time.Time) (hourlyB
 	}
 	defer rows.Close()
 
-	baseHour := now.Truncate(time.Hour).Add(-23 * time.Hour)
 	for rows.Next() {
 		var (
 			bucket time.Time
@@ -475,7 +516,39 @@ func (s *Server) fetchHourlyBuckets(ctx context.Context, now time.Time) (hourlyB
 		out.requests[idx] = float64(total)
 		out.errors[idx] = float64(failed)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+
+	// Cost. Separate query so an empty cost_events table doesn't
+	// hide gateway data via inner-join semantics.
+	costRows, err := s.db.Pool.Query(ctx,
+		"select date_trunc('hour', occurred_at) as bucket, "+
+			"coalesce(sum(cost_usd), 0) "+
+			"from suite_cost_events "+
+			"where occurred_at >= $1 "+
+			"group by bucket "+
+			"order by bucket",
+		start)
+	if err != nil {
+		return out, err
+	}
+	defer costRows.Close()
+	for costRows.Next() {
+		var (
+			bucket time.Time
+			cost   float64
+		)
+		if err := costRows.Scan(&bucket, &cost); err != nil {
+			return out, err
+		}
+		idx := int(bucket.Sub(baseHour).Hours())
+		if idx < 0 || idx >= 24 {
+			continue
+		}
+		out.cost[idx] = cost
+	}
+	return out, costRows.Err()
 }
 
 func zeroSparkline() []float64 {
@@ -517,19 +590,22 @@ type costByTenant struct {
 	CostUSD    float64 `json:"cost_usd"`
 }
 
-// handleCostSummary returns a stub cost summary. Phase 4 doesn't track
-// cost yet — Phase 7 wires the LLM gateway's per-call cost into a sibling
-// `suite_cost_events` table. Schema MUST still validate, so we return the
-// nullable budget as JSON null (Go nil pointer) and empty arrays for the
-// breakdowns.
+// handleCostSummary returns the dashboard's cost summary panel.
 //
-// Query params `from` and `to` are accepted but ignored until Phase 7.
+// Backed by the cost.Aggregate package (Phase 7). When no DB / no
+// Aggregate is wired (boot mode), responds with empty/zero panels so
+// the dashboard still renders skeletons rather than erroring.
+//
+// Query params:
+//
+//	from    RFC3339 — defaults to start of current month UTC
+//	to      RFC3339 — defaults to now UTC
+//	tenant  uuid     — scopes the summary to a single tenant (operator
+//	                   view by default reports across tenants)
 func (s *Server) handleCostSummary(w http.ResponseWriter, r *http.Request) {
-	_, span := s.dashTracer().Start(r.Context(), "dashboard.cost.summary")
+	ctx, span := s.dashTracer().Start(r.Context(), "dashboard.cost.summary")
 	defer span.End()
 
-	// TODO Phase 7: read from suite_cost_events keyed on tenant_id, model,
-	// agent, and bucket by day across [from,to]. For now: zeros + empty.
 	resp := costSummaryResponse{
 		PeriodTotalUSD:   0,
 		PreviousTotalUSD: 0,
@@ -539,6 +615,62 @@ func (s *Server) handleCostSummary(w http.ResponseWriter, r *http.Request) {
 		ByModel:          []costByModel{},
 		ByAgent:          []costByAgent{},
 		ByTenant:         []costByTenant{},
+	}
+
+	if s.costAgg == nil {
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
+	q := r.URL.Query()
+	opts := cost.AggregateOpts{
+		TenantID: strings.TrimSpace(q.Get("tenant")),
+	}
+	if v := strings.TrimSpace(q.Get("from")); v != "" {
+		t, err := parseRFC3339(v)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "from must be RFC3339", nil)
+			return
+		}
+		opts.PeriodStart = t
+	}
+	if v := strings.TrimSpace(q.Get("to")); v != "" {
+		t, err := parseRFC3339(v)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "to must be RFC3339", nil)
+			return
+		}
+		opts.PeriodEnd = t
+	}
+
+	summary, err := s.costAgg.Summary(ctx, opts)
+	if err != nil {
+		span.RecordError(err)
+		s.log.Warn("cost summary failed", "error", err)
+		// Graceful degrade: dashboard still gets a valid envelope.
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
+	resp.PeriodTotalUSD = summary.PeriodTotalUSD
+	resp.PreviousTotalUSD = summary.PreviousTotalUSD
+	resp.BudgetUSD = summary.BudgetUSD
+	resp.ForecastUSD = summary.ForecastUSD
+	for _, d := range summary.ByDay {
+		resp.ByDay = append(resp.ByDay, costPoint{Date: d.Date, CostUSD: d.CostUSD})
+	}
+	for _, m := range summary.ByModel {
+		resp.ByModel = append(resp.ByModel, costByModel{Model: m.Model, CostUSD: m.CostUSD})
+	}
+	for _, a := range summary.ByAgent {
+		resp.ByAgent = append(resp.ByAgent, costByAgent{Agent: a.Agent, CostUSD: a.CostUSD})
+	}
+	for _, t := range summary.ByTenant {
+		resp.ByTenant = append(resp.ByTenant, costByTenant{
+			TenantID:   t.TenantID,
+			TenantName: t.TenantName,
+			CostUSD:    t.CostUSD,
+		})
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

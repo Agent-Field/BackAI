@@ -88,6 +88,11 @@ services:
       # docker-compose where file mounts may not be readable by the
       # distroless nonroot user.
       AF_STACK_MODULE_MULTI_TENANCY: ${AF_STACK_MODULE_MULTI_TENANCY:-false}
+      # LLM provider keys for the gateway (Phase 7). The runtime picks
+      # the first one set in this order: openrouter → openai → anthropic.
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # MinIO-backed object storage.
       AF_STACK_S3_ADAPTER: minio
       AF_STACK_S3_ENDPOINT: minio:9000

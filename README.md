@@ -111,6 +111,79 @@ To enable multi-tenancy: set `modules.multi-tenancy.enabled: true` in
 for the full guide, including how to run the end-to-end isolation test
 (`scripts/test-multi-tenancy.sh`).
 
+## Phase 7 — LLM Gateway
+
+Every LLM call in the suite goes through the gateway at `/api/v1/llm/*`.
+The wire shape is OpenAI-compatible, so any OpenAI-shaped client works
+by changing one line: the base URL.
+
+<div align="center">
+<img src="dashboard-screenshots/cost-live.png" alt="AF Stack Cost dashboard with live LLM traffic" width="900" />
+<sub>Operate → Cost: live cost events, model mix, per-tenant spend, budget meters</sub>
+</div>
+
+**One-line OpenAI SDK config** (works with the official `openai` package
+on every language):
+
+```js
+import OpenAI from "openai"
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/api/v1/llm",
+  apiKey: process.env.AF_STACK_TENANT_KEY,
+})
+
+const completion = await client.chat.completions.create({
+  model: "qwen/qwen-2.5-72b-instruct",
+  messages: [{ role: "user", content: "Hello!" }],
+})
+```
+
+**Or use the Suite SDK** — same gateway, ergonomic helpers, typed
+responses, plus access to the cost log and budgets:
+
+```python
+from af_stack import suite
+
+# Chat — non-streaming
+response = await suite.llm.chat(
+    model="qwen/qwen-2.5-72b-instruct",
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+print(response["choices"][0]["message"]["content"])
+
+# Chat — streaming
+async for chunk in await suite.llm.chat(
+    model="qwen/qwen-2.5-72b-instruct",
+    messages=[{"role": "user", "content": "Tell me a story."}],
+    stream=True,
+):
+    delta = chunk["choices"][0]["delta"].get("content", "")
+    print(delta, end="", flush=True)
+
+# Cost log + budgets
+events = await suite.cost.events(tenant="acme", limit=20)
+await suite.admin.budgets.set({
+    "tenant_id": "acme",
+    "monthly_usd": 500,
+    "alert_threshold_pct": 80,
+})
+```
+
+Every call is recorded with tenant, agent, model, tokens, cost, and
+cache-hit flag. Budgets are per-tenant; when a tenant exceeds its
+monthly cap, subsequent calls fail with `HTTP 402 BUDGET_EXCEEDED`.
+
+End-to-end tests:
+
+```bash
+# Real openai npm package against a live runtime
+node scripts/test-openai-sdk.mjs
+
+# Budget enforcement (creates tiny budget, verifies 402 on overrun)
+./scripts/test-budget-enforcement.sh
+```
+
 ### Make it your own
 
 Replace the sample agent with your own at `apps/backend/agents/<name>/` —

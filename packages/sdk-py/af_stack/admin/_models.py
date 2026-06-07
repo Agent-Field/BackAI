@@ -222,6 +222,48 @@ class TenantDetail(BaseModel):
     usage: TenantUsage = Field(default_factory=TenantUsage)
 
 
+# ─── Budgets (Phase 7) ────────────────────────────────────────────────────
+
+
+class Budget(BaseModel):
+    """Mirrors ``BudgetSchema`` in ``apps/dashboard/src/lib/api.ts``.
+
+    Returned by both the per-tenant ``GET /admin/budgets/{tenant_id}``
+    and as a row in ``GET /admin/budgets``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    tenant_id: str
+    monthly_usd: float
+    alert_threshold_pct: float
+    spent_this_period_usd: float
+    remaining_usd: float
+    resets_at: str
+
+
+class BudgetList(BaseModel):
+    """Mirrors ``BudgetListSchema``."""
+
+    model_config = ConfigDict(extra="allow")
+
+    budgets: list[Budget] = Field(default_factory=list)
+
+
+class SetBudgetInput(BaseModel):
+    """Mirrors ``SetBudgetInputSchema``.
+
+    ``alert_threshold_pct`` defaults to 80 on the server when omitted;
+    we keep the same default here so the wire payload is stable.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    tenant_id: str
+    monthly_usd: float
+    alert_threshold_pct: float = 80.0
+
+
 # ─── Audit ────────────────────────────────────────────────────────────────
 
 
@@ -256,12 +298,15 @@ __all__ = [
     "APIKeyList",
     "AuditEntry",
     "AuditList",
+    "Budget",
+    "BudgetList",
     "CreateTenantInput",
     "IssueAPIKeyInput",
     "IssuedAPIKey",
     "Membership",
     "MembershipList",
     "Role",
+    "SetBudgetInput",
     "Tenant",
     "TenantDetail",
     "TenantList",

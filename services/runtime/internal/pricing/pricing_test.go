@@ -57,6 +57,30 @@ func TestEstimateCostUSDForKnownModelIsRealistic(t *testing.T) {
 	}
 }
 
+func TestLookupTolerantOfProviderPrefix(t *testing.T) {
+	// Catalog stores "openrouter/qwen/...". Callers using the OpenAI SDK
+	// typically pass just "qwen/qwen-2.5-72b-instruct" — we must match.
+	cases := []struct {
+		input string
+		want  string // expected catalog ID
+	}{
+		{"qwen/qwen-2.5-72b-instruct", "openrouter/qwen/qwen-2.5-72b-instruct"},
+		{"QWEN/qwen-2.5-72b-instruct", "openrouter/qwen/qwen-2.5-72b-instruct"},
+		{"openrouter/qwen/qwen-2.5-72b-instruct", "openrouter/qwen/qwen-2.5-72b-instruct"},
+		{"gpt-4o-mini", "openai/gpt-4o-mini"},
+	}
+	for _, c := range cases {
+		p, ok := Lookup(c.input)
+		if !ok {
+			t.Errorf("Lookup(%q) miss, expected %q", c.input, c.want)
+			continue
+		}
+		if p.ID != c.want {
+			t.Errorf("Lookup(%q) = %q, want %q", c.input, p.ID, c.want)
+		}
+	}
+}
+
 func TestCatalogHasNoDuplicates(t *testing.T) {
 	seen := make(map[string]bool)
 	for _, p := range Catalog {

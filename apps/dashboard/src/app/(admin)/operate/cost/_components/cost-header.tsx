@@ -1,7 +1,15 @@
-// Top-of-page metrics: period total, delta vs previous period, forecast
-// for the current period, and (optionally) budget consumption.
+// Top-of-page hero metric strip: 4 cards.
+//
+//   1. Period total spend, with vs-previous delta Badge
+//   2. Budget remaining (Progress bar; "No budget set" if none configured)
+//   3. Forecast for current period (linear extrapolation from server)
+//   4. Cache hit rate, with savings_usd subline
+//
+// Cache stats are optional — they come from the LLM gateway and the
+// endpoint may not exist yet on older runtimes. When `cache` is null
+// we render a calm fallback state instead of a noisy error.
 
-import { ArrowDown, ArrowRight, ArrowUp } from "lucide-react"
+import { ArrowDown, ArrowRight, ArrowUp, Zap } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import {
@@ -11,12 +19,25 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
-import type { CostSummary } from "@/lib/api"
+import type { CacheStats, CostSummary } from "@/lib/api"
 
-import { formatCurrency, formatCurrencyCompact, formatPercentDelta } from "./format"
+import {
+  formatCurrency,
+  formatCurrencyCompact,
+  formatPercentDelta,
+} from "./format"
 
 type CostHeaderProps = {
   data: CostSummary
+  cache: CacheStats | null
+  /**
+   * Effective budget. The runtime exposes both a coarse `data.budget_usd`
+   * (account-wide for the period) and the per-tenant `budgets` collection.
+   * The page picks whichever is more relevant for the active filters and
+   * passes it down here. `null` means "no budget set" — render an empty
+   * card state instead of "—".
+   */
+  budgetUsd: number | null
 }
 
 const DIRECTION_VARIANT: Record<
@@ -35,16 +56,20 @@ const DIRECTION_ICON = {
   flat: ArrowRight,
 } as const
 
-export function CostHeader({ data }: CostHeaderProps) {
+export function CostHeader({ data, cache, budgetUsd }: CostHeaderProps) {
   const delta = formatPercentDelta(data.period_total_usd, data.previous_total_usd)
   const DeltaIcon = DIRECTION_ICON[delta.direction]
   const budgetPct =
-    data.budget_usd && data.budget_usd > 0
-      ? Math.min(100, (data.period_total_usd / data.budget_usd) * 100)
+    budgetUsd && budgetUsd > 0
+      ? Math.min(100, (data.period_total_usd / budgetUsd) * 100)
+      : null
+  const cacheHitPct =
+    cache && cache.total_calls > 0
+      ? Math.round(cache.hit_rate * 100)
       : null
 
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
       <Card>
         <CardHeader>
           <CardDescription>Period total</CardDescription>
@@ -65,6 +90,41 @@ export function CostHeader({ data }: CostHeaderProps) {
 
       <Card>
         <CardHeader>
+          <CardDescription>Budget</CardDescription>
+          {budgetPct === null ? (
+            <>
+              <CardTitle className="text-muted-foreground text-2xl font-medium tabular-nums tracking-tight">
+                No budget set
+              </CardTitle>
+              <p className="text-muted-foreground mt-2 text-xs">
+                Set a monthly budget to track remaining spend and trigger
+                alerts.
+              </p>
+            </>
+          ) : (
+            <>
+              <CardTitle className="text-4xl font-semibold tabular-nums tracking-tight">
+                {formatCurrencyCompact(
+                  Math.max(0, (budgetUsd ?? 0) - data.period_total_usd),
+                )}
+              </CardTitle>
+              <div className="mt-3 flex items-center justify-between gap-2 text-xs">
+                <span className="text-muted-foreground">
+                  {budgetPct.toFixed(0)}% used
+                </span>
+                <span className="text-muted-foreground tabular-nums">
+                  {formatCurrencyCompact(data.period_total_usd)} /{" "}
+                  {formatCurrencyCompact(budgetUsd ?? 0)}
+                </span>
+              </div>
+              <Progress value={budgetPct} className="mt-2 w-full" />
+            </>
+          )}
+        </CardHeader>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardDescription>Forecast</CardDescription>
           <CardTitle className="text-4xl font-semibold tabular-nums tracking-tight">
             {formatCurrencyCompact(data.forecast_usd)}
@@ -77,31 +137,28 @@ export function CostHeader({ data }: CostHeaderProps) {
 
       <Card>
         <CardHeader>
-          <CardDescription>Budget</CardDescription>
-          {budgetPct === null ? (
+          <CardDescription className="flex items-center gap-1.5">
+            <Zap className="size-3" />
+            Cache hit rate
+          </CardDescription>
+          {cacheHitPct === null ? (
             <>
-              <CardTitle className="text-4xl font-semibold tabular-nums tracking-tight">
-                —
+              <CardTitle className="text-muted-foreground text-2xl font-medium tabular-nums tracking-tight">
+                No cache yet
               </CardTitle>
               <p className="text-muted-foreground mt-2 text-xs">
-                No budget configured for this period.
+                Cache stats appear once the LLM gateway serves a request.
               </p>
             </>
           ) : (
             <>
               <CardTitle className="text-4xl font-semibold tabular-nums tracking-tight">
-                {formatCurrencyCompact(data.budget_usd ?? 0)}
+                {cacheHitPct}%
               </CardTitle>
-              <div className="mt-3 flex items-center justify-between gap-2 text-xs">
-                <span className="text-muted-foreground">
-                  {budgetPct.toFixed(0)}% used
-                </span>
-                <span className="text-muted-foreground tabular-nums">
-                  {formatCurrencyCompact(data.period_total_usd)} /{" "}
-                  {formatCurrencyCompact(data.budget_usd ?? 0)}
-                </span>
-              </div>
-              <Progress value={budgetPct} className="mt-2 w-full" />
+              <p className="text-muted-foreground mt-2 text-xs">
+                Saved {formatCurrencyCompact(cache?.savings_usd ?? 0)} across{" "}
+                {(cache?.cache_hits ?? 0).toLocaleString()} cached calls.
+              </p>
             </>
           )}
         </CardHeader>

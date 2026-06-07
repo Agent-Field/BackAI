@@ -84,6 +84,28 @@ async function capture() {
     fullPage: false,
   })
 
+  // ── 4b. Cost dashboard with LIVE LLM traffic.
+  //
+  // The README hero block uses cost-live.png — it's the same page as
+  // cost.png but captured AFTER the OpenAI-SDK e2e test has run, so the
+  // live cost events table, model mix, and per-tenant spend bars are
+  // populated with real (not synthetic) data.
+  //
+  // The caller is expected to:
+  //   1. run scripts/test-openai-sdk.mjs first (a few chat calls)
+  //   2. then run this capture script
+  //
+  // We don't gate the capture on that — if no live calls have happened
+  // yet the file will still save (showing the empty state), which is a
+  // useful canary that the e2e ran.
+  console.log("→ Cost dashboard (live)")
+  await page.goto(`${DASHBOARD_URL}/operate/cost`, { waitUntil: "networkidle" })
+  await page.waitForTimeout(2500)
+  await page.screenshot({
+    path: resolve(OUT_DIR, "cost-live.png"),
+    fullPage: false,
+  })
+
   // ── 5. Runs
   console.log("→ Runs")
   await page.goto(`${DASHBOARD_URL}/operate/runs`, { waitUntil: "networkidle" })

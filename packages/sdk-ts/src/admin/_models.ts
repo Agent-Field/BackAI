@@ -123,6 +123,29 @@ export const TenantDetailSchema = z.object({
 })
 export type TenantDetail = z.infer<typeof TenantDetailSchema>
 
+// ---------- Budgets (Phase 7) ----------
+
+export const BudgetSchema = z.object({
+  tenantId: z.string(),
+  monthlyUsd: z.number(),
+  alertThresholdPct: z.number(),
+  spentThisPeriodUsd: z.number(),
+  remainingUsd: z.number(),
+  resetsAt: z.string(),
+})
+export type Budget = z.infer<typeof BudgetSchema>
+
+export const BudgetListSchema = z.object({
+  budgets: z.array(BudgetSchema),
+})
+export type BudgetList = z.infer<typeof BudgetListSchema>
+
+export interface SetBudgetInput {
+  tenantId: string
+  monthlyUsd: number
+  alertThresholdPct?: number
+}
+
 // ---------- Audit ----------
 
 export const AuditEntrySchema = z.object({

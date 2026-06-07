@@ -1,4 +1,8 @@
 // Streaming skeleton for the Cost dashboard.
+//
+// Mirrors the new 4-card hero strip + filters + chart + breakdowns +
+// live event stream layout so the loading state doesn't visibly jump
+// when the real content lands.
 
 import { PageHeader } from "@/components/layout/page-header"
 import { Card, CardHeader } from "@/components/ui/card"
@@ -9,7 +13,7 @@ export default function CostLoading() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Cost"
-        description="Spend by model, agent, tenant, day. Budget alerts and forecast."
+        description="Spend by model, agent, tenant, day. Budget alerts, forecast, and a live event stream."
       />
 
       <div className="flex flex-wrap items-center gap-2">
@@ -22,8 +26,8 @@ export default function CostLoading() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        {Array.from({ length: 3 }).map((_, i) => (
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
           <Card key={i}>
             <CardHeader>
               <Skeleton className="h-3 w-20" />
@@ -52,6 +56,18 @@ export default function CostLoading() {
         <div className="flex flex-col gap-2 px-4 pb-4">
           {Array.from({ length: 5 }).map((_, i) => (
             <Skeleton key={i} className="h-10 w-full" />
+          ))}
+        </div>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="mt-1 h-3 w-64" />
+        </CardHeader>
+        <div className="flex flex-col gap-2 px-4 pb-4">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-8 w-full" />
           ))}
         </div>
       </Card>

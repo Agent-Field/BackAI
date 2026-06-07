@@ -13,9 +13,12 @@ import (
 
 	"github.com/Agent-Field/backai/services/runtime/internal/agentfield"
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
+	"github.com/Agent-Field/backai/services/runtime/internal/cost"
 	"github.com/Agent-Field/backai/services/runtime/internal/db"
 	"github.com/Agent-Field/backai/services/runtime/internal/hooks"
 	"github.com/Agent-Field/backai/services/runtime/internal/jobs"
+	"github.com/Agent-Field/backai/services/runtime/internal/llmcache"
+	"github.com/Agent-Field/backai/services/runtime/internal/llmgateway"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
 	"github.com/Agent-Field/backai/services/runtime/internal/ratelimit"
@@ -43,6 +46,15 @@ type Server struct {
 	tenancy       *tenancy.Manager
 	limiter       ratelimit.Limiter
 	openapi       *openapi.Builder
+	llmCache      *llmcache.Cache
+	llmGateway    *llmgateway.Gateway
+	// costAgg powers /api/v1/cost + /api/v1/cost/events. nil when no
+	// DB is wired; handlers return empty/zero responses.
+	costAgg *cost.Aggregate
+	// budgets powers /api/v1/admin/budgets (Get/Set/List) and is the
+	// authority for the cost summary's BudgetUSD field. nil disables
+	// budget endpoints (they return 503).
+	budgets *cost.Budgets
 }
 
 // Health aggregates dependency health for the /health endpoint.
@@ -84,6 +96,22 @@ type Deps struct {
 	// (e.g. tests that want a stable snapshot). nil means New()
 	// constructs a fresh Builder with the standard AF Stack title.
 	OpenAPIBuilder *openapi.Builder
+	// LLMCache is the Phase 7.3 LLM response cache. nil means the
+	// Phase 7.1 gateway should treat every call as a miss; the cache
+	// is an optional accelerator, never a correctness dependency.
+	LLMCache *llmcache.Cache
+	// LLMGateway is the Phase 7.1 OpenAI-compatible LLM gateway shim.
+	// nil means /api/v1/llm/* return 503 GATEWAY_NOT_CONFIGURED.
+	// main.go constructs one from the runtime's provider env keys
+	// (OPENROUTER_API_KEY etc.).
+	LLMGateway *llmgateway.Gateway
+	// CostAggregate powers the dashboard's /api/v1/cost summary +
+	// /api/v1/cost/events list. nil = the endpoints return empty
+	// zeros (boot mode without DB).
+	CostAggregate *cost.Aggregate
+	// Budgets is the per-tenant monthly budget store. nil disables
+	// the /api/v1/admin/budgets endpoints (which return 503).
+	Budgets *cost.Budgets
 }
 
 // New constructs a Server with the given config + logger + dependencies.
@@ -99,6 +127,7 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		builder.AddTag("secrets", "Per-tenant secrets vault")
 		builder.AddTag("jobs", "Background jobs queue")
 		builder.AddTag("admin", "Multi-tenancy admin")
+		builder.AddTag("llm", "OpenAI-compatible LLM gateway")
 		builder.AddTag("system", "Health, readiness, metrics")
 	}
 	s := &Server{
@@ -117,6 +146,10 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		tenancy:       deps.Tenancy,
 		limiter:       deps.RateLimiter,
 		openapi:       builder,
+		llmCache:      deps.LLMCache,
+		llmGateway:    deps.LLMGateway,
+		costAgg:       deps.CostAggregate,
+		budgets:       deps.Budgets,
 	}
 	s.registerRoutes()
 
@@ -264,11 +297,23 @@ func (s *Server) registerRoutes() {
 		Summary: "Mark a job retryable", Tags: []string{"jobs"},
 	})
 
+	// LLM gateway (Phase 7.1). Endpoints return 503 when no
+	// llmgateway.Gateway is wired (main.go constructs one from the
+	// runtime's provider env keys).
+	s.registerLLMRoutes()
+	s.registerLLMOpenAPI()
+
 	// Multi-tenancy admin (Phase 6). Endpoints return 503 when the
 	// multi-tenancy module is disabled or when no tenancy.Manager is
 	// wired (the latter is Phase 6.1's responsibility).
 	s.registerAdminRoutes()
 	s.registerAdminOpenAPI()
+
+	// Cost ledger + budgets (Phase 7). Cost-event endpoint degrades to
+	// empty list when no Aggregate is wired; budget endpoints are gated
+	// by the multi-tenancy module flag and return 503 otherwise.
+	s.registerCostRoutes()
+	s.registerCostOpenAPI()
 
 	if s.tel != nil {
 		s.mux.Handle("GET /metrics", s.tel.MetricsHandler())

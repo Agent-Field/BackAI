@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { CostSummary } from "@/lib/api"
+import type { CostEvent, CostSummary } from "@/lib/api"
 
 const RANGE_OPTIONS = [
   { value: "1d", label: "Last 24h" },
@@ -31,6 +31,11 @@ const ALL = "__all__"
 
 type CostFiltersProps = {
   data: CostSummary
+  /**
+   * Recent events. Included in the CSV export so the download is a
+   * single self-contained snapshot (aggregates + line items).
+   */
+  events?: CostEvent[]
   initialRange: RangeValue
   initialTenant: string
   initialAgent: string
@@ -63,6 +68,7 @@ function downloadCsv(filename: string, rows: (string | number)[][]) {
 
 export function CostFilters({
   data,
+  events,
   initialRange,
   initialTenant,
   initialAgent,
@@ -105,6 +111,33 @@ export function CostFilters({
     }
     for (const row of data.by_day) {
       rows.push(["day", row.date, row.date, row.cost_usd.toFixed(6)])
+    }
+    // Append individual events when available so the download captures
+    // both the aggregate view and the raw line items.
+    if (events && events.length > 0) {
+      rows.push([])
+      rows.push([
+        "event_occurred_at",
+        "tenant_id",
+        "model",
+        "prompt_tokens",
+        "completion_tokens",
+        "cost_usd",
+        "cached",
+        "latency_ms",
+      ])
+      for (const e of events) {
+        rows.push([
+          e.occurred_at,
+          e.tenant_id ?? "",
+          e.model,
+          e.prompt_tokens,
+          e.completion_tokens,
+          e.cost_usd.toFixed(6),
+          e.cached ? "true" : "false",
+          e.latency_ms,
+        ])
+      }
     }
     const today = new Date().toISOString().slice(0, 10)
     downloadCsv(`cost-${today}.csv`, rows)

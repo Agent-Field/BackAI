@@ -19,8 +19,9 @@ import { users } from "./users.js"
 import { memberships } from "./memberships.js"
 import { keys } from "./keys.js"
 import { audit } from "./audit.js"
+import { budgets } from "./budgets.js"
 
-export { tenants, users, memberships, keys, audit }
+export { tenants, users, memberships, keys, audit, budgets }
 
 export type {
   CreateTenantInput,
@@ -41,6 +42,9 @@ export type {
   IssuedAPIKey,
   AuditEntry,
   AuditList,
+  Budget,
+  BudgetList,
+  SetBudgetInput,
 } from "./_models.js"
 
 export {
@@ -59,13 +63,16 @@ export {
   TenantDetailSchema,
   TenantMemberSchema,
   TenantUsageSchema,
+  BudgetSchema,
+  BudgetListSchema,
 } from "./_models.js"
 
-/** Combined namespace: `suite.admin.{tenants,users,memberships,keys,audit}`. */
+/** Combined namespace: `suite.admin.{tenants,users,memberships,keys,audit,budgets}`. */
 export const admin = {
   tenants,
   users,
   memberships,
   keys,
   audit,
+  budgets,
 } as const
