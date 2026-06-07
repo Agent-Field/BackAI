@@ -48,6 +48,44 @@ function makeAuth() {
     secret: process.env.AF_STACK_AUTH_SECRET ?? "dev-secret-change-me",
     baseURL: process.env.BETTER_AUTH_URL,
     trustedOrigins,
+    // Mirror every better-auth user into suite_users on create so the
+    // runtime's tenant_resolver can join on email and find the canonical
+    // suite user id. Without this hook a freshly-signed-up operator gets
+    // 401 on /api/v1/secrets and friends until someone hand-inserts the
+    // row.
+    databaseHooks: {
+      user: {
+        create: {
+          after: async (user) => {
+            try {
+              await pool.query(
+                `INSERT INTO suite_users (email, name)
+                 VALUES ($1, $2)
+                 ON CONFLICT (email) DO NOTHING`,
+                [user.email, user.name ?? null],
+              )
+              // Auto-membership: every freshly-signed-up user becomes
+              // an owner of the default tenant. Once an admin builds
+              // tenant-management flows we can swap this for an
+              // invitation-based join.
+              await pool.query(
+                `INSERT INTO suite_memberships (user_id, tenant_id, role)
+                 SELECT u.id, '00000000-0000-0000-0000-000000000000'::uuid, 'owner'
+                 FROM suite_users u
+                 WHERE u.email = $1
+                 ON CONFLICT DO NOTHING`,
+                [user.email],
+              )
+            } catch (e) {
+              // Don't block sign-up on the mirror — log and let the
+              // user in. They'll get 401 on protected APIs until the
+              // mirror is repaired, which is loud + recoverable.
+              console.error("[suite_users mirror] failed:", e)
+            }
+          },
+        },
+      },
+    },
     emailAndPassword: {
       enabled: true,
       autoSignIn: true,

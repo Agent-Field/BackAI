@@ -26,6 +26,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/Agent-Field/backai/services/runtime/internal/audit"
 	"github.com/Agent-Field/backai/services/runtime/internal/cost"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
 )
@@ -353,5 +354,14 @@ func (s *Server) handleAdminSetBudget(w http.ResponseWriter, r *http.Request) {
 		writeBudgetError(w, err)
 		return
 	}
+	s.audit.Write(ctx, r, audit.Event{
+		Action:       "budget.set",
+		ResourceType: "budget",
+		ResourceID:   in.TenantID,
+		Metadata: map[string]any{
+			"monthly_usd":         in.MonthlyUSD,
+			"alert_threshold_pct": thresh,
+		},
+	})
 	writeJSON(w, http.StatusOK, marshalBudget(b))
 }

@@ -28,6 +28,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/Agent-Field/backai/services/runtime/internal/audit"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
 	"github.com/Agent-Field/backai/services/runtime/internal/tenancy"
 )
@@ -618,6 +619,16 @@ func (s *Server) handleAdminCreateTenant(w http.ResponseWriter, r *http.Request)
 		writeTenancyError(w, err)
 		return
 	}
+	s.audit.Write(ctx, r, audit.Event{
+		Action:       "tenant.create",
+		ResourceType: "tenant",
+		ResourceID:   t.ID,
+		Metadata: map[string]any{
+			"slug": t.Slug,
+			"name": t.Name,
+			"plan": t.Plan,
+		},
+	})
 	writeJSON(w, http.StatusCreated, marshalTenant(t))
 }
 
@@ -714,6 +725,11 @@ func (s *Server) handleAdminDeleteTenant(w http.ResponseWriter, r *http.Request)
 		writeTenancyError(w, err)
 		return
 	}
+	s.audit.Write(ctx, r, audit.Event{
+		Action:       "tenant.delete",
+		ResourceType: "tenant",
+		ResourceID:   id,
+	})
 	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 }
 
@@ -790,6 +806,16 @@ func (s *Server) handleAdminAddMembership(w http.ResponseWriter, r *http.Request
 		writeTenancyError(w, err)
 		return
 	}
+	s.audit.Write(ctx, r, audit.Event{
+		Action:       "membership.add",
+		ResourceType: "membership",
+		ResourceID:   in.TenantID + "/" + in.UserID,
+		Metadata: map[string]any{
+			"tenant_id": in.TenantID,
+			"user_id":   in.UserID,
+			"role":      in.Role,
+		},
+	})
 	writeJSON(w, http.StatusCreated, marshalMembership(m))
 }
 
@@ -811,6 +837,15 @@ func (s *Server) handleAdminRemoveMembership(w http.ResponseWriter, r *http.Requ
 		writeTenancyError(w, err)
 		return
 	}
+	s.audit.Write(ctx, r, audit.Event{
+		Action:       "membership.remove",
+		ResourceType: "membership",
+		ResourceID:   tenantID + "/" + userID,
+		Metadata: map[string]any{
+			"tenant_id": tenantID,
+			"user_id":   userID,
+		},
+	})
 	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 }
 
@@ -875,6 +910,16 @@ func (s *Server) handleAdminIssueKey(w http.ResponseWriter, r *http.Request) {
 		writeTenancyError(w, err)
 		return
 	}
+	s.audit.Write(ctx, r, audit.Event{
+		Action:       "api_key.create",
+		ResourceType: "api_key",
+		ResourceID:   issued.ID,
+		Metadata: map[string]any{
+			"tenant_id": issued.TenantID,
+			"name":      issued.Name,
+			"scopes":    issued.Scopes,
+		},
+	})
 	// The plaintext leaves the runtime here ONCE. Subsequent GETs only
 	// see the APIKey shape (no `value`).
 	writeJSON(w, http.StatusCreated, marshalIssuedKey(issued))
@@ -896,6 +941,11 @@ func (s *Server) handleAdminRevokeKey(w http.ResponseWriter, r *http.Request) {
 		writeTenancyError(w, err)
 		return
 	}
+	s.audit.Write(ctx, r, audit.Event{
+		Action:       "api_key.revoke",
+		ResourceType: "api_key",
+		ResourceID:   id,
+	})
 	writeJSON(w, http.StatusOK, map[string]bool{"revoked": true})
 }
 

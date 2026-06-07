@@ -1,5 +1,6 @@
 packages:
   - apps/dashboard
+  - apps/customer-app
   - packages/sdk-ts
   - packages/ui
   - packages/auth

@@ -35,6 +35,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
 	"github.com/Agent-Field/backai/services/runtime/internal/ratelimit"
 	"github.com/Agent-Field/backai/services/runtime/internal/sandbox"
+	"github.com/Agent-Field/backai/services/runtime/internal/audit"
 	"github.com/Agent-Field/backai/services/runtime/internal/secrets"
 	"github.com/Agent-Field/backai/services/runtime/internal/skills"
 	"github.com/Agent-Field/backai/services/runtime/internal/storage"
@@ -140,6 +141,10 @@ type Server struct {
 	// version is the runtime version label surfaced in
 	// /api/v1/metrics/summary. Defaults to "dev" when empty.
 	version string
+	// audit writes append-only rows into suite_audit_log for every
+	// admin mutation. Always non-nil; falls back to no-op when no DB
+	// pool is wired.
+	audit *audit.Writer
 }
 
 // Health aggregates dependency health for the /health endpoint.
@@ -314,6 +319,11 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		metricsRing:     newMetricsRing(MetricsRingSize),
 		logRing:         deps.LogRing,
 		version:         deps.Version,
+	}
+	if deps.DB != nil {
+		s.audit = audit.New(deps.DB.Pool, log)
+	} else {
+		s.audit = audit.New(nil, log)
 	}
 	s.registerRoutes()
 

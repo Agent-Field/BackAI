@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Agent-Field/backai/services/runtime/internal/audit"
 	"github.com/Agent-Field/backai/services/runtime/internal/secrets"
 	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 )
@@ -338,6 +339,11 @@ func (s *Server) handlePutSecret(w http.ResponseWriter, r *http.Request) {
 		writeSecretError(w, err)
 		return
 	}
+	s.audit.Write(ctx, r, audit.Event{
+		Action:       "secret.put",
+		ResourceType: "secret",
+		ResourceID:   key,
+	})
 	writeJSON(w, http.StatusOK, meta)
 }
 
@@ -355,6 +361,11 @@ func (s *Server) handleDeleteSecret(w http.ResponseWriter, r *http.Request) {
 		writeSecretError(w, err)
 		return
 	}
+	s.audit.Write(ctx, r, audit.Event{
+		Action:       "secret.delete",
+		ResourceType: "secret",
+		ResourceID:   key,
+	})
 	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 }
 
