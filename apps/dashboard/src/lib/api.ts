@@ -347,6 +347,80 @@ export const SignedURLSchema = z.object({
 })
 export type SignedURL = z.infer<typeof SignedURLSchema>
 
+// ─── LLM Gateway + Cost (Phase 7) ─────────────────────────────────────────
+
+export const CostEventSchema = z.object({
+  id: z.string(),
+  tenant_id: z.string().nullable(),
+  api_key_id: z.string().nullable(),
+  model: z.string(),
+  provider: z.string(),
+  agent: z.string().nullable(),
+  prompt_tokens: z.number(),
+  completion_tokens: z.number(),
+  total_tokens: z.number(),
+  cost_usd: z.number(),
+  cached: z.boolean(),
+  latency_ms: z.number(),
+  occurred_at: z.string(),
+})
+export type CostEvent = z.infer<typeof CostEventSchema>
+
+export const CostEventListSchema = z.object({
+  events: z.array(CostEventSchema),
+  total: z.number(),
+  has_more: z.boolean(),
+})
+export type CostEventList = z.infer<typeof CostEventListSchema>
+
+export const BudgetSchema = z.object({
+  tenant_id: z.string(),
+  monthly_usd: z.number(),
+  alert_threshold_pct: z.number(),
+  spent_this_period_usd: z.number(),
+  remaining_usd: z.number(),
+  resets_at: z.string(),
+})
+export type Budget = z.infer<typeof BudgetSchema>
+
+export const BudgetListSchema = z.object({
+  budgets: z.array(BudgetSchema),
+})
+export type BudgetList = z.infer<typeof BudgetListSchema>
+
+export const SetBudgetInputSchema = z.object({
+  tenant_id: z.string(),
+  monthly_usd: z.number().positive(),
+  alert_threshold_pct: z.number().min(0).max(100).default(80),
+})
+export type SetBudgetInput = z.infer<typeof SetBudgetInputSchema>
+
+export const LLMModelSchema = z.object({
+  id: z.string(),
+  display_name: z.string(),
+  provider: z.string(),
+  prompt_usd_per_1m: z.number(),
+  completion_usd_per_1m: z.number(),
+  supports_streaming: z.boolean(),
+  supports_tools: z.boolean(),
+})
+export type LLMModel = z.infer<typeof LLMModelSchema>
+
+export const LLMModelListSchema = z.object({
+  models: z.array(LLMModelSchema),
+})
+export type LLMModelList = z.infer<typeof LLMModelListSchema>
+
+export const CacheStatsSchema = z.object({
+  total_calls: z.number(),
+  cache_hits: z.number(),
+  cache_misses: z.number(),
+  hit_rate: z.number(),
+  savings_usd: z.number(),
+  entries: z.number(),
+})
+export type CacheStats = z.infer<typeof CacheStatsSchema>
+
 // ─── Tenancy (Phase 6) ────────────────────────────────────────────────────
 
 export const TenantSchema = z.object({
@@ -591,6 +665,50 @@ export const api = {
         `/api/v1/secrets/${encodeURIComponent(key)}/rotate`,
         { method: "POST", json: input },
         SecretMetadataSchema,
+      ),
+  },
+
+  // ─── LLM gateway + cost (Phase 7) ───
+  llm: {
+    models: () => request("/api/v1/llm/models", undefined, LLMModelListSchema),
+    cacheStats: () =>
+      request("/api/v1/llm/cache/stats", undefined, CacheStatsSchema),
+  },
+  costEvents: (params?: {
+    tenant?: string
+    model?: string
+    from?: string
+    to?: string
+    limit?: number
+    offset?: number
+  }) => {
+    const qs = new URLSearchParams()
+    if (params?.tenant) qs.set("tenant", params.tenant)
+    if (params?.model) qs.set("model", params.model)
+    if (params?.from) qs.set("from", params.from)
+    if (params?.to) qs.set("to", params.to)
+    if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+    if (params?.offset !== undefined) qs.set("offset", String(params.offset))
+    const q = qs.toString()
+    return request(
+      `/api/v1/cost/events${q ? "?" + q : ""}`,
+      undefined,
+      CostEventListSchema,
+    )
+  },
+  budgets: {
+    list: () => request("/api/v1/admin/budgets", undefined, BudgetListSchema),
+    get: (tenantId: string) =>
+      request(
+        `/api/v1/admin/budgets/${tenantId}`,
+        undefined,
+        BudgetSchema,
+      ),
+    set: (input: SetBudgetInput) =>
+      request(
+        "/api/v1/admin/budgets",
+        { method: "PUT", json: input },
+        BudgetSchema,
       ),
   },
 
