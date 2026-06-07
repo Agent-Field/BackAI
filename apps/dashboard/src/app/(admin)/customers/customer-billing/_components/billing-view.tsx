@@ -302,6 +302,25 @@ export function CustomerBillingView() {
         cell: ({ row }) => {
           const tid = row.original.customer.tenant_id
           const busy = opening === tid
+          // Stub mode: stripe_customer_id starts with "cus_stub_" when
+          // the runtime is running without STRIPE_SECRET_KEY. The
+          // Portal link would just go to example.com, so hide the
+          // button and show the dev hint instead.
+          const isStub = (
+            row.original.customer.stripe_customer_id ?? ""
+          ).startsWith("cus_stub_")
+          if (isStub) {
+            return (
+              <div className="flex justify-end">
+                <span
+                  className="text-muted-foreground text-xs"
+                  title="Set STRIPE_SECRET_KEY in your .env and restart the runtime to enable the Stripe Portal."
+                >
+                  Stripe stub — set <code className="font-mono">STRIPE_SECRET_KEY</code>
+                </span>
+              </div>
+            )
+          }
           return (
             <div className="flex justify-end">
               <Button
