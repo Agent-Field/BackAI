@@ -20,9 +20,32 @@ function makeAuth() {
   }
   const pool = new Pool({ connectionString: databaseUrl })
 
+  // Origins the dashboard accepts cross-origin auth requests from. Defaults
+  // cover the docker-compose host-port pair plus dev. Operators override via
+  // BETTER_AUTH_URL or BETTER_AUTH_TRUSTED_ORIGINS (comma-separated).
+  const extraOrigins = (process.env.BETTER_AUTH_TRUSTED_ORIGINS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const trustedOrigins = Array.from(
+    new Set(
+      [
+        "http://localhost:3000",
+        "http://localhost:33000",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:33000",
+        process.env.BETTER_AUTH_URL,
+        process.env.NEXT_PUBLIC_DASHBOARD_URL,
+        ...extraOrigins,
+      ].filter((s): s is string => Boolean(s)),
+    ),
+  )
+
   return betterAuth({
     database: pool,
     secret: process.env.AF_STACK_AUTH_SECRET ?? "dev-secret-change-me",
+    baseURL: process.env.BETTER_AUTH_URL,
+    trustedOrigins,
     emailAndPassword: {
       enabled: true,
       autoSignIn: true,

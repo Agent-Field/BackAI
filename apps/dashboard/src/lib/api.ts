@@ -347,6 +347,144 @@ export const SignedURLSchema = z.object({
 })
 export type SignedURL = z.infer<typeof SignedURLSchema>
 
+// ─── Tenancy (Phase 6) ────────────────────────────────────────────────────
+
+export const TenantSchema = z.object({
+  id: z.string(),
+  slug: z.string(),
+  name: z.string(),
+  plan: z.string(),
+  settings: z.record(z.string(), z.unknown()),
+  quota: z.record(z.string(), z.unknown()),
+  created_at: z.string(),
+  deleted_at: z.string().nullable(),
+})
+export type Tenant = z.infer<typeof TenantSchema>
+
+export const TenantListSchema = z.object({
+  tenants: z.array(TenantSchema),
+})
+export type TenantList = z.infer<typeof TenantListSchema>
+
+export const CreateTenantInputSchema = z.object({
+  slug: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[a-z0-9][a-z0-9-]*$/, "lowercase letters, digits, hyphens"),
+  name: z.string().min(1).max(128),
+  plan: z.string().optional(),
+})
+export type CreateTenantInput = z.infer<typeof CreateTenantInputSchema>
+
+export const UpdateTenantInputSchema = z.object({
+  name: z.string().optional(),
+  plan: z.string().optional(),
+  settings: z.record(z.string(), z.unknown()).optional(),
+  quota: z.record(z.string(), z.unknown()).optional(),
+})
+export type UpdateTenantInput = z.infer<typeof UpdateTenantInputSchema>
+
+export const UserSchema = z.object({
+  id: z.string(),
+  email: z.email(),
+  name: z.string().nullable(),
+  avatar_url: z.string().nullable(),
+  created_at: z.string(),
+  deleted_at: z.string().nullable(),
+})
+export type User = z.infer<typeof UserSchema>
+
+export const UserListSchema = z.object({
+  users: z.array(UserSchema),
+})
+export type UserList = z.infer<typeof UserListSchema>
+
+export const MembershipSchema = z.object({
+  tenant_id: z.string(),
+  user_id: z.string(),
+  role: z.enum(["owner", "admin", "member", "viewer"]),
+  invited_at: z.string(),
+  accepted_at: z.string().nullable(),
+})
+export type Membership = z.infer<typeof MembershipSchema>
+
+export const MembershipListSchema = z.object({
+  memberships: z.array(MembershipSchema),
+})
+export type MembershipList = z.infer<typeof MembershipListSchema>
+
+export const APIKeySchema = z.object({
+  id: z.string(),
+  tenant_id: z.string(),
+  prefix: z.string(),
+  name: z.string().nullable(),
+  scopes: z.array(z.string()),
+  created_by: z.string().nullable(),
+  created_at: z.string(),
+  last_used_at: z.string().nullable(),
+  expires_at: z.string().nullable(),
+  revoked_at: z.string().nullable(),
+})
+export type APIKey = z.infer<typeof APIKeySchema>
+
+export const APIKeyListSchema = z.object({
+  keys: z.array(APIKeySchema),
+})
+export type APIKeyList = z.infer<typeof APIKeyListSchema>
+
+// Returned by POST /api/v1/admin/keys ONCE; the `value` is never shown again.
+export const IssuedAPIKeySchema = APIKeySchema.extend({
+  value: z.string(),
+})
+export type IssuedAPIKey = z.infer<typeof IssuedAPIKeySchema>
+
+export const IssueAPIKeyInputSchema = z.object({
+  tenant_id: z.string(),
+  name: z.string().optional(),
+  scopes: z.array(z.string()).default([]),
+  expires_at: z.string().optional(),
+})
+export type IssueAPIKeyInput = z.infer<typeof IssueAPIKeyInputSchema>
+
+export const TenantDetailSchema = z.object({
+  tenant: TenantSchema,
+  members: z.array(
+    z.object({
+      user: UserSchema,
+      role: z.string(),
+    }),
+  ),
+  api_keys: z.array(APIKeySchema),
+  usage: z.object({
+    requests_30d: z.number(),
+    cost_usd_30d: z.number(),
+    storage_bytes: z.number(),
+    secrets_count: z.number(),
+  }),
+})
+export type TenantDetail = z.infer<typeof TenantDetailSchema>
+
+export const AuditEntrySchema = z.object({
+  id: z.string(),
+  tenant_id: z.string().nullable(),
+  user_id: z.string().nullable(),
+  api_key_id: z.string().nullable(),
+  action: z.string(),
+  resource_type: z.string().nullable(),
+  resource_id: z.string().nullable(),
+  metadata: z.record(z.string(), z.unknown()),
+  occurred_at: z.string(),
+})
+export type AuditEntry = z.infer<typeof AuditEntrySchema>
+
+export const AuditListSchema = z.object({
+  entries: z.array(AuditEntrySchema),
+  total: z.number(),
+  has_more: z.boolean(),
+})
+export type AuditList = z.infer<typeof AuditListSchema>
+
 export const ModulesStateSchema = z.object({
   modules: z.array(
     z.object({

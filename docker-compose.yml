@@ -117,6 +117,9 @@ services:
     environment:
       DATABASE_URL: postgres://afstack:afstack@postgres:5432/afstack?sslmode=disable
       AF_STACK_AUTH_SECRET: ${AF_STACK_AUTH_SECRET:-dev-secret-change-me-in-prod}
+      # Tell better-auth which URL the operator hits the dashboard at.
+      BETTER_AUTH_URL: http://localhost:${AF_STACK_DASHBOARD_PORT:-3000}
+      BETTER_AUTH_TRUSTED_ORIGINS: ${BETTER_AUTH_TRUSTED_ORIGINS:-}
       # Server-side fetches use Docker DNS.
       RUNTIME_URL: http://runtime:8080
       # Client-side fetches use the host-mapped runtime port.
