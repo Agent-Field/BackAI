@@ -156,6 +156,30 @@ export {
   type ListCostEventsOptions,
 } from "./cost.js"
 
+// ─── Memory (Phase 8.3) ───────────────────────────────────────────────────
+
+export {
+  memory,
+  get as getMemory,
+  put as putMemory,
+  delete as deleteMemory,
+  list as listMemory,
+  search as searchMemory,
+  MemoryScopeSchema,
+  MemoryEntrySchema,
+  MemoryListSchema,
+  MemorySearchHitSchema,
+  MemorySearchResultSchema,
+  type MemoryScope,
+  type MemoryEntry,
+  type MemoryList,
+  type MemorySearchHit,
+  type MemorySearchResult,
+  type PutMemoryOptions,
+  type ListMemoryOptions,
+  type SearchMemoryOptions,
+} from "./memory.js"
+
 import { agents } from "./agents.js"
 import { jobs } from "./jobs.js"
 import { secrets } from "./secrets.js"
@@ -163,8 +187,9 @@ import { storage } from "./storage.js"
 import { admin } from "./admin/index.js"
 import { llm } from "./llm.js"
 import { cost } from "./cost.js"
+import { memory } from "./memory.js"
 
-/** Top-level namespace: `suite.agents.*`, `suite.jobs.*`, `suite.secrets.*`, `suite.storage.*`, `suite.llm.*`, `suite.cost.*`, `suite.admin.*`. */
+/** Top-level namespace: `suite.agents.*`, `suite.jobs.*`, `suite.secrets.*`, `suite.storage.*`, `suite.llm.*`, `suite.cost.*`, `suite.memory.*`, `suite.admin.*`. */
 export const suite = {
   agents,
   jobs,
@@ -172,5 +197,6 @@ export const suite = {
   storage,
   llm,
   cost,
+  memory,
   admin,
 } as const

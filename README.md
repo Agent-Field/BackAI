@@ -184,6 +184,33 @@ node scripts/test-openai-sdk.mjs
 ./scripts/test-budget-enforcement.sh
 ```
 
+## Phase 8 — Database studio + memory
+
+Every AF Stack deployment ships a full Postgres browser in the operator
+dashboard. Inspect tables, view row-level security policies, run
+read-only SQL, and manage the per-scope memory store — all from the same
+console. The `Build → Database` tab covers the four operator workflows
+that previously required `psql`: browsing data, reading schema +
+indexes, auditing RLS, and ad-hoc queries.
+
+Per-scope KV with vector search out of the box — store agent context
+across runs, search semantically.
+
+<div align="center">
+<img src="dashboard-screenshots/database.png" alt="AF Stack Database studio — table browser + SQL runner + RLS policies + memory" width="900" />
+<sub>Build → Database: tables sidebar, row browser, structure / policies / SQL / memory tabs</sub>
+</div>
+
+End-to-end tests:
+
+```bash
+# DB studio API: tables, table detail, SQL runner read-only guard
+./scripts/test-db-studio.sh
+
+# Memory API: put / get / search / rerank / delete
+./scripts/test-memory.sh
+```
+
 ### Make it your own
 
 Replace the sample agent with your own at `apps/backend/agents/<name>/` —

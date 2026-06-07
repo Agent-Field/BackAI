@@ -84,6 +84,14 @@ var publicPrefixes = []string{
 	// The admin/* surface gates its own access via the
 	// multi-tenancy module flag + admin auth (Phase 6 dashboard).
 	"/api/v1/admin",
+	// DB studio (Phase 8.1) — dashboard-only operator surface; the
+	// dashboard's own session auth gates it, the same way admin
+	// routes work.
+	"/api/v1/db",
+	// Memory (Phase 8.2). Operator can browse + put + search from the
+	// dashboard. Tenant scoping is enforced at the Store layer via
+	// the resolved tenant context when scope=tenant.
+	"/api/v1/memory",
 }
 
 func isPublicPath(p string) bool {

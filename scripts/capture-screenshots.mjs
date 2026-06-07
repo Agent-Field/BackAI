@@ -186,6 +186,63 @@ async function capture() {
     fullPage: false,
   })
 
+  // ── 13. Build → Database (Phase 8.4)
+  //
+  // The DB studio renders a left table sidebar + tabs (Data / Structure /
+  // Policies / SQL / Memory). When the runtime hasn't wired the
+  // /api/v1/db/* endpoints yet (Phase 8.x in flight on a parallel
+  // branch), the page renders an empty-state CTA instead — still worth
+  // a screenshot as a canary.
+  console.log("→ Build → Database")
+  await page.goto(`${DASHBOARD_URL}/build/database`, {
+    waitUntil: "networkidle",
+  })
+  await page.waitForTimeout(2000)
+  // Best-effort: select suite_tenants in the sidebar so the screenshot
+  // shows real content. The sidebar may not have rendered if the runtime
+  // endpoints are down — in that case we just capture the empty state.
+  try {
+    const tenants = page
+      .locator(
+        '[role="button"], [data-table], button, a',
+        { hasText: /^suite_tenants$/ },
+      )
+      .first()
+    await tenants.waitFor({ state: "visible", timeout: 3000 })
+    await tenants.click()
+    await page.waitForTimeout(1500)
+  } catch {
+    console.log("    (no suite_tenants entry found — capturing whatever rendered)")
+  }
+  await page.screenshot({
+    path: resolve(OUT_DIR, "database.png"),
+    fullPage: false,
+  })
+
+  // ── 14. Build → Database → Memory tab (Phase 8.4)
+  //
+  // Same route, just the Memory tab activated. The tab shows the per-
+  // scope KV browser + vector search box.
+  console.log("→ Build → Database → Memory tab")
+  await page.goto(`${DASHBOARD_URL}/build/database`, {
+    waitUntil: "networkidle",
+  })
+  await page.waitForTimeout(1500)
+  try {
+    const memoryTab = page
+      .locator('button[role="tab"], [data-state]', { hasText: /^Memory$/i })
+      .first()
+    await memoryTab.waitFor({ state: "visible", timeout: 3000 })
+    await memoryTab.click()
+    await page.waitForTimeout(1500)
+  } catch {
+    console.log("    (no Memory tab found — capturing whatever rendered)")
+  }
+  await page.screenshot({
+    path: resolve(OUT_DIR, "memory.png"),
+    fullPage: false,
+  })
+
   await browser.close()
   console.log(`saved screenshots to ${OUT_DIR}`)
 }

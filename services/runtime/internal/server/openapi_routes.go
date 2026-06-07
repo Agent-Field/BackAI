@@ -75,6 +75,49 @@ func (s *Server) registerSecretsOpenAPI() {
 	})
 }
 
+// registerMemoryOpenAPI describes /api/v1/memory/* routes.
+func (s *Server) registerMemoryOpenAPI() {
+	b := s.openapi
+	b.Register("GET", "/api/v1/memory", openapi.RouteMeta{
+		Summary: "List memory entries (paginated)", Tags: []string{"memory"},
+		Parameters: []openapi.Parameter{
+			{Name: "scope", In: "query", Schema: map[string]any{"type": "string"}},
+			{Name: "scope_id", In: "query", Schema: map[string]any{"type": "string"}},
+			{Name: "prefix", In: "query", Schema: map[string]any{"type": "string"}},
+			{Name: "limit", In: "query", Schema: map[string]any{"type": "integer"}},
+			{Name: "offset", In: "query", Schema: map[string]any{"type": "integer"}},
+		},
+	})
+	b.Register("GET", "/api/v1/memory/get", openapi.RouteMeta{
+		Summary: "Get a single memory entry", Tags: []string{"memory"},
+		Parameters: []openapi.Parameter{
+			{Name: "scope", In: "query", Required: true,
+				Schema: map[string]any{"type": "string"}},
+			{Name: "key", In: "query", Required: true,
+				Schema: map[string]any{"type": "string"}},
+			{Name: "scope_id", In: "query",
+				Schema: map[string]any{"type": "string"}},
+		},
+	})
+	b.Register("PUT", "/api/v1/memory", openapi.RouteMeta{
+		Summary: "Upsert a memory entry", Tags: []string{"memory"},
+	})
+	b.Register("DELETE", "/api/v1/memory", openapi.RouteMeta{
+		Summary: "Delete a memory entry", Tags: []string{"memory"},
+		Parameters: []openapi.Parameter{
+			{Name: "scope", In: "query", Required: true,
+				Schema: map[string]any{"type": "string"}},
+			{Name: "key", In: "query", Required: true,
+				Schema: map[string]any{"type": "string"}},
+			{Name: "scope_id", In: "query",
+				Schema: map[string]any{"type": "string"}},
+		},
+	})
+	b.Register("POST", "/api/v1/memory/search", openapi.RouteMeta{
+		Summary: "Vector-similarity search over memory", Tags: []string{"memory"},
+	})
+}
+
 // NOTE: registerAdminOpenAPI lives in admin.go (alongside the handler
 // declarations). It used to be here, but co-locating it with the
 // handlers makes future param/response schema edits easier.

@@ -15,10 +15,12 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
 	"github.com/Agent-Field/backai/services/runtime/internal/cost"
 	"github.com/Agent-Field/backai/services/runtime/internal/db"
+	"github.com/Agent-Field/backai/services/runtime/internal/dbstudio"
 	"github.com/Agent-Field/backai/services/runtime/internal/hooks"
 	"github.com/Agent-Field/backai/services/runtime/internal/jobs"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmcache"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmgateway"
+	"github.com/Agent-Field/backai/services/runtime/internal/memory"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
 	"github.com/Agent-Field/backai/services/runtime/internal/ratelimit"
@@ -48,6 +50,12 @@ type Server struct {
 	openapi       *openapi.Builder
 	llmCache      *llmcache.Cache
 	llmGateway    *llmgateway.Gateway
+	// memory is the Phase 8.2 suite memory store. nil when no DB is
+	// wired; the /api/v1/memory/* endpoints return 503 in that case.
+	memory *memory.Store
+	// dbStudio powers the Phase 8.1 DB studio (/api/v1/db/*). nil when
+	// no DB is wired; endpoints return 503 DB_STUDIO_NOT_CONFIGURED.
+	dbStudio *dbstudio.Studio
 	// costAgg powers /api/v1/cost + /api/v1/cost/events. nil when no
 	// DB is wired; handlers return empty/zero responses.
 	costAgg *cost.Aggregate
@@ -105,6 +113,15 @@ type Deps struct {
 	// main.go constructs one from the runtime's provider env keys
 	// (OPENROUTER_API_KEY etc.).
 	LLMGateway *llmgateway.Gateway
+	// Memory is the Phase 8.2 suite memory store (pgvector-backed
+	// key/value with optional embeddings). nil means /api/v1/memory/*
+	// endpoints return 503 MEMORY_NOT_CONFIGURED.
+	Memory *memory.Store
+	// DBStudio is the Phase 8.1 read-mostly DB introspection + SQL
+	// runner. nil means /api/v1/db/* endpoints return 503
+	// DB_STUDIO_NOT_CONFIGURED. main.go constructs one wrapped around
+	// the same pgxpool when database != nil.
+	DBStudio *dbstudio.Studio
 	// CostAggregate powers the dashboard's /api/v1/cost summary +
 	// /api/v1/cost/events list. nil = the endpoints return empty
 	// zeros (boot mode without DB).
@@ -128,6 +145,8 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		builder.AddTag("jobs", "Background jobs queue")
 		builder.AddTag("admin", "Multi-tenancy admin")
 		builder.AddTag("llm", "OpenAI-compatible LLM gateway")
+		builder.AddTag("memory", "Suite memory (pgvector-backed key/value)")
+		builder.AddTag("db", "Database studio (introspection + SQL runner)")
 		builder.AddTag("system", "Health, readiness, metrics")
 	}
 	s := &Server{
@@ -148,6 +167,8 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		openapi:       builder,
 		llmCache:      deps.LLMCache,
 		llmGateway:    deps.LLMGateway,
+		memory:        deps.Memory,
+		dbStudio:      deps.DBStudio,
 		costAgg:       deps.CostAggregate,
 		budgets:       deps.Budgets,
 	}
@@ -302,6 +323,16 @@ func (s *Server) registerRoutes() {
 	// runtime's provider env keys).
 	s.registerLLMRoutes()
 	s.registerLLMOpenAPI()
+
+	// Suite memory (Phase 8.2). Endpoints return 503 when no
+	// memory.Store is wired (no DB at boot).
+	s.registerMemoryRoutes()
+	s.registerMemoryOpenAPI()
+
+	// DB studio (Phase 8.1). Endpoints return 503 when no
+	// dbstudio.Studio is wired (no DB at boot).
+	s.registerDBStudioRoutes()
+	s.registerDBStudioOpenAPI()
 
 	// Multi-tenancy admin (Phase 6). Endpoints return 503 when the
 	// multi-tenancy module is disabled or when no tenancy.Manager is

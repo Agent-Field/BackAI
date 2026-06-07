@@ -158,7 +158,9 @@ func TestResolverIsPublicPath(t *testing.T) {
 		{"/api/v1/cost", true},
 		{"/api/v1/modules", true},
 		{"/api/v1/queues", true},
-		{"/api/v1/admin/tenants", true}, // admin gates itself
+		{"/api/v1/admin/tenants", true},   // admin gates itself
+		{"/api/v1/db/tables", true},       // DB studio is dashboard-gated
+		{"/api/v1/db/sql", true},          // DB studio is dashboard-gated
 		{"/api/v1/secrets", false},
 		{"/api/v1/storage", false},
 		{"/api/v1/jobs", false},

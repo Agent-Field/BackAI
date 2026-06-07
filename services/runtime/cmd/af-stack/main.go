@@ -26,11 +26,13 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
 	"github.com/Agent-Field/backai/services/runtime/internal/cost"
 	"github.com/Agent-Field/backai/services/runtime/internal/db"
+	"github.com/Agent-Field/backai/services/runtime/internal/dbstudio"
 	"github.com/Agent-Field/backai/services/runtime/internal/hooks"
 	"github.com/Agent-Field/backai/services/runtime/internal/jobs"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmcache"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmgateway"
 	"github.com/Agent-Field/backai/services/runtime/internal/logger"
+	"github.com/Agent-Field/backai/services/runtime/internal/memory"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
 	"github.com/Agent-Field/backai/services/runtime/internal/ratelimit"
 	"github.com/Agent-Field/backai/services/runtime/internal/secrets"
@@ -340,6 +342,40 @@ func main() {
 		log.Info("cost ledger not configured (no database); per-call cost will not be tracked")
 	}
 
+	// DB studio (Phase 8.1). The Studio is a read-mostly wrapper over
+	// the same pgxpool used by the rest of the runtime; we hand it the
+	// pool directly. nil pool -> nil Studio -> /api/v1/db/* returns
+	// 503 DB_STUDIO_NOT_CONFIGURED.
+	var studioSvc *dbstudio.Studio
+	if database != nil && database.Pool != nil {
+		studioSvc = dbstudio.New(database.Pool)
+	}
+
+	// Suite memory (Phase 8.2). Requires a DB; the embedder is
+	// optional — when the LLM gateway has a provider key wired we
+	// route embeddings through it, otherwise memory still works for
+	// non-vector operations (Get / Put without Embed=true / Delete /
+	// List). Search calls 503 when no embedder is configured.
+	var memoryStore *memory.Store
+	if database != nil && database.Pool != nil {
+		var embedder memory.Embedder
+		if llmGW != nil {
+			embedder = memory.NewLLMGatewayEmbedder(llmGW, "")
+		}
+		ms, memErr := memory.New(database.Pool, embedder, log)
+		if memErr != nil {
+			log.Error("memory: init failed", "error", memErr)
+		} else {
+			memoryStore = ms
+			log.Info("memory store ready",
+				"embedder", embedder != nil,
+				"model", memory.DefaultEmbeddingModel,
+			)
+		}
+	} else {
+		log.Info("memory store not configured (no database); /api/v1/memory/* will return 503")
+	}
+
 	srv := server.New(cfg, log, server.Deps{
 		DB:            database,
 		AF:            afClient,
@@ -353,6 +389,8 @@ func main() {
 		Tenancy:       tenancyMgr,
 		LLMCache:      llmResponseCache,
 		LLMGateway:    llmGW,
+		DBStudio:      studioSvc,
+		Memory:        memoryStore,
 		CostAggregate: costAggregate,
 		Budgets:       costBudgets,
 	})
