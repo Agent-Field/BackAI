@@ -594,6 +594,120 @@ export const api = {
       ),
   },
 
+  // ─── Tenancy (admin) ───
+  admin: {
+    tenants: {
+      list: () =>
+        request("/api/v1/admin/tenants", undefined, TenantListSchema),
+      get: (id: string) =>
+        request(`/api/v1/admin/tenants/${id}`, undefined, TenantDetailSchema),
+      create: (input: CreateTenantInput) =>
+        request(
+          "/api/v1/admin/tenants",
+          { method: "POST", json: input },
+          TenantSchema,
+        ),
+      update: (id: string, input: UpdateTenantInput) =>
+        request(
+          `/api/v1/admin/tenants/${id}`,
+          { method: "PATCH", json: input },
+          TenantSchema,
+        ),
+      delete: (id: string) =>
+        request(
+          `/api/v1/admin/tenants/${id}`,
+          { method: "DELETE" },
+          z.object({ deleted: z.boolean() }),
+        ),
+    },
+    users: {
+      list: (params?: { tenant?: string; search?: string }) => {
+        const qs = new URLSearchParams()
+        if (params?.tenant) qs.set("tenant", params.tenant)
+        if (params?.search) qs.set("search", params.search)
+        const q = qs.toString()
+        return request(
+          `/api/v1/admin/users${q ? "?" + q : ""}`,
+          undefined,
+          UserListSchema,
+        )
+      },
+    },
+    memberships: {
+      list: (params?: { tenant?: string; user?: string }) => {
+        const qs = new URLSearchParams()
+        if (params?.tenant) qs.set("tenant", params.tenant)
+        if (params?.user) qs.set("user", params.user)
+        const q = qs.toString()
+        return request(
+          `/api/v1/admin/memberships${q ? "?" + q : ""}`,
+          undefined,
+          MembershipListSchema,
+        )
+      },
+      add: (input: { tenant_id: string; user_id: string; role: string }) =>
+        request(
+          "/api/v1/admin/memberships",
+          { method: "POST", json: input },
+          MembershipSchema,
+        ),
+      remove: (tenantId: string, userId: string) =>
+        request(
+          `/api/v1/admin/memberships/${tenantId}/${userId}`,
+          { method: "DELETE" },
+          z.object({ deleted: z.boolean() }),
+        ),
+    },
+    keys: {
+      list: (params?: { tenant?: string }) => {
+        const qs = new URLSearchParams()
+        if (params?.tenant) qs.set("tenant", params.tenant)
+        const q = qs.toString()
+        return request(
+          `/api/v1/admin/keys${q ? "?" + q : ""}`,
+          undefined,
+          APIKeyListSchema,
+        )
+      },
+      issue: (input: IssueAPIKeyInput) =>
+        request(
+          "/api/v1/admin/keys",
+          { method: "POST", json: input },
+          IssuedAPIKeySchema,
+        ),
+      revoke: (id: string) =>
+        request(
+          `/api/v1/admin/keys/${id}`,
+          { method: "DELETE" },
+          z.object({ revoked: z.boolean() }),
+        ),
+    },
+    audit: {
+      list: (params?: {
+        tenant?: string
+        action?: string
+        from?: string
+        to?: string
+        limit?: number
+        offset?: number
+      }) => {
+        const qs = new URLSearchParams()
+        if (params?.tenant) qs.set("tenant", params.tenant)
+        if (params?.action) qs.set("action", params.action)
+        if (params?.from) qs.set("from", params.from)
+        if (params?.to) qs.set("to", params.to)
+        if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+        if (params?.offset !== undefined) qs.set("offset", String(params.offset))
+        const q = qs.toString()
+        return request(
+          `/api/v1/admin/audit${q ? "?" + q : ""}`,
+          undefined,
+          AuditListSchema,
+        )
+      },
+    },
+  },
+
   // ─── Storage ───
   storage: {
     list: (params?: { prefix?: string; next_token?: string; limit?: number }) => {
