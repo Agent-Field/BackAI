@@ -20,8 +20,9 @@ import { memberships } from "./memberships.js"
 import { keys } from "./keys.js"
 import { audit } from "./audit.js"
 import { budgets } from "./budgets.js"
+import { skills } from "../skills.js"
 
-export { tenants, users, memberships, keys, audit, budgets }
+export { tenants, users, memberships, keys, audit, budgets, skills }
 
 export type {
   CreateTenantInput,
@@ -67,7 +68,7 @@ export {
   BudgetListSchema,
 } from "./_models.js"
 
-/** Combined namespace: `suite.admin.{tenants,users,memberships,keys,audit,budgets}`. */
+/** Combined namespace: `suite.admin.{tenants,users,memberships,keys,audit,budgets,skills}`. */
 export const admin = {
   tenants,
   users,
@@ -75,4 +76,5 @@ export const admin = {
   keys,
   audit,
   budgets,
+  skills,
 } as const

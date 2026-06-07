@@ -21,13 +21,14 @@ See :mod:`af_stack.admin.tenants`, :mod:`.users`, :mod:`.memberships`,
 
 from __future__ import annotations
 
-from . import audit, budgets, keys, memberships, tenants, users
+from . import audit, budgets, keys, memberships, skills, tenants, users
 
 __all__ = [
     "audit",
     "budgets",
     "keys",
     "memberships",
+    "skills",
     "tenants",
     "users",
 ]

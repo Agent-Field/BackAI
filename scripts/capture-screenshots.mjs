@@ -307,6 +307,37 @@ async function capture() {
     fullPage: false,
   })
 
+  // ── 20. Build → MCP (Phase 11.1 + 11.2) — server table + tool browser.
+  console.log("→ Build → MCP")
+  await page.goto(`${DASHBOARD_URL}/build/mcp`, { waitUntil: "networkidle" })
+  await page.waitForTimeout(2000)
+  await page.screenshot({
+    path: resolve(OUT_DIR, "mcp.png"),
+    fullPage: false,
+  })
+
+  // ── 21. Build → Skills (Phase 11.3) — installed skill bundles.
+  console.log("→ Build → Skills")
+  await page.goto(`${DASHBOARD_URL}/build/skills`, {
+    waitUntil: "networkidle",
+  })
+  await page.waitForTimeout(2000)
+  await page.screenshot({
+    path: resolve(OUT_DIR, "skills.png"),
+    fullPage: false,
+  })
+
+  // ── 22. Build → Harnesses (Phase 11.4) — CLI tool probe grid.
+  console.log("→ Build → Harnesses")
+  await page.goto(`${DASHBOARD_URL}/build/harnesses`, {
+    waitUntil: "networkidle",
+  })
+  await page.waitForTimeout(2000)
+  await page.screenshot({
+    path: resolve(OUT_DIR, "harnesses.png"),
+    fullPage: false,
+  })
+
   await browser.close()
   console.log(`saved screenshots to ${OUT_DIR}`)
 }

@@ -9,6 +9,7 @@
 import { loadPlugins } from "./plugins"
 import {
   Activity,
+  Bot,
   Boxes,
   CircleDollarSign,
   Cog,
@@ -34,6 +35,7 @@ import {
   Users,
   Webhook,
   Workflow,
+  Wrench,
 } from "lucide-react"
 
 export type NavItem = {
@@ -147,6 +149,27 @@ export const NAV_GROUPS: NavGroup[] = [
         href: "/build/sandboxes",
         icon: TerminalSquare,
         description: "Sandbox adapter configuration",
+      },
+      {
+        id: "mcp",
+        label: "MCP",
+        href: "/build/mcp",
+        icon: Wrench,
+        description: "Model Context Protocol servers and tools",
+      },
+      {
+        id: "skills",
+        label: "Skills",
+        href: "/build/skills",
+        icon: Layers,
+        description: "Installed AF skillkit bundles — install, list, attach",
+      },
+      {
+        id: "harnesses",
+        label: "Harnesses",
+        href: "/build/harnesses",
+        icon: Bot,
+        description: "CLI agent harnesses (Claude Code, Codex, Gemini, OpenCode)",
       },
       {
         id: "modules",

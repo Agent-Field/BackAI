@@ -3,6 +3,7 @@ module github.com/Agent-Field/backai
 go 1.25.7
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/minio/minio-go/v7 v7.2.0

@@ -29,11 +29,13 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/cost"
 	"github.com/Agent-Field/backai/services/runtime/internal/db"
 	"github.com/Agent-Field/backai/services/runtime/internal/dbstudio"
+	"github.com/Agent-Field/backai/services/runtime/internal/harnesses"
 	"github.com/Agent-Field/backai/services/runtime/internal/hooks"
 	"github.com/Agent-Field/backai/services/runtime/internal/jobs"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmcache"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmgateway"
 	"github.com/Agent-Field/backai/services/runtime/internal/logger"
+	"github.com/Agent-Field/backai/services/runtime/internal/mcp"
 	"github.com/Agent-Field/backai/services/runtime/internal/memory"
 	"github.com/Agent-Field/backai/services/runtime/internal/notifications"
 	notificationslog "github.com/Agent-Field/backai/services/runtime/internal/notifications/adapters/log"
@@ -47,6 +49,7 @@ import (
 	firecrackersandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/firecracker"
 	gvisorsandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/gvisor"
 	"github.com/Agent-Field/backai/services/runtime/internal/server"
+	"github.com/Agent-Field/backai/services/runtime/internal/skills"
 	"github.com/Agent-Field/backai/services/runtime/internal/storage"
 	minioadapter "github.com/Agent-Field/backai/services/runtime/internal/storage/adapters/minio"
 	s3adapter "github.com/Agent-Field/backai/services/runtime/internal/storage/adapters/s3"
@@ -83,6 +86,9 @@ func main() {
 		switch os.Args[1] {
 		case "version", "--version", "-v":
 			fmt.Printf("af-stack %s\n", version)
+			return
+		case "harness":
+			runHarnessCmd(os.Args[2:])
 			return
 		}
 	}
@@ -567,6 +573,67 @@ func main() {
 		billingSvc = billing.NewService(billingStore, stripeClient, billing.NewMeterRegistry(), log)
 	}
 
+	// Skills (Phase 11.3). The Store + Installer are independent: the
+	// Store needs a DB (no pool → mutating endpoints return 503 and
+	// reads return an empty list), the Installer is stateless and is
+	// always constructed so the install handler can parse + read
+	// manifests even if persistence later fails.
+	var skillsStore *skills.Store
+	if database != nil && database.Pool != nil {
+		skillsStore = skills.NewStore(database.Pool, log)
+		log.Info("skills: store ready")
+	} else {
+		log.Info("skills: store not configured (no database); /api/v1/skills mutations will return 503")
+	}
+	skillsInstaller := skills.NewInstaller()
+
+	// Harnesses (Phase 11.4). Probe-only — the runtime checks whether
+	// the four supported CLI harnesses (Claude Code, Codex, Gemini,
+	// OpenCode) are installed and reachable, then caches the result in
+	// memory. We warm the cache once at boot so the dashboard's first
+	// list render is instant; the user re-runs probes via the
+	// dashboard's per-card Probe button.
+	harnessesSvc := harnesses.NewService(log)
+	{
+		warmCtx, warmCancel := context.WithTimeout(ctx, 30*time.Second)
+		_ = harnessesSvc.ListAll(warmCtx)
+		warmCancel()
+		log.Info("harnesses: probe cache warmed",
+			"providers", len(harnesses.AllProviders))
+	}
+
+	// MCP (Phase 11.1). Requires DB for the suite_mcp_servers table
+	// (no pool ⇒ Pool.Configured() reports false; mutating endpoints
+	// surface 503). Pool.Reconcile() at boot opens connections for
+	// every enabled row, and a background goroutine refreshes the tool
+	// catalogue every 5 minutes. The secrets vault is passed through
+	// as a SecretReader so env values prefixed "secret:<key>" resolve
+	// before any stdio child is spawned.
+	var mcpStore *mcp.Store
+	var mcpPool *mcp.Pool
+	if database != nil && database.Pool != nil {
+		mcpStore = mcp.NewStore(database.Pool, log)
+		var secretReader mcp.SecretReader
+		if vault != nil {
+			secretReader = vault
+		}
+		mcpPool = mcp.NewPool(mcpStore, secretReader, mcp.PoolConfig{
+			Logger:  log,
+			Factory: newMCPAdapterFactory(),
+		})
+		reconCtx, reconCancel := context.WithTimeout(ctx, 30*time.Second)
+		if err := mcpPool.Reconcile(reconCtx); err != nil {
+			log.Warn("mcp: initial reconcile failed; pool still running",
+				"error", err)
+		}
+		reconCancel()
+		go mcpPool.RunRefreshLoop(ctx)
+		defer mcpPool.Shutdown()
+		log.Info("mcp: pool ready", "refresh", "5m")
+	} else {
+		log.Info("mcp: not configured (no database); /api/v1/mcp/* mutations will return 503")
+	}
+
 	srv := server.New(cfg, log, server.Deps{
 		DB:            database,
 		AF:            afClient,
@@ -585,9 +652,14 @@ func main() {
 		CostAggregate: costAggregate,
 		Budgets:       costBudgets,
 		Sandbox:       sandboxSvc,
-		Notifications: notificationsSvc,
-		Webhooks:      webhooksSvc,
-		Billing:       billingSvc,
+		Notifications:   notificationsSvc,
+		Webhooks:        webhooksSvc,
+		Billing:         billingSvc,
+		Skills:          skillsStore,
+		SkillsInstaller: skillsInstaller,
+		Harnesses:       harnessesSvc,
+		MCP:             mcpPool,
+		MCPStore:        mcpStore,
 	})
 	if err := srv.Start(ctx); err != nil {
 		log.Error("server stopped with error", "error", err)

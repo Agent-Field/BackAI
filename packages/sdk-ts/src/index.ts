@@ -277,6 +277,68 @@ export {
   type ListWebhookDeliveriesOptions,
 } from "./webhooks.js"
 
+// ─── Skills (Phase 11.3) ─────────────────────────────────────────────────
+
+export {
+  skills,
+  list as listSkills,
+  install as installSkill,
+  uninstall as uninstallSkill,
+  attach as attachSkill,
+  SkillSchema,
+  SkillListSchema,
+  type Skill,
+  type SkillList,
+  type InstallSkillInput,
+  type AttachSkillInput,
+  type ListSkillsOptions,
+} from "./skills.js"
+
+// ─── Harnesses (Phase 11.4) ──────────────────────────────────────────────
+
+export {
+  harnesses,
+  list as listHarnesses,
+  get as getHarness,
+  probe as probeHarness,
+  HarnessProviderSchema,
+  HarnessStatusSchema,
+  HarnessSchema,
+  HarnessListSchema,
+  type HarnessProvider,
+  type HarnessStatus,
+  type Harness,
+  type HarnessList,
+} from "./harnesses.js"
+
+// ─── Tools / MCP (Phase 11.2) ────────────────────────────────────────────
+
+export {
+  tools,
+  listMcpServers,
+  addMcpServer,
+  removeMcpServer,
+  enableMcpServer,
+  listMcpTools,
+  callMcp,
+  MCPTransportSchema,
+  MCPServerStatusSchema,
+  MCPServerSchema,
+  MCPServerListSchema,
+  MCPToolSchema,
+  MCPToolListSchema,
+  MCPCallResultSchema,
+  type MCPTransport,
+  type MCPServerStatus,
+  type MCPServer,
+  type MCPServerList,
+  type MCPTool,
+  type MCPToolList,
+  type MCPCallResult,
+  type AddMCPServerOptions,
+  type ListMCPToolsOptions,
+} from "./tools.js"
+
 import { agents } from "./agents.js"
 import { jobs } from "./jobs.js"
 import { secrets } from "./secrets.js"
@@ -289,8 +351,10 @@ import { sandbox } from "./sandbox.js"
 import { notifications } from "./notifications.js"
 import { billing } from "./billing.js"
 import { webhooks } from "./webhooks.js"
+import { tools } from "./tools.js"
+import { harnesses } from "./harnesses.js"
 
-/** Top-level namespace: `suite.agents.*`, `suite.jobs.*`, `suite.secrets.*`, `suite.storage.*`, `suite.llm.*`, `suite.cost.*`, `suite.memory.*`, `suite.sandbox.*`, `suite.notifications.*`, `suite.webhooks.*`, `suite.billing.*`, `suite.admin.*`. */
+/** Top-level namespace: `suite.agents.*`, `suite.jobs.*`, `suite.secrets.*`, `suite.storage.*`, `suite.llm.*`, `suite.cost.*`, `suite.memory.*`, `suite.sandbox.*`, `suite.notifications.*`, `suite.webhooks.*`, `suite.billing.*`, `suite.tools.*`, `suite.admin.*`. */
 export const suite = {
   agents,
   jobs,
@@ -303,5 +367,7 @@ export const suite = {
   notifications,
   webhooks,
   billing,
+  tools,
+  harnesses,
   admin,
 } as const

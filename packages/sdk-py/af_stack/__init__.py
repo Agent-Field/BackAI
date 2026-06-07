@@ -30,6 +30,7 @@ from . import (
     agents,
     billing,
     cost,
+    harnesses,
     jobs,
     llm,
     memory,
@@ -40,6 +41,7 @@ from . import (
     webhooks,
 )
 from .ctx import RequestContext, bind, ctx, current, reset, scope
+from .tools import Tools, tools
 
 __version__ = "0.0.1"
 
@@ -59,6 +61,8 @@ suite = SimpleNamespace(
     sandbox=sandbox,
     billing=billing,
     webhooks=webhooks,
+    harnesses=harnesses,
+    tools=tools,
     admin=SimpleNamespace(
         tenants=admin.tenants,
         users=admin.users,
@@ -66,12 +70,14 @@ suite = SimpleNamespace(
         keys=admin.keys,
         audit=admin.audit,
         budgets=admin.budgets,
+        skills=admin.skills,
     ),
 )
 
 
 __all__ = [
     "RequestContext",
+    "Tools",
     "__version__",
     "admin",
     "agents",
@@ -80,6 +86,7 @@ __all__ = [
     "cost",
     "ctx",
     "current",
+    "harnesses",
     "jobs",
     "llm",
     "memory",
@@ -90,5 +97,6 @@ __all__ = [
     "secrets",
     "storage",
     "suite",
+    "tools",
     "webhooks",
 ]

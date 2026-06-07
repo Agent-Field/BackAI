@@ -264,6 +264,69 @@ class SetBudgetInput(BaseModel):
     alert_threshold_pct: float = 80.0
 
 
+# ─── Skills (Phase 11.3) ──────────────────────────────────────────────────
+
+
+class Skill(BaseModel):
+    """Mirrors ``SkillSchema`` in ``apps/dashboard/src/lib/api.ts``.
+
+    A Skill is an AF skillkit bundle installed into the runtime. The
+    ``id`` is the bundle identifier (e.g.
+    ``"af-skill://acme/security-audit@1.2.0"``, a local path, or
+    ``"embedded:default"``); ``tenant_id`` is ``None`` for shared
+    bundles that every tenant can see.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    name: str
+    version: str
+    source: str
+    description: str | None = None
+    harnesses: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    tenant_id: str | None = None
+    installed_at: str
+
+
+class SkillList(BaseModel):
+    """Mirrors ``SkillListSchema``."""
+
+    model_config = ConfigDict(extra="allow")
+
+    skills: list[Skill] = Field(default_factory=list)
+
+
+class InstallSkillInput(BaseModel):
+    """Mirrors ``InstallSkillInputSchema``.
+
+    ``source`` accepts three formats:
+
+    * ``af-skill://<vendor>/<name>@<version>`` — registry URL
+    * ``/abs/path`` or ``./relative`` — local manifest dir / file
+    * ``embedded:<name>`` — runtime-bundled skill (e.g. ``embedded:default``)
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    source: str
+    tenant_id: str | None = None
+
+
+class AttachSkillInput(BaseModel):
+    """Mirrors ``AttachSkillInputSchema``.
+
+    ``agent`` is the slug a skill is being bound onto — either an AF
+    agent ``ns.func`` id or a harness provider id.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    skill_id: str
+    agent: str
+
+
 # ─── Audit ────────────────────────────────────────────────────────────────
 
 
@@ -296,17 +359,21 @@ class AuditList(BaseModel):
 __all__ = [
     "APIKey",
     "APIKeyList",
+    "AttachSkillInput",
     "AuditEntry",
     "AuditList",
     "Budget",
     "BudgetList",
     "CreateTenantInput",
+    "InstallSkillInput",
     "IssueAPIKeyInput",
     "IssuedAPIKey",
     "Membership",
     "MembershipList",
     "Role",
     "SetBudgetInput",
+    "Skill",
+    "SkillList",
     "Tenant",
     "TenantDetail",
     "TenantList",

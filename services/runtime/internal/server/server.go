@@ -17,10 +17,12 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/cost"
 	"github.com/Agent-Field/backai/services/runtime/internal/db"
 	"github.com/Agent-Field/backai/services/runtime/internal/dbstudio"
+	"github.com/Agent-Field/backai/services/runtime/internal/harnesses"
 	"github.com/Agent-Field/backai/services/runtime/internal/hooks"
 	"github.com/Agent-Field/backai/services/runtime/internal/jobs"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmcache"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmgateway"
+	"github.com/Agent-Field/backai/services/runtime/internal/mcp"
 	"github.com/Agent-Field/backai/services/runtime/internal/memory"
 	"github.com/Agent-Field/backai/services/runtime/internal/notifications"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
@@ -28,6 +30,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/ratelimit"
 	"github.com/Agent-Field/backai/services/runtime/internal/sandbox"
 	"github.com/Agent-Field/backai/services/runtime/internal/secrets"
+	"github.com/Agent-Field/backai/services/runtime/internal/skills"
 	"github.com/Agent-Field/backai/services/runtime/internal/storage"
 	"github.com/Agent-Field/backai/services/runtime/internal/tenancy"
 	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
@@ -85,6 +88,27 @@ type Server struct {
 	// degrade to empty pages. Shared facade between Phase 10.2
 	// (inbound) and Phase 10.3 (outbound).
 	webhooks *webhooks.Service
+	// skills powers /api/v1/skills/*. nil = mutating endpoints return
+	// 503 SKILLS_NOT_CONFIGURED; the list endpoint serves an empty
+	// page (so the dashboard renders the empty state). skillsInstaller
+	// is the manifest reader used by the install handler — kept on the
+	// Server so tests can swap in a stub installer.
+	skills          *skills.Store
+	skillsInstaller *skills.Installer
+	// harnesses powers /api/v1/harnesses/* (Phase 11.4). Probe-only —
+	// the runtime detects whether each CLI harness is installed and
+	// reachable but never installs them. nil = the list endpoint
+	// returns an empty list; get / probe return 404 / 503.
+	harnesses *harnesses.Service
+	// mcp powers /api/v1/mcp/* (Phase 11.1). The Pool owns the
+	// long-lived JSON-RPC connections to external MCP servers and
+	// proxies tool calls. mcpStore is the persistence layer the
+	// dashboard mutates through; mutating endpoints write via Store
+	// then call Pool.Reconcile() so the in-memory adapter set catches
+	// up. nil pool = MCP_NOT_CONFIGURED on mutating endpoints; GETs
+	// return empty pages.
+	mcp      *mcp.Pool
+	mcpStore *mcp.Store
 }
 
 // Health aggregates dependency health for the /health endpoint.
@@ -168,6 +192,31 @@ type Deps struct {
 	// WEBHOOKS_NOT_CONFIGURED; the list endpoint serves an empty
 	// page (so the dashboard renders the empty state).
 	Webhooks *webhooks.Service
+	// Skills is the Phase 11.3 skills install/list/attach store. nil =
+	// the /api/v1/skills/* mutating endpoints return 503
+	// SKILLS_NOT_CONFIGURED; GET returns an empty list. main.go
+	// constructs the store when a DB is available.
+	Skills *skills.Store
+	// SkillsInstaller turns source strings into Skill records ready to
+	// hand to Skills.Install. main.go wires the default installer; tests
+	// can pass a stub. When nil the install handler falls back to
+	// skills.NewInstaller() so the route stays usable.
+	SkillsInstaller *skills.Installer
+	// Harnesses powers /api/v1/harnesses/* (Phase 11.4). main.go
+	// constructs the service at boot and warms the cache by calling
+	// ListAll once before the HTTP server starts accepting traffic.
+	// nil = endpoints degrade (list -> empty array; get -> 404;
+	// probe -> 503 HARNESSES_NOT_CONFIGURED).
+	Harnesses *harnesses.Service
+	// MCP is the Phase 11.1 Model Context Protocol pool — long-lived
+	// connections to external MCP servers (stdio or sse) keyed by
+	// server name. nil = mutating endpoints return 503
+	// MCP_NOT_CONFIGURED; reads return an empty list / catalogue.
+	// MCPStore is the persistence layer the mutating endpoints write
+	// through. main.go calls Pool.Reconcile() at boot and starts the
+	// 5-minute refresh goroutine.
+	MCP      *mcp.Pool
+	MCPStore *mcp.Store
 }
 
 // New constructs a Server with the given config + logger + dependencies.
@@ -212,8 +261,13 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		budgets:       deps.Budgets,
 		sandbox:       deps.Sandbox,
 		billing:       deps.Billing,
-		notifications: deps.Notifications,
-		webhooks:      deps.Webhooks,
+		notifications:   deps.Notifications,
+		webhooks:        deps.Webhooks,
+		skills:          deps.Skills,
+		skillsInstaller: deps.SkillsInstaller,
+		harnesses:       deps.Harnesses,
+		mcp:             deps.MCP,
+		mcpStore:        deps.MCPStore,
 	}
 	s.registerRoutes()
 
@@ -412,6 +466,25 @@ func (s *Server) registerRoutes() {
 	// comment for the Phase 10.2 coordination note.
 	s.registerBillingRoutes()
 	s.registerBillingOpenAPI()
+
+	// Skills (Phase 11.3). Mutating endpoints (install / uninstall /
+	// attach) return 503 when no store is wired; the list endpoint
+	// degrades to an empty page so the dashboard renders.
+	s.registerSkillsRoutes()
+	s.registerSkillsOpenAPI()
+
+	// Harnesses (Phase 11.4). Probe-only — main.go constructs the
+	// service and warms the cache at boot. nil service ⇒ list returns
+	// an empty array, get returns 404, probe returns 503.
+	s.registerHarnessesRoutes()
+	s.registerHarnessesOpenAPI()
+
+	// MCP (Phase 11.1). The Pool owns long-lived JSON-RPC connections
+	// to external MCP servers and proxies tool calls. nil pool =
+	// mutating endpoints return 503 MCP_NOT_CONFIGURED; GETs return
+	// tolerant empty pages.
+	s.registerMCPRoutes()
+	s.registerMCPOpenAPI()
 
 	if s.tel != nil {
 		s.mux.Handle("GET /metrics", s.tel.MetricsHandler())
