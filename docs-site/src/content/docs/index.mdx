@@ -1,0 +1,67 @@
+---
+title: AF Stack
+description: The open backend for the AI era. Multi-tenant, OpenAI-compatible, self-hosted.
+template: splash
+hero:
+  tagline: The open backend for the AI era.
+  actions:
+    - text: Get Started
+      link: /get-started/quickstart/
+      icon: right-arrow
+      variant: primary
+    - text: GitHub
+      link: https://github.com/Agent-Field/backai
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, Code } from "@astrojs/starlight/components";
+
+## Why AF Stack
+
+<CardGrid stagger>
+  <Card title="OpenAI-compatible gateway">
+    Drop-in `chat/completions`, embeddings, and tool calls. Per-tenant cost
+    ledger, in-process cache, and budget enforcement come built in. Point
+    any existing OpenAI client at AF Stack and it just works.
+  </Card>
+  <Card title="Multi-tenant from day one">
+    PostgreSQL row-level security enforces tenant isolation at the database
+    boundary, not in app code. API keys, secrets, costs, jobs, crons, and
+    memory entries are all scoped automatically.
+  </Card>
+  <Card title="Open source, self-hosted">
+    Apache 2.0. One `docker compose up` on your laptop, Helm chart for
+    production. No vendor lock-in, no telemetry by default, no required
+    SaaS dependencies.
+  </Card>
+</CardGrid>
+
+## Run AF Stack in 60 seconds
+
+```bash
+git clone https://github.com/Agent-Field/backai.git
+cd backai
+cp .env.example .env
+# Set OPENROUTER_API_KEY (or OPENAI_API_KEY) in .env
+docker compose up -d
+open http://localhost:33000
+```
+
+The dashboard lands at `http://localhost:33000`. The OpenAI-compatible
+gateway is at `http://localhost:8080/api/v1/llm/chat/completions`.
+
+## Three examples to try
+
+- **[03 — LLM gateway only](https://github.com/Agent-Field/backai/tree/main/examples/03-llm-gateway-only)** — the smallest possible deploy. 60 seconds to first call.
+- **[01 — Notable](https://github.com/Agent-Field/backai/tree/main/examples/01-notable)** — multi-tenant SaaS with three AF agents wired through the gateway.
+- **[06 — Deep research](https://github.com/Agent-Field/backai/tree/main/examples/06-deep-research)** — long-running agent that fans out into five parallel sub-investigations.
+
+---
+
+<div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; opacity: 0.8;">
+  <span>Apache 2.0 licensed</span>
+  <a href="https://github.com/Agent-Field/backai/stargazers">
+    Star us on GitHub
+  </a>
+</div>

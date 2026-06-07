@@ -1,0 +1,35 @@
+---
+title: API Reference
+description: Interactive browser for every AF Stack runtime endpoint.
+template: splash
+tableOfContents: false
+---
+
+import ApiReference from "../../../components/ApiReference.tsx";
+import SpecGate from "../../../components/SpecGate.astro";
+
+<SpecGate>
+  <div slot="ready" style="height: calc(100vh - 5rem); margin: 0 -1rem">
+    <ApiReference client:only="react" />
+  </div>
+  <div slot="missing">
+    <h2>API spec not loaded yet</h2>
+    <p>
+      The interactive API reference renders from a snapshot of the runtime's <code>/openapi.json</code>.
+      That file is not present in this build.
+    </p>
+    <p>To populate it, with the dev compose stack up:</p>
+    <pre><code>{`docker compose up -d
+./docs-site/scripts/fetch-openapi.sh
+cd docs-site && npm run build`}</code></pre>
+    <p>
+      The fetch script is idempotent and CI-safe: if the runtime is not reachable it prints a warning
+      and exits 0 so the docs build keeps working with whatever snapshot is already committed at
+      <code>docs-site/public/openapi.json</code>.
+    </p>
+    <p>
+      Re-run the script whenever runtime routes change. The git diff on <code>openapi.json</code> is
+      the review surface for "did this PR change the public API contract".
+    </p>
+  </div>
+</SpecGate>

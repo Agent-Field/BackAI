@@ -1,0 +1,34 @@
+---
+/**
+ * SpecGate.astro — build-time existence check for the OpenAPI snapshot.
+ *
+ * Why an Astro component, not inline MDX
+ * --------------------------------------
+ * Astro MDX can `import` ESM modules but the JSX body executes inside a
+ * render context that doesn't expose top-level constants for use in JSX
+ * conditionals reliably across versions. A `.astro` component has a
+ * proper frontmatter block that runs Node freely at build time. Putting
+ * the gate here keeps the MDX file declarative.
+ *
+ * Usage
+ * -----
+ *   <SpecGate>
+ *     <div slot="ready">...interactive widget...</div>
+ *     <div slot="missing">...fallback message...</div>
+ *   </SpecGate>
+ *
+ * Behaviour
+ * ---------
+ * If `public/openapi.json` exists at build time, the `ready` slot
+ * renders. Otherwise the `missing` slot does. This lets the docs build
+ * survive a fresh checkout where nobody has run fetch-openapi.sh yet.
+ */
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+
+// Astro builds run with cwd = docs-site/, so the spec lives at
+// $cwd/public/openapi.json. process.cwd() is the most portable handle.
+const specReady = existsSync(resolve(process.cwd(), "public/openapi.json"));
+---
+
+{specReady ? <slot name="ready" /> : <slot name="missing" />}

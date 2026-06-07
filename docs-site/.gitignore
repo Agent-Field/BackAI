@@ -1,0 +1,13 @@
+# Astro build output + dev cache
+dist/
+.astro/
+
+# Node deps
+node_modules/
+
+# Local env overrides
+.env
+.env.local
+
+# OS junk
+.DS_Store

@@ -1,0 +1,27 @@
+/* AF Stack Starlight theme tweaks. Dark by default; light still works. */
+
+:root {
+  --sl-font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  --sl-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+/* Default to dark. Starlight reads prefers-color-scheme; we hint dark when
+   the user has no preference set. */
+:root[data-theme="dark"] {
+  --sl-color-accent: #7dd3fc;
+}
+
+/* API reference page — let Scalar own the full viewport on its splash
+   layout. The page sets template: splash so Starlight already drops the
+   side TOC; we just need to nuke residual padding so Scalar's chrome
+   doesn't double-up with Starlight's content margins. */
+.sl-container:has(.scalar-app),
+main:has(.scalar-app) {
+  max-width: 100%;
+  padding: 0;
+}
+.scalar-app {
+  --scalar-custom-header-height: 0;
+}

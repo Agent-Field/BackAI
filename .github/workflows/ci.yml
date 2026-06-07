@@ -27,6 +27,7 @@ jobs:
       python: ${{ steps.filter.outputs.python }}
       typescript: ${{ steps.filter.outputs.typescript }}
       docs: ${{ steps.filter.outputs.docs }}
+      docs_site: ${{ steps.filter.outputs.docs_site }}
       compose: ${{ steps.filter.outputs.compose }}
     steps:
       - uses: actions/checkout@v4
@@ -53,6 +54,9 @@ jobs:
               - 'apps/dashboard/**'
             docs:
               - '**/*.md'
+              - 'docs/**'
+            docs_site:
+              - 'docs-site/**'
               - 'docs/**'
             compose:
               - 'docker-compose*.yml'
@@ -182,6 +186,37 @@ jobs:
           # Simple check for obviously broken markdown links
           ! grep -rn '](\.\./\.\./\.\.' --include='*.md' . || (echo "Suspicious path traversal in docs" && exit 1)
 
+  build-docs-site:
+    name: Build docs-site (Astro Starlight)
+    needs: changes
+    if: needs.changes.outputs.docs_site == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs-site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: docs-site/package-lock.json
+      - name: Install
+        run: npm install
+      - name: Build
+        run: npm run build
+      - name: Verify build output
+        run: |
+          # Build must produce a non-trivial static site. Threshold is loose
+          # so adding/removing one or two pages doesn't fail CI, but a
+          # broken collection that drops most pages does.
+          pages=$(find dist -name '*.html' -type f | wc -l)
+          echo "Built $pages HTML pages"
+          if [ "$pages" -lt 15 ]; then
+            echo "Expected at least 15 pages, got $pages"
+            exit 1
+          fi
+
   ci-success:
     name: CI Success
     needs:
@@ -194,6 +229,7 @@ jobs:
         test-typescript,
         validate-compose,
         docs-lint,
+        build-docs-site,
       ]
     if: always()
     runs-on: ubuntu-latest
