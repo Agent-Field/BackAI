@@ -177,32 +177,23 @@ type ListResult struct {
 	HasMore    bool
 }
 
-// Defaults applied by the worker + Enqueue.
+// Defaults shared by the inbound pipeline + the Svix outbound proxy.
+//
+// Outbound retry / backoff knobs USED to live here for our hand-rolled
+// worker. After OSS-AUDIT item #2 Svix owns those concerns; the
+// sidecar's environment variables (SVIX_RETRY_*) configure them. The
+// constants below are the AF Stack values that survive the migration.
 const (
-	// MaxAttempts caps outbound retries. After this many failures the
-	// worker stops re-scheduling — the row stays at status='failed'
-	// and the dashboard can trigger a manual retry.
-	MaxAttempts = 8
-
-	// PollInterval is how often the worker scans for ready rows.
-	PollInterval = 2 * time.Second
-
-	// BatchSize is how many rows the worker claims per scan.
-	BatchSize = 32
-
-	// BackoffStep is multiplied by the current attempt count to set
-	// the next scheduled_at. Capped at MaxBackoff.
-	BackoffStep = 2 * time.Second
-	MaxBackoff  = 5 * time.Minute
-
-	// DefaultTimeout bounds a single outbound POST. Worker reuses
-	// this; the immediate path takes it as an upper bound too.
-	DefaultTimeout = 30 * time.Second
-
 	// BodyPreviewBytes is the cap on body_preview (truncated UTF-8
-	// safe; the full body lives in Body / object storage).
+	// safe; the full body lives in Body / object storage). Used by
+	// inbound persistence + by the outbound proxy when it translates a
+	// Svix message into a Delivery.
 	BodyPreviewBytes = 4096
 )
+
+// keep time imported even if all constants migrate away — inbound.go
+// still uses it via DefaultTimeout-ish patterns.
+var _ = time.Second
 
 // Sentinel errors. The HTTP handlers map each to a code + status.
 var (

@@ -78,7 +78,13 @@ func quietCLILogger() *slog.Logger {
 // columns mirror what the dashboard's card grid shows: provider, status,
 // version, binary path, last error.
 func harnessList() {
-	svc := harnesses.NewService(quietCLILogger())
+	// The CLI runs outside the runtime process, so there's no AF client
+	// to aggregate from — pass nil and every provider renders Missing
+	// with the install-doc hint, which is exactly what an operator
+	// running `af-stack harness list` on the host wants to see.
+	// (For live status against running agents, hit /api/v1/harnesses
+	// via the dashboard or curl instead.)
+	svc := harnesses.NewService(nil, quietCLILogger())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	list := svc.ListAll(ctx)

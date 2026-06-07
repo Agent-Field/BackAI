@@ -639,7 +639,15 @@ func main() {
 	// memory. We warm the cache once at boot so the dashboard's first
 	// list render is instant; the user re-runs probes via the
 	// dashboard's per-card Probe button.
-	harnessesSvc := harnesses.NewService(log)
+	// CapabilitiesProvider (Phase 17 refactor): harness availability comes
+	// from the AF agent layer. The agentfield client implements
+	// FetchAgentCapabilities so the prober aggregates across agents
+	// instead of probing the runtime's own PATH.
+	var harnessCapProvider harnesses.CapabilitiesProvider
+	if afClient != nil {
+		harnessCapProvider = afClient
+	}
+	harnessesSvc := harnesses.NewService(harnessCapProvider, log)
 	{
 		warmCtx, warmCancel := context.WithTimeout(ctx, 30*time.Second)
 		_ = harnessesSvc.ListAll(warmCtx)
