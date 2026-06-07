@@ -347,6 +347,82 @@ export const SignedURLSchema = z.object({
 })
 export type SignedURL = z.infer<typeof SignedURLSchema>
 
+// ─── Sandboxes (Phase 9) ──────────────────────────────────────────────────
+
+export const SandboxCapabilitiesSchema = z.object({
+  max_timeout_s: z.number(),
+  supports_gpu: z.boolean(),
+  supports_network: z.boolean(),
+  supports_mounts: z.boolean(),
+  cold_start_ms: z.number(),
+  adapter: z.string(),
+})
+export type SandboxCapabilities = z.infer<typeof SandboxCapabilitiesSchema>
+
+export const SandboxRunSchema = z.object({
+  id: z.string(),
+  tenant_id: z.string().nullable(),
+  workspace_id: z.string().nullable(),
+  adapter: z.string(),
+  image: z.string(),
+  command: z.array(z.string()),
+  status: z.enum([
+    "queued",
+    "running",
+    "done",
+    "failed",
+    "timeout",
+    "killed",
+  ]),
+  exit_code: z.number().nullable(),
+  duration_s: z.number().nullable(),
+  cpu_seconds: z.number().nullable(),
+  memory_peak_mb: z.number().nullable(),
+  network_bytes_in: z.number().nullable(),
+  network_bytes_out: z.number().nullable(),
+  cost_usd: z.number().nullable(),
+  stdout_url: z.string().nullable(),
+  stderr_url: z.string().nullable(),
+  artifacts_url: z.string().nullable(),
+  started_at: z.string().nullable(),
+  ended_at: z.string().nullable(),
+  created_at: z.string(),
+})
+export type SandboxRun = z.infer<typeof SandboxRunSchema>
+
+export const SandboxRunListSchema = z.object({
+  runs: z.array(SandboxRunSchema),
+  total: z.number(),
+  has_more: z.boolean(),
+})
+export type SandboxRunList = z.infer<typeof SandboxRunListSchema>
+
+export const SandboxRunInputSchema = z.object({
+  image: z.string(),
+  command: z.array(z.string()),
+  files: z.record(z.string(), z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  timeout_s: z.number().int().min(1).max(86400).default(300),
+  cpu: z.number().int().min(1).max(32).default(2),
+  memory_gb: z.number().int().min(1).max(64).default(4),
+  network: z.enum(["open", "restricted", "isolated"]).default("restricted"),
+  allow_egress: z.array(z.string()).optional(),
+  workspace_id: z.string().optional(),
+})
+export type SandboxRunInput = z.infer<typeof SandboxRunInputSchema>
+
+export const SandboxPoolStatsSchema = z.object({
+  adapter: z.string(),
+  warm: z.number(),
+  active: z.number(),
+  queued: z.number(),
+  total_runs_today: z.number(),
+  cpu_seconds_today: z.number(),
+  cost_usd_today: z.number(),
+  capabilities: SandboxCapabilitiesSchema,
+})
+export type SandboxPoolStats = z.infer<typeof SandboxPoolStatsSchema>
+
 // ─── Database studio + memory (Phase 8) ──────────────────────────────────
 
 export const DBTableSchema = z.object({
@@ -808,6 +884,44 @@ export const api = {
         `/api/v1/secrets/${encodeURIComponent(key)}/rotate`,
         { method: "POST", json: input },
         SecretMetadataSchema,
+      ),
+  },
+
+  // ─── Sandboxes (Phase 9) ───
+  sandbox: {
+    pool: () =>
+      request("/api/v1/sandbox/pool", undefined, SandboxPoolStatsSchema),
+    list: (params?: {
+      tenant?: string
+      status?: string
+      limit?: number
+      offset?: number
+    }) => {
+      const qs = new URLSearchParams()
+      if (params?.tenant) qs.set("tenant", params.tenant)
+      if (params?.status) qs.set("status", params.status)
+      if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+      if (params?.offset !== undefined) qs.set("offset", String(params.offset))
+      const q = qs.toString()
+      return request(
+        `/api/v1/sandbox/runs${q ? "?" + q : ""}`,
+        undefined,
+        SandboxRunListSchema,
+      )
+    },
+    get: (id: string) =>
+      request(`/api/v1/sandbox/runs/${id}`, undefined, SandboxRunSchema),
+    run: (input: SandboxRunInput) =>
+      request(
+        "/api/v1/sandbox/run",
+        { method: "POST", json: input },
+        SandboxRunSchema,
+      ),
+    stop: (id: string) =>
+      request(
+        `/api/v1/sandbox/runs/${id}`,
+        { method: "DELETE" },
+        z.object({ stopped: z.boolean() }),
       ),
   },
 
