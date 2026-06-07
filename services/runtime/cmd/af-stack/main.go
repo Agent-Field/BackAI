@@ -12,6 +12,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -27,6 +28,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/billing"
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
 	"github.com/Agent-Field/backai/services/runtime/internal/cost"
+	"github.com/Agent-Field/backai/services/runtime/internal/crons"
 	"github.com/Agent-Field/backai/services/runtime/internal/db"
 	"github.com/Agent-Field/backai/services/runtime/internal/dbstudio"
 	"github.com/Agent-Field/backai/services/runtime/internal/harnesses"
@@ -62,6 +64,24 @@ import (
 // webhooks package doesn't take an import dependency on agentfield.
 type webhookAgentInvoker struct {
 	c *agentfield.Client
+}
+
+// cronJobEnqueuer bridges the crons.JobEnqueuer contract to the
+// runtime's jobs.Manager. Lives in main so the crons package doesn't
+// take an import dependency on jobs.
+type cronJobEnqueuer struct {
+	mgr *jobs.Manager
+}
+
+func (c *cronJobEnqueuer) Enqueue(ctx context.Context, name string, args json.RawMessage, tenantID string) error {
+	if c == nil || c.mgr == nil {
+		return fmt.Errorf("jobs manager not configured")
+	}
+	if len(args) == 0 {
+		args = json.RawMessage("{}")
+	}
+	_, err := c.mgr.Enqueue(ctx, name, args, jobs.EnqueueOpts{TenantID: tenantID})
+	return err
 }
 
 func (w *webhookAgentInvoker) Execute(
@@ -110,7 +130,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	log := logger.New(cfg.Logging.Level, cfg.Logging.Format)
+	// Log ring buffer + slog wiring. The ring tees every structured log
+	// record into a fixed-capacity in-memory buffer the dashboard's
+	// /operate/logs tab reads from. Strictly process-local; multi-process
+	// deployments need a real aggregator.
+	logRing := logger.NewRing(logger.RingSize, "af-stack")
+	log := logger.NewWithRing(cfg.Logging.Level, cfg.Logging.Format, logRing)
 	log.Info("af-stack starting",
 		"version", version,
 		"http_addr", cfg.Server.HTTPAddr,
@@ -634,6 +659,30 @@ func main() {
 		log.Info("mcp: not configured (no database); /api/v1/mcp/* mutations will return 503")
 	}
 
+	// Crons (Phase 12.2). The Store reads/writes suite_crons; the
+	// Scheduler ticks once a minute and dispatches due rows via the
+	// jobs manager. We construct both unconditionally so the dashboard
+	// still renders the empty state when no DB / no jobs are wired.
+	var cronsStore *crons.Store
+	if database != nil && database.Pool != nil {
+		cronsStore = crons.NewStore(database.Pool, log)
+		log.Info("crons: store ready")
+		if jobsManager != nil {
+			scheduler := crons.NewScheduler(crons.SchedulerConfig{
+				Store:    cronsStore,
+				Enqueuer: &cronJobEnqueuer{mgr: jobsManager},
+				Logger:   log,
+			})
+			if scheduler != nil {
+				go scheduler.Run(ctx)
+			}
+		} else {
+			log.Info("crons: scheduler not started (no jobs manager); CRUD still works")
+		}
+	} else {
+		log.Info("crons: store not configured (no database); /api/v1/crons mutations will return 503")
+	}
+
 	srv := server.New(cfg, log, server.Deps{
 		DB:            database,
 		AF:            afClient,
@@ -660,6 +709,9 @@ func main() {
 		Harnesses:       harnessesSvc,
 		MCP:             mcpPool,
 		MCPStore:        mcpStore,
+		Crons:           cronsStore,
+		LogRing:         logRing,
+		Version:         version,
 	})
 	if err := srv.Start(ctx); err != nil {
 		log.Error("server stopped with error", "error", err)

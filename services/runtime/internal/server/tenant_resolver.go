@@ -123,6 +123,8 @@ var publicPrefixes = []string{
 	"/api/v1/metrics",
 	// Plugins manifest (Phase 12.3) — dashboard reads to render nav.
 	"/api/v1/plugins",
+	// Logs view (Phase 12.2) — dashboard reads from the runtime log ring.
+	"/api/v1/logs",
 }
 
 func isPublicPath(p string) bool {

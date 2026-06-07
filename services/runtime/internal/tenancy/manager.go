@@ -361,6 +361,353 @@ func (m *Manager) tenantUsage(ctx context.Context, tenantID string) (TenantDetai
 	return out, nil
 }
 
+// ─── Phase 12.1 — tenant drilldown ────────────────────────────────────────
+
+// GetTenantDrilldown returns the per-tenant aggregate payload backing
+// /api/v1/admin/tenants/{id}/drilldown. It's a strict superset of
+// GetTenantDetail: members carry last_active_at, usage carries 24-bucket
+// sparklines, and the result also includes recent runs, recent webhook
+// deliveries, and the optional billing snapshot.
+//
+// Every sub-query is tolerant — drilldown is a "nice to know everything"
+// dashboard view and a failure on any one panel must never collapse the
+// whole page. Failures are logged and the corresponding field stays at
+// its zero value (empty slice / NULL pointer / zero numeric).
+func (m *Manager) GetTenantDrilldown(ctx context.Context, id string) (TenantDrilldown, error) {
+	ctx, span := m.tracer.Start(ctx, "tenancy.get_tenant_drilldown",
+		trace.WithAttributes(attribute.String("tenancy.tenant_id", id)),
+	)
+	defer span.End()
+
+	t, err := m.GetTenantOnly(ctx, id)
+	if err != nil {
+		return TenantDrilldown{}, err
+	}
+
+	out := TenantDrilldown{
+		Tenant:         t,
+		Members:        []DrilldownMember{},
+		APIKeys:        []APIKey{},
+		Usage:          DrilldownUsage{CostSparkline: zeroSparkline24(), RequestSparkline: zeroSparkline24()},
+		RecentRuns:     []DrilldownRun{},
+		RecentWebhooks: []DrilldownWebhook{},
+	}
+
+	if members, err := m.drilldownMembers(ctx, id); err != nil {
+		m.log.Warn("tenancy: drilldown members failed", "tenant_id", id, "error", err)
+	} else {
+		out.Members = members
+	}
+
+	if keys, err := m.listKeysImpl(ctx, ListKeysOpts{TenantID: id, IncludeRevoked: true}); err != nil {
+		m.log.Warn("tenancy: drilldown keys failed", "tenant_id", id, "error", err)
+	} else {
+		out.APIKeys = keys
+	}
+
+	out.Usage = m.drilldownUsage(ctx, id)
+
+	if runs, err := m.drilldownRecentRuns(ctx, id); err != nil {
+		m.log.Warn("tenancy: drilldown runs failed", "tenant_id", id, "error", err)
+	} else {
+		out.RecentRuns = runs
+	}
+
+	if hooks, err := m.drilldownRecentWebhooks(ctx, id); err != nil {
+		m.log.Warn("tenancy: drilldown webhooks failed", "tenant_id", id, "error", err)
+	} else {
+		out.RecentWebhooks = hooks
+	}
+
+	if billing, err := m.drilldownBilling(ctx, id); err != nil {
+		m.log.Warn("tenancy: drilldown billing failed", "tenant_id", id, "error", err)
+	} else {
+		out.Billing = billing
+	}
+
+	return out, nil
+}
+
+// drilldownMembers extends tenantMembers with last_active_at = MAX of
+// (suite_api_keys.last_used_at) across the user's keys in this tenant.
+// The session table (better-auth) uses TEXT user IDs that don't FK to
+// suite_users; joining email-to-email would be brittle, so we keep the
+// fallback to NULL and rely on api-key activity.
+func (m *Manager) drilldownMembers(ctx context.Context, tenantID string) ([]DrilldownMember, error) {
+	rows, err := m.pool.Query(ctx, `
+		select u.id::text, u.email, u.name, u.avatar_url, u.created_at, u.deleted_at,
+		       mem.role,
+		       (
+		         select max(k.last_used_at)
+		           from suite_api_keys k
+		          where k.tenant_id = mem.tenant_id
+		            and k.created_by = u.id
+		       ) as last_active_at
+		  from suite_memberships mem
+		  join suite_users u on u.id = mem.user_id
+		 where mem.tenant_id = $1
+		 order by mem.invited_at asc
+	`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("tenancy: drilldown members: %w", err)
+	}
+	defer rows.Close()
+	out := []DrilldownMember{}
+	for rows.Next() {
+		var (
+			u            User
+			role         string
+			lastActiveAt *time.Time
+		)
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.AvatarURL, &u.CreatedAt, &u.DeletedAt, &role, &lastActiveAt); err != nil {
+			return nil, err
+		}
+		out = append(out, DrilldownMember{User: u, Role: role, LastActiveAt: lastActiveAt})
+	}
+	return out, rows.Err()
+}
+
+// drilldownUsage aggregates 30d totals plus 24 hourly buckets for cost
+// and requests. Tolerant: any sub-query failure is logged and the field
+// stays at zero.
+func (m *Manager) drilldownUsage(ctx context.Context, tenantID string) DrilldownUsage {
+	out := DrilldownUsage{
+		CostSparkline:    zeroSparkline24(),
+		RequestSparkline: zeroSparkline24(),
+	}
+	now := time.Now().UTC()
+	cutoff30 := now.Add(-30 * 24 * time.Hour)
+
+	if err := m.pool.QueryRow(ctx, `
+		select count(*) from suite_gateway_requests
+		 where tenant_id = $1 and created_at >= $2
+	`, tenantID, cutoff30).Scan(&out.Requests30D); err != nil {
+		m.log.Warn("tenancy: drilldown requests_30d failed", "tenant_id", tenantID, "error", err)
+	}
+
+	if err := m.pool.QueryRow(ctx, `
+		select coalesce(sum(cost_usd), 0) from suite_cost_events
+		 where tenant_id = $1 and occurred_at >= $2
+	`, tenantID, cutoff30).Scan(&out.CostUSD30D); err != nil {
+		m.log.Warn("tenancy: drilldown cost_usd_30d failed", "tenant_id", tenantID, "error", err)
+	}
+
+	if err := m.pool.QueryRow(ctx, `
+		select count(*) from suite_secrets where tenant_id = $1
+	`, tenantID).Scan(&out.SecretsCount); err != nil {
+		m.log.Warn("tenancy: drilldown secrets_count failed", "tenant_id", tenantID, "error", err)
+	}
+
+	// StorageBytes left at 0 — the storage adapter doesn't track per-
+	// tenant byte counts yet (no suite_storage_objects table).
+	out.StorageBytes = 0
+
+	// 24-bucket hourly sparklines for the last 24 hours.
+	baseHour := now.Truncate(time.Hour).Add(-23 * time.Hour)
+	start := baseHour
+	if rows, err := m.pool.Query(ctx, `
+		select date_trunc('hour', created_at) as bucket, count(*)
+		  from suite_gateway_requests
+		 where tenant_id = $1 and created_at >= $2
+		 group by bucket
+		 order by bucket
+	`, tenantID, start); err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var (
+				bucket time.Time
+				total  int64
+			)
+			if err := rows.Scan(&bucket, &total); err != nil {
+				m.log.Warn("tenancy: drilldown request sparkline scan failed", "tenant_id", tenantID, "error", err)
+				break
+			}
+			idx := int(bucket.Sub(baseHour).Hours())
+			if idx >= 0 && idx < 24 {
+				out.RequestSparkline[idx] = float64(total)
+			}
+		}
+	} else {
+		m.log.Warn("tenancy: drilldown request sparkline failed", "tenant_id", tenantID, "error", err)
+	}
+
+	if rows, err := m.pool.Query(ctx, `
+		select date_trunc('hour', occurred_at) as bucket, coalesce(sum(cost_usd), 0)
+		  from suite_cost_events
+		 where tenant_id = $1 and occurred_at >= $2
+		 group by bucket
+		 order by bucket
+	`, tenantID, start); err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var (
+				bucket time.Time
+				cost   float64
+			)
+			if err := rows.Scan(&bucket, &cost); err != nil {
+				m.log.Warn("tenancy: drilldown cost sparkline scan failed", "tenant_id", tenantID, "error", err)
+				break
+			}
+			idx := int(bucket.Sub(baseHour).Hours())
+			if idx >= 0 && idx < 24 {
+				out.CostSparkline[idx] = cost
+			}
+		}
+	} else {
+		m.log.Warn("tenancy: drilldown cost sparkline failed", "tenant_id", tenantID, "error", err)
+	}
+
+	return out
+}
+
+// drilldownRecentRuns pulls the 10 most-recent gateway requests that hit
+// an agent execute endpoint for this tenant. Joins suite_cost_events on
+// the same tenant + tight time window (the same approximation used by
+// /api/v1/runs) to approximate the cost of each run.
+func (m *Manager) drilldownRecentRuns(ctx context.Context, tenantID string) ([]DrilldownRun, error) {
+	rows, err := m.pool.Query(ctx, `
+		select r.id::text,
+		       r.endpoint,
+		       r.status_code,
+		       r.duration_ms,
+		       r.created_at,
+		       coalesce((
+		         select sum(e.cost_usd)
+		           from suite_cost_events e
+		          where e.tenant_id is not distinct from r.tenant_id
+		            and e.occurred_at >= r.created_at - interval '5 seconds'
+		            and e.occurred_at <= r.created_at + interval '60 seconds'
+		       ), 0) as cost_usd
+		  from suite_gateway_requests r
+		 where r.tenant_id::text = $1
+		   and r.endpoint like '/api/v1/execute/%'
+		 order by r.created_at desc
+		 limit 10
+	`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("tenancy: drilldown runs: %w", err)
+	}
+	defer rows.Close()
+	out := []DrilldownRun{}
+	for rows.Next() {
+		var (
+			id         string
+			endpoint   string
+			statusCode *int32
+			durationMS *int32
+			createdAt  time.Time
+			costUSD    float64
+		)
+		if err := rows.Scan(&id, &endpoint, &statusCode, &durationMS, &createdAt, &costUSD); err != nil {
+			return nil, err
+		}
+		rec := DrilldownRun{
+			ID:        id,
+			Agent:     agentFromExecuteEndpoint(endpoint),
+			Status:    classifyRunStatus(statusCode),
+			StartedAt: createdAt.UTC(),
+			CostUSD:   costUSD,
+		}
+		if durationMS != nil {
+			rec.DurationMS = int64(*durationMS)
+		}
+		out = append(out, rec)
+	}
+	return out, rows.Err()
+}
+
+// drilldownRecentWebhooks pulls the 10 most-recent webhook deliveries
+// (inbound + outbound) for this tenant.
+func (m *Manager) drilldownRecentWebhooks(ctx context.Context, tenantID string) ([]DrilldownWebhook, error) {
+	rows, err := m.pool.Query(ctx, `
+		select id::text, direction, event_type, status, created_at
+		  from suite_webhook_deliveries
+		 where tenant_id::text = $1
+		 order by created_at desc
+		 limit 10
+	`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("tenancy: drilldown webhooks: %w", err)
+	}
+	defer rows.Close()
+	out := []DrilldownWebhook{}
+	for rows.Next() {
+		var hk DrilldownWebhook
+		if err := rows.Scan(&hk.ID, &hk.Direction, &hk.EventType, &hk.Status, &hk.CreatedAt); err != nil {
+			return nil, err
+		}
+		hk.CreatedAt = hk.CreatedAt.UTC()
+		out = append(out, hk)
+	}
+	return out, rows.Err()
+}
+
+// drilldownBilling returns the one suite_billing_customers row for the
+// tenant, or nil when the row doesn't exist (treated as "free plan, no
+// Stripe wiring yet"). errNoRows is NOT propagated as an error here —
+// nil-with-no-error is the correct "no billing snapshot" signal.
+func (m *Manager) drilldownBilling(ctx context.Context, tenantID string) (*DrilldownBilling, error) {
+	var (
+		plan               string
+		subscriptionStatus *string
+		currentPeriodEnd   *time.Time
+		trialEndsAt        *time.Time
+	)
+	err := m.pool.QueryRow(ctx, `
+		select plan, subscription_status, current_period_end, trial_ends_at
+		  from suite_billing_customers
+		 where tenant_id::text = $1
+	`, tenantID).Scan(&plan, &subscriptionStatus, &currentPeriodEnd, &trialEndsAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &DrilldownBilling{
+		Plan:               plan,
+		SubscriptionStatus: subscriptionStatus,
+		CurrentPeriodEnd:   currentPeriodEnd,
+		TrialEndsAt:        trialEndsAt,
+	}, nil
+}
+
+// zeroSparkline24 returns a fresh 24-element zeroed slice. Mirrors the
+// dashboard-layer zeroSparkline so we never serialise null for sparkline
+// fields (zod expects a 24-length array).
+func zeroSparkline24() []float64 {
+	return make([]float64, 24)
+}
+
+// agentFromExecuteEndpoint extracts the agent name from a gateway-recorded
+// endpoint of the form "/api/v1/execute/<agent>" or
+// "/api/v1/execute/async/<agent>". Mirrors the dashboard.go helper but is
+// duplicated here to avoid an import cycle (server -> tenancy).
+func agentFromExecuteEndpoint(endpoint string) string {
+	const syncPrefix = "/api/v1/execute/"
+	const asyncPrefix = "/api/v1/execute/async/"
+	if strings.HasPrefix(endpoint, asyncPrefix) {
+		return endpoint[len(asyncPrefix):]
+	}
+	if strings.HasPrefix(endpoint, syncPrefix) {
+		return endpoint[len(syncPrefix):]
+	}
+	return endpoint
+}
+
+// classifyRunStatus maps a gateway status_code to "succeeded" / "failed".
+// Mirrors classifyStatus in dashboard.go; duplicated here to avoid a
+// server -> tenancy import cycle.
+func classifyRunStatus(code *int32) string {
+	if code == nil {
+		return "failed"
+	}
+	if *code >= 200 && *code < 300 {
+		return "succeeded"
+	}
+	return "failed"
+}
+
 // UpdateTenant patches selected fields. Nil-valued input fields are
 // left untouched; passing an empty map for Settings/Quota clears them.
 func (m *Manager) UpdateTenant(ctx context.Context, id string, in UpdateTenantInput) (Tenant, error) {

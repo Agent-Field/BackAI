@@ -1,12 +1,18 @@
 "use client"
 
-// TenantsView — list + CRUD over multi-tenant orgs, with row → side Sheet
-// for detail (usage KPIs, members, keys, audit).
+// TenantsView — list + CRUD over multi-tenant orgs.
 //
-// All fetches go through `lib/api.ts`. Detail data is loaded lazily when the
-// Sheet opens — that keeps the table render path fast.
+// Rows are tappable; clicking a row navigates to the Phase 12.1 drilldown
+// page at /customers/tenants/<id>. A side-Sheet "Quick view" remains
+// available from the row dropdown for operators who don't want to leave
+// the list.
+//
+// All fetches go through `lib/api.ts`. Detail data is loaded lazily when
+// the Sheet opens — that keeps the table render path fast.
 
 import * as React from "react"
+import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import {
@@ -16,6 +22,8 @@ import {
   type ColumnDef,
 } from "@tanstack/react-table"
 import {
+  ExternalLink,
+  Eye,
   Globe,
   KeyRound,
   MoreHorizontal,
@@ -48,7 +56,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
@@ -133,6 +141,7 @@ function formatBytes(bytes: number): string {
 type TenantRow = Tenant & { members_count: number }
 
 export function TenantsView() {
+  const router = useRouter()
   const [rows, setRows] = React.useState<TenantRow[]>([])
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
@@ -228,9 +237,16 @@ export function TenantsView() {
         header: "",
         cell: ({ row }) => (
           <div
-            className="flex justify-end"
+            className="flex items-center justify-end gap-1"
             onClick={(e) => e.stopPropagation()}
           >
+            <Link
+              href={`/customers/tenants/${row.original.id}`}
+              aria-label="Open detail"
+              className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
+            >
+              <ExternalLink />
+            </Link>
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={
@@ -240,6 +256,12 @@ export function TenantsView() {
                 }
               />
               <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onClick={() => setDetailTarget(row.original)}
+                >
+                  <Eye />
+                  Quick view
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setEditTarget(row.original)}>
                   <Pencil />
                   Edit
@@ -320,7 +342,9 @@ export function TenantsView() {
                 <TableRow
                   key={row.id}
                   className="cursor-pointer hover:bg-muted/30"
-                  onClick={() => setDetailTarget(row.original)}
+                  onClick={() =>
+                    router.push(`/customers/tenants/${row.original.id}`)
+                  }
                 >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>

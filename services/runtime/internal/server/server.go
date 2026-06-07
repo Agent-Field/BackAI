@@ -15,6 +15,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/billing"
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
 	"github.com/Agent-Field/backai/services/runtime/internal/cost"
+	"github.com/Agent-Field/backai/services/runtime/internal/crons"
 	"github.com/Agent-Field/backai/services/runtime/internal/db"
 	"github.com/Agent-Field/backai/services/runtime/internal/dbstudio"
 	"github.com/Agent-Field/backai/services/runtime/internal/harnesses"
@@ -22,6 +23,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/jobs"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmcache"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmgateway"
+	"github.com/Agent-Field/backai/services/runtime/internal/logger"
 	"github.com/Agent-Field/backai/services/runtime/internal/mcp"
 	"github.com/Agent-Field/backai/services/runtime/internal/memory"
 	"github.com/Agent-Field/backai/services/runtime/internal/notifications"
@@ -109,6 +111,21 @@ type Server struct {
 	// return empty pages.
 	mcp      *mcp.Pool
 	mcpStore *mcp.Store
+	// crons is the Phase 12.2 cron scheduling store. nil pool ⇒
+	// mutating endpoints return 503 CRONS_NOT_CONFIGURED; reads serve
+	// an empty list so the dashboard renders.
+	crons *crons.Store
+	// metricsRing collects HTTP request durations + per-route counters
+	// for the /api/v1/metrics/summary handler. Always constructed in
+	// New().
+	metricsRing *metricsRing
+	// logRing is the in-memory log buffer the /api/v1/logs endpoint
+	// reads from. nil ⇒ the endpoint serves an empty list. main.go
+	// constructs one at boot and tees the structured logger into it.
+	logRing *logger.Ring
+	// version is the runtime version label surfaced in
+	// /api/v1/metrics/summary. Defaults to "dev" when empty.
+	version string
 }
 
 // Health aggregates dependency health for the /health endpoint.
@@ -217,6 +234,16 @@ type Deps struct {
 	// 5-minute refresh goroutine.
 	MCP      *mcp.Pool
 	MCPStore *mcp.Store
+	// Crons is the Phase 12.2 cron schedules store. nil pool ⇒
+	// mutating endpoints return 503 CRONS_NOT_CONFIGURED; reads serve
+	// an empty page.
+	Crons *crons.Store
+	// LogRing is the in-memory log buffer the /api/v1/logs endpoint
+	// reads from. Constructed in main.go and shared with the logger.
+	LogRing *logger.Ring
+	// Version is the runtime version string surfaced via
+	// /api/v1/metrics/summary. Defaults to "dev".
+	Version string
 }
 
 // New constructs a Server with the given config + logger + dependencies.
@@ -268,6 +295,10 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		harnesses:       deps.Harnesses,
 		mcp:             deps.MCP,
 		mcpStore:        deps.MCPStore,
+		crons:           deps.Crons,
+		metricsRing:     newMetricsRing(MetricsRingSize),
+		logRing:         deps.LogRing,
+		version:         deps.Version,
 	}
 	s.registerRoutes()
 
@@ -289,7 +320,7 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 	if deps.Telemetry != nil {
 		handler = observability.TraceMiddleware(cfg.Observability.ServiceName)(handler)
 	}
-	handler = withLogging(log, handler)
+	handler = withLogging(log, s.metricsRing, handler)
 	handler = withCORS(handler)
 
 	s.srv = &http.Server{
@@ -485,6 +516,27 @@ func (s *Server) registerRoutes() {
 	// tolerant empty pages.
 	s.registerMCPRoutes()
 	s.registerMCPOpenAPI()
+
+	// Plugins (Phase 12.3). Endpoint returns an empty PluginList — the
+	// dashboard owns plugin discovery at its own build time and merges
+	// the local manifest client-side. See plugins.go for rationale.
+	s.registerPluginsRoutes()
+	s.registerPluginsOpenAPI()
+
+	// Crons (Phase 12.2). Mutating endpoints return 503 when no store
+	// is wired; reads degrade to empty pages.
+	s.registerCronsRoutes()
+	s.registerCronsOpenAPI()
+
+	// Metrics summary (Phase 12.2). Always wired — runtime + ring data
+	// is available even without a DB.
+	s.registerMetricsRoutes()
+	s.registerMetricsOpenAPI()
+
+	// Logs (Phase 12.2). When no ring is wired the endpoint serves an
+	// empty array; otherwise returns the most-recent buffered lines.
+	s.registerLogsRoutes()
+	s.registerLogsOpenAPI()
 
 	if s.tel != nil {
 		s.mux.Handle("GET /metrics", s.tel.MetricsHandler())
@@ -916,17 +968,23 @@ func withRateLimit(lim ratelimit.Limiter, log *slog.Logger) func(http.Handler) h
 }
 
 // withLogging is a tiny structured-log middleware. OTel tracing comes in 1.7.
-func withLogging(log *slog.Logger, next http.Handler) http.Handler {
+//
+// Also feeds the metrics ring buffer so /api/v1/metrics/summary has a
+// real p95 + per-route counters to serve. The ring is owned by the
+// Server; nil-safety lives inside metricsRing.observe.
+func withLogging(log *slog.Logger, ring *metricsRing, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(sw, r)
+		dur := time.Since(start)
 		log.Info("http.request",
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", sw.status,
-			"duration_ms", time.Since(start).Milliseconds(),
+			"duration_ms", dur.Milliseconds(),
 		)
+		ring.observe(r.URL.Path, dur.Milliseconds(), sw.status)
 	})
 }
 

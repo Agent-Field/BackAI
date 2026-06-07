@@ -19,6 +19,8 @@ export default definePlugin({
   id: "hello",
   label: "Hello",
   icon: Sparkles,
+  iconName: "Sparkles",
   description: "Example plugin — proves the loader works end-to-end",
   group: "system",
+  version: "1.0.0",
 })

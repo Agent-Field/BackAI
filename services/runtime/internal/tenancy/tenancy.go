@@ -176,6 +176,71 @@ type TenantDetail struct {
 	Usage   TenantDetailUsage    `json:"usage"`
 }
 
+// ─── Phase 12.1 drilldown shapes ──────────────────────────────────────────
+//
+// TenantDrilldown is the per-tenant "everything we know" payload backing
+// /api/v1/admin/tenants/{id}/drilldown. It's a strict superset of
+// TenantDetail: members carry last_active_at, usage carries 24-bucket
+// sparklines, and the payload also includes recent runs, recent webhook
+// deliveries, and an optional billing snapshot.
+
+// DrilldownMember is TenantDetail.members[] + last_active_at.
+type DrilldownMember struct {
+	User         User       `json:"user"`
+	Role         string     `json:"role"`
+	LastActiveAt *time.Time `json:"last_active_at"`
+}
+
+// DrilldownUsage extends TenantDetailUsage with 24-bucket sparklines.
+type DrilldownUsage struct {
+	Requests30D      int64     `json:"requests_30d"`
+	CostUSD30D       float64   `json:"cost_usd_30d"`
+	StorageBytes     int64     `json:"storage_bytes"`
+	SecretsCount     int       `json:"secrets_count"`
+	CostSparkline    []float64 `json:"cost_sparkline"`
+	RequestSparkline []float64 `json:"request_sparkline"`
+}
+
+// DrilldownRun is one row of the "recent runs" table on the drilldown page.
+type DrilldownRun struct {
+	ID         string    `json:"id"`
+	Agent      string    `json:"agent"`
+	Status     string    `json:"status"`
+	StartedAt  time.Time `json:"started_at"`
+	DurationMS int64     `json:"duration_ms"`
+	CostUSD    float64   `json:"cost_usd"`
+}
+
+// DrilldownWebhook is one row of the "recent webhooks" table.
+type DrilldownWebhook struct {
+	ID        string    `json:"id"`
+	Direction string    `json:"direction"`
+	EventType string    `json:"event_type"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// DrilldownBilling is the optional billing snapshot. nil pointer = no row
+// in suite_billing_customers (the dashboard shows the "free plan" copy).
+type DrilldownBilling struct {
+	Plan               string     `json:"plan"`
+	SubscriptionStatus *string    `json:"subscription_status"`
+	CurrentPeriodEnd   *time.Time `json:"current_period_end"`
+	TrialEndsAt        *time.Time `json:"trial_ends_at"`
+}
+
+// TenantDrilldown is the full per-tenant aggregate returned by the
+// /api/v1/admin/tenants/{id}/drilldown endpoint.
+type TenantDrilldown struct {
+	Tenant         Tenant             `json:"tenant"`
+	Members        []DrilldownMember  `json:"members"`
+	APIKeys        []APIKey           `json:"api_keys"`
+	Usage          DrilldownUsage     `json:"usage"`
+	RecentRuns     []DrilldownRun     `json:"recent_runs"`
+	RecentWebhooks []DrilldownWebhook `json:"recent_webhooks"`
+	Billing        *DrilldownBilling  `json:"billing"`
+}
+
 // AuditEntry matches AuditEntrySchema.
 type AuditEntry struct {
 	ID           string                 `json:"id"`

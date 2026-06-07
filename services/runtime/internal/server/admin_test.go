@@ -66,6 +66,7 @@ func adminEndpoints() []endpointCase {
 		{"GET", "/api/v1/admin/tenants", ""},
 		{"POST", "/api/v1/admin/tenants", `{"slug":"acme","name":"Acme"}`},
 		{"GET", "/api/v1/admin/tenants/t-1", ""},
+		{"GET", "/api/v1/admin/tenants/t-1/drilldown", ""},
 		{"PATCH", "/api/v1/admin/tenants/t-1", `{"name":"New"}`},
 		{"DELETE", "/api/v1/admin/tenants/t-1", ""},
 
@@ -252,6 +253,164 @@ func TestAdminTenantDetailWireShape(t *testing.T) {
 		if _, ok := usage[k]; !ok {
 			t.Errorf("usage missing %q in JSON: %s", k, raw)
 		}
+	}
+}
+
+// TestAdminTenantDrilldownWireShape pins the Phase 12.1 drilldown
+// envelope. Drift here breaks the dashboard's /customers/tenants/[id]
+// page (TenantDrilldownSchema in apps/dashboard/src/lib/api.ts).
+func TestAdminTenantDrilldownWireShape(t *testing.T) {
+	lastActive := "2026-06-06T12:00:00Z"
+	subStatus := "active"
+	periodEnd := "2026-07-01T00:00:00Z"
+	d := tenantDrilldownWire{
+		Tenant: tenantWire{
+			ID: "t-1", Slug: "acme", Name: "Acme", Plan: "pro",
+			Settings: map[string]interface{}{}, Quota: map[string]interface{}{},
+			CreatedAt: "2026-06-06T12:00:00Z",
+		},
+		Members: []tenantDrilldownMemberWire{
+			{
+				User:         userWire{ID: "u-1", Email: "a@b.co", CreatedAt: "2026-06-06T12:00:00Z"},
+				Role:         "owner",
+				LastActiveAt: &lastActive,
+			},
+		},
+		APIKeys: []apiKeyWire{},
+		Usage: tenantDrilldownUsageWire{
+			Requests30D:      42,
+			CostUSD30D:       1.25,
+			StorageBytes:     2048,
+			SecretsCount:     3,
+			CostSparkline:    make([]float64, 24),
+			RequestSparkline: make([]float64, 24),
+		},
+		RecentRuns: []tenantDrilldownRunWire{
+			{
+				ID: "r-1", Agent: "sample.echo", Status: "succeeded",
+				StartedAt: "2026-06-06T12:00:00Z", DurationMS: 120, CostUSD: 0.001,
+			},
+		},
+		RecentWebhooks: []tenantDrilldownWebhookWire{
+			{
+				ID: "w-1", Direction: "inbound", EventType: "issue.opened",
+				Status: "delivered", CreatedAt: "2026-06-06T12:00:00Z",
+			},
+		},
+		Billing: &tenantDrilldownBillingWire{
+			Plan:               "pro",
+			SubscriptionStatus: &subStatus,
+			CurrentPeriodEnd:   &periodEnd,
+			TrialEndsAt:        nil,
+		},
+	}
+	raw, err := json.Marshal(d)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, k := range []string{"tenant", "members", "api_keys", "usage", "recent_runs", "recent_webhooks", "billing"} {
+		if _, ok := parsed[k]; !ok {
+			t.Errorf("tenantDrilldownWire missing %q in JSON: %s", k, raw)
+		}
+	}
+
+	// Usage must carry the two 24-element sparklines so zod's
+	// .length(24) check passes.
+	usage, _ := parsed["usage"].(map[string]any)
+	for _, k := range []string{"requests_30d", "cost_usd_30d", "storage_bytes", "secrets_count", "cost_sparkline", "request_sparkline"} {
+		if _, ok := usage[k]; !ok {
+			t.Errorf("drilldown usage missing %q in JSON: %s", k, raw)
+		}
+	}
+	costSpark, _ := usage["cost_sparkline"].([]any)
+	if len(costSpark) != 24 {
+		t.Errorf("cost_sparkline len = %d, want 24", len(costSpark))
+	}
+	reqSpark, _ := usage["request_sparkline"].([]any)
+	if len(reqSpark) != 24 {
+		t.Errorf("request_sparkline len = %d, want 24", len(reqSpark))
+	}
+
+	// Members must carry last_active_at (nullable, but present).
+	members, _ := parsed["members"].([]any)
+	if len(members) != 1 {
+		t.Fatalf("expected 1 member, got %d", len(members))
+	}
+	m0, _ := members[0].(map[string]any)
+	for _, k := range []string{"user", "role", "last_active_at"} {
+		if _, ok := m0[k]; !ok {
+			t.Errorf("drilldown member missing %q in JSON: %s", k, raw)
+		}
+	}
+
+	// recent_runs row shape.
+	runs, _ := parsed["recent_runs"].([]any)
+	if len(runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(runs))
+	}
+	r0, _ := runs[0].(map[string]any)
+	for _, k := range []string{"id", "agent", "status", "started_at", "duration_ms", "cost_usd"} {
+		if _, ok := r0[k]; !ok {
+			t.Errorf("drilldown run missing %q in JSON: %s", k, raw)
+		}
+	}
+
+	// recent_webhooks row shape.
+	hooks, _ := parsed["recent_webhooks"].([]any)
+	if len(hooks) != 1 {
+		t.Fatalf("expected 1 webhook, got %d", len(hooks))
+	}
+	h0, _ := hooks[0].(map[string]any)
+	for _, k := range []string{"id", "direction", "event_type", "status", "created_at"} {
+		if _, ok := h0[k]; !ok {
+			t.Errorf("drilldown webhook missing %q in JSON: %s", k, raw)
+		}
+	}
+
+	// billing snapshot fields when present.
+	billing, _ := parsed["billing"].(map[string]any)
+	for _, k := range []string{"plan", "subscription_status", "current_period_end", "trial_ends_at"} {
+		if _, ok := billing[k]; !ok {
+			t.Errorf("drilldown billing missing %q in JSON: %s", k, raw)
+		}
+	}
+	// trial_ends_at must serialise as explicit JSON null (zod nullable).
+	if got, ok := billing["trial_ends_at"]; !ok || got != nil {
+		t.Errorf("trial_ends_at should be JSON null, got %v / present=%v", got, ok)
+	}
+}
+
+// TestAdminTenantDrilldownNilBillingSerialisesAsNull pins the contract
+// for tenants without a suite_billing_customers row — the dashboard
+// expects `billing: null` so the "Open Stripe Portal" card stays hidden.
+func TestAdminTenantDrilldownNilBillingSerialisesAsNull(t *testing.T) {
+	d := tenantDrilldownWire{
+		Tenant: tenantWire{
+			ID: "t-1", Slug: "acme", Name: "Acme", Plan: "free",
+			Settings: map[string]interface{}{}, Quota: map[string]interface{}{},
+			CreatedAt: "2026-06-06T12:00:00Z",
+		},
+		Members:        []tenantDrilldownMemberWire{},
+		APIKeys:        []apiKeyWire{},
+		Usage:          tenantDrilldownUsageWire{CostSparkline: make([]float64, 24), RequestSparkline: make([]float64, 24)},
+		RecentRuns:     []tenantDrilldownRunWire{},
+		RecentWebhooks: []tenantDrilldownWebhookWire{},
+		Billing:        nil,
+	}
+	raw, err := json.Marshal(d)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got, ok := parsed["billing"]; !ok || got != nil {
+		t.Errorf("billing should be JSON null when absent, got %v / present=%v", got, ok)
 	}
 }
 

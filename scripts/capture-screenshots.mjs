@@ -338,6 +338,66 @@ async function capture() {
     fullPage: false,
   })
 
+  // ── 23. Customers → Tenant drilldown (Phase 12.1)
+  //
+  // Click the first tenant row from the list (skip if the page hasn't
+  // wired drilldown navigation yet — falls back to the list page).
+  console.log("→ Customers → Tenant drilldown")
+  try {
+    await page.goto(`${DASHBOARD_URL}/customers/tenants`, {
+      waitUntil: "networkidle",
+    })
+    await page.waitForTimeout(1500)
+    // First tenant row link.
+    const firstTenant = page.locator('a[href*="/customers/tenants/"]').first()
+    if (await firstTenant.count()) {
+      await firstTenant.click()
+      await page.waitForLoadState("networkidle")
+      await page.waitForTimeout(2000)
+    } else {
+      console.log("    (no tenant link found — capturing list)")
+    }
+  } catch (e) {
+    console.log("    (drilldown nav failed —", e.message, ")")
+  }
+  await page.screenshot({
+    path: resolve(OUT_DIR, "tenant-drilldown.png"),
+    fullPage: false,
+  })
+
+  // ── 24. Operate → Crons (Phase 12.2)
+  console.log("→ Operate → Crons")
+  await page.goto(`${DASHBOARD_URL}/operate/crons`, {
+    waitUntil: "networkidle",
+  })
+  await page.waitForTimeout(2000)
+  await page.screenshot({
+    path: resolve(OUT_DIR, "crons.png"),
+    fullPage: false,
+  })
+
+  // ── 25. Operate → Metrics (Phase 12.2)
+  console.log("→ Operate → Metrics")
+  await page.goto(`${DASHBOARD_URL}/operate/metrics`, {
+    waitUntil: "networkidle",
+  })
+  await page.waitForTimeout(2000)
+  await page.screenshot({
+    path: resolve(OUT_DIR, "metrics.png"),
+    fullPage: false,
+  })
+
+  // ── 26. Plugins → Cost Explorer (Phase 12.3)
+  console.log("→ Plugins → Cost Explorer")
+  await page.goto(`${DASHBOARD_URL}/plugins/cost-explorer`, {
+    waitUntil: "networkidle",
+  })
+  await page.waitForTimeout(2000)
+  await page.screenshot({
+    path: resolve(OUT_DIR, "plugin-cost-explorer.png"),
+    fullPage: false,
+  })
+
   await browser.close()
   console.log(`saved screenshots to ${OUT_DIR}`)
 }

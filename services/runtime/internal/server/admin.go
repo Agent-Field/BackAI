@@ -45,6 +45,7 @@ func (s *Server) registerAdminRoutes() {
 	s.mux.HandleFunc("GET /api/v1/admin/tenants", s.handleAdminListTenants)
 	s.mux.HandleFunc("POST /api/v1/admin/tenants", s.handleAdminCreateTenant)
 	s.mux.HandleFunc("GET /api/v1/admin/tenants/{id}", s.handleAdminGetTenant)
+	s.mux.HandleFunc("GET /api/v1/admin/tenants/{id}/drilldown", s.handleAdminGetTenantDrilldown)
 	s.mux.HandleFunc("PATCH /api/v1/admin/tenants/{id}", s.handleAdminUpdateTenant)
 	s.mux.HandleFunc("DELETE /api/v1/admin/tenants/{id}", s.handleAdminDeleteTenant)
 
@@ -227,6 +228,71 @@ type tenantDetailWire struct {
 	Usage   tenantDetailUsageWire    `json:"usage"`
 }
 
+// ─── Phase 12.1 — tenant drilldown wire shapes ────────────────────────────
+//
+// Mirrors TenantDrilldownSchema in apps/dashboard/src/lib/api.ts. The
+// schema is a strict superset of TenantDetail: members carry
+// last_active_at, usage carries 24-bucket sparklines, and the payload
+// also includes recent runs, recent webhook deliveries, and a nullable
+// billing snapshot.
+
+// tenantDrilldownMemberWire mirrors TenantDrilldownSchema.members[].
+type tenantDrilldownMemberWire struct {
+	User         userWire `json:"user"`
+	Role         string   `json:"role"`
+	LastActiveAt *string  `json:"last_active_at"`
+}
+
+// tenantDrilldownUsageWire mirrors TenantDrilldownSchema.usage.
+type tenantDrilldownUsageWire struct {
+	Requests30D      int64     `json:"requests_30d"`
+	CostUSD30D       float64   `json:"cost_usd_30d"`
+	StorageBytes     int64     `json:"storage_bytes"`
+	SecretsCount     int       `json:"secrets_count"`
+	CostSparkline    []float64 `json:"cost_sparkline"`
+	RequestSparkline []float64 `json:"request_sparkline"`
+}
+
+// tenantDrilldownRunWire mirrors TenantDrilldownSchema.recent_runs[].
+type tenantDrilldownRunWire struct {
+	ID         string  `json:"id"`
+	Agent      string  `json:"agent"`
+	Status     string  `json:"status"`
+	StartedAt  string  `json:"started_at"`
+	DurationMS int64   `json:"duration_ms"`
+	CostUSD    float64 `json:"cost_usd"`
+}
+
+// tenantDrilldownWebhookWire mirrors TenantDrilldownSchema.recent_webhooks[].
+type tenantDrilldownWebhookWire struct {
+	ID        string `json:"id"`
+	Direction string `json:"direction"`
+	EventType string `json:"event_type"`
+	Status    string `json:"status"`
+	CreatedAt string `json:"created_at"`
+}
+
+// tenantDrilldownBillingWire mirrors TenantDrilldownSchema.billing.
+// Pointer fields serialise as JSON null when unset, matching zod
+// .nullable() expectations.
+type tenantDrilldownBillingWire struct {
+	Plan               string  `json:"plan"`
+	SubscriptionStatus *string `json:"subscription_status"`
+	CurrentPeriodEnd   *string `json:"current_period_end"`
+	TrialEndsAt        *string `json:"trial_ends_at"`
+}
+
+// tenantDrilldownWire mirrors TenantDrilldownSchema.
+type tenantDrilldownWire struct {
+	Tenant         tenantWire                   `json:"tenant"`
+	Members        []tenantDrilldownMemberWire  `json:"members"`
+	APIKeys        []apiKeyWire                 `json:"api_keys"`
+	Usage          tenantDrilldownUsageWire     `json:"usage"`
+	RecentRuns     []tenantDrilldownRunWire     `json:"recent_runs"`
+	RecentWebhooks []tenantDrilldownWebhookWire `json:"recent_webhooks"`
+	Billing        *tenantDrilldownBillingWire  `json:"billing"`
+}
+
 // auditEntryWire mirrors AuditEntrySchema.
 type auditEntryWire struct {
 	ID           string                 `json:"id"`
@@ -387,6 +453,94 @@ func marshalAuditEntry(e tenancy.AuditEntry) auditEntryWire {
 	}
 }
 
+// marshalTenantDrilldown converts the tenancy-layer aggregate into its
+// wire shape. Keeps every nullable field as a JSON-null pointer so the
+// dashboard's zod safeParse never sees `undefined` where it expects
+// `null`. Sparkline arrays are always 24-long (the tenancy layer
+// guarantees zeroed defaults).
+func marshalTenantDrilldown(d tenancy.TenantDrilldown) tenantDrilldownWire {
+	members := make([]tenantDrilldownMemberWire, 0, len(d.Members))
+	for _, m := range d.Members {
+		mw := tenantDrilldownMemberWire{
+			User: marshalUser(m.User),
+			Role: m.Role,
+		}
+		if m.LastActiveAt != nil {
+			s := m.LastActiveAt.UTC().Format(time.RFC3339Nano)
+			mw.LastActiveAt = &s
+		}
+		members = append(members, mw)
+	}
+	keys := make([]apiKeyWire, 0, len(d.APIKeys))
+	for _, k := range d.APIKeys {
+		keys = append(keys, marshalAPIKey(k))
+	}
+	runs := make([]tenantDrilldownRunWire, 0, len(d.RecentRuns))
+	for _, r := range d.RecentRuns {
+		runs = append(runs, tenantDrilldownRunWire{
+			ID:         r.ID,
+			Agent:      r.Agent,
+			Status:     r.Status,
+			StartedAt:  r.StartedAt.UTC().Format(time.RFC3339Nano),
+			DurationMS: r.DurationMS,
+			CostUSD:    r.CostUSD,
+		})
+	}
+	hooks := make([]tenantDrilldownWebhookWire, 0, len(d.RecentWebhooks))
+	for _, h := range d.RecentWebhooks {
+		hooks = append(hooks, tenantDrilldownWebhookWire{
+			ID:        h.ID,
+			Direction: h.Direction,
+			EventType: h.EventType,
+			Status:    h.Status,
+			CreatedAt: h.CreatedAt.UTC().Format(time.RFC3339Nano),
+		})
+	}
+	costSpark := d.Usage.CostSparkline
+	if len(costSpark) != 24 {
+		costSpark = make([]float64, 24)
+	}
+	reqSpark := d.Usage.RequestSparkline
+	if len(reqSpark) != 24 {
+		reqSpark = make([]float64, 24)
+	}
+	var billing *tenantDrilldownBillingWire
+	if d.Billing != nil {
+		bw := &tenantDrilldownBillingWire{
+			Plan: d.Billing.Plan,
+		}
+		if d.Billing.SubscriptionStatus != nil {
+			s := *d.Billing.SubscriptionStatus
+			bw.SubscriptionStatus = &s
+		}
+		if d.Billing.CurrentPeriodEnd != nil {
+			s := d.Billing.CurrentPeriodEnd.UTC().Format(time.RFC3339Nano)
+			bw.CurrentPeriodEnd = &s
+		}
+		if d.Billing.TrialEndsAt != nil {
+			s := d.Billing.TrialEndsAt.UTC().Format(time.RFC3339Nano)
+			bw.TrialEndsAt = &s
+		}
+		billing = bw
+	}
+	return tenantDrilldownWire{
+		Tenant:  marshalTenant(d.Tenant),
+		Members: members,
+		APIKeys: keys,
+		Usage: tenantDrilldownUsageWire{
+			Requests30D:      d.Usage.Requests30D,
+			CostUSD30D:       d.Usage.CostUSD30D,
+			StorageBytes:     d.Usage.StorageBytes,
+			SecretsCount:     d.Usage.SecretsCount,
+			CostSparkline:    costSpark,
+			RequestSparkline: reqSpark,
+		},
+		RecentRuns:     runs,
+		RecentWebhooks: hooks,
+		Billing:        billing,
+	}
+}
+
 func marshalTenantDetail(d tenancy.TenantDetail) tenantDetailWire {
 	members := make([]tenantDetailMemberWire, 0, len(d.Members))
 	for _, m := range d.Members {
@@ -484,6 +638,32 @@ func (s *Server) handleAdminGetTenant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, marshalTenantDetail(detail))
+}
+
+// handleAdminGetTenantDrilldown is Phase 12.1's "everything about this
+// tenant" endpoint. Backs the dashboard's /customers/tenants/[id] page
+// and is a strict superset of GetTenant — members carry last_active_at,
+// usage carries 24-bucket sparklines, and recent runs / webhooks /
+// billing snapshot are folded in.
+func (s *Server) handleAdminGetTenantDrilldown(w http.ResponseWriter, r *http.Request) {
+	ctx, span := s.dashTracer().Start(r.Context(), "admin.tenants.drilldown")
+	defer span.End()
+	if s.adminUnavailable(w) {
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, errEnvelope("VALIDATION_FAILED", "tenant id required"))
+		return
+	}
+	span.SetAttributes(attribute.String("tenant.id", id))
+	drilldown, err := s.tenancy.GetTenantDrilldown(ctx, id)
+	if err != nil {
+		span.RecordError(err)
+		writeTenancyError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, marshalTenantDrilldown(drilldown))
 }
 
 func (s *Server) handleAdminUpdateTenant(w http.ResponseWriter, r *http.Request) {
@@ -791,6 +971,7 @@ func (s *Server) registerAdminOpenAPI() {
 	b.Register("GET", "/api/v1/admin/tenants", openapi.RouteMeta{Summary: "List tenants", Tags: tags})
 	b.Register("POST", "/api/v1/admin/tenants", openapi.RouteMeta{Summary: "Create a tenant", Tags: tags})
 	b.Register("GET", "/api/v1/admin/tenants/{id}", openapi.RouteMeta{Summary: "Get tenant detail (members, keys, usage)", Tags: tags})
+	b.Register("GET", "/api/v1/admin/tenants/{id}/drilldown", openapi.RouteMeta{Summary: "Get full per-tenant drilldown (Phase 12.1: members + keys + usage + sparklines + recent runs + recent webhooks + billing)", Tags: tags})
 	b.Register("PATCH", "/api/v1/admin/tenants/{id}", openapi.RouteMeta{Summary: "Update a tenant", Tags: tags})
 	b.Register("DELETE", "/api/v1/admin/tenants/{id}", openapi.RouteMeta{Summary: "Soft-delete a tenant", Tags: tags})
 	// Users.
