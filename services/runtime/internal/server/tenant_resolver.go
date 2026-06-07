@@ -117,6 +117,12 @@ var publicPrefixes = []string{
 	"/api/v1/skills",
 	// Harnesses (Phase 11.4) — probe + list surface for the dashboard.
 	"/api/v1/harnesses",
+	// Crons (Phase 12.2) — scheduled-job CRUD surface.
+	"/api/v1/crons",
+	// Metrics summary (Phase 12.2) — at-a-glance Prometheus rollup.
+	"/api/v1/metrics",
+	// Plugins manifest (Phase 12.3) — dashboard reads to render nav.
+	"/api/v1/plugins",
 }
 
 func isPublicPath(p string) bool {

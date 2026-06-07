@@ -1222,6 +1222,173 @@ export const TenantDetailSchema = z.object({
 })
 export type TenantDetail = z.infer<typeof TenantDetailSchema>
 
+// Phase 12.1 — the "everything about this tenant" drilldown payload.
+// TenantDetail above is the legacy compact shape used elsewhere; this
+// schema is what `/customers/tenants/[id]` renders against. We keep it
+// as a superset so existing callers don't break.
+export const TenantDrilldownSchema = z.object({
+  tenant: TenantSchema,
+  // Same shape as TenantDetail.members, repeated for self-containment.
+  members: z.array(
+    z.object({
+      user: UserSchema,
+      role: z.string(),
+      // ISO 8601 timestamp of last seen activity (last_used_at on any
+      // of the user's API keys, or session activity, whichever wins).
+      // Nullable when the user has never made a request.
+      last_active_at: z.string().nullable(),
+    }),
+  ),
+  api_keys: z.array(APIKeySchema),
+  // Aggregated usage rollups across the active billing period.
+  usage: z.object({
+    requests_30d: z.number(),
+    cost_usd_30d: z.number(),
+    storage_bytes: z.number(),
+    secrets_count: z.number(),
+    // 24-bucket sparkline of cost in USD — same format as HomeOverview's
+    // cost_sparkline. The dashboard renders it inline so the operator
+    // can see spend shape without a chart roundtrip.
+    cost_sparkline: z.array(z.number()).length(24),
+    // Same for requests.
+    request_sparkline: z.array(z.number()).length(24),
+  }),
+  // Most-recent runs across all agents for this tenant. Capped at 10.
+  recent_runs: z.array(
+    z.object({
+      id: z.string(),
+      agent: z.string(),
+      status: z.string(),
+      started_at: z.string(),
+      duration_ms: z.number(),
+      cost_usd: z.number(),
+    }),
+  ),
+  // Most-recent inbound + outbound webhook deliveries. Capped at 10.
+  recent_webhooks: z.array(
+    z.object({
+      id: z.string(),
+      direction: z.enum(["inbound", "outbound"]),
+      event_type: z.string(),
+      status: z.string(),
+      created_at: z.string(),
+    }),
+  ),
+  // Billing snapshot when the billing module is wired; null otherwise.
+  billing: z
+    .object({
+      plan: z.string(),
+      subscription_status: z.string().nullable(),
+      current_period_end: z.string().nullable(),
+      trial_ends_at: z.string().nullable(),
+    })
+    .nullable(),
+})
+export type TenantDrilldown = z.infer<typeof TenantDrilldownSchema>
+
+// ─── Cron jobs (Phase 12.2) ──────────────────────────────────────────────
+//
+// Cron is a thin convenience layer over the existing jobs queue. Each
+// cron row spawns one job at its scheduled time; the runtime tracks
+// last_run + next_run separately from the job itself so the dashboard
+// doesn't have to JOIN every render.
+
+export const CronSchema = z.object({
+  id: z.string(),
+  tenant_id: z.string().nullable(),
+  // Free-form name shown in the dashboard.
+  name: z.string(),
+  // Job kind (from suite_jobs_definitions) the cron enqueues.
+  job_name: z.string(),
+  // Standard cron expression ("0 * * * *" = top of each hour). The
+  // runtime stores in 5-field crontab format; "@daily" / "@hourly"
+  // shortcuts expand server-side.
+  schedule: z.string(),
+  // JSON args forwarded to the job on each tick.
+  args: z.record(z.string(), z.unknown()),
+  is_active: z.boolean(),
+  // Nullable when the cron has never fired.
+  last_run_at: z.string().nullable(),
+  next_run_at: z.string(),
+  created_at: z.string(),
+})
+export type Cron = z.infer<typeof CronSchema>
+
+export const CronListSchema = z.object({
+  crons: z.array(CronSchema),
+})
+export type CronList = z.infer<typeof CronListSchema>
+
+export const CreateCronInputSchema = z.object({
+  name: z.string(),
+  job_name: z.string(),
+  schedule: z.string(),
+  args: z.record(z.string(), z.unknown()).optional(),
+  is_active: z.boolean().optional(),
+})
+export type CreateCronInput = z.infer<typeof CreateCronInputSchema>
+
+// ─── Metrics surface (Phase 12.2) ────────────────────────────────────────
+//
+// We don't try to mirror Prometheus's full surface — the operator can
+// open the Prometheus / Grafana side panel for that. This schema is the
+// minimal at-a-glance summary the dashboard's /operate/metrics tab
+// renders so the operator doesn't have to leave the dashboard to know
+// the runtime is healthy.
+
+export const MetricsSummarySchema = z.object({
+  // Total HTTP requests handled since boot.
+  http_requests_total: z.number(),
+  // 95p latency in milliseconds across the last 5 minutes.
+  http_p95_ms: z.number(),
+  // Active goroutines.
+  goroutines: z.number(),
+  // Heap allocated (bytes).
+  heap_alloc_bytes: z.number(),
+  // Uptime in seconds since boot.
+  uptime_seconds: z.number(),
+  // Runtime version string ("v0.12.0+abcd").
+  version: z.string(),
+  // List of per-endpoint rollups (top 10 by request count).
+  by_route: z.array(
+    z.object({
+      route: z.string(),
+      requests: z.number(),
+      avg_ms: z.number(),
+      error_count: z.number(),
+    }),
+  ),
+})
+export type MetricsSummary = z.infer<typeof MetricsSummarySchema>
+
+// ─── Plugin manifest (Phase 12.3) ────────────────────────────────────────
+//
+// Dashboard plugins are TS files dropped into apps/dashboard/plugins/.
+// The dashboard scans them at build time and exposes the discovered
+// entries via this endpoint so the sidebar nav can render extra
+// entries without a code edit.
+
+export const PluginSchema = z.object({
+  // Plugin id — taken from the file name (without extension).
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  // Where the plugin's main tab lives — relative path under /(admin).
+  route: z.string(),
+  // Lucide icon name. Resolved at render time.
+  icon: z.string(),
+  // Sidebar group ("Build" | "Operate" | "Customers" | "Plugins").
+  group: z.string(),
+  // Plugin version from its manifest.
+  version: z.string(),
+})
+export type Plugin = z.infer<typeof PluginSchema>
+
+export const PluginListSchema = z.object({
+  plugins: z.array(PluginSchema),
+})
+export type PluginList = z.infer<typeof PluginListSchema>
+
 export const AuditEntrySchema = z.object({
   id: z.string(),
   tenant_id: z.string().nullable(),
@@ -1623,6 +1790,49 @@ export const api = {
         HarnessSchema,
       ),
   },
+
+  // ─── Tenant drilldown (Phase 12.1) ───
+  // Superset of the legacy /admin/tenants/{id} payload. Renders the
+  // per-tenant page at /customers/tenants/[id].
+  tenantDrilldown: (id: string) =>
+    request(
+      `/api/v1/admin/tenants/${encodeURIComponent(id)}/drilldown`,
+      undefined,
+      TenantDrilldownSchema,
+    ),
+
+  // ─── Crons (Phase 12.2) ───
+  crons: {
+    list: (params?: { tenant?: string }) => {
+      const qs = params?.tenant
+        ? `?tenant=${encodeURIComponent(params.tenant)}`
+        : ""
+      return request(`/api/v1/crons${qs}`, undefined, CronListSchema)
+    },
+    get: (id: string) =>
+      request(`/api/v1/crons/${encodeURIComponent(id)}`, undefined, CronSchema),
+    create: (input: CreateCronInput) =>
+      request("/api/v1/crons", { method: "POST", json: input }, CronSchema),
+    setActive: (id: string, isActive: boolean) =>
+      request(
+        `/api/v1/crons/${encodeURIComponent(id)}/active`,
+        { method: "PUT", json: { is_active: isActive } },
+        CronSchema,
+      ),
+    delete: (id: string) =>
+      request(
+        `/api/v1/crons/${encodeURIComponent(id)}`,
+        { method: "DELETE" },
+        z.object({ deleted: z.boolean() }),
+      ),
+  },
+
+  // ─── Metrics (Phase 12.2) ───
+  metrics: () =>
+    request("/api/v1/metrics/summary", undefined, MetricsSummarySchema),
+
+  // ─── Plugins (Phase 12.3) ───
+  plugins: () => request("/api/v1/plugins", undefined, PluginListSchema),
 
   // ─── Database studio + memory (Phase 8) ───
   db: {
