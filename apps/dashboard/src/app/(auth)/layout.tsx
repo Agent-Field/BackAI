@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Boxes } from "lucide-react"
 import Link from "next/link"
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package cost implements per-call LLM cost tracking + per-tenant budget
 // enforcement for AF Stack Phase 7.
 //

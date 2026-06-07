@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // outbound.go — outbound webhook delivery service.
 //
 // Phase 10.3 owns this file. The OutboundService is the public surface
@@ -25,6 +27,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/Agent-Field/backai/services/runtime/internal/safehttp"
 )
 
 // OutboundService composes the shared DeliveryStore with an HTTP client.
@@ -32,6 +36,11 @@ import (
 // The HTTP client is intentionally not the global http.DefaultClient: we
 // set our own per-request timeout, and we never want a global rewrite
 // (e.g. a test injecting a roundtripper) to leak into webhook POSTs.
+//
+// SSRF defence: the client comes from safehttp.New(...) which refuses
+// to dial private / link-local / loopback CIDRs and the cloud-metadata
+// hostnames. Without this the destination URL (user-supplied) could be
+// pointed at 169.254.169.254 to exfiltrate cloud credentials.
 type OutboundService struct {
 	store  *DeliveryStore
 	client *http.Client
@@ -46,11 +55,9 @@ func NewOutboundService(store *DeliveryStore, log *slog.Logger) *OutboundService
 		log = slog.Default()
 	}
 	return &OutboundService{
-		store: store,
-		client: &http.Client{
-			Timeout: DefaultTimeout,
-		},
-		log: log,
+		store:  store,
+		client: safehttp.New(safehttp.Options{Timeout: DefaultTimeout}),
+		log:    log,
 	}
 }
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client"
 
 // Active sessions. Fetched client-side via `authClient.listSessions()`.

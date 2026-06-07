@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package crons is AF Stack's Phase 12.2 cron scheduling layer.
 //
 // A Cron is a single row in suite_crons describing "every <schedule>,

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Sandbox activity — live pool stats + recent run history.
 //
 // Server component pre-fetches the pool snapshot and the first page of

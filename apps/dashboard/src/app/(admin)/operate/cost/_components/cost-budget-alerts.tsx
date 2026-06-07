@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Budget alerts.
 //
 // Renders one shadcn Alert per budget that has crossed its threshold,

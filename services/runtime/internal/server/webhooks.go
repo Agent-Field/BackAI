@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // webhooks.go — REST handlers for the webhook outbox + inbox.
 //
 // This file is CO-OWNED between Phase 10.2 and Phase 10.3. The two

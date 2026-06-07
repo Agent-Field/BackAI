@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Notable dashboard plugin page (example 01).
 //
 // Shows per-tenant note counts + the matching LLM token spend so an

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """``suite.storage.*`` — object storage operations.
 
 Maps to the REST surface in ``apps/dashboard/src/lib/api.ts`` under

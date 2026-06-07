@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // suite.admin.* — multi-tenancy admin operations.
 //
 // Re-exports the per-namespace modules so callers can write either:

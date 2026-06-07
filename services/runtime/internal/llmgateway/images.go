@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package llmgateway
 
 // ImagesRequest is the inbound /images/generations body shape.

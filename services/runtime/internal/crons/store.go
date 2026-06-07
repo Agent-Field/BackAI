@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // store.go — persistence layer for suite_crons.
 //
 // Store wraps a pgxpool and exposes the operations the REST layer and

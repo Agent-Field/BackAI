@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Home dashboard — the first thing operators see when they sign in.
 //
 // Server-renders a snapshot from `api.home()` and falls back to a

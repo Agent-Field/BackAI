@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // client.go wraps the River client with the suite's name-based dispatch
 // API and exposes the high-level operations the runtime needs: Enqueue,
 // Get, List, Retry, Cancel, and Summary.

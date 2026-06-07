@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Recent webhook deliveries panel. Server component.
 
 import { formatDistanceToNowStrict } from "date-fns"

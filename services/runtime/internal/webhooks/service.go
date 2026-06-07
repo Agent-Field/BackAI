@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // service.go — top-level Service facade for the webhook package.
 //
 // CO-OWNED. Phase 10.2 adds the inbound surface (EndpointStore +

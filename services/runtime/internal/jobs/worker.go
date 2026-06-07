@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // worker.go bridges River's typed-worker model to our dynamic, name-based
 // dispatch model.
 //

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Tenants page — customer orgs.
 //
 // Server shell. Checks the multi-tenancy module flag and either falls back

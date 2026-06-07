@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Plugin page. Mounted by the generator at `/plugins/hello` via a route proxy
 // under `src/app/(admin)/plugins/hello/page.tsx`. Because the proxy lives in
 // the `(admin)` route group, this page gets the dashboard chrome (sidebar,

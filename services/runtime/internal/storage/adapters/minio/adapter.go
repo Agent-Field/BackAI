@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package minio implements the storage.Storage interface against an
 // S3-compatible MinIO or AWS S3 endpoint.
 //

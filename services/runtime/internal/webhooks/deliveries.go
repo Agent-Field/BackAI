@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // deliveries.go — persistence layer for suite_webhook_deliveries.
 //
 // CO-OWNED with Phase 10.2. Phase 10.2 owns the canonical version of

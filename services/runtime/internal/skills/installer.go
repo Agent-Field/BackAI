@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // installer.go — turns a source string into a Skill ready for Store.Install.
 //
 // The Installer handles the three source formats parsed by ParseSource:

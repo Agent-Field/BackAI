@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Metrics page — at-a-glance runtime stats from /api/v1/metrics/summary.
 //
 // The runtime exposes a Prometheus surface at /metrics for proper

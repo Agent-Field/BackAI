@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // better-auth configuration wired against the dashboard's Postgres database.
 //
 // We share the same database as the runtime (see TECH-SPEC §3). better-auth

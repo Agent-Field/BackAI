@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """``suite.admin.skills.*`` — install / list / attach AF skillkit bundles.
 
 Maps to the Phase 11.3 skills endpoints in

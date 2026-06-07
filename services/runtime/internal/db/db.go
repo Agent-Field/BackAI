@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package db wires the Postgres connection pool used by the runtime.
 //
 // Uses pgxpool for connection pooling. Migrations run via goose against

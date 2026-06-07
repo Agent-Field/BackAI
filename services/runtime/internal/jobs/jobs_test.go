@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build integration
 
 // Integration tests for the jobs package. These exercise the full River

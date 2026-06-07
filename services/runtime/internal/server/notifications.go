@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // notifications.go — REST handlers for the suite notifications outbox.
 //
 // Endpoints map 1:1 to NotificationSchema / NotificationListSchema /

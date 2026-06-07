@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // drain_middleware.go — request-counting middleware paired with the
 // Drain controller.
 //

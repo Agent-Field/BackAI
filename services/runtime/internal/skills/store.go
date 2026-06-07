@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // store.go — persistence layer for suite_skills + suite_skill_attachments.
 //
 // Store wraps a pgxpool and exposes the operations the REST + SDK
@@ -381,4 +383,3 @@ func scanSkill(rows pgx.Rows) (*Skill, error) {
 		InstalledAt: installedAt.UTC().Format(time.RFC3339Nano),
 	}, nil
 }
-

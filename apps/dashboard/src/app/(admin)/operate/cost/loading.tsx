@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Streaming skeleton for the Cost dashboard.
 //
 // Mirrors the new 4-card hero strip + filters + chart + breakdowns +

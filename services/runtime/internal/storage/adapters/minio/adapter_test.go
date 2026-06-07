@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build integration
 
 // adapter_test.go is a real-MinIO integration test.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package llmgateway implements an OpenAI-compatible LLM gateway shim.
 //
 // Wire shape closely matches the official OpenAI Python SDK request /

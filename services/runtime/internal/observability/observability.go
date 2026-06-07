@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package observability wires OpenTelemetry traces + Prometheus metrics
 // for the suite runtime.
 //
@@ -140,4 +142,3 @@ func TraceMiddleware(serviceName string) func(http.Handler) http.Handler {
 		})
 	}
 }
-

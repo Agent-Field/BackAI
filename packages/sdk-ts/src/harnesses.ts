@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // suite.harnesses.* — Phase 11.4 CLI harness probes.
 //
 // Endpoint paths and JSON shapes are the canonical contract from

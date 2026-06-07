@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Recent runs list. Server component — pure rendering of the `runs[]`
 // slice from `home.recent_runs`.
 

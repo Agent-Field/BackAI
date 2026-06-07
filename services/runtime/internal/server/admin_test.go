@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // admin_test.go — handler-level tests for the Phase 6 multi-tenancy admin
 // surface.
 //

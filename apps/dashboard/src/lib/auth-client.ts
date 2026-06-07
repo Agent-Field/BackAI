@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Client-side auth helpers. Use these in React Server / Client Components.
 
 import { createAuthClient } from "better-auth/react"

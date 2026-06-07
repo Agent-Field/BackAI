@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // billing.go — REST handlers for Phase 10.4 Stripe billing.
 //
 // Endpoints map 1:1 to BillingCustomerSchema / BillingCustomerListSchema

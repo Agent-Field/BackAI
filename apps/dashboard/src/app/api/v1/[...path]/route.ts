@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Same-origin proxy from the dashboard to the runtime's REST API.
 //
 // Without this, client components calling `api.runs()` would either:

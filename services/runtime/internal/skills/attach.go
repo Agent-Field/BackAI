@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // attach.go — thin convenience wrappers over Store.{Attach,Detach}.
 //
 // These exist as standalone helpers (rather than methods on Store)

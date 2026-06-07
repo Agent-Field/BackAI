@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Server-only session helpers.
 
 import { headers } from "next/headers"

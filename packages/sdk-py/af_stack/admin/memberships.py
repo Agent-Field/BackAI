@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """``suite.admin.memberships.*`` — tenant<->user role mapping.
 
 Maps to:

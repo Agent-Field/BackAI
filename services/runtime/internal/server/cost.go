@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // cost.go — REST handlers for the Phase 7 cost ledger + budgets.
 //
 // Endpoints (paths + response shapes match apps/dashboard/src/lib/api.ts):

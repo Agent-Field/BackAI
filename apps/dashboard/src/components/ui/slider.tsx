@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Slider as SliderPrimitive } from "@base-ui/react/slider"
 
 import { cn } from "@/lib/utils"

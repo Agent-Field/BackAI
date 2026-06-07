@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // util.go — small helpers shared by inbound + outbound.
 //
 // Kept in its own file so Phase 10.2 (inbound) and Phase 10.3 (outbound)

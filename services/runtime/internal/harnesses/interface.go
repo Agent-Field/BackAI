@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package harnesses probes the local environment for CLI agent harnesses
 // (Claude Code, Codex, Gemini CLI, OpenCode) and surfaces their state to
 // the dashboard + SDKs. This is Phase 11.4: probe-only — the runtime

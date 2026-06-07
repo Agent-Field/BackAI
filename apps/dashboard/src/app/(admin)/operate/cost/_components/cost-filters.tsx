@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client"
 
 // Filter bar for the Cost page. Updates URL search params so the server

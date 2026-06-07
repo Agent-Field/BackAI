@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client"
 
 // SandboxRunDetailSheet — side panel for inspecting a single sandbox run.

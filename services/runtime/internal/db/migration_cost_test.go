@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build integration
 
 // Integration test for the 00005_cost migration: Up/Down round-trip.

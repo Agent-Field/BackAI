@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package tenantctx is the read-side API for tenant + API-key identity
 // stored on a request's context.Context.
 //

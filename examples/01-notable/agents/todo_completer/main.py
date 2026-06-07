@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """todo_completer — find unchecked TODOs in a note and suggest completions.
 
 Smallest possible "agentic UX" reasoner: regex-extracts ``- [ ]`` lines,

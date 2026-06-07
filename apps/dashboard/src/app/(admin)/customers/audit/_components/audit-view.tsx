@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client"
 
 // AuditView — paginated audit log across tenants.
@@ -435,4 +437,3 @@ function AuditEmpty({ error }: { error: string | null }) {
     </Empty>
   )
 }
-

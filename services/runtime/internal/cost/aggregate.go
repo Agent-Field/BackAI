@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // aggregate.go — read-side aggregations for the dashboard cost surface.
 //
 // Aggregate.Summary powers GET /api/v1/cost. It returns the dashboard's

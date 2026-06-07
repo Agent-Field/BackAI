@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Alerts panel. Hidden entirely when `alerts[]` is empty.
 //
 // Severity → Alert variant mapping:

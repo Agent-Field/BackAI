@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Cost dashboard — the hero tab. Server-renders snapshots from
 // `api.cost()`, `api.llm.cacheStats()`, `api.budgets.list()`, and the
 // first page of `api.costEvents()` in parallel, then hands them to

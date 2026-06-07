@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // admin.go — REST handlers for the AF Stack multi-tenancy admin surface.
 //
 // Endpoints map 1:1 to the admin section in apps/dashboard/src/lib/api.ts.

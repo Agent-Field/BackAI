@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // store.go — persistence for suite_billing_customers + suite_usage_meters.
 //
 // The Store is constructed once per process and shared by:

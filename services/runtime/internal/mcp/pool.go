@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // pool.go — the runtime-wide MCP connection pool.
 //
 // Pool owns a map of Server.Name -> Adapter. Reconcile() reads the

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // scheduler.go — the 60-second tick loop that dispatches due crons.
 //
 // One goroutine, no parallelism inside the tick. Per-row enqueue is fast

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package openapi builds an OpenAPI 3.1 spec by aggregating route
 // registrations from every handler.
 //

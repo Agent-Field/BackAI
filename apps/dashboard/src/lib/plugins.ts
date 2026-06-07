@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Plugin loader.
 //
 // A plugin is a contributor-owned folder under `apps/dashboard/plugins/<id>/`

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Webhook activity — unified inbound + outbound delivery feed.
 //
 // Server component pre-fetches the first page of deliveries + the

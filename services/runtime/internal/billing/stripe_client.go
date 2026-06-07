@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // stripe_client.go — thin wrapper around the official stripe-go SDK.
 //
 // Two modes:

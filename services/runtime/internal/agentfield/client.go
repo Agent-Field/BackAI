@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package agentfield is the suite runtime's client for the AgentField
 // control plane.
 //

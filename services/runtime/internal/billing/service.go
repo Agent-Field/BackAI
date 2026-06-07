@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // service.go — public Service surface combining the Store + the Stripe
 // Client. The REST layer and the SDKs talk to this — they don't reach
 // into Store or Client directly.

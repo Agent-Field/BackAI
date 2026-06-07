@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """HTTP-mocked tests for ``af_stack.admin.budgets``.
 
 Endpoint paths and JSON shapes mirror the canonical contract in

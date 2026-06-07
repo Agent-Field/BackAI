@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // service.go — orchestrates a single sandbox run end-to-end.
 //
 // Flow for Service.Run:

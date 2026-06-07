@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // skills.go — REST handlers for the Phase 11.3 skills install/list/attach
 // surface.
 //

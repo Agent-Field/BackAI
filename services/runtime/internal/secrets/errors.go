@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package secrets implements the AF Stack suite secrets vault.
 //
 // The vault stores per-tenant key/value pairs in Postgres (table

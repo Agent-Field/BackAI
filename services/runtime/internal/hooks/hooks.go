@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package hooks implements named hook points for cross-cutting concerns.
 //
 // Handlers register against a HookPoint (gateway.pre_auth, llm.pre_call,

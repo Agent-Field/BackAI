@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package memory implements the AF Stack suite memory primitives.
 //
 // Memory is a per-scope key/value store with optional pgvector-backed

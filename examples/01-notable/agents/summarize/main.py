@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """summarize — turn a note body into a TLDR + key points.
 
 Smallest of the three Notable reasoners. Single ``app.ai()`` call with a

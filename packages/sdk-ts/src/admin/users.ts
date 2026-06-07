@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // suite.admin.users.* — user lookup.
 //
 // The admin user surface in v1 is read-only — provisioning happens via

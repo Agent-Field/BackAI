@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // openapi_test.go — verifies the live /openapi.json endpoint produces a
 // valid OpenAPI 3.1 spec at runtime.
 //

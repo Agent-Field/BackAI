@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package server — tests for the dashboard read-only endpoints.
 //
 // These tests exercise the empty-DB / empty-deps path (no PG, no AF) and

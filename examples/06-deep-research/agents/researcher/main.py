@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Deep Research agent — long-running fan-out with parallel sub-investigations.
 
 This is what AF Stack looks like when you build a long-running agent. The

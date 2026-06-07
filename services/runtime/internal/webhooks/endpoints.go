@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // endpoints.go — persistence for suite_webhook_endpoints.
 //
 // The dashboard's CRUD surface (POST/GET/DELETE /api/v1/webhooks/endpoints)

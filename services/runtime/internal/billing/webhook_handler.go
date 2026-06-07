@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // webhook_handler.go — Stripe webhook ingest.
 //
 // Stripe pushes lifecycle events to /webhooks/in/stripe; this file

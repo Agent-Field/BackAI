@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // af-stack — the suite runtime entry point.
 //
 // Reads config (yaml + env), opens PG, connects to AF, starts the HTTP

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Migrations: embedded SQL files run with goose on boot.
 //
 // Source files live in services/runtime/internal/db/migrations/. Each file

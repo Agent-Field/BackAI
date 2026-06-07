@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package resend implements the notifications.Adapter contract against
 // Resend (https://resend.com), the email-as-API service.
 //

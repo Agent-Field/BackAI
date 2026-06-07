@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """``suite.agents.*`` — invoking AgentField from outside an agent.
 
 Maps directly to the REST surface documented in ``TECH-SPEC.md §4.4``:

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """``suite.admin.*`` — multi-tenancy admin operations.
 
 The admin sub-package mirrors the ``/api/v1/admin/*`` REST surface defined

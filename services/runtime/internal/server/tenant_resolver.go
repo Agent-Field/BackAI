@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // tenant_resolver.go — per-request tenant identification middleware.
 //
 // Resolution order (first match wins):

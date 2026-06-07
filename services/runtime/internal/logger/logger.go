@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package logger provides structured logging via slog.
 //
 // JSON format in production, text format in dev. Level from config.

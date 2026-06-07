@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // storage_test.go covers the interface contract via an in-memory stub and
 // holds a compile-time check that the stub implements storage.Storage. The
 // real-MinIO integration test lives in adapters/minio/adapter_test.go behind

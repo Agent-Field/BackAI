@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // store.go — persistence layer for suite_mcp_servers.
 //
 // Methods are intentionally small and orthogonal:

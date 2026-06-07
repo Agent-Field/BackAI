@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Notable agent entrypoint — registers all three reasoners on one node.
 
 The reasoners live in sibling modules so the file each developer touches

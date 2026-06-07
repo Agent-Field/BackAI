@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Shared zod schemas for the admin sub-package.
 //
 // Each schema mirrors a zod schema declared in

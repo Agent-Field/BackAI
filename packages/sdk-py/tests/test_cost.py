@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """HTTP-mocked tests for ``af_stack.cost``.
 
 Mirrors the canonical contract in

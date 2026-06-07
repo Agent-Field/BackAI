@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client"
 
 // CronsView — table of cron schedules with create / toggle / delete.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Plugin index — server component. Lists every installed plugin discovered by
 // `loadPlugins()`. Shows the standard `Empty` state when nothing's installed.
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // errors.go — canonical error envelope helpers shared across handlers.
 //
 // Every non-2xx response from the AF Stack runtime MUST use this shape:

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """``suite.notifications.*`` — outbox-style notifications.
 
 Maps to the REST surface defined in ``apps/dashboard/src/lib/api.ts``

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // error_envelope_test.go — exercises every public error path on the
 // runtime gateway and asserts the response body matches the canonical
 // envelope contract:

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // suite.storage.* — object storage operations.
 //
 // Endpoint paths and JSON shapes are the canonical contract from

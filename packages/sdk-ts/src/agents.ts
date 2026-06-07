@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // suite.agents.* — invoke AgentField agents via the gateway.
 //
 // Maps 1:1 to TECH-SPEC.md §4.4. All model calls go through AF; this

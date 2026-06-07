@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Top-of-page hero metric strip: 4 cards.
 //
 //   1. Period total spend, with vs-previous delta Badge

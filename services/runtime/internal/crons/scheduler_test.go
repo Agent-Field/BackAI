@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // scheduler_test.go — unit tests for the parsing helpers + the
 // nil-safety properties of the Scheduler.
 //

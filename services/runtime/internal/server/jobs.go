@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // jobs.go — REST handlers for the suite jobs queue.
 //
 // Endpoints map 1:1 to JobSchema / JobListSchema / JobDefinitionListSchema /

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // llm.go — REST handlers for the OpenAI-compatible LLM gateway shim.
 //
 // Endpoints:

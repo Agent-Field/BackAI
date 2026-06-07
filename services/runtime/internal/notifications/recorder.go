@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // recorder.go — persistence layer for suite_notifications.
 //
 // Four write paths:

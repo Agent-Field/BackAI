@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Settings index. Shallow surface — operator account, appearance, plugins,
 // feature flags. Account is a separate route (per docs/dashboard-ia.md) so a
 // link card is offered here as well.

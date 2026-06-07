@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Example plugin.
 //
 // Adding a plugin = drop a folder under `apps/dashboard/plugins/<id>/` with:

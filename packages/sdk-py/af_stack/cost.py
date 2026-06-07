@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """``suite.cost.*`` — cost event log browsing.
 
 Maps to the cost event REST surface in

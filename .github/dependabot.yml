@@ -1,0 +1,140 @@
+version: 2
+
+# Updates land as PRs. Security-only entries fire on advisory feeds;
+# version-bump entries fire on the configured cadence.
+#
+# Group runtime + dashboard + SDK by ecosystem to avoid a flood of
+# individual PRs. Ignore major version bumps by default — those need
+# human review.
+
+updates:
+  # ─── Go: the runtime + CLI ──────────────────────────────────────────────
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      go-deps:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    labels:
+      - dependencies
+      - go
+
+  # ─── npm: dashboard ─────────────────────────────────────────────────────
+  - package-ecosystem: npm
+    directory: /apps/dashboard
+    schedule:
+      interval: weekly
+      day: tuesday
+    open-pull-requests-limit: 5
+    groups:
+      dashboard-deps:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    ignore:
+      - dependency-name: "next"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react*"
+        update-types: ["version-update:semver-major"]
+    labels:
+      - dependencies
+      - npm
+      - dashboard
+
+  # ─── npm: TypeScript SDK ────────────────────────────────────────────────
+  - package-ecosystem: npm
+    directory: /packages/sdk-ts
+    schedule:
+      interval: weekly
+      day: tuesday
+    open-pull-requests-limit: 3
+    groups:
+      sdk-ts-deps:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    labels:
+      - dependencies
+      - npm
+      - sdk-ts
+
+  # ─── npm: docs site ─────────────────────────────────────────────────────
+  - package-ecosystem: npm
+    directory: /docs-site
+    schedule:
+      interval: weekly
+      day: wednesday
+    open-pull-requests-limit: 3
+    groups:
+      docs-site-deps:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    labels:
+      - dependencies
+      - npm
+      - docs-site
+
+  # ─── pip: Python SDK ────────────────────────────────────────────────────
+  - package-ecosystem: pip
+    directory: /packages/sdk-py
+    schedule:
+      interval: weekly
+      day: wednesday
+    open-pull-requests-limit: 3
+    groups:
+      sdk-py-deps:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    labels:
+      - dependencies
+      - pip
+      - sdk-py
+
+  # ─── docker: base images ───────────────────────────────────────────────
+  - package-ecosystem: docker
+    directory: /services/runtime
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+    labels:
+      - dependencies
+      - docker
+
+  - package-ecosystem: docker
+    directory: /apps/dashboard
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+    labels:
+      - dependencies
+      - docker
+
+  # ─── github-actions: workflow files ────────────────────────────────────
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - ci

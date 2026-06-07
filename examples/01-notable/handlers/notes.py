@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Notable HTTP service — note CRUD + agent invocations + stats.
 
 This runs as its own FastAPI service (``notable-api`` in the compose

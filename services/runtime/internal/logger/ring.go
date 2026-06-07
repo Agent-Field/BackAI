@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // ring.go — in-memory ring buffer of recent log lines.
 //
 // Powers the dashboard's /operate/logs tab. The runtime owns one of

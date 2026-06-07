@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package tenancy holds the multi-tenancy data model + Manager
 // implementation for AF Stack Phase 6.
 //

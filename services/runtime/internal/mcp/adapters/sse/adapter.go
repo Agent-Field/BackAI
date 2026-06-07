@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package sse implements the MCP HTTP+SSE transport. The runtime POSTs
 // JSON-RPC requests to <url>/messages and receives responses on a
 // long-lived Server-Sent-Events stream from <url>/sse.
@@ -28,6 +30,7 @@ import (
 	"time"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/mcp"
+	"github.com/Agent-Field/backai/services/runtime/internal/safehttp"
 )
 
 // Compile-time assertion: Adapter satisfies mcp.Adapter.
@@ -75,7 +78,13 @@ func New(cfg Config) *Adapter {
 	}
 	client := cfg.Client
 	if client == nil {
-		client = &http.Client{Timeout: 0} // SSE: no overall timeout; ctx controls cancellation.
+		// SSE: no overall timeout (ctx controls cancellation); SSRF
+		// defence: refuse private CIDRs + metadata hosts. The MCP
+		// server URL is user-supplied (suite_mcp_servers.url is
+		// dashboard-configurable) so a hostile config could otherwise
+		// point at 169.254.169.254 to lift cloud creds, or at a
+		// docker-internal Postgres.
+		client = safehttp.New(safehttp.Options{Timeout: 0})
 	}
 	return &Adapter{
 		name:          cfg.Name,

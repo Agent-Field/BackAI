@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // secrets_test.go — unit tests for the env-resolver. No DB; uses a
 // hand-rolled SecretReader stub so the logic is exercised end-to-end
 // without pgxpool.

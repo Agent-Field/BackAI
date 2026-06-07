@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package dbstudio is the read-mostly DB-introspection + SQL-runner backend
 // for the AF Stack dashboard's "Database" tab (Phase 8.1).
 //

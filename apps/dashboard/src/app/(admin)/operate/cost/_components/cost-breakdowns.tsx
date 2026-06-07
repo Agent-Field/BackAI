@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client"
 
 // Breakdown tabs: Model / Agent / Tenant / Day. Each tab renders a

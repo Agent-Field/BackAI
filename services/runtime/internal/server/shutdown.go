@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // shutdown.go — Drain controller for graceful shutdown.
 //
 // The Drain controller is the central piece of Phase 14.3 graceful

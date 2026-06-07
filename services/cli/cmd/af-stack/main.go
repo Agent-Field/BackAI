@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // af-stack — the AF Stack operator CLI.
 //
 // The CLI is a thin wrapper around the runtime REST API. It exists so

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // suite.webhooks.* — webhook outbox + unified delivery feed operations.
 //
 // Endpoint paths and JSON shapes are the canonical contract from

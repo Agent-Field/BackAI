@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Notable dashboard plugin (example 01).
 //
 // Adds a sidebar entry under "Customers" because operators reach for

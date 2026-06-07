@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package server — secrets.go wires the suite secrets vault to the
 // REST endpoints consumed by the dashboard and SDKs.
 //
@@ -20,6 +22,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -27,6 +30,7 @@ import (
 	"time"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/secrets"
+	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 )
 
 // defaultTenantUUID is the well-known UUID seeded by migration 00001
@@ -148,18 +152,138 @@ func (s *Server) handleRevealSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := r.PathValue("key")
-	plaintext, err := s.secrets.Get(ctx, s.defaultTenant(r), key)
+	tenantID := s.defaultTenant(r)
+	plaintext, err := s.secrets.Get(ctx, tenantID, key)
 	if err != nil {
+		// Failed reveal attempts are an interesting audit signal too,
+		// but only when the failure isn't "wrong key shape" or "no
+		// such secret" (those happen on every dashboard typo). We log
+		// only the success path for now; failures stay in the slog.
 		span.RecordError(err)
 		writeSecretError(w, err)
 		return
 	}
 	// The plaintext leaves the runtime here. We do NOT log the response
 	// body; the only sink is the HTTP writer.
+	// Audit log: every successful reveal is a sensitive event. Best-
+	// effort write so the response isn't blocked on a slow audit
+	// insert; the audit ctx is decoupled from the response ctx.
+	s.recordSecretReveal(r, tenantID, key)
 	writeJSON(w, http.StatusOK, secretValueResponse{
 		Key:   key,
 		Value: string(plaintext),
 	})
+}
+
+// recordSecretReveal inserts an audit row noting that a secret was
+// revealed via the dashboard endpoint. Runs in a goroutine with a
+// fresh, short-lived context so a slow DB write doesn't block the
+// caller; on a missing pool (tests / degraded mode) it's a no-op.
+//
+// Action: "secret.reveal" — the dashboard's audit panel filters on
+// this string. Resource: ("secret", key). Metadata captures the path
+// + method for cross-correlation with suite_gateway_requests rows.
+func (s *Server) recordSecretReveal(r *http.Request, tenantID, key string) {
+	if s.db == nil || s.db.Pool == nil {
+		return
+	}
+	userID := tenantctx.UserID(r.Context())
+	apiKeyID := tenantctx.APIKeyID(r.Context())
+	ip := clientIP(r)
+	userAgent := r.Header.Get("User-Agent")
+
+	var tenantPtr, userPtr, keyPtr, ipPtr, uaPtr *string
+	if tenantID != "" {
+		tenantPtr = &tenantID
+	}
+	if userID != "" {
+		userPtr = &userID
+	}
+	if apiKeyID != "" {
+		keyPtr = &apiKeyID
+	}
+	if ip != "" {
+		ipPtr = &ip
+	}
+	if userAgent != "" {
+		userAgent = truncateAudit(userAgent, 512)
+		uaPtr = &userAgent
+	}
+	resourceID := key
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		metadata := map[string]any{
+			"path":   r.URL.Path,
+			"method": r.Method,
+		}
+		metaBytes, _ := json.Marshal(metadata)
+		_, err := s.db.Pool.Exec(ctx, `
+			insert into suite_audit_log
+				(tenant_id, user_id, api_key_id, action,
+				 resource_type, resource_id, metadata, ip, user_agent)
+			values
+				($1, $2, $3, 'secret.reveal', 'secret', $4, $5, $6, $7)
+		`, tenantPtr, userPtr, keyPtr, resourceID, metaBytes, ipPtr, uaPtr)
+		if err != nil {
+			s.log.Warn("secrets: audit insert failed",
+				"key", key, "tenant_id", tenantID, "error", err)
+		}
+	}()
+}
+
+// clientIP returns the closest thing to a remote client IP we can
+// derive. Prefers X-Forwarded-For (first value), then X-Real-IP, then
+// the raw RemoteAddr. Returns "" rather than half-baked data when no
+// signal is present.
+func clientIP(r *http.Request) string {
+	if v := r.Header.Get("X-Forwarded-For"); v != "" {
+		if i := indexComma(v); i >= 0 {
+			return trimSpace(v[:i])
+		}
+		return trimSpace(v)
+	}
+	if v := r.Header.Get("X-Real-IP"); v != "" {
+		return trimSpace(v)
+	}
+	host := r.RemoteAddr
+	// RemoteAddr may be "ip:port"; strip the port.
+	for i := len(host) - 1; i >= 0; i-- {
+		if host[i] == ':' {
+			return host[:i]
+		}
+	}
+	return host
+}
+
+func indexComma(s string) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == ',' {
+			return i
+		}
+	}
+	return -1
+}
+
+func trimSpace(s string) string {
+	for len(s) > 0 && (s[0] == ' ' || s[0] == '\t') {
+		s = s[1:]
+	}
+	for len(s) > 0 && (s[len(s)-1] == ' ' || s[len(s)-1] == '\t') {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+// truncateAudit clips long strings so a hostile User-Agent can't bloat
+// the audit row. RFC 7230 doesn't bound the header but 512 is plenty
+// for legitimate clients.
+func truncateAudit(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max]
 }
 
 // ─── PUT /api/v1/secrets/{key} ────────────────────────────────────────────

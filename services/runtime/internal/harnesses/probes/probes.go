@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package probes carries the static, per-provider probe definitions used
 // by the harnesses Service. Probes describe HOW to detect a harness
 // (which binaries to try, which version args, which env vars must be

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // crons.go — REST handlers for the Phase 12.2 cron schedules surface.
 //
 // Endpoints map 1:1 to CronSchema / CronListSchema / CreateCronInputSchema

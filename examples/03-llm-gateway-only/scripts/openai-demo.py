@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Hit the AF Stack LLM gateway using the official OpenAI Python SDK.
 

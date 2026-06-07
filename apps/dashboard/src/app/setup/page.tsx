@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { redirect } from "next/navigation"
 import Link from "next/link"
 import { Boxes } from "lucide-react"

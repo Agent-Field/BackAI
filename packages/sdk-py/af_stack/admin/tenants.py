@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """``suite.admin.tenants.*`` — tenant CRUD.
 
 Maps to the admin tenant endpoints in ``apps/dashboard/src/lib/api.ts``:

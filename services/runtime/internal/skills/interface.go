@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package skills is AF Stack's Phase 11.3 skills install/list/attach layer.
 //
 // A Skill is an AF skillkit bundle — a manifest declaring prompt

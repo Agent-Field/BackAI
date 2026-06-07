@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package billing wires Stripe + the runtime's per-tenant usage meter
 // aggregation, behind a single Service that the REST handlers and SDKs
 // consume.

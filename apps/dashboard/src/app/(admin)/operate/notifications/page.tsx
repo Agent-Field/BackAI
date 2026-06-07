@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Notifications — outbox stats + recent delivery history.
 //
 // Server component pre-fetches the stats snapshot and the first page of

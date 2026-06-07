@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Cost Explorer plugin page (Phase 12.3).
 //
 // Real first-party demo of a Plugin page. Mounted at

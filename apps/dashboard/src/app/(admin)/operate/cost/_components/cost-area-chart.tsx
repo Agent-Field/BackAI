@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client"
 
 // Daily spend chart. Stacked area when broken out by model, single area

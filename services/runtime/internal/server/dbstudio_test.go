@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package server — tests for the DB studio REST endpoints.
 //
 // These cover the empty-Studio path (no DB at boot) and confirm 503

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Badge } from "@/components/ui/badge"
 import type { SandboxRun } from "@/lib/api"
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package sandbox is AF Stack's sandboxed code-execution layer.
 //
 // A Sandbox spins up a short-lived isolated environment (Docker

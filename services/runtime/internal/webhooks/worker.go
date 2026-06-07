@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // worker.go — background loop that drains the outbound webhook outbox.
 //
 // Phase 10.3 owns this file. The worker is the engine behind the

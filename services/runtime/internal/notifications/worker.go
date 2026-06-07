@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // worker.go — background drain of suite_notifications.
 //
 // The worker wakes every ~2s, atomically claims up to MaxBatchSize

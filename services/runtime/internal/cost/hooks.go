@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // hooks.go — adapter glue that wires Recorder + Budgets to the
 // hooks.Engine.
 //

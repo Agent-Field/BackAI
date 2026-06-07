@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // shutdown_test.go — Phase 14.3 graceful shutdown coverage.
 //
 // Verifies:

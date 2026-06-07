@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // dbstudio.go — REST handlers for the DB studio (Phase 8.1).
 //
 // Endpoints map 1:1 to the zod schemas in apps/dashboard/src/lib/api.ts:

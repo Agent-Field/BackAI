@@ -1,74 +1,86 @@
 # Contributing
 
-Thanks for your interest in contributing to AF Stack (working name).
+Thanks for poking around AF Stack. Early build. Stuff change. PRs welcome.
 
-This project is in early build. The shape will change. Issues, PRs, and
-ideas all welcome.
-
-## Quick start for contributors
+## Quickstart
 
 ```bash
 git clone https://github.com/Agent-Field/backai
 cd backai
 cp .env.example .env
-make dev
+make dev          # boots docker compose + runtime
+make test         # go + ts + py
 ```
 
 Read `README.md` for orientation, `PLAN.md` for architecture,
-`ROADMAP.md` for what's being built next.
-
-## Development workflow
-
-- Create an issue describing the change before opening a PR for non-trivial
-  work
-- Reference the issue in your PR description
-- Keep PRs small and focused; large PRs are hard to review
-- Run `make lint` and `make test` before pushing
-- Sign your commits if you can (not required)
-
-## Pre-commit hooks
-
-We use [lefthook](https://github.com/evilmartians/lefthook) for fast,
-parallel pre-commit checks across Go, Python, and TypeScript.
-
-```bash
-# install lefthook (one-time)
-brew install lefthook       # macOS
-# or: scoop install lefthook (Windows)
-# or: see https://github.com/evilmartians/lefthook for other platforms
-
-# enable hooks in this repo
-lefthook install
-```
-
-Hooks run automatically on `git commit`. To skip once: `LEFTHOOK=0 git commit`.
+`ROADMAP.md` for what's next.
 
 ## Code style
 
-- **Go**: `gofmt`, `golangci-lint` rules in `.golangci.yml`
-- **Python**: `ruff`, `mypy` strict where applied
-- **TypeScript**: `eslint`, `prettier`, strict `tsconfig`
-- **Commits**: Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`,
-  `refactor:`, `test:`)
+Run formatters before pushing. Configs already in repo are the source of truth.
 
-## Testing
+- **Go**: `gofmt`, `goimports`, `golangci-lint run` (config: `.golangci.yml`)
+- **TypeScript**: `prettier --write`, `eslint` (configs: `.prettierrc`, per-app `eslint.config.*`)
+- **Python**: `ruff format`, `ruff check` (config: `pyproject.toml`)
 
-- Each package has a unit test suite
-- Integration tests run against `docker compose up`
-- CI runs lint, unit tests, integration tests on every PR
-- Don't break the 60-second quickstart
+`lefthook install` hooks them into `git commit`. Skip once: `LEFTHOOK=0 git commit`.
 
-## Issue and PR labels
+## Tests
 
-- `phase:0` … `phase:16` — which roadmap phase
+- New feature → tests in the same PR. No tests, no merge.
+- Coverage is not a hard gate. PRs that drop overall coverage by **> 2 points**
+  get extra scrutiny — bring a reason.
+- Integration tests use `docker compose up`. Don't break the 60-second quickstart.
+
+## Commits
+
+- **DCO sign-off required.** Every commit must carry `Signed-off-by: Your Name <you@example.com>`.
+  Easiest: `git commit -s`. No CLA, no paperwork.
+- **Conventional Commits encouraged** (`feat:`, `fix:`, `docs:`, `chore:`,
+  `refactor:`, `test:`). Makes changelogs nice. Not enforced.
+- Keep PRs small. Reference the issue you're closing.
+
+## How to add a workload module
+
+See `docs/workload-modules.md`. Short version: implement the module
+interface, register it, write a test, add a docs page.
+
+## How to add a dashboard plugin
+
+See `docs/dashboard-plugins.md`. Drop a plugin under `apps/dashboard/plugins/`,
+declare its nav entries, run `pnpm generate:plugins`.
+
+## How to add an adapter (LLM provider, storage, queue, etc.)
+
+The LLM provider adapter is the canonical reference. Read
+`services/runtime/internal/llmgateway/providers/` and copy that shape.
+
+1. Implement the provider interface in a new file under `providers/`.
+2. Wire it into the factory switch in
+   `services/runtime/cmd/af-stack/main.go` (or the module's own factory).
+3. Write a unit test against a mocked upstream.
+4. Add a docs page under `docs/` and link it from `docs-site/`.
+
+Same shape applies for storage, queue, vector backends, etc. Find the
+existing adapter type, copy its file structure, fill in the interface.
+
+## Where to ask
+
+- **Design questions** → GitHub Discussions
+- **Bugs** → GitHub Issues
+- **Chat** → Discord (placeholder: https://discord.gg/agentfield)
+
+## Labels (for triagers)
+
+- `phase:0` … `phase:16` — roadmap phase
 - `area:runtime` / `area:dashboard` / `area:sdk-py` / `area:sdk-ts` /
   `area:sdk-go` / `area:docs` / `area:ci` / `area:modules`
-- `type:feat` / `type:fix` / `type:chore` / `type:docs` / `type:test` /
-  `type:refactor`
+- `type:feat` / `type:fix` / `type:chore` / `type:docs` / `type:test` / `type:refactor`
 - `priority:p0` (blocking) / `priority:p1` (next) / `priority:p2` (later)
 - `good first issue` for newcomer-friendly tasks
 
 ## License
 
-By contributing, you agree your contributions are licensed under
-Apache 2.0 (see `LICENSE`).
+By contributing, you agree your work is licensed under Apache 2.0
+(see `LICENSE`). Third-party dependency licenses are inventoried in
+`THIRD-PARTY-LICENSES.md`.

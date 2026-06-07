@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Inline adapter + capabilities indicator.
 //
 // Shows which adapter the runtime is configured with, and exposes the

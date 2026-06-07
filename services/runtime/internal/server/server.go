@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package server wires HTTP handlers and lifecycle for the suite runtime.
 package server
 
@@ -7,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -1007,16 +1010,31 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 // withCORS allows the dashboard (and other in-stack browsers) to call the
-// runtime's REST API from the operator's machine. Phase 6 narrows the
-// allow-list per tenant; for now any origin is accepted since auth is
-// per-cookie at the dashboard layer.
+// runtime's REST API from the operator's machine.
+//
+// Security: credentialed cross-origin requests are restricted to an
+// explicit allowlist. Without this gate, any website the operator
+// visits could fire authenticated requests against the runtime using
+// their better-auth session cookie — classic CSRF. We allowlist:
+//
+//   - http://localhost:<DASHBOARD_PORT> and http://127.0.0.1:<DASHBOARD_PORT>
+//     for the bundled dev experience (DASHBOARD_PORT defaults to 3000)
+//   - any comma-separated origin in AF_STACK_CORS_ORIGINS
+//
+// For non-allowlisted origins we still echo the Origin header so simple
+// (non-credentialed) GETs work — but we do NOT set
+// Access-Control-Allow-Credentials, so the browser drops cookies and
+// the request is effectively anonymous.
 func withCORS(next http.Handler) http.Handler {
+	allow := loadCORSAllowlist()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		if origin != "" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			if _, ok := allow[origin]; ok {
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+			}
 			w.Header().Set("Access-Control-Allow-Methods",
 				"GET,POST,PUT,DELETE,OPTIONS,PATCH")
 			w.Header().Set("Access-Control-Allow-Headers",
@@ -1029,6 +1047,34 @@ func withCORS(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// loadCORSAllowlist builds the set of origins that may make
+// credentialed cross-origin requests. Always includes the bundled dev
+// dashboard on localhost + 127.0.0.1 (default port 3000, overridable
+// via DASHBOARD_PORT). Additional origins come from a comma-separated
+// AF_STACK_CORS_ORIGINS env var.
+func loadCORSAllowlist() map[string]struct{} {
+	out := map[string]struct{}{}
+	port := strings.TrimSpace(os.Getenv("DASHBOARD_PORT"))
+	if port == "" {
+		port = "3000"
+	}
+	for _, host := range []string{"localhost", "127.0.0.1"} {
+		out["http://"+host+":"+port] = struct{}{}
+		out["https://"+host+":"+port] = struct{}{}
+	}
+	raw := strings.TrimSpace(os.Getenv("AF_STACK_CORS_ORIGINS"))
+	if raw == "" {
+		return out
+	}
+	for _, p := range strings.Split(raw, ",") {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out[p] = struct{}{}
+		}
+	}
+	return out
 }
 
 // rateLimitedRoutes is the list of URL-prefix matchers the rate-limit

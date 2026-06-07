@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // metrics_summary.go — the at-a-glance metrics surface used by the
 // dashboard's /operate/metrics tab.
 //

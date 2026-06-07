@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Internal HTTP client backed by global fetch.
 //
 // Works in Node 20+, Bun, Deno, Cloudflare Workers, Vercel Edge — anything

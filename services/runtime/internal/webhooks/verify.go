@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // verify.go — HMAC signature verification for inbound webhooks.
 //
 // Different providers spell their signature header differently. We

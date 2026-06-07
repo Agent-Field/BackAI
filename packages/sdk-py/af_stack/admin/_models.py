@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pydantic models shared by the admin sub-package.
 
 Each model mirrors a zod schema declared in

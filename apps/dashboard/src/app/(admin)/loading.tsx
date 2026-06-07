@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Streaming skeleton for the Home dashboard. Matches the page layout so
 // the swap to real content does not shift.
 

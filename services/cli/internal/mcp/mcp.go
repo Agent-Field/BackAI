@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package mcp implements the `af-stack mcp ...` subcommands.
 //
 // All commands are thin wrappers over the runtime's REST surface (see

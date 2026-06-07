@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // mcp_factory.go — wires the stdio / sse adapters into mcp.Pool.
 //
 // Lives in main because the mcp package itself can't import its own

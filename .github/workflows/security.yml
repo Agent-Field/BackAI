@@ -1,0 +1,113 @@
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # 03:00 UTC every Monday so security issues surface before a workweek.
+    - cron: '0 3 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  gosec:
+    name: gosec (Go runtime + CLI)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - name: Run gosec
+        uses: securego/gosec@master
+        with:
+          # Standard rule set; the high-noise rules (G104 for unchecked
+          # errors) are excluded so the gate is meaningful.
+          args: '-fmt sarif -out gosec.sarif -no-fail -exclude G104 ./services/...'
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: gosec.sarif
+
+  npm-audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace:
+          - apps/dashboard
+          - packages/sdk-ts
+          - docs-site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install
+        working-directory: ${{ matrix.workspace }}
+        run: npm install --omit=dev
+      - name: Audit
+        working-directory: ${{ matrix.workspace }}
+        # --audit-level=high gates on high/critical only; moderate +
+        # below flow through Dependabot rather than blocking the build.
+        run: npm audit --audit-level=high --omit=dev
+
+  pip-audit:
+    name: pip-audit (sdk-py)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pip-audit
+        run: pip install pip-audit
+      - name: Audit
+        working-directory: packages/sdk-py
+        # --vulnerability-service=osv preferred — has wider coverage
+        # than PyPI's index alone.
+        run: pip-audit --vulnerability-service=osv
+
+  trivy:
+    name: trivy fs scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: 'HIGH,CRITICAL'
+          format: sarif
+          output: trivy.sarif
+          ignore-unfixed: true
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy.sarif
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['go', 'javascript', 'python']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+      - uses: github/codeql-action/autobuild@v3
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:${{ matrix.language }}'

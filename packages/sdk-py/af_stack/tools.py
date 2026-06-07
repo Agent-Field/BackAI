@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """``suite.tools.*`` — Model Context Protocol (MCP) server + tool operations.
 
 Maps to the REST surface defined in ``apps/dashboard/src/lib/api.ts`` under

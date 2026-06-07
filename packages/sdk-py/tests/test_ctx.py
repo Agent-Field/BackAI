@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Context propagation tests.
 
 The ``ctx`` proxy is built on ``contextvars``, so it must:

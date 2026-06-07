@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // suite.memory.* — scoped key/value + semantic memory primitives.
 //
 // Endpoint paths and JSON shapes are the canonical contract from

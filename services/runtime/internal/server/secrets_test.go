@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package server — secrets handler tests.
 //
 // These tests cover the "no vault wired" path: every secrets endpoint
@@ -144,4 +146,3 @@ func TestParseRFC3339(t *testing.T) {
 		}
 	}
 }
-

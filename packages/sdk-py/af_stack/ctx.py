@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Request context for the AF Stack Suite SDK.
 
 The ``ctx`` module-level proxy reads from contextvars so it works across

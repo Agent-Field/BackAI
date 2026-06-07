@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """suggest_tags — propose up to 5 tags for a note, biased by user history.
 
 Demonstrates the AF Stack ``memory`` primitive: we read the user's

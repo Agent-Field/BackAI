@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Generate the plugin manifest and Next.js route proxies.
 //
 // Scans `apps/dashboard/plugins/<id>/plugin.ts` for plugins (each must default-

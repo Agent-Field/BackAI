@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // gvisor adapter unit tests.
 //
 // We don't talk to a real Docker daemon — the point is to verify the

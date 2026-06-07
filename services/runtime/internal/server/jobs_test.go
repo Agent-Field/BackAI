@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package server — tests for the jobs REST endpoints.
 //
 // These tests exercise the tolerant empty-Manager path (jobs.Manager nil

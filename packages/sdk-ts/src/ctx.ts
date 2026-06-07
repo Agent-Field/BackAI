@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Request context.
 //
 // In Node 20+, Bun and Deno we use AsyncLocalStorage so values set by

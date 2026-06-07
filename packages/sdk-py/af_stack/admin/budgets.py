@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """``suite.admin.budgets.*`` — per-tenant LLM spend budgets.
 
 Maps to the admin budgets endpoints in

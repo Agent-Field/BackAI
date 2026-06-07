@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // e2b adapter unit tests.
 //
 // We stand up an httptest.Server to mock the e2b control plane, point the

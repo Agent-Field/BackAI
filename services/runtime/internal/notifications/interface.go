@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package notifications is AF Stack's outbox-style notification layer.
 //
 // A Notification is inserted into suite_notifications by Service.Send at

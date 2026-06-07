@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Tenant drilldown page — /customers/tenants/[id].
 //
 // Server shell. Fetches the Phase 12.1 drilldown payload + audit log in

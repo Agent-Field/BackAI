@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """``suite.sandbox.*`` — code execution sandbox operations.
 
 Maps to the REST surface defined in ``apps/dashboard/src/lib/api.ts`` under

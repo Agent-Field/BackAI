@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * ApiReference.tsx — Scalar API reference embedded in Starlight.
  *

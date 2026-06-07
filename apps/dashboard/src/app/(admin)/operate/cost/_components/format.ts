@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Shared formatting helpers for the Cost page. Keeping these in one
 // file makes the page consistent (every dollar value formats the same)
 // and easy to tweak later.

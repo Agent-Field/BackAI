@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // inbound.go — InboundService: the verify -> dedup -> persist ->
 // forward pipeline for /webhooks/in/<slug>.
 //
@@ -37,6 +39,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/Agent-Field/backai/services/runtime/internal/safehttp"
 )
 
 // AgentInvoker is the minimal contract the InboundService needs from
@@ -104,8 +108,13 @@ func NewInboundService(deps InboundDeps) *InboundService {
 		deliveries: deps.Deliveries,
 		vault:      deps.Vault,
 		agents:     deps.Agents,
-		client:     &http.Client{Timeout: 15 * time.Second},
-		log:        log,
+		// SSRF defence: the forward target is user-supplied — endpoints
+		// declare a forward_to URL the dashboard / provider configures.
+		// safehttp refuses private CIDRs and cloud-metadata hosts so a
+		// hostile endpoint config can't coerce the runtime into hitting
+		// 169.254.169.254 / Postgres / internal services.
+		client: safehttp.New(safehttp.Options{Timeout: 15 * time.Second}),
+		log:    log,
 	}
 }
 

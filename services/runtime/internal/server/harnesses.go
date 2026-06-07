@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // harnesses.go — REST handlers for Phase 11.4 harness probes.
 //
 // Endpoints map 1:1 to HarnessSchema / HarnessListSchema in

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Standard empty-state stub used by every dashboard tab that doesn't have
 // a real implementation yet. Built on shadcn `Empty`.
 //

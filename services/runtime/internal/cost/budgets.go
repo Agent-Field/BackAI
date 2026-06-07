@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // budgets.go — per-tenant monthly budget store + spend lookup.
 //
 // One Budgets is constructed per process and shared between:

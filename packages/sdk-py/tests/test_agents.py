@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """HTTP-mocked tests for the ``af_stack.agents`` module.
 
 The shared httpx client is reset between tests so each test sees a clean

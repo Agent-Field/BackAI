@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """``suite.secrets.*`` — per-tenant secret reads.
 
 The main SDK exposes a single operation: read the plaintext value of a

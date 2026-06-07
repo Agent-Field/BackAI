@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // logs.go — recent-log-lines REST surface.
 //
 // Backed by the in-memory logger.Ring the runtime owns. Single-process

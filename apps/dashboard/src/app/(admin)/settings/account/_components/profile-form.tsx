@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client"
 
 // Profile form. Name is editable via better-auth's `updateUser`. Email is

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package webhooks is AF Stack's webhook outbox + inbox layer.
 //
 // The package owns two surfaces that share a single `suite_webhook_deliveries`

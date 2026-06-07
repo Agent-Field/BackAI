@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Customer Billing page — per-tenant usage and cost rollup.
 
 import { ReceiptText } from "lucide-react"

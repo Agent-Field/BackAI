@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package server — storage.go wires the object-storage REST endpoints that
 // power the AF Stack dashboard's Storage tab and any agent that needs file
 // I/O.

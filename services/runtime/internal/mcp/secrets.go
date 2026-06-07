@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // secrets.go — env resolver. Walks an env map and, for any value
 // prefixed "secret:<key>", looks up the bare key in the secrets vault
 // scoped to the same tenant as the MCP server row.

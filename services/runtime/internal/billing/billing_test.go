@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Unit tests for the billing package.
 //
 // These tests exercise the no-DB paths (Store==nil), the stub Stripe

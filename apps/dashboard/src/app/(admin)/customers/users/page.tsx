@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Users page — end users across tenants.
 
 import { Users } from "lucide-react"

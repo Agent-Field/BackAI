@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package client is the thin REST helper that powers `af-stack <subcommand>`.
 //
 // The CLI never talks to the database or any internal package directly —

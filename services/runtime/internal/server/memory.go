@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package server — memory.go wires the suite memory primitives to the
 // REST endpoints consumed by the dashboard and SDKs.
 //
@@ -262,4 +264,3 @@ func (s *Server) handleSearchMemory(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, result)
 }
-

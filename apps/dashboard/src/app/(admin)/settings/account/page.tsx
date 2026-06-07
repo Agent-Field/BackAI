@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Account settings. Server component loads the session, then three Cards host
 // client forms (profile, password, sessions). Each form talks to better-auth
 // via the `authClient` SDK.

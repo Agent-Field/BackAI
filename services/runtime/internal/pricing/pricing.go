@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package pricing holds the canonical model-pricing table used by the cost
 // endpoint and any budget/forecast feature.
 //

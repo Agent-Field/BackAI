@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // openapi_routes.go — sub-handler OpenAPI registrations.
 //
 // We keep these calls OUT of the handler files (storage.go, secrets.go,

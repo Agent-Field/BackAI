@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """HTTP-mocked tests for the ``af_stack.webhooks`` module.
 
 Endpoint paths and JSON shapes mirror ``apps/dashboard/src/lib/api.ts``

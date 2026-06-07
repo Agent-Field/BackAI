@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package mcp is AF Stack's Model Context Protocol runtime: a long-lived
 // pool of connections to external MCP servers (stdio child processes or
 // HTTP+SSE endpoints) plus a uniform Adapter contract every transport

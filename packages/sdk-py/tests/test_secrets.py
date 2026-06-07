@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """HTTP-mocked tests for the ``af_stack.secrets`` module.
 
 Only :func:`secrets.get` exists in the main SDK; admin verbs are post-v1.

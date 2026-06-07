@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client"
 
 // TenantDrilldownView — Phase 12.1 "everything about this tenant" page.

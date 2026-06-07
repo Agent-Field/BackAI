@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // suite.admin.keys.* — per-tenant API key management.
 //
 // Endpoints (mirroring `apps/dashboard/src/lib/api.ts`):

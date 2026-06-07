@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // registry_test.go covers the pure-Go pieces of the jobs package — the
 // in-memory Registry, dispatchArgs JSON shape, and the stats helper. No
 // Postgres required, so these run as part of `go test ./...`.

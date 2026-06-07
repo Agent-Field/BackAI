@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Source of truth for the dashboard navigation.
 // Mirrors docs/dashboard-ia.md exactly. Sidebar + ⌘K both read from here.
 //

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package server — unit tests for the per-request tenant resolver.
 //
 // These tests don't require Postgres: they exercise the resolver's

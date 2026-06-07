@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // metrics_ring.go — in-memory ring buffer of recent HTTP request
 // durations + per-route counters.
 //

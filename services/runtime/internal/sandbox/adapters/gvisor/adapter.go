@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package gvisor implements the sandbox.Sandbox interface against a Docker
 // daemon configured with the gVisor (runsc) OCI runtime.
 //

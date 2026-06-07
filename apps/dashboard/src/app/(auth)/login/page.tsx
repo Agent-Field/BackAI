@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { redirect } from "next/navigation"
 
 import { operatorCount } from "@/lib/session"

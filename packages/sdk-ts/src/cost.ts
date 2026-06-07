@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // suite.cost.* — cost event log browsing.
 //
 // Endpoint (mirroring `apps/dashboard/src/lib/api.ts`):

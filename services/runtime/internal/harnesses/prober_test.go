@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Tests cover the three probe outcomes (Missing / Errored / NeedsAuth /
 // Ready) without depending on a real CLI being installed. The runProbe
 // path is exercised end-to-end by pointing the probe at a small shell

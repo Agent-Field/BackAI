@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Mock harness fallback.
 
 When the configured ``.harness()`` provider (claude-code by default) is

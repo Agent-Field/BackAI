@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // prober.go — the runtime side of harness detection.
 //
 // A single Service instance fans out across the provider registry,

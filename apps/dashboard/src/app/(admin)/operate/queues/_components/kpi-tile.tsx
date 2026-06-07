@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Compact KPI tile used by the Queues page.
 //
 // Pure presentation, no chart. Same Card+CardHeader pattern as the Home

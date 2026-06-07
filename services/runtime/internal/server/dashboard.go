@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package server — dashboard.go wires the read-only REST endpoints that
 // power the AF Stack dashboard (apps/dashboard).
 //

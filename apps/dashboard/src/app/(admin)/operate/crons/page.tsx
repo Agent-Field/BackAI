@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Crons page — schedules that fire jobs on a cron expression.
 //
 // Server component: fetches the cron list on render. The CronsView

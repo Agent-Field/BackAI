@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package suite is the AF Stack Suite SDK for Go.
 //
 // The suite SDK exposes the operational verbs an app uses daily:

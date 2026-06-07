@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """AF Stack — Suite SDK for Python.
 
 The suite SDK exposes the operational verbs an app uses daily. Both of

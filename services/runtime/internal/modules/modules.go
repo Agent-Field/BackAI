@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package modules implements the module + adapter system that lets the
 // runtime load suite primitives at startup.
 //

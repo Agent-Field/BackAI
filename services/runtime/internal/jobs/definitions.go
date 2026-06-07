@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package jobs implements the suite runtime's background-jobs module on top
 // of River (https://riverqueue.com), a Postgres-backed durable queue.
 //

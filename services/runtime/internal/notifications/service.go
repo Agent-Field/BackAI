@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // service.go — orchestrates send + persistence + worker hand-off.
 //
 // Flow for Service.Send:

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // AF Stack — Suite SDK for TypeScript
 //
 // Two equivalent import styles:

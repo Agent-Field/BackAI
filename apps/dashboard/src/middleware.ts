@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Auth gate for the dashboard.
 //
 // Unauthenticated visitors trying to reach an admin route are redirected to

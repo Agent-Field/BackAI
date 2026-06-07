@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // recorder.go — best-effort ledger writer for LLM cost events.
 //
 // One Recorder is constructed per process and shared with the

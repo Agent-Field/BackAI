@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // API Keys page — issue and revoke per-tenant programmatic credentials.
 
 import { KeyRound } from "lucide-react"

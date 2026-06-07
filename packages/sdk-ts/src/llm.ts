@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // suite.llm.* — OpenAI-compatible LLM gateway operations.
 //
 // Every model call inside the suite flows through this gateway. The wire

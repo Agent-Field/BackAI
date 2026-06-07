@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package config loads and validates AF Stack runtime configuration.
 //
 // Precedence: env vars > config.yaml > defaults.

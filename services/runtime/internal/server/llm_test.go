@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package server
 
 import (
@@ -451,4 +453,3 @@ func assertOpenAIErrorCode(t *testing.T, body []byte, wantCode string) {
 		t.Errorf("expected error.type populated, got body=%s", body)
 	}
 }
-

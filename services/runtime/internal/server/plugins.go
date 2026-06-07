@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // plugins.go — REST handler for the Phase 12.3 plugin manifest endpoint.
 //
 // Endpoint (path + response shape match apps/dashboard/src/lib/api.ts):

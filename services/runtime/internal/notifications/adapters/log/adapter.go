@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package log is the default zero-config notifications adapter.
 //
 // It writes a structured log line for each notification and returns a

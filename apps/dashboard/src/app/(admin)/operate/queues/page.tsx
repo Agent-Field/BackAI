@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Queues page — operator view of the runtime job queue.
 //
 // Server component: fetches the queue summary once per render (force-dynamic

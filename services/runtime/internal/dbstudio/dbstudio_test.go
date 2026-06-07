@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Unit tests for the dbstudio package — no DB required.
 //
 // Integration tests (which DO need a Postgres instance) live in

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Unit tests for the sandbox package.
 //
 // The validation tests cover the RunSpec.Validate normalisation +

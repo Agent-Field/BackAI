@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // harness_cmd.go — `af-stack harness …` subcommand surface.
 //
 // Probe-only — `harness list` runs the local detection logic and prints

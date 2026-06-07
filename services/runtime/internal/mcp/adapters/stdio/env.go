@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // env.go — the real os.LookupEnv backing the swappable hook in
 // adapter.go. Pulled into a tiny file so a test in this package can
 // override lookupEnv without redeclaring the rest of the adapter.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client"
 
 // CreateCronDialog — form for POST /api/v1/crons.

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Smoke test: package imports cleanly."""
 
 import af_stack

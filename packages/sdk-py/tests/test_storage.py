@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """HTTP-mocked tests for the ``af_stack.storage`` module.
 
 Multipart uploads are exercised through respx route-matchers that inspect

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package llmcache implements the exact-match LLM response cache used
 // by the Phase 7.1 gateway to suppress duplicate upstream calls.
 //

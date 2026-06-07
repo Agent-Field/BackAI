@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // migrations.go runs River's embedded schema migrations.
 //
 // River ships its own migration sequence (river_migration table + the

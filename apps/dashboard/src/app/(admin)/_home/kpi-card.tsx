@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client"
 
 // KPI tile: label + tabular value + 24-point sparkline.

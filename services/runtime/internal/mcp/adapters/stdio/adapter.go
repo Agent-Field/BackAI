@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package stdio implements the MCP stdio transport: a child process
 // spawned via os/exec, talking JSON-RPC 2.0 framed with the LSP-style
 // `Content-Length: N\r\n\r\n<json>` header per the MCP wire spec.

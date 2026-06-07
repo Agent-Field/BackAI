@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // dedup.go — deterministic dedup token derivation for inbound webhooks.
 //
 // The inbound handler writes (endpoint_id, dedup_token) into the

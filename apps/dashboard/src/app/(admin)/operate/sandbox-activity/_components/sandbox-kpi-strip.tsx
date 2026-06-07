@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Top-of-page hero metric strip: 4 KPI cards from the pool snapshot.
 //
 //   1. Warm — pre-warmed sandboxes ready to accept a workload.

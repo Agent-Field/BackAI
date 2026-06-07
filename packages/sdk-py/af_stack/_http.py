@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Internal async HTTP client for the AF Stack Suite SDK.
 
 A single shared ``httpx.AsyncClient`` is lazy-initialised on first use and

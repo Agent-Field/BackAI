@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client"
 
 import { Toggle as TogglePrimitive } from "@base-ui/react/toggle"

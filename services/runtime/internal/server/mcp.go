@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // mcp.go — REST handlers for the Phase 11.1 MCP runtime.
 //
 // Endpoints (mirror api.ts MCP block):

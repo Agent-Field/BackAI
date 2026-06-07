@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pure-Go unit tests that don't need Postgres. These run on every
 // `go test ./...` so the token parser + sentinel-error wiring keep
 // passing even when the integration DB isn't available.

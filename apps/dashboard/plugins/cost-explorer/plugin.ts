@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // First-party Cost Explorer plugin (Phase 12.3).
 //
 // Drops the canonical example of a Plugin manifest under

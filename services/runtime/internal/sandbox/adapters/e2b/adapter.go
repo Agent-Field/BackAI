@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package e2b implements the sandbox.Sandbox interface against e2b.dev's
 // hosted sandbox service (https://e2b.dev).
 //

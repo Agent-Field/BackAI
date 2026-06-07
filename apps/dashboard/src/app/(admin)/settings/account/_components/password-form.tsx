@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client"
 
 // Change password. Backed by better-auth's `/change-password` endpoint

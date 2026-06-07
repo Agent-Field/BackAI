@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // suite.notifications.* — outbox-style notifications.
 //
 // Endpoint paths and JSON shapes are the canonical contract from

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package s3 implements the storage.Storage interface against AWS S3.
 //
 // minio-go speaks vanilla S3 — there is no separate code path. This package

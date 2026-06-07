@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // sandbox.go — REST handlers for the suite sandbox runs.
 //
 // Endpoints map 1:1 to SandboxRunSchema / SandboxRunListSchema /
