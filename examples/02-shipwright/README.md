@@ -1,101 +1,111 @@
-# 02 — Shipwright
+# Shipwright — autonomous code-agent demo
 
-Shipwright is the autonomous coding-agent factory example for AF Stack.
-Customers submit a task through AF Stack:
+> Customer pastes a GitHub issue → an agent reads the repo, plans the
+> change, edits code, runs tests, opens a PR. Iteration UI built on
+> standard shadcn components. Real flow today uses a stub agent so you
+> can iterate on the UX; swap in the actual SWE-AF library and the
+> wiring stays identical.
+
+## What's here
+
+```
+examples/02-shipwright/
+├── agents/shipwright/        # AgentField agent (the "stub" — same node_id + reasoner names as the real one)
+│   ├── Dockerfile
+│   ├── main.py               # @app.reasoner def execute_task(payload: dict)
+│   └── requirements.txt
+├── handlers/                 # FastAPI workload-module sidecar
+│   ├── Dockerfile
+│   ├── handler.py            # /tasks POST/GET, /tasks/{id} GET, /tasks/{id}/cancel POST, /stats GET
+│   └── requirements.txt
+├── migrations/
+│   └── 00001_shipwright.sql  # shipwright_tasks + shipwright_steps with RLS
+└── docker-compose.yml        # Compose overlay
+```
+
+Customer-app pages (live in the main `apps/customer-app/`):
+
+- `/shipwright` — queue table + new-task form
+- `/shipwright/[id]` — task detail with step timeline + diff preview
+- Proxy: `/api/customer/shipwright/[...path]` — forwards session-derived
+  tenant + user as `x-af-stack-tenant-id` + `x-af-stack-user-id` headers
+
+## Run it
 
 ```bash
-POST /api/v1/shipwright/tasks
+# From repo root, with .env already populated (cp .env.example .env)
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.override.yml \
+  -f examples/02-shipwright/docker-compose.yml \
+  up -d
+
+# Customer-app:    http://localhost:34000
+# Operator:        http://localhost:33000
+# Runtime API:     http://localhost:38080
+# Shipwright API:  http://localhost:38201
 ```
 
-AF Stack stores the task row, starts the AgentField reasoner
-`shipwright.build`, and keeps only the returned `run_id` plus final patch
-pointers. AgentField owns the live execution graph, harness calls, logs,
-spans, traces, and memory.
+Sign up at `http://localhost:34000/sign-up`. The first sign-up auto-
+provisions a tenant + membership + API key. Click **Shipwright** in the
+sidebar and submit a task.
 
-## Quickstart
+## How the flow works
 
-```bash
-cd examples/02-shipwright
-cp .env.example .env
-# edit .env — set OPENROUTER_API_KEY or another provider key
-
-docker compose -f docker-compose.yml up --build
-
-# in another shell:
-./scripts/run-task.sh
+```
+Customer-app /shipwright form (Next.js)
+        ↓
+POST /api/customer/shipwright/tasks  (proxy, attaches tenant + user)
+        ↓
+shipwright-api FastAPI sidecar (handler.py)
+   ├── INSERT INTO shipwright_tasks (status=queued)
+   └── asyncio.create_task(_drive_task)  ← non-blocking
+        ↓
+POST runtime /api/v1/agents/shipwright-v2.execute_task
+        ↓
+AgentField control plane routes to agent
+        ↓
+shipwright-agent (main.py) — the stub
+   ├── prints "[shipwright] starting task ..."
+   ├── 7 steps × asyncio.sleep + print → AgentField records spans
+   └── returns RunResult{status, summary, diff_preview, steps}
+        ↓
+handler.py persists the result:
+   UPDATE shipwright_tasks SET status='completed', summary, diff_preview
+   INSERT 7 rows into shipwright_steps
+        ↓
+Customer-app polls every ~1s and renders the live state
 ```
 
-By default the agent uses `openrouter/google/gemini-2.5-flash` when
-`OPENROUTER_API_KEY` is present. You can override per task with the API
-`model` field.
+## Swapping in the real SWE-AF
 
-Set `GH_TOKEN` to allow Shipwright to push a branch and open a draft
-GitHub PR for GitHub repositories. Without `GH_TOKEN`, the harness path
-still captures a durable patch file under the `shipwright-patches`
-Docker volume and returns that file URI as `diff_url`.
+The contract is just the AgentField reasoner. To swap:
 
-## Architecture
+1. Replace `agents/shipwright/main.py` with the real SWE-AF agent.
+2. Keep `Agent(node_id="shipwright-v2")` and reasoner name
+   `execute_task`. (Or bump the node_id to `shipwright-v3` and update
+   `SHIPWRIGHT_AGENT` env var in `docker-compose.yml`.)
+3. The reasoner takes `payload: dict` with `issue_url`, `title`,
+   `description` and returns the same `RunResult` schema (status,
+   summary, diff_preview, steps).
+4. Everything else (UI, workload module, DB, polling) stays.
 
-```text
-POST /shipwright/tasks
-  -> AF Stack inserts suite_shipwright_tasks
-  -> AgentField async execute: shipwright.build
+## Watch out for
 
-shipwright.build
-  -> triage_task        (.ai: complexity, risk, confidence)
-  -> plan_change        (.ai: files, steps, tests, confidence)
-  -> execute_plan       (clone repo -> app.harness(cwd=repo) -> git diff)
-  -> review_patch       (.ai: approve/reject, findings, confidence)
-  -> callback_complete  (POST /shipwright/tasks/{id}/complete)
-```
+- **Don't name a reasoner `run`** — that collides with `Agent.run()`
+  (the decorator overrides the method and the agent exits immediately
+  with a benign-looking RuntimeWarning).
+- **AgentField caches reasoner metadata** keyed on node_id. If you
+  rename a reasoner during iteration, bump the node_id (`shipwright`
+  → `shipwright-v2`) to force a fresh registration.
+- **Payload shape**: AgentField expects `{"input": {"payload": {...}}}`
+  when the reasoner signature is `async def f(payload: dict)`.
+- **Result shape**: the runtime returns `{"result": {...}}`, not
+  `{"output": {...}}`.
 
-The harness path is guarded with `shutil.which()`. The example image
-installs the Codex, Gemini, and Claude Code CLIs so the default Compose
-path can exercise `app.harness(provider=..., cwd=...)` instead of only
-documenting it. Provider auth still comes from your environment:
+## Screenshots
 
-- `codex` uses `OPENAI_API_KEY` or read-only `~/.codex/auth.json` plus
-  `~/.codex/config.toml` mounts over a writable container-side Codex
-  state volume.
-- `gemini` uses `GOOGLE_API_KEY` or the read-only `~/.gemini` mount.
-- `claude-code` uses `ANTHROPIC_API_KEY` or the read-only `~/.claude`
-  mount.
-
-The Compose file mounts local CLI auth into the agent container for
-development. In production, replace those mounts with secrets or
-provider API keys.
-
-If the selected CLI is unavailable or unauthenticated, Shipwright falls
-back to an `.ai()` patch sketch and marks that mode explicitly.
-
-The default Compose setting is
-`SHIPWRIGHT_HARNESS_PERMISSION_MODE=danger-full-access` because the
-agent is already isolated in its own Docker container and Codex's nested
-Linux sandbox can fail on Docker Desktop / kernels without unprivileged
-user namespaces. For bare-metal Linux agents, switch this to the
-stricter mode your harness supports.
-
-When a harness is available, Shipwright:
-
-1. Clones `repo_url` into a temporary working directory.
-2. Checks out a `shipwright/...` branch.
-3. Runs the harness in that checkout.
-4. Captures `git diff --binary` into the `shipwright-patches` volume.
-5. If `GH_TOKEN` is configured and `repo_url` is a GitHub repo, commits,
-   pushes the branch, and opens a draft PR. The PR URL becomes `diff_url`.
-
-When no harness binary is available, the agent falls back to an `.ai()`
-patch sketch and explicitly does not claim files were edited.
-
-## Files
-
-```text
-02-shipwright/
-├── README.md
-├── .env.example
-├── docker-compose.yml
-├── Dockerfile
-├── agents/shipwright/main.py
-├── agents/shipwright/requirements.txt
-└── scripts/run-task.sh
-```
+See `dashboard-screenshots/`:
+- `shipwright-with-sidebar.png` — sidebar nav + queue view
+- `shipwright-queue-mixed.png` — list with mixed running / completed
+- `shipwright-detail-completed.png` — task detail with steps + diff

@@ -1,51 +1,66 @@
-# Shipwright example — adds a coding-agent node to the root AF Stack.
-
-include:
-  - ../../docker-compose.yml
+# Shipwright example — extends the base AF Stack compose.
+#
+# Usage (from repo root):
+#   docker compose \
+#     -f docker-compose.yml \
+#     -f docker-compose.override.yml \
+#     -f examples/02-shipwright/docker-compose.yml \
+#     up
 
 services:
+  # Shipwright stub agent. Same node_id ("shipwright") + reasoner name
+  # ("run") as the eventual real SWE-AF agent.
   shipwright-agent:
     build:
-      context: .
+      context: ./examples/02-shipwright/agents/shipwright
       dockerfile: Dockerfile
     environment:
       AGENTFIELD_SERVER: http://agentfield:8080
-      NODE_ID: shipwright
+      NODE_ID: shipwright-v2
       AGENT_CALLBACK_URL: http://shipwright-agent:8090
-      AF_STACK_URL: http://runtime:8080
-      AF_STACK_API_KEY: ${AF_STACK_API_KEY:-}
-
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      GH_TOKEN: ${GH_TOKEN:-}
-
-      SHIPWRIGHT_MODEL: ${SHIPWRIGHT_MODEL:-openrouter/google/gemini-2.5-flash}
-      SHIPWRIGHT_HARNESS: ${SHIPWRIGHT_HARNESS:-codex}
-      SHIPWRIGHT_HARNESS_BUDGET_USD: ${SHIPWRIGHT_HARNESS_BUDGET_USD:-0.50}
-      SHIPWRIGHT_HARNESS_MAX_TURNS: ${SHIPWRIGHT_HARNESS_MAX_TURNS:-20}
-      SHIPWRIGHT_HARNESS_PERMISSION_MODE: ${SHIPWRIGHT_HARNESS_PERMISSION_MODE:-danger-full-access}
-      SHIPWRIGHT_BASE_BRANCH: ${SHIPWRIGHT_BASE_BRANCH:-main}
-      SHIPWRIGHT_DRAFT_PR: ${SHIPWRIGHT_DRAFT_PR:-true}
-      SHIPWRIGHT_PATCH_DIR: /var/lib/shipwright/patches
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      HOME: /root
-      CODEX_HOME: /root/.codex
-    volumes:
-      - shipwright-patches:/var/lib/shipwright/patches
-      - shipwright-codex-home:/root/.codex
-      - ${HOME}/.codex/auth.json:/root/.codex/auth.json:ro
-      - ${HOME}/.codex/config.toml:/root/.codex/config.toml:ro
-      - ${HOME}/.claude:/root/.claude:ro
-      - ${HOME}/.gemini:/root/.gemini:ro
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     depends_on:
       agentfield:
         condition: service_started
+    restart: unless-stopped
+
+  # FastAPI sidecar — task CRUD + agent dispatch.
+  shipwright-api:
+    build:
+      context: ./examples/02-shipwright/handlers
+      dockerfile: Dockerfile
+    environment:
+      SHIPWRIGHT_DATABASE_URL: postgres://afstack:afstack@postgres:5432/afstack?sslmode=disable
+      AF_STACK_URL: http://runtime:8080
+      SHIPWRIGHT_AGENT: shipwright-v2.execute_task
+    ports:
+      - "${SHIPWRIGHT_PORT:-8201}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
       runtime:
         condition: service_started
     restart: unless-stopped
 
-volumes:
-  shipwright-patches:
-  shipwright-codex-home:
+  # Make sure the migration runs before the sidecar starts.
+  shipwright-migrate:
+    image: postgres:16-alpine
+    environment:
+      PGPASSWORD: afstack
+    volumes:
+      - ./examples/02-shipwright/migrations:/migrations:ro
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        for f in /migrations/*.sql; do
+          echo "applying $$f"
+          psql -h postgres -U afstack -d afstack -f $$f
+        done
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
