@@ -36,7 +36,23 @@ from pydantic import BaseModel, Field
 
 DATABASE_URL = os.environ["SHIPWRIGHT_DATABASE_URL"]
 RUNTIME_URL = os.getenv("AF_STACK_URL", "http://runtime:8080").rstrip("/")
-AGENT_NAME = os.getenv("SHIPWRIGHT_AGENT", "shipwright-v2.execute_task")
+
+# SHIPWRIGHT_AGENT controls which agent the workload module dispatches to.
+#   - shipwright-v2.execute_task : the iteration stub (sync, ~10s, no keys)
+#   - swe-planner.build          : the real SWE-AF library (async, minutes,
+#                                  needs ANTHROPIC_API_KEY + GH_TOKEN)
+AGENT_NAME = os.getenv("SHIPWRIGHT_AGENT", "swe-planner.build")
+
+# SHIPWRIGHT_MODE controls the call shape:
+#   - sync  : POST /api/v1/agents/<name> and wait for the response inline
+#             (fine for the stub; bad for real builds that take minutes)
+#   - async : POST /api/v1/agents/async/<name> and poll executions/<id>
+#             (the only shape that works for real SWE-AF builds)
+AGENT_MODE = os.getenv("SHIPWRIGHT_MODE", "async").lower()
+
+# Auto-pick mode if user explicitly named the stub.
+if AGENT_NAME == "shipwright-v2.execute_task" and os.getenv("SHIPWRIGHT_MODE") is None:
+    AGENT_MODE = "sync"
 
 
 _runtime_client: httpx.AsyncClient | None = None
@@ -132,12 +148,39 @@ class TaskDetail(TaskSummary):
 # ─── Background agent driver ─────────────────────────────────────────────
 
 
+def _build_payload(issue_url: str, title: str, description: str) -> dict:
+    """Translate the customer-app form into the configured agent's input.
+
+    Two reasoner shapes are supported:
+
+      - shipwright-v2.execute_task — takes {"payload": {issue_url, title,
+        description}} and returns the canonical step result.
+      - swe-planner.build — the real SWE-AF. Takes {"goal", "repo_url",
+        "additional_context", ...}. We derive goal from title +
+        description and pass the issue_url as repo_url (SWE-AF clones it
+        if it looks like a repo).
+    """
+    if AGENT_NAME.endswith(".build") or AGENT_NAME.startswith("swe-planner"):
+        # SWE-AF reasoner signature
+        goal = title
+        if description:
+            goal = f"{title}\n\n{description}"
+        return {"goal": goal, "repo_url": issue_url, "artifacts_dir": ".artifacts"}
+    # Stub reasoner signature
+    return {"payload": {"issue_url": issue_url, "title": title,
+                         "description": description}}
+
+
 async def _drive_task(task_id: str, tenant_id: str, user_id: str,
                        issue_url: str, title: str, description: str):
-    """Run the agent in the background and persist results to the DB."""
+    """Run the agent in the background and persist results to the DB.
+
+    Branches on AGENT_MODE:
+      - sync  : single POST, wait inline
+      - async : POST to /async/, poll executions/{id} every 5s
+    """
     assert _runtime_client is not None
 
-    # Mark task as running.
     async with _tenant_conn(tenant_id) as conn:
         await conn.execute(
             """UPDATE shipwright_tasks
@@ -146,22 +189,27 @@ async def _drive_task(task_id: str, tenant_id: str, user_id: str,
             (task_id,),
         )
 
+    headers = {
+        "x-af-stack-tenant-id": tenant_id,
+        "x-af-stack-user-id": user_id,
+    }
+    input_payload = _build_payload(issue_url, title, description)
+
+    if AGENT_MODE == "async":
+        await _drive_async(task_id, tenant_id, input_payload, headers)
+    else:
+        await _drive_sync(task_id, tenant_id, input_payload, headers)
+
+
+async def _drive_sync(task_id: str, tenant_id: str, input_payload: dict,
+                       headers: dict):
+    """Sync agent call. Good for the stub (~10s). Bad for real builds."""
+    assert _runtime_client is not None
     try:
         resp = await _runtime_client.post(
             f"/api/v1/agents/{AGENT_NAME}",
-            json={
-                "input": {
-                    "payload": {
-                        "issue_url": issue_url,
-                        "title": title,
-                        "description": description,
-                    }
-                }
-            },
-            headers={
-                "x-af-stack-tenant-id": tenant_id,
-                "x-af-stack-user-id": user_id,
-            },
+            json={"input": input_payload},
+            headers=headers,
         )
     except Exception as exc:  # noqa: BLE001
         await _record_failure(task_id, tenant_id, f"agent call failed: {exc}")
@@ -175,11 +223,158 @@ async def _drive_task(task_id: str, tenant_id: str, user_id: str,
         return
 
     body = resp.json() or {}
-    output = body.get("result") or {}
-    status = output.get("status", "completed")
-    summary = output.get("summary", "")
-    diff_preview = output.get("diff_preview")
-    steps = output.get("steps") or []
+    result = body.get("result") or {}
+    await _persist_result(task_id, tenant_id, result)
+
+
+async def _drive_async(task_id: str, tenant_id: str, input_payload: dict,
+                        headers: dict):
+    """Async agent call. Posts to /async/, polls executions/{id} every 5s.
+
+    This is the only shape that works for real SWE-AF builds (which can
+    run for minutes / hours and emit incremental status as they go).
+    """
+    assert _runtime_client is not None
+
+    try:
+        resp = await _runtime_client.post(
+            f"/api/v1/agents/async/{AGENT_NAME}",
+            json={"input": input_payload},
+            headers=headers,
+        )
+    except Exception as exc:  # noqa: BLE001
+        await _record_failure(task_id, tenant_id, f"async dispatch failed: {exc}")
+        return
+
+    if resp.status_code not in (200, 202):
+        await _record_failure(
+            task_id, tenant_id,
+            f"async dispatch returned {resp.status_code}: {resp.text[:500]}",
+        )
+        return
+
+    body = resp.json() or {}
+    execution_id = body.get("execution_id")
+    run_id = body.get("run_id")
+    if not execution_id:
+        await _record_failure(
+            task_id, tenant_id,
+            f"no execution_id in async dispatch response: {resp.text[:300]}",
+        )
+        return
+
+    async with _tenant_conn(tenant_id) as conn:
+        await conn.execute(
+            """UPDATE shipwright_tasks SET execution_id = %s, run_id = %s
+               WHERE id = %s""",
+            (execution_id, run_id, task_id),
+        )
+
+    # Poll the run/agentfield endpoint until terminal. SWE-AF builds can
+    # take 5-30+ min. This endpoint takes the tenant header — no Bearer
+    # needed because the workload module's caller already authenticated.
+    poll_interval_s = 5.0
+    max_wait_s = 60 * 60
+    elapsed = 0.0
+    poll_path = f"/api/v1/runs/{run_id}/agentfield" if run_id else None
+    fallback_path = f"/api/v1/executions/{execution_id}"
+
+    while elapsed < max_wait_s:
+        await asyncio.sleep(poll_interval_s)
+        elapsed += poll_interval_s
+        try:
+            poll = await _runtime_client.get(poll_path or fallback_path,
+                                              headers=headers)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[shipwright-api] poll error (will retry): {exc}",
+                  flush=True)
+            continue
+
+        if poll.status_code == 404 and poll_path:
+            # Fallback path if runs/{id}/agentfield isn't available.
+            poll_path = None
+            continue
+
+        if poll.status_code != 200:
+            print(
+                f"[shipwright-api] poll {poll.status_code} for {execution_id} "
+                f"(elapsed {elapsed:.0f}s)",
+                flush=True,
+            )
+            continue
+
+        exec_body = poll.json() or {}
+        # Extract status from either response shape.
+        overview = exec_body.get("overview") or exec_body
+        status = (overview.get("status") or "").lower()
+
+        if status in ("succeeded", "completed", "failed", "cancelled"):
+            result = exec_body.get("result") or overview.get("result") or {}
+            if status in ("succeeded", "completed"):
+                await _persist_result(task_id, tenant_id, result)
+            else:
+                err = (
+                    exec_body.get("error")
+                    or overview.get("error")
+                    or "agent execution failed"
+                )
+                await _record_failure(task_id, tenant_id, str(err))
+            return
+
+    await _record_failure(
+        task_id, tenant_id,
+        f"execution timed out after {int(max_wait_s/60)} minutes",
+    )
+
+
+async def _persist_result(task_id: str, tenant_id: str, result: dict):
+    """Write the agent's structured result back to the DB.
+
+    Handles both reasoner shapes:
+      - stub returns {status, summary, diff_preview, steps}
+      - SWE-AF returns the BuildResult schema (build_id, repos, pr_url, etc).
+        We coerce that to our shape so the UI doesn't need to know which
+        agent produced it.
+    """
+    # Stub shape
+    status = result.get("status", "completed")
+    summary = result.get("summary")
+    diff_preview = result.get("diff_preview")
+    steps = result.get("steps") or []
+
+    # SWE-AF shape — translate.
+    if not summary and result.get("pr_url"):
+        summary = (
+            f"Build completed. PR: {result['pr_url']}\n"
+            f"Build id: {result.get('build_id', '—')}"
+        )
+    elif not summary and result.get("repos"):
+        repos = result.get("repos") or []
+        prs = [r.get("pr_url") for r in repos if r.get("pr_url")]
+        summary = (
+            f"Build completed across {len(repos)} repo(s)."
+            + (f" PRs: {', '.join(prs)}" if prs else "")
+        )
+
+    if not diff_preview and result.get("diff"):
+        diff_preview = result.get("diff")
+
+    # Derive a step list from SWE-AF's plan if we have it.
+    if not steps and result.get("plan"):
+        plan = result.get("plan") or {}
+        tasks = plan.get("tasks") or []
+        steps = [
+            {
+                "idx": i + 1,
+                "title": t.get("title", f"Task {i+1}"),
+                "status": t.get("status", "completed"),
+                "detail": t.get("description") or t.get("summary"),
+            }
+            for i, t in enumerate(tasks)
+        ]
+
+    if status == "succeeded":
+        status = "completed"
 
     async with _tenant_conn(tenant_id) as conn:
         await conn.execute(
