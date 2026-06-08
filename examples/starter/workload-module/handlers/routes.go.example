@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Package starter shows the intended shape for one workload route.
+// Copy this module into workload-modules/starter/ and rename this file to
+// routes.go once the runtime workload handler package is enabled in your fork.
+package starter
+
+import (
+	"context"
+	"encoding/json"
+
+	"github.com/Agent-Field/backai/services/runtime/internal/workload"
+)
+
+type CreateEventInput struct {
+	Kind    string         `json:"kind"`
+	Payload map[string]any `json:"payload"`
+}
+
+func CreateEvent(ctx context.Context, req workload.Request) (workload.Response, error) {
+	var in CreateEventInput
+	if err := req.Decode(&in); err != nil {
+		return req.BadRequest("invalid body"), nil
+	}
+	if in.Kind == "" {
+		return req.BadRequest("kind is required"), nil
+	}
+	payload, err := json.Marshal(in.Payload)
+	if err != nil {
+		return req.BadRequest("payload must be JSON"), nil
+	}
+
+	var id string
+	err = req.DB.QueryRow(ctx, `
+		INSERT INTO starter_events (tenant_id, user_id, kind, payload)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`, req.TenantID, req.UserID, in.Kind, payload).Scan(&id)
+	if err != nil {
+		return workload.Response{}, err
+	}
+	return req.JSON(201, map[string]any{"id": id}), nil
+}

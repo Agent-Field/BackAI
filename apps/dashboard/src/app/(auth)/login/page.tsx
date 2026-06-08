@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation"
 
 import { operatorCount } from "@/lib/session"
+import { getDashboardSSOConfig } from "@/lib/sso"
 import { LoginForm } from "./login-form"
 
 // Server component — checks first-run state before rendering the form.
@@ -15,5 +16,6 @@ export default async function LoginPage() {
   if (count === 0) {
     redirect("/setup")
   }
-  return <LoginForm />
+  const sso = getDashboardSSOConfig()
+  return <LoginForm sso={{ enabled: sso.enabled, label: sso.label }} />
 }

@@ -1,15 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import Link from "next/link"
 import { CalendarIcon, CreditCardIcon, GaugeIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { api, type BillingCustomer, type UsageMeterList } from "@/lib/api"
 import { requireCustomerContext } from "@/lib/session"
@@ -35,8 +31,47 @@ function formatDate(iso: string | null): string {
 
 export const dynamic = "force-dynamic"
 
+function billingDisabled(): boolean {
+  return process.env.AF_STACK_BILLING_ADAPTER?.trim().toLowerCase() === "none"
+}
+
 export default async function BillingPage() {
   const { ctx } = await requireCustomerContext()
+
+  if (billingDisabled()) {
+    return (
+      <div className="flex flex-col gap-6">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Billing</h1>
+          <p className="text-muted-foreground text-sm">Billing is disabled for this deployment.</p>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Billing adapter disabled</CardTitle>
+            <CardDescription>
+              Set <code className="font-mono">AF_STACK_BILLING_ADAPTER</code> to{" "}
+              <code className="font-mono">stripe</code> or another supported adapter, configure the
+              provider env vars, and restart the stack.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              variant="outline"
+              render={
+                <Link
+                  href="https://github.com/Agent-Field/af-stack/blob/main/docs/adapters/billing.md"
+                  target="_blank"
+                >
+                  Enable billing
+                </Link>
+              }
+            />
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
 
   let customer: BillingCustomer | null = null
   let meters: UsageMeterList | null = null
@@ -73,9 +108,7 @@ export default async function BillingPage() {
               <CreditCardIcon className="size-4" />
               Plan
             </CardDescription>
-            <CardTitle className="text-2xl font-semibold capitalize">
-              {plan}
-            </CardTitle>
+            <CardTitle className="text-2xl font-semibold capitalize">{plan}</CardTitle>
           </CardHeader>
           <CardContent>
             <Badge variant="outline" className="font-mono text-[10px]">
@@ -110,15 +143,11 @@ export default async function BillingPage() {
       <Card>
         <CardHeader>
           <CardTitle>Usage meters</CardTitle>
-          <CardDescription>
-            Live counts for the current billing period.
-          </CardDescription>
+          <CardDescription>Live counts for the current billing period.</CardDescription>
         </CardHeader>
         <CardContent>
           {!meters || meters.meters.length === 0 ? (
-            <p className="text-muted-foreground py-6 text-center text-sm">
-              No metered usage yet.
-            </p>
+            <p className="text-muted-foreground py-6 text-center text-sm">No metered usage yet.</p>
           ) : (
             <div className="flex flex-col gap-4">
               {meters.meters.map((m) => {
@@ -132,9 +161,7 @@ export default async function BillingPage() {
                       <span className="font-medium">{m.meter}</span>
                       <span className="tabular-nums text-muted-foreground">
                         {m.quantity.toLocaleString()} units
-                        {m.cost_usd !== null
-                          ? ` · ${formatUSD(m.cost_usd)}`
-                          : ""}
+                        {m.cost_usd !== null ? ` · ${formatUSD(m.cost_usd)}` : ""}
                       </span>
                     </div>
                     <Progress value={ratio} />
@@ -150,8 +177,7 @@ export default async function BillingPage() {
         <CardHeader>
           <CardTitle>Subscription</CardTitle>
           <CardDescription>
-            Open the Stripe customer portal to change plans, update payment, or
-            view invoices.
+            Open the Stripe customer portal to change plans, update payment, or view invoices.
           </CardDescription>
         </CardHeader>
         <CardContent>

@@ -6,7 +6,11 @@
 //
 //	POST /api/v1/llm/chat/completions       — sync or streaming
 //	POST /api/v1/llm/embeddings             — sync
+//	POST /api/v1/embeddings                 — sync, canonical suite path
 //	POST /api/v1/llm/images/generations     — sync
+//	POST /api/v1/images/generations         — sync, canonical suite path
+//	POST /api/v1/audio/speech               — sync, returns audio bytes
+//	POST /api/v1/audio/transcriptions       — sync, multipart upload
 //	GET  /api/v1/llm/models                 — pulls from pricing catalog
 //	GET  /api/v1/llm/cache/stats            — Phase 7.3 cache module
 //
@@ -30,19 +34,67 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/Agent-Field/backai/services/runtime/internal/guardrails"
 	"github.com/Agent-Field/backai/services/runtime/internal/hooks"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmgateway"
+	"github.com/Agent-Field/backai/services/runtime/internal/llmgateway/adapters"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
 	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 )
+
+// attachLiteLLMKey resolves the per-tenant LiteLLM virtual-key secret
+// (stored by tenancy.IssueAPIKey under "litellm/key/{api_key_id}") and
+// attaches it to the request context via llmgateway.WithLiteLLMKey.
+//
+// The LiteLLM provider reads the key off the context and uses it as
+// the Authorization header instead of the master key, so LiteLLM
+// attributes spend + enforces budget/rate-limit against the customer's
+// virtual key.
+//
+// Returns the context unchanged when:
+//   - no tenancy manager is wired,
+//   - no secrets vault is wired,
+//   - the api key has no LiteLLM mapping (legacy rows / boot without
+//     LiteLLM admin configured).
+//
+// Empty key falls back to LITELLM_MASTER_KEY — preserving pre-#22
+// behaviour for every degraded path.
+func (s *Server) attachLiteLLMKey(ctx context.Context) context.Context {
+	if s == nil || s.tenancy == nil {
+		return ctx
+	}
+	tenantID := tenantctx.TenantID(ctx)
+	apiKeyID := tenantctx.APIKeyID(ctx)
+	if tenantID == "" || apiKeyID == "" {
+		return ctx
+	}
+	key, err := s.tenancy.LiteLLMKeyForAPIKey(ctx, tenantID, apiKeyID)
+	if err != nil {
+		// Vault unreachable / transient error — log and fall back to
+		// master key. The customer's call still succeeds; LiteLLM
+		// just won't see the per-key budget enforcement for this
+		// request.
+		s.log.Warn("llm: resolve litellm key failed",
+			"tenant_id", tenantID, "api_key_id", apiKeyID, "error", err)
+		return ctx
+	}
+	if key == "" {
+		return ctx
+	}
+	return llmgateway.WithLiteLLMKey(ctx, key)
+}
 
 // LLMPreCallPayload is the payload passed to HookLLMPreCall handlers.
 //
@@ -55,11 +107,26 @@ type LLMPreCallPayload struct {
 	Model            string  `json:"model"`
 	Provider         string  `json:"provider"`
 	RequestID        string  `json:"request_id"`
-	Operation        string  `json:"operation"` // "chat" | "embeddings" | "images"
+	Operation        string  `json:"operation"` // "chat" | "embeddings" | "images" | "audio_speech" | "audio_transcriptions" | "audio_translations" | "images_edits" | "images_variations"
 	Stream           bool    `json:"stream"`
 	EstimatedCostUSD float64 `json:"estimated_cost_usd"`
 	PromptCharsHint  int     `json:"prompt_chars_hint"`
+	// Modality classifies the call for the cost ledger. See the
+	// Modality* constants for accepted values. Defaults to "text".
+	Modality string `json:"modality,omitempty"`
 }
+
+// Modality constants — written verbatim into suite_cost_events.modality
+// and surfaced in the dashboard's "cost by modality" breakdown.
+const (
+	ModalityText                = "text"
+	ModalityEmbedding           = "embedding"
+	ModalityAudioSpeech         = "audio_speech"
+	ModalityAudioTranscription  = "audio_transcription"
+	ModalityAudioTranslation    = "audio_translation"
+	ModalityImage               = "image"
+	ModalityVideo               = "video"
+)
 
 // LLMPostCallPayload is the payload passed to HookLLMPostCall handlers.
 //
@@ -84,6 +151,9 @@ type LLMPostCallPayload struct {
 	StatusCode       int     `json:"status_code"`
 	ErrorCode        string  `json:"error_code,omitempty"`
 	OccurredAt       string  `json:"occurred_at"`
+	// Modality classifies the call for the cost ledger. Defaults to
+	// "text". See ModalityText / ModalityImage / ... constants.
+	Modality string `json:"modality,omitempty"`
 }
 
 // registerLLMRoutes wires the gateway endpoints. Called from
@@ -91,7 +161,16 @@ type LLMPostCallPayload struct {
 func (s *Server) registerLLMRoutes() {
 	s.mux.HandleFunc("POST /api/v1/llm/chat/completions", s.handleLLMChatCompletions)
 	s.mux.HandleFunc("POST /api/v1/llm/embeddings", s.handleLLMEmbeddings)
+	s.mux.HandleFunc("POST /api/v1/embeddings", s.handleLLMEmbeddings)
 	s.mux.HandleFunc("POST /api/v1/llm/images/generations", s.handleLLMImages)
+	s.mux.HandleFunc("POST /api/v1/images/generations", s.handleLLMImages)
+	s.mux.HandleFunc("POST /api/v1/llm/images/edits", s.handleLLMImageEdits)
+	s.mux.HandleFunc("POST /api/v1/images/edits", s.handleLLMImageEdits)
+	s.mux.HandleFunc("POST /api/v1/llm/images/variations", s.handleLLMImageVariations)
+	s.mux.HandleFunc("POST /api/v1/images/variations", s.handleLLMImageVariations)
+	s.mux.HandleFunc("POST /api/v1/audio/speech", s.handleLLMAudioSpeech)
+	s.mux.HandleFunc("POST /api/v1/audio/transcriptions", s.handleLLMAudioTranscriptions)
+	s.mux.HandleFunc("POST /api/v1/audio/translations", s.handleLLMAudioTranslations)
 	s.mux.HandleFunc("GET /api/v1/llm/models", s.handleLLMModels)
 	s.mux.HandleFunc("GET /api/v1/llm/cache/stats", s.handleLLMCacheStats)
 }
@@ -112,8 +191,36 @@ func (s *Server) registerLLMOpenAPI() {
 		Summary: "OpenAI-compatible embeddings",
 		Tags:    []string{"llm"},
 	})
+	b.Register("POST", "/api/v1/embeddings", openapi.RouteMeta{
+		Summary: "OpenAI-compatible embeddings",
+		Tags:    []string{"llm"},
+	})
 	b.Register("POST", "/api/v1/llm/images/generations", openapi.RouteMeta{
 		Summary: "OpenAI-compatible image generation",
+		Tags:    []string{"llm"},
+	})
+	b.Register("POST", "/api/v1/images/generations", openapi.RouteMeta{
+		Summary: "OpenAI-compatible image generation",
+		Tags:    []string{"llm"},
+	})
+	b.Register("POST", "/api/v1/audio/speech", openapi.RouteMeta{
+		Summary: "OpenAI-compatible text to speech",
+		Tags:    []string{"llm"},
+	})
+	b.Register("POST", "/api/v1/audio/transcriptions", openapi.RouteMeta{
+		Summary: "OpenAI-compatible audio transcription",
+		Tags:    []string{"llm"},
+	})
+	b.Register("POST", "/api/v1/audio/translations", openapi.RouteMeta{
+		Summary: "OpenAI-compatible audio translation (to English)",
+		Tags:    []string{"llm"},
+	})
+	b.Register("POST", "/api/v1/images/edits", openapi.RouteMeta{
+		Summary: "OpenAI-compatible image edit (multipart upload)",
+		Tags:    []string{"llm"},
+	})
+	b.Register("POST", "/api/v1/images/variations", openapi.RouteMeta{
+		Summary: "OpenAI-compatible image variations (multipart upload)",
 		Tags:    []string{"llm"},
 	})
 	b.Register("GET", "/api/v1/llm/models", openapi.RouteMeta{
@@ -140,6 +247,30 @@ func llmRequestID(r *http.Request) string {
 // openai-python SDK parses natively. We use this for every /llm/*
 // route so SDK consumers don't have to special-case our error shape.
 func writeOpenAIError(w http.ResponseWriter, status int, code, message string, details map[string]any) {
+	writeOpenAIErrorWithHeaders(w, status, code, message, details, nil)
+}
+
+// writeOpenAIErrorWithHeaders is the variant that sets extra response
+// headers before writing the body. Used for 429 passthrough so
+// Retry-After + X-RateLimit-* from LiteLLM reach the client (item #32 —
+// rate limiting is enforced upstream by LiteLLM, the runtime just
+// proxies the response).
+//
+// Any header set on w MUST be set BEFORE WriteHeader; this helper bundles
+// the two steps so callers can't forget.
+func writeOpenAIErrorWithHeaders(
+	w http.ResponseWriter,
+	status int,
+	code, message string,
+	details map[string]any,
+	headers map[string]string,
+) {
+	for k, v := range headers {
+		if v == "" {
+			continue
+		}
+		w.Header().Set(k, v)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	body := map[string]any{
@@ -168,6 +299,8 @@ func openAIErrorType(code string) string {
 		return "billing_error"
 	case llmgateway.ErrCodeModelNotSupported:
 		return "invalid_request_error"
+	case guardrails.CodeContentBlocked:
+		return "invalid_request_error"
 	case llmgateway.ErrCodeUpstreamError:
 		return "api_error"
 	}
@@ -176,6 +309,13 @@ func openAIErrorType(code string) string {
 
 // llmAPIErrorResponse renders an llmgateway.APIError into an HTTP
 // response with the right status code + envelope.
+//
+// When the APIError carries upstream rate-limit headers (Retry-After /
+// X-RateLimit-*), they're proxied verbatim to the client — LiteLLM
+// owns rate-limit enforcement (item #22 — per-virtual-key rpm_limit /
+// tpm_limit), so the runtime just surfaces the upstream's response
+// signal. Item #32 removed the local in-process limiter; this is the
+// only path 429s flow through now.
 func llmAPIErrorResponse(w http.ResponseWriter, err error) {
 	apiErr, ok := llmgateway.AsAPIError(err)
 	if !ok {
@@ -183,7 +323,7 @@ func llmAPIErrorResponse(w http.ResponseWriter, err error) {
 			llmgateway.ErrCodeUpstreamError, err.Error(), nil)
 		return
 	}
-	writeOpenAIError(w, apiErr.HTTPStatus(), apiErr.Code, apiErr.Message, apiErr.Details)
+	writeOpenAIErrorWithHeaders(w, apiErr.HTTPStatus(), apiErr.Code, apiErr.Message, apiErr.Details, apiErr.Headers)
 }
 
 // estimatePromptChars returns a cheap character-count estimate of the
@@ -249,6 +389,16 @@ func (s *Server) handleLLMChatCompletions(w http.ResponseWriter, r *http.Request
 
 	tenantID := tenantctx.TenantID(r.Context())
 	apiKeyID := tenantctx.APIKeyID(r.Context())
+	if s.guardrails != nil {
+		next, changed, err := s.guardrails.ProcessChatRequest(r.Context(), req)
+		if err != nil {
+			s.writeGuardrailRejection(w, err, requestID, start, tenantID, apiKeyID, req.Model, "chat", req.Stream)
+			return
+		}
+		if changed {
+			req = next
+		}
+	}
 	promptChars := estimatePromptChars(req.Messages)
 	// Conservative cost estimate: assume prompt-chars / 4 = tokens
 	// (the standard OpenAI heuristic) and complete with 512 tokens.
@@ -277,13 +427,22 @@ func (s *Server) handleLLMChatCompletions(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	resp, err := s.llmGateway.Chat(r.Context(), req)
+	resp, err := s.llmGateway.Chat(s.attachLiteLLMKey(r.Context()), req)
 	post := s.buildPostPayload(pre, &resp, nil, start, http.StatusOK)
 
 	if err != nil {
 		s.fireLLMPostCallBest(r.Context(), s.errorPost(pre, err, start))
 		llmAPIErrorResponse(w, err)
 		return
+	}
+	if s.guardrails != nil {
+		next, _, err := s.guardrails.ProcessChatResponse(r.Context(), resp)
+		if err != nil {
+			s.fireLLMPostCallBest(r.Context(), s.guardrailPost(pre, err, start))
+			writeGuardrailError(w, err)
+			return
+		}
+		resp = next
 	}
 	s.fireLLMPostCallBest(r.Context(), post)
 	writeJSON(w, http.StatusOK, resp)
@@ -307,7 +466,7 @@ func (s *Server) streamChatCompletion(
 		return
 	}
 
-	chunkCh, errCh := s.llmGateway.ChatStream(r.Context(), req)
+	chunkCh, errCh := s.llmGateway.ChatStream(s.attachLiteLLMKey(r.Context()), req)
 
 	// Aggregate token usage from the final chunk that carries it
 	// (OpenAI emits usage on the last chunk when stream_options
@@ -325,6 +484,14 @@ streamLoop:
 			if chunk.Usage != nil {
 				u := *chunk.Usage
 				lastUsage = &u
+			}
+			if s.guardrails != nil {
+				next, _, err := s.guardrails.ProcessChatStreamChunk(r.Context(), chunk)
+				if err != nil {
+					streamErr = err
+					break streamLoop
+				}
+				chunk = next
 			}
 			if err := sse.WriteChunk(chunk); err != nil {
 				streamErr = err
@@ -354,9 +521,16 @@ streamLoop:
 		if apiErr, ok := llmgateway.AsAPIError(streamErr); ok {
 			code = apiErr.Code
 			msg = apiErr.Message
+		} else if gCode, gMsg, _ := classifyGuardrailError(streamErr); gCode != "" {
+			code = gCode
+			msg = gMsg
 		}
 		sse.WriteError(code, msg)
-		s.fireLLMPostCallBest(r.Context(), s.errorPost(pre, streamErr, start))
+		if isGuardrailError(streamErr) {
+			s.fireLLMPostCallBest(r.Context(), s.guardrailPost(pre, streamErr, start))
+		} else {
+			s.fireLLMPostCallBest(r.Context(), s.errorPost(pre, streamErr, start))
+		}
 		return
 	}
 
@@ -401,6 +575,16 @@ func (s *Server) handleLLMEmbeddings(w http.ResponseWriter, r *http.Request) {
 
 	tenantID := tenantctx.TenantID(r.Context())
 	apiKeyID := tenantctx.APIKeyID(r.Context())
+	if s.guardrails != nil {
+		next, changed, err := s.guardrails.ProcessEmbeddingsRequest(r.Context(), req)
+		if err != nil {
+			s.writeGuardrailRejection(w, err, requestID, start, tenantID, apiKeyID, req.Model, "embeddings", false)
+			return
+		}
+		if changed {
+			req = next
+		}
+	}
 	pre := LLMPreCallPayload{
 		TenantID:  tenantID,
 		APIKeyID:  apiKeyID,
@@ -414,7 +598,7 @@ func (s *Server) handleLLMEmbeddings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := s.llmGateway.Embeddings(r.Context(), req)
+	resp, err := s.llmGateway.Embeddings(s.attachLiteLLMKey(r.Context()), req)
 	if err != nil {
 		s.fireLLMPostCallBest(r.Context(), s.errorPost(pre, err, start))
 		llmAPIErrorResponse(w, err)
@@ -456,6 +640,16 @@ func (s *Server) handleLLMImages(w http.ResponseWriter, r *http.Request) {
 
 	tenantID := tenantctx.TenantID(r.Context())
 	apiKeyID := tenantctx.APIKeyID(r.Context())
+	if s.guardrails != nil {
+		next, changed, err := s.guardrails.ProcessImagesRequest(r.Context(), req)
+		if err != nil {
+			s.writeGuardrailRejection(w, err, requestID, start, tenantID, apiKeyID, req.Model, "images", false)
+			return
+		}
+		if changed {
+			req = next
+		}
+	}
 	pre := LLMPreCallPayload{
 		TenantID:  tenantID,
 		APIKeyID:  apiKeyID,
@@ -463,32 +657,497 @@ func (s *Server) handleLLMImages(w http.ResponseWriter, r *http.Request) {
 		Provider:  s.llmGateway.ProviderName(),
 		RequestID: requestID,
 		Operation: "images",
+		Modality:  ModalityImage,
 	}
 	if err := s.fireLLMPreCall(r.Context(), pre); err != nil {
 		s.writeHookRejection(w, err, requestID, start, tenantID, apiKeyID, req.Model, "images", false)
 		return
 	}
 
-	resp, err := s.llmGateway.Images(r.Context(), req)
+	n := 0
+	if req.N != nil {
+		n = *req.N
+	}
+	resp, provider, err := s.llmGateway.Image(s.attachLiteLLMKey(r.Context()), adapters.ImageRequest{
+		Model:          req.Model,
+		Prompt:         req.Prompt,
+		N:              n,
+		Size:           req.Size,
+		Quality:        req.Quality,
+		Style:          req.Style,
+		ResponseFormat: req.ResponseFormat,
+		Body:           body,
+	})
 	if err != nil {
 		s.fireLLMPostCallBest(r.Context(), s.errorPost(pre, err, start))
 		llmAPIErrorResponse(w, err)
 		return
 	}
-	post := LLMPostCallPayload{
-		TenantID:   pre.TenantID,
-		APIKeyID:   pre.APIKeyID,
-		Model:      pre.Model,
-		Provider:   pre.Provider,
-		RequestID:  pre.RequestID,
-		Operation:  pre.Operation,
-		Stream:     false,
-		LatencyMS:  int(time.Since(start).Milliseconds()),
-		StatusCode: http.StatusOK,
-		OccurredAt: time.Now().UTC().Format(time.RFC3339Nano),
+	if s.guardrails != nil {
+		for i := range resp.Data {
+			if resp.Data[i].RevisedPrompt == "" {
+				continue
+			}
+			res, err := s.guardrails.ProcessText(r.Context(), resp.Data[i].RevisedPrompt)
+			if err != nil {
+				s.fireLLMPostCallBest(r.Context(), s.guardrailPost(pre, err, start))
+				writeGuardrailError(w, err)
+				return
+			}
+			resp.Data[i].RevisedPrompt = res.Text
+		}
+	}
+	post := s.simplePostPayload(pre, start, http.StatusOK)
+	if provider != "" {
+		post.Provider = provider
+	}
+	// Image cost = per-image rate × N.
+	if cnt := len(resp.Data); cnt > 0 {
+		if cost, ok := llmgateway.EstimateMultimodalCost(req.Model, "image", float64(cnt)); ok {
+			post.CostUSD = cost
+			post.CostKnown = true
+		}
 	}
 	s.fireLLMPostCallBest(r.Context(), post)
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, http.StatusOK, llmgateway.ImagesResponseFromAdapter(resp))
+}
+
+// handleLLMImageEdits handles POST /api/v1/images/edits (multipart).
+//
+// Multipart fields: image (file), prompt (string), mask (optional file),
+// model (string), n (string), size (string), response_format (string).
+//
+// We forward the multipart body verbatim to the chosen adapter; the
+// adapter takes care of any re-encoding (LiteLLM tunnels it straight to
+// OpenAI; first-party adapters that don't support edits return
+// ErrUnsupported and the runtime renders 503).
+func (s *Server) handleLLMImageEdits(w http.ResponseWriter, r *http.Request) {
+	s.handleLLMImageMultipart(w, r, true, false)
+}
+
+// handleLLMImageVariations handles POST /api/v1/images/variations (multipart).
+//
+// Multipart fields: image (file), model (string), n (string),
+// size (string), response_format (string).
+func (s *Server) handleLLMImageVariations(w http.ResponseWriter, r *http.Request) {
+	s.handleLLMImageMultipart(w, r, false, true)
+}
+
+// handleLLMImageMultipart is the shared multipart-image path for edits
+// and variations.
+func (s *Server) handleLLMImageMultipart(w http.ResponseWriter, r *http.Request, edit, variations bool) {
+	start := time.Now()
+	requestID := llmRequestID(r)
+	operation := "images_edits"
+	if variations {
+		operation = "images_variations"
+	}
+	if s.llmGateway == nil {
+		writeOpenAIError(w, http.StatusServiceUnavailable,
+			"GATEWAY_NOT_CONFIGURED",
+			"llm gateway not configured on this runtime", nil)
+		return
+	}
+	ct := r.Header.Get("Content-Type")
+	body, err := io.ReadAll(io.LimitReader(r.Body, 64<<20))
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadRequest,
+			llmgateway.ErrCodeInvalidRequest, "could not read request body", nil)
+		return
+	}
+	meta, err := inspectImageMultipart(body, ct, edit, variations)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadRequest,
+			llmgateway.ErrCodeInvalidRequest, err.Error(), nil)
+		return
+	}
+
+	tenantID := tenantctx.TenantID(r.Context())
+	apiKeyID := tenantctx.APIKeyID(r.Context())
+	pre := LLMPreCallPayload{
+		TenantID:  tenantID,
+		APIKeyID:  apiKeyID,
+		Model:     meta.Model,
+		Provider:  s.llmGateway.ProviderName(),
+		RequestID: requestID,
+		Operation: operation,
+		Modality:  ModalityImage,
+	}
+	if err := s.fireLLMPreCall(r.Context(), pre); err != nil {
+		s.writeHookRejection(w, err, requestID, start, tenantID, apiKeyID, meta.Model, operation, false)
+		return
+	}
+
+	resp, provider, err := s.llmGateway.Image(s.attachLiteLLMKey(r.Context()), adapters.ImageRequest{
+		Model:                meta.Model,
+		Prompt:               meta.Prompt,
+		N:                    meta.N,
+		Size:                 meta.Size,
+		ResponseFormat:       meta.ResponseFormat,
+		IsEdit:               edit,
+		IsVariations:         variations,
+		MultipartContentType: ct,
+		Body:                 body,
+	})
+	if err != nil {
+		s.fireLLMPostCallBest(r.Context(), s.errorPost(pre, err, start))
+		llmAPIErrorResponse(w, err)
+		return
+	}
+	post := s.simplePostPayload(pre, start, http.StatusOK)
+	if provider != "" {
+		post.Provider = provider
+	}
+	if cnt := len(resp.Data); cnt > 0 {
+		if cost, ok := llmgateway.EstimateMultimodalCost(meta.Model, "image", float64(cnt)); ok {
+			post.CostUSD = cost
+			post.CostKnown = true
+		}
+	}
+	s.fireLLMPostCallBest(r.Context(), post)
+	writeJSON(w, http.StatusOK, llmgateway.ImagesResponseFromAdapter(resp))
+}
+
+// ─── audio/speech ────────────────────────────────────────────────────────
+
+func (s *Server) handleLLMAudioSpeech(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	requestID := llmRequestID(r)
+	if s.llmGateway == nil {
+		writeOpenAIError(w, http.StatusServiceUnavailable,
+			"GATEWAY_NOT_CONFIGURED",
+			"llm gateway not configured on this runtime", nil)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 16<<20))
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadRequest,
+			llmgateway.ErrCodeInvalidRequest, "could not read request body", nil)
+		return
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest,
+			llmgateway.ErrCodeInvalidRequest, "invalid JSON body: "+err.Error(), nil)
+		return
+	}
+	model, _ := raw["model"].(string)
+	input, _ := raw["input"].(string)
+	voice, _ := raw["voice"].(string)
+	respFormat, _ := raw["response_format"].(string)
+	var speed float64
+	switch v := raw["speed"].(type) {
+	case float64:
+		speed = v
+	case int:
+		speed = float64(v)
+	}
+	if strings.TrimSpace(model) == "" {
+		writeOpenAIError(w, http.StatusBadRequest,
+			llmgateway.ErrCodeInvalidRequest, "model is required", nil)
+		return
+	}
+	if strings.TrimSpace(input) == "" {
+		writeOpenAIError(w, http.StatusBadRequest,
+			llmgateway.ErrCodeInvalidRequest, "input is required", nil)
+		return
+	}
+
+	tenantID := tenantctx.TenantID(r.Context())
+	apiKeyID := tenantctx.APIKeyID(r.Context())
+	if s.guardrails != nil {
+		next, changed, err := s.guardrails.ProcessStringMap(r.Context(), raw, "input", "user")
+		if err != nil {
+			s.writeGuardrailRejection(w, err, requestID, start, tenantID, apiKeyID, model, "audio_speech", false)
+			return
+		}
+		if changed {
+			raw = next
+			if v, ok := raw["input"].(string); ok {
+				input = v
+			}
+			body, _ = json.Marshal(raw)
+		}
+	}
+	pre := LLMPreCallPayload{
+		TenantID:  tenantID,
+		APIKeyID:  apiKeyID,
+		Model:     model,
+		Provider:  s.llmGateway.ProviderName(),
+		RequestID: requestID,
+		Operation: "audio_speech",
+		Modality:  ModalityAudioSpeech,
+	}
+	if err := s.fireLLMPreCall(r.Context(), pre); err != nil {
+		s.writeHookRejection(w, err, requestID, start, tenantID, apiKeyID, model, "audio_speech", false)
+		return
+	}
+
+	resp, provider, err := s.llmGateway.Speech(s.attachLiteLLMKey(r.Context()), adapters.SpeechRequest{
+		Model:          model,
+		Input:          input,
+		Voice:          voice,
+		ResponseFormat: respFormat,
+		Speed:          speed,
+		Body:           body,
+	})
+	if err != nil {
+		s.fireLLMPostCallBest(r.Context(), s.errorPost(pre, err, start))
+		llmAPIErrorResponse(w, err)
+		return
+	}
+	if s.guardrails != nil {
+		next, _, err := s.guardrails.ProcessResponseBytes(r.Context(), resp.Body, resp.ContentType)
+		if err != nil {
+			s.fireLLMPostCallBest(r.Context(), s.guardrailPost(pre, err, start))
+			writeGuardrailError(w, err)
+			return
+		}
+		resp.Body = next
+	}
+	post := s.simplePostPayload(pre, start, http.StatusOK)
+	if provider != "" {
+		post.Provider = provider
+	}
+	// Per-character pricing for TTS — uses pricing.EstimateMultimodalCost.
+	if resp.CharCount > 0 {
+		if cost, ok := llmgateway.EstimateMultimodalCost(model, "tts", float64(resp.CharCount)); ok {
+			post.CostUSD = cost
+			post.CostKnown = true
+		}
+	}
+	s.fireLLMPostCallBest(r.Context(), post)
+	writeRawSpeech(w, http.StatusOK, resp)
+}
+
+// ─── audio/transcriptions ────────────────────────────────────────────────
+
+func (s *Server) handleLLMAudioTranscriptions(w http.ResponseWriter, r *http.Request) {
+	s.handleLLMTranscribe(w, r, false)
+}
+
+// ─── audio/translations ──────────────────────────────────────────────────
+
+func (s *Server) handleLLMAudioTranslations(w http.ResponseWriter, r *http.Request) {
+	s.handleLLMTranscribe(w, r, true)
+}
+
+// handleLLMTranscribe is the shared path for STT + translate. Both
+// endpoints accept multipart/form-data and differ only in the upstream
+// path (LiteLLM /audio/transcriptions vs /audio/translations).
+func (s *Server) handleLLMTranscribe(w http.ResponseWriter, r *http.Request, translate bool) {
+	start := time.Now()
+	requestID := llmRequestID(r)
+	operation := "audio_transcriptions"
+	modality := ModalityAudioTranscription
+	if translate {
+		operation = "audio_translations"
+		modality = ModalityAudioTranslation
+	}
+	if s.llmGateway == nil {
+		writeOpenAIError(w, http.StatusServiceUnavailable,
+			"GATEWAY_NOT_CONFIGURED",
+			"llm gateway not configured on this runtime", nil)
+		return
+	}
+	ct := r.Header.Get("Content-Type")
+	body, err := io.ReadAll(io.LimitReader(r.Body, 64<<20))
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadRequest,
+			llmgateway.ErrCodeInvalidRequest, "could not read request body", nil)
+		return
+	}
+	model, err := inspectTranscriptionMultipart(body, ct)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadRequest,
+			llmgateway.ErrCodeInvalidRequest, err.Error(), nil)
+		return
+	}
+
+	tenantID := tenantctx.TenantID(r.Context())
+	apiKeyID := tenantctx.APIKeyID(r.Context())
+	pre := LLMPreCallPayload{
+		TenantID:  tenantID,
+		APIKeyID:  apiKeyID,
+		Model:     model,
+		Provider:  s.llmGateway.ProviderName(),
+		RequestID: requestID,
+		Operation: operation,
+		Modality:  modality,
+	}
+	if err := s.fireLLMPreCall(r.Context(), pre); err != nil {
+		s.writeHookRejection(w, err, requestID, start, tenantID, apiKeyID, model, operation, false)
+		return
+	}
+
+	resp, provider, err := s.llmGateway.Transcribe(s.attachLiteLLMKey(r.Context()), adapters.TranscribeRequest{
+		Model:       model,
+		ContentType: ct,
+		Body:        body,
+		Translate:   translate,
+	})
+	if err != nil {
+		s.fireLLMPostCallBest(r.Context(), s.errorPost(pre, err, start))
+		llmAPIErrorResponse(w, err)
+		return
+	}
+	post := s.simplePostPayload(pre, start, http.StatusOK)
+	if provider != "" {
+		post.Provider = provider
+	}
+	// STT cost = per-minute rate × audio_seconds / 60. Adapters that
+	// surface DurationSeconds (currently nil — TODO) feed this number.
+	if resp.DurationSeconds > 0 {
+		if cost, ok := llmgateway.EstimateMultimodalCost(model, "stt", resp.DurationSeconds); ok {
+			post.CostUSD = cost
+			post.CostKnown = true
+		}
+	}
+	s.fireLLMPostCallBest(r.Context(), post)
+	writeRawTranscribe(w, http.StatusOK, resp)
+}
+
+func inspectTranscriptionMultipart(body []byte, contentType string) (string, error) {
+	mediaType, params, err := mime.ParseMediaType(contentType)
+	if err != nil || !strings.HasPrefix(mediaType, "multipart/form-data") {
+		return "", errors.New("content-type must be multipart/form-data")
+	}
+	boundary := params["boundary"]
+	if boundary == "" {
+		return "", errors.New("multipart boundary is required")
+	}
+	reader := multipart.NewReader(bytes.NewReader(body), boundary)
+	model := ""
+	hasFile := false
+	for {
+		part, err := reader.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return "", errors.New("invalid multipart body")
+		}
+		switch part.FormName() {
+		case "model":
+			value, _ := io.ReadAll(io.LimitReader(part, 1024))
+			model = strings.TrimSpace(string(value))
+		case "file":
+			if part.FileName() != "" {
+				hasFile = true
+			}
+		}
+		_ = part.Close()
+	}
+	if model == "" {
+		return "", errors.New("model is required")
+	}
+	if !hasFile {
+		return "", errors.New("file is required")
+	}
+	return model, nil
+}
+
+func writeRaw(w http.ResponseWriter, status int, resp llmgateway.RawResponse) {
+	if resp.ContentType != "" {
+		w.Header().Set("Content-Type", resp.ContentType)
+	}
+	w.WriteHeader(status)
+	_, _ = w.Write(resp.Body)
+}
+
+// writeRawSpeech renders an adapters.SpeechResponse as the HTTP body.
+// Default content-type is audio/mpeg when the adapter didn't supply one.
+func writeRawSpeech(w http.ResponseWriter, status int, resp adapters.SpeechResponse) {
+	ct := resp.ContentType
+	if ct == "" {
+		ct = "audio/mpeg"
+	}
+	w.Header().Set("Content-Type", ct)
+	w.WriteHeader(status)
+	_, _ = w.Write(resp.Body)
+}
+
+// writeRawTranscribe renders an adapters.TranscribeResponse.
+func writeRawTranscribe(w http.ResponseWriter, status int, resp adapters.TranscribeResponse) {
+	ct := resp.ContentType
+	if ct == "" {
+		ct = "application/json"
+	}
+	w.Header().Set("Content-Type", ct)
+	w.WriteHeader(status)
+	_, _ = w.Write(resp.Body)
+}
+
+// imageMultipartMeta is the small struct we extract from an /images/edits
+// or /images/variations multipart upload to drive routing + post-call
+// accounting. The actual file bytes stay in the original body — adapters
+// that tunnel to LiteLLM re-send it verbatim.
+type imageMultipartMeta struct {
+	Model          string
+	Prompt         string
+	N              int
+	Size           string
+	ResponseFormat string
+}
+
+// inspectImageMultipart walks the multipart body and pulls out the
+// non-file fields needed for routing and cost accounting. Validates
+// that an `image` file field is present (edits + variations both
+// require it).
+func inspectImageMultipart(body []byte, contentType string, edit, variations bool) (imageMultipartMeta, error) {
+	out := imageMultipartMeta{}
+	mediaType, params, err := mime.ParseMediaType(contentType)
+	if err != nil || !strings.HasPrefix(mediaType, "multipart/form-data") {
+		return out, errors.New("content-type must be multipart/form-data")
+	}
+	boundary := params["boundary"]
+	if boundary == "" {
+		return out, errors.New("multipart boundary is required")
+	}
+	reader := multipart.NewReader(bytes.NewReader(body), boundary)
+	hasImage := false
+	for {
+		part, err := reader.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return out, errors.New("invalid multipart body")
+		}
+		switch part.FormName() {
+		case "model":
+			value, _ := io.ReadAll(io.LimitReader(part, 1024))
+			out.Model = strings.TrimSpace(string(value))
+		case "prompt":
+			value, _ := io.ReadAll(io.LimitReader(part, 32<<10))
+			out.Prompt = strings.TrimSpace(string(value))
+		case "n":
+			value, _ := io.ReadAll(io.LimitReader(part, 32))
+			fmt.Sscanf(strings.TrimSpace(string(value)), "%d", &out.N)
+		case "size":
+			value, _ := io.ReadAll(io.LimitReader(part, 64))
+			out.Size = strings.TrimSpace(string(value))
+		case "response_format":
+			value, _ := io.ReadAll(io.LimitReader(part, 32))
+			out.ResponseFormat = strings.TrimSpace(string(value))
+		case "image":
+			if part.FileName() != "" {
+				hasImage = true
+			}
+		}
+		_ = part.Close()
+	}
+	if out.Model == "" {
+		return out, errors.New("model is required")
+	}
+	if !hasImage {
+		return out, errors.New("image file is required")
+	}
+	if edit && out.Prompt == "" {
+		return out, errors.New("prompt is required for /images/edits")
+	}
+	_ = variations // signature symmetry only
+	return out, nil
 }
 
 // ─── /llm/models ─────────────────────────────────────────────────────────
@@ -593,8 +1252,30 @@ func (s *Server) writeHookRejection(
 		StatusCode: status,
 		ErrorCode:  code,
 		OccurredAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Modality:   modalityFromOperation(operation),
 	}
 	s.fireLLMPostCallBest(context.Background(), post)
+}
+
+// modalityFromOperation maps the LLM gateway operation tag (set on
+// every pre/post-call payload) to its canonical modality string. Used
+// by the rejection helpers that don't have the pre-call payload to
+// copy from.
+func modalityFromOperation(op string) string {
+	switch op {
+	case "embeddings":
+		return ModalityEmbedding
+	case "audio_speech":
+		return ModalityAudioSpeech
+	case "audio_transcriptions":
+		return ModalityAudioTranscription
+	case "audio_translations":
+		return ModalityAudioTranslation
+	case "images", "images_edits", "images_variations":
+		return ModalityImage
+	default:
+		return ModalityText
+	}
 }
 
 // classifyHookError inspects a pre-call hook error and returns the
@@ -607,6 +1288,100 @@ func classifyHookError(err error) (string, string, int) {
 		return apiErr.Code, apiErr.Message, apiErr.HTTPStatus()
 	}
 	return "POLICY_VIOLATION", err.Error(), http.StatusForbidden
+}
+
+func isGuardrailError(err error) bool {
+	return errors.Is(err, guardrails.ErrContentBlocked) ||
+		errors.Is(err, guardrails.ErrGuardrailsUnavailable)
+}
+
+func classifyGuardrailError(err error) (string, string, int) {
+	switch {
+	case errors.Is(err, guardrails.ErrContentBlocked):
+		return guardrails.CodeContentBlocked, "content blocked by gateway moderation policy", http.StatusUnprocessableEntity
+	case errors.Is(err, guardrails.ErrGuardrailsUnavailable):
+		return guardrails.CodeGuardrailsUnavailable, "gateway guardrails provider unavailable", http.StatusServiceUnavailable
+	default:
+		return "", "", 0
+	}
+}
+
+func writeGuardrailError(w http.ResponseWriter, err error) {
+	code, msg, status := classifyGuardrailError(err)
+	if code == "" {
+		code = "POLICY_VIOLATION"
+		msg = err.Error()
+		status = http.StatusForbidden
+	}
+	writeOpenAIError(w, status, code, msg, nil)
+}
+
+func (s *Server) writeGuardrailRejection(
+	w http.ResponseWriter,
+	err error,
+	requestID string,
+	start time.Time,
+	tenantID, apiKeyID, model, operation string,
+	stream bool,
+) {
+	writeGuardrailError(w, err)
+	post := LLMPostCallPayload{
+		TenantID:   tenantID,
+		APIKeyID:   apiKeyID,
+		Model:      model,
+		Provider:   s.llmGateway.ProviderName(),
+		RequestID:  requestID,
+		Operation:  operation,
+		Stream:     stream,
+		LatencyMS:  int(time.Since(start).Milliseconds()),
+		StatusCode: guardrailStatus(err),
+		ErrorCode:  guardrailCode(err),
+		OccurredAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Modality:   modalityFromOperation(operation),
+	}
+	s.fireLLMPostCallBest(context.Background(), post)
+}
+
+func (s *Server) guardrailPost(pre LLMPreCallPayload, err error, start time.Time) LLMPostCallPayload {
+	return LLMPostCallPayload{
+		TenantID:   pre.TenantID,
+		APIKeyID:   pre.APIKeyID,
+		Model:      pre.Model,
+		Provider:   pre.Provider,
+		RequestID:  pre.RequestID,
+		Operation:  pre.Operation,
+		Stream:     pre.Stream,
+		LatencyMS:  int(time.Since(start).Milliseconds()),
+		StatusCode: guardrailStatus(err),
+		ErrorCode:  guardrailCode(err),
+		OccurredAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Modality:   normalizeModality(pre.Modality),
+	}
+}
+
+// normalizeModality returns a non-empty modality string, defaulting to
+// "text" when the caller didn't set one (chat/embeddings paths).
+func normalizeModality(m string) string {
+	if m == "" {
+		return ModalityText
+	}
+	return m
+}
+
+func guardrailCode(err error) string {
+	code, _, _ := classifyGuardrailError(err)
+	if code == "" {
+		return "POLICY_VIOLATION"
+	}
+	return code
+}
+
+func guardrailStatus(err error) int {
+	_, _, status := classifyGuardrailError(err)
+	if status == 0 {
+		return http.StatusForbidden
+	}
+	return status
 }
 
 // buildPostPayload constructs the post-call hook payload for a chat
@@ -630,6 +1405,7 @@ func (s *Server) buildPostPayload(
 		LatencyMS:  int(time.Since(start).Milliseconds()),
 		StatusCode: status,
 		OccurredAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Modality:   normalizeModality(pre.Modality),
 	}
 	var u *llmgateway.Usage
 	switch {
@@ -667,6 +1443,7 @@ func (s *Server) buildPostPayloadEmbeddings(
 		LatencyMS:  int(time.Since(start).Milliseconds()),
 		StatusCode: http.StatusOK,
 		OccurredAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Modality:   ModalityEmbedding,
 	}
 	if resp.Usage != nil {
 		post.PromptTokens = resp.Usage.PromptTokens
@@ -678,6 +1455,22 @@ func (s *Server) buildPostPayloadEmbeddings(
 		}
 	}
 	return post
+}
+
+func (s *Server) simplePostPayload(pre LLMPreCallPayload, start time.Time, status int) LLMPostCallPayload {
+	return LLMPostCallPayload{
+		TenantID:   pre.TenantID,
+		APIKeyID:   pre.APIKeyID,
+		Model:      pre.Model,
+		Provider:   pre.Provider,
+		RequestID:  pre.RequestID,
+		Operation:  pre.Operation,
+		Stream:     pre.Stream,
+		LatencyMS:  int(time.Since(start).Milliseconds()),
+		StatusCode: status,
+		OccurredAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Modality:   normalizeModality(pre.Modality),
+	}
 }
 
 // errorPost constructs a post-call payload for a failed call (so
@@ -701,5 +1494,6 @@ func (s *Server) errorPost(pre LLMPreCallPayload, err error, start time.Time) LL
 		StatusCode: status,
 		ErrorCode:  code,
 		OccurredAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Modality:   normalizeModality(pre.Modality),
 	}
 }

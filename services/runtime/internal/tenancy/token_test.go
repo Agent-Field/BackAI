@@ -36,12 +36,12 @@ func TestParseTokenAccepts(t *testing.T) {
 // resolver maps to 401.
 func TestParseTokenRejects(t *testing.T) {
 	for _, bad := range []string{
-		"",                  // empty
-		"af_",               // no separator past prefix marker
-		"af__secret",        // empty prefix
-		"af_prefix_",        // empty secret
+		"",                    // empty
+		"af_",                 // no separator past prefix marker
+		"af__secret",          // empty prefix
+		"af_prefix_",          // empty secret
 		"notaf_prefix_secret", // missing token prefix marker
-		"prefix_secret",     // missing `af_` entirely
+		"prefix_secret",       // missing `af_` entirely
 	} {
 		_, _, err := parseToken(bad)
 		if !errors.Is(err, ErrInvalidAPIKeyFormat) {

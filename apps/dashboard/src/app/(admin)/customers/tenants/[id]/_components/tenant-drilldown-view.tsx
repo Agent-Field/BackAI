@@ -8,7 +8,7 @@
 // API keys, recent runs, recent webhooks, optional billing snapshot,
 // recent audit. The drilldown payload comes from the server component
 // pre-fetched at request time; this component is pure presentation
-// with one optional client-side mutation (the "Open Stripe Portal"
+// with one optional client-side mutation (the "Open Billing Portal"
 // button calls api.billing.portalLink and redirects).
 
 import * as React from "react"
@@ -746,7 +746,7 @@ function RecentWebhooksCard({
   )
 }
 
-// ─── Billing card (Stripe portal) ─────────────────────────────────────────
+// ─── Billing card (provider portal) ───────────────────────────────────────
 
 function BillingCard({
   billing,
@@ -769,7 +769,7 @@ function BillingCard({
           ? `${e.code}: ${e.message}`
           : e instanceof Error
             ? e.message
-            : "Failed to open Stripe portal"
+            : "Failed to open billing portal"
       toast.error("Could not open portal", { description: message })
     } finally {
       setOpening(false)
@@ -786,12 +786,12 @@ function BillingCard({
               Billing
             </CardTitle>
             <CardDescription>
-              Stripe-backed plan + subscription snapshot for this tenant.
+              Billing plan + subscription snapshot for this tenant.
             </CardDescription>
           </div>
           <Button size="sm" onClick={openPortal} disabled={opening}>
             <ExternalLink />
-            {opening ? "Opening…" : "Open Stripe Portal"}
+            {opening ? "Opening…" : "Open Billing Portal"}
           </Button>
         </div>
       </CardHeader>

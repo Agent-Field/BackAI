@@ -11,14 +11,15 @@
 import { loadPlugins } from "./plugins"
 import {
   Activity,
-  Bot,
   Boxes,
+  CheckCheck,
   CircleDollarSign,
   Clock,
   Cog,
   CreditCard,
   Database,
   FileBadge,
+  GitPullRequest,
   Globe,
   HardDrive,
   HomeIcon,
@@ -30,12 +31,12 @@ import {
   type LucideIcon,
   Mail,
   PlugZap,
+  Puzzle,
   ReceiptText,
   ScrollText,
   ShieldCheck,
+  SlidersHorizontal,
   Tags,
-  TerminalSquare,
-  Timer,
   Users,
   Webhook,
   Workflow,
@@ -58,9 +59,13 @@ export type NavItem = {
 }
 
 export type NavGroup = {
-  id: "build" | "operate" | "customers" | "system"
+  id: "build" | "operate" | "customers" | "infrastructure" | "system"
   label: string
   items: NavItem[]
+}
+
+export type NavOptions = {
+  billingDisabled?: boolean
 }
 
 export const NAV_HOME: NavItem = {
@@ -76,7 +81,7 @@ export const NAV_SETTINGS: NavItem = {
   label: "Settings",
   href: "/settings",
   icon: Cog,
-  description: "Operator account, theme, plugins, feature flags",
+  description: "Operator account, theme, feature flags",
 }
 
 export const NAV_GROUPS: NavGroup[] = [
@@ -97,27 +102,6 @@ export const NAV_GROUPS: NavGroup[] = [
         href: "/build/integrations",
         icon: PlugZap,
         description: "Tools, MCP servers, skills, harnesses",
-      },
-      {
-        id: "database",
-        label: "Database",
-        href: "/build/database",
-        icon: Database,
-        description: "Tables, SQL runner, RLS policies, vector collections",
-      },
-      {
-        id: "storage",
-        label: "Storage",
-        href: "/build/storage",
-        icon: HardDrive,
-        description: "Buckets and signed URL configuration",
-      },
-      {
-        id: "secrets",
-        label: "Secrets",
-        href: "/build/secrets",
-        icon: Lock,
-        description: "Per-tenant secrets vault",
       },
       {
         id: "webhooks",
@@ -141,20 +125,6 @@ export const NAV_GROUPS: NavGroup[] = [
         description: "Billing your customers see — plans, metered metrics",
       },
       {
-        id: "jobs",
-        label: "Jobs",
-        href: "/build/jobs",
-        icon: Timer,
-        description: "Background job definitions and cron schedules",
-      },
-      {
-        id: "sandboxes",
-        label: "Sandboxes",
-        href: "/build/sandboxes",
-        icon: TerminalSquare,
-        description: "Sandbox adapter configuration",
-      },
-      {
         id: "mcp",
         label: "MCP",
         href: "/build/mcp",
@@ -169,18 +139,18 @@ export const NAV_GROUPS: NavGroup[] = [
         description: "Installed AF skillkit bundles — install, list, attach",
       },
       {
-        id: "harnesses",
-        label: "Harnesses",
-        href: "/build/harnesses",
-        icon: Bot,
-        description: "CLI agent harnesses (Claude Code, Codex, Gemini, OpenCode)",
-      },
-      {
         id: "modules",
         label: "Modules",
         href: "/build/modules",
         icon: Layers,
         description: "Read-only view of config.yaml",
+      },
+      {
+        id: "dashboard-plugins",
+        label: "Dashboard Plugins",
+        href: "/build/dashboard-plugins",
+        icon: Puzzle,
+        description: "Build-time operator-console tabs in this fork",
       },
     ],
   },
@@ -194,6 +164,20 @@ export const NAV_GROUPS: NavGroup[] = [
         href: "/operate/runs",
         icon: Workflow,
         description: "Agent executions with logs and traces",
+      },
+      {
+        id: "shipwright",
+        label: "Shipwright",
+        href: "/operate/shipwright",
+        icon: GitPullRequest,
+        description: "Coding-agent tasks, patches, and AgentField run links",
+      },
+      {
+        id: "approvals",
+        label: "Approvals",
+        href: "/operate/approvals",
+        icon: CheckCheck,
+        description: "Human decision gates for workflow requests",
       },
       {
         id: "logs",
@@ -299,6 +283,40 @@ export const NAV_GROUPS: NavGroup[] = [
       },
     ],
   },
+  {
+    id: "infrastructure",
+    label: "Infrastructure",
+    items: [
+      {
+        id: "adapters",
+        label: "Adapters",
+        href: "/build/adapters",
+        icon: SlidersHorizontal,
+        description: "Active and available backend adapter choices",
+      },
+      {
+        id: "database",
+        label: "Database",
+        href: "/build/database",
+        icon: Database,
+        description: "Tables, SQL runner, RLS policies, vector collections",
+      },
+      {
+        id: "storage",
+        label: "Storage",
+        href: "/build/storage",
+        icon: HardDrive,
+        description: "Buckets and signed URL configuration",
+      },
+      {
+        id: "secrets",
+        label: "Secrets",
+        href: "/build/secrets",
+        icon: Lock,
+        description: "Per-tenant secrets vault",
+      },
+    ],
+  },
 ]
 
 /** Flat list of every nav item, including Home and Settings. */
@@ -308,9 +326,20 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   NAV_SETTINGS,
 ]
 
+function applyNavOptions(groups: NavGroup[], options: NavOptions): NavGroup[] {
+  if (!options.billingDisabled) return groups
+  return groups.map((group) =>
+    group.id === "customers"
+      ? {
+          ...group,
+          items: group.items.filter((item) => item.id !== "customer-billing"),
+        }
+      : group,
+  )
+}
+
 /**
- * Returns the four primary nav groups (build / operate / customers + an extra
- * `system` group for plugins) with plugin items merged into the group each
+ * Returns the primary nav groups with plugin items merged into the group each
  * plugin requested. Pure: safe to call from server or client components.
  *
  * - Plugins whose `group` is `build|operate|customers` are appended to the
@@ -319,9 +348,9 @@ export const ALL_NAV_ITEMS: NavItem[] = [
  *   returned when at least one plugin uses it (otherwise the sidebar keeps the
  *   default shape).
  */
-export function getNavGroupsWithPlugins(): NavGroup[] {
+export function getNavGroupsWithPlugins(options: NavOptions = {}): NavGroup[] {
   const plugins = loadPlugins()
-  if (plugins.length === 0) return NAV_GROUPS
+  if (plugins.length === 0) return applyNavOptions(NAV_GROUPS, options)
 
   const groups = NAV_GROUPS.map((g) => ({ ...g, items: [...g.items] }))
   const systemItems: NavItem[] = []
@@ -345,16 +374,12 @@ export function getNavGroupsWithPlugins(): NavGroup[] {
   if (systemItems.length > 0) {
     groups.push({ id: "system", label: "System", items: systemItems })
   }
-  return groups
+  return applyNavOptions(groups, options)
 }
 
 /** Flat list including plugin nav items. Used by ⌘K to find anything. */
-export function getAllNavItemsWithPlugins(): NavItem[] {
-  return [
-    NAV_HOME,
-    ...getNavGroupsWithPlugins().flatMap((g) => g.items),
-    NAV_SETTINGS,
-  ]
+export function getAllNavItemsWithPlugins(options: NavOptions = {}): NavItem[] {
+  return [NAV_HOME, ...getNavGroupsWithPlugins(options).flatMap((g) => g.items), NAV_SETTINGS]
 }
 
 /** Look up a nav item by route prefix. Used for breadcrumbs and highlight. */

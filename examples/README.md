@@ -1,14 +1,23 @@
 # Examples
 
-Six end-to-end examples that demonstrate the range of AF Stack. Each one
-is self-contained: `docker compose up` from inside the directory boots
-the stack with everything wired so you can see real data flow without
-glueing things together yourself.
+AF Stack ships one canonical starter template and four example tracks.
+Ready examples are
+self-contained: `docker compose up` from inside the directory boots the
+stack with everything wired so you can see real data flow without
+gluing things together yourself.
 
-Three are shipped in v1. The remaining three are scaffolded with
-working compose + config so you can run them; the workload modules they
-depend on (multimodal-storage, change-stream-listener) ship as docs
-under `docs/workload-modules.md` and are open issues on GitHub.
+## Recommended starting point
+
+### Starter
+
+[`examples/starter/`](./starter/)
+
+The bare-bones fork basis: one AgentField agent, one customer-app first
+action page, one dashboard plugin, and one workload module with a route
+plus migration. Copy these four surfaces into your fork after running
+`af-stack init`.
+
+**Use this when:** you are starting a new AF Stack product.
 
 ## Ready to run
 
@@ -58,44 +67,37 @@ Runs + Memory + Sandbox tabs all lighting up on the same operation.
 **Time to first result:** ~2 minutes with default settings; cost capped
 per-sub-question via `RESEARCHER_HARNESS_BUDGET_USD`.
 
-## In progress
-
-The compose files boot; the workload modules ship in a follow-up.
-
 ### 02 — Shipwright (SWE-AF SaaS)
 
-`examples/02-shipwright/` — directory exists but the workload module
-isn't shipped yet. Tracking in
-[issue #82](https://github.com/Agent-Field/backai/issues) (when filed).
+[`examples/02-shipwright/`](./02-shipwright/)
 
-Will be: SWE-AF imported as a workload module + custom estimator and
-classifier agents + e2b as the default sandbox + GitHub OAuth + a
-`git-workload` module exposing branch/PR primitives to agents.
+Autonomous coding-agent factory scaffold. AF Stack stores task + patch
+metadata, starts the AgentField `shipwright.build` reasoner, and links
+the runtime task to the AgentField execution id. AgentField owns the
+execution graph, live logs, harness calls, spans, traces, and memory.
 
-### 04 — Podcast creator
+The example is intentionally runnable without bundling Codex / Claude /
+Gemini CLIs: if a harness binary is present, the agent routes through
+`app.harness(provider=..., cwd=...)`; otherwise it falls back to an
+`.ai()` patch sketch so the topology still works in fresh Docker builds.
+When `GH_TOKEN` is configured, the harness path can push a branch and
+open a draft GitHub PR; without it, Shipwright writes a durable patch
+file into the `shipwright-patches` volume.
 
-`examples/04-podcast-creator/` — needs the `multimodal-storage`
-workload module. Will be: ffmpeg + Whisper + Vision pipelines in the
-sandbox adapter, AF agents for chaptering and clipping, the storage
-adapter holding large mp3/mp4 artefacts.
-
-### 05 — Reactive enrichment
-
-`examples/05-reactive-enrichment/` — needs the
-`change-stream-listener` workload module. Will be: a PostgreSQL +
-Mongo change stream subscriber that wakes an AF agent on every insert,
-runs an enrichment, and writes the result back through a transaction.
+**Demonstrates:** AF Stack task metadata + AgentField async execution +
+guarded coding harness flow + patch/optional PR callback.
+**Still maturing:** production hardening and a deeper `git-workload`
+module for branch / diff / PR primitives.
 
 ## Picking an example
 
-| You want to… | Start with |
-|---|---|
-| Try AF Stack as just an OpenAI-compatible gateway | **03 — LLM gateway only** |
-| See what a production-shape multi-tenant SaaS looks like | **01 — Notable** |
-| Understand the composite-reasoning pattern with real cost data | **06 — Deep research** |
-| Build a coding-agent SaaS | wait for 02 / port from `code/labs/codeaf/` |
-| Build a multimodal pipeline | wait for 04 / read `docs/workload-modules.md` |
-| Build a change-stream-driven agent | wait for 05 / read `docs/workload-modules.md` |
+| You want to…                                                   | Start with                                                    |
+| -------------------------------------------------------------- | ------------------------------------------------------------- |
+| Build your own product from the canonical fork basis           | **Starter**                                                   |
+| Try AF Stack as just an OpenAI-compatible gateway              | **03 — LLM gateway only**                                     |
+| See what a production-shape multi-tenant SaaS looks like       | **01 — Notable**                                              |
+| Understand the composite-reasoning pattern with real cost data | **06 — Deep research**                                        |
+| Build a coding-agent SaaS                                      | **02 — Shipwright**                                           |
 
 ## Adding your own example
 

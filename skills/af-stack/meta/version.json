@@ -1,0 +1,6 @@
+{
+  "skill_version": "0.1.0",
+  "af_stack_repo_sha": "ae41f49a108af77dc9ac389135f9beb3fd567592",
+  "generated_at": "2026-06-07T00:00:00Z",
+  "notes": "Initial skill bundle. Status column in SKILL.md primitives table tracks Phase 1/2/3 rollout. Update version.json whenever primitives table changes."
+}

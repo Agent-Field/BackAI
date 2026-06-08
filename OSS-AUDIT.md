@@ -20,6 +20,7 @@ holes are listed below in priority order.
 |---|---|---|
 | Auth | **better-auth** | Modern Node auth with OAuth providers built in |
 | LLM provider routing | **LiteLLM** (sidecar) | 100+ upstream providers, OpenAI-compat surface |
+| Outbound webhooks | **Svix** (sidecar) | Delivery queue, retries, signing, replay protection, message log |
 | Job queue | **River** | PG-backed, multi-replica, no Redis |
 | Cron parsing | **robfig/cron/v3** | Industry standard |
 | Vector store | **pgvector** | Avoids Pinecone op cost |
@@ -34,6 +35,8 @@ holes are listed below in priority order.
 | Sandbox: Firecracker | **Flintlock** | Stub today; swap to flintlockd when needed |
 | Sandbox: e2b | **e2b API** | Real client, paid service |
 | MCP protocol | **modelcontextprotocol.io** spec | We use JSON-RPC framing per spec |
+| MCP runners | **uv / uvx** in the agent container | Agent containers can spawn stdio MCP servers via `uvx` |
+| Coding harnesses | **claude-code / codex / gemini-cli / opencode** in the agent container | Agents declare available harnesses through AgentField capabilities |
 | Logging | **slog** (stdlib) | Ring buffer is ours (tiny) |
 | Tracing | **OpenTelemetry SDK** | Standard wiring |
 | Metrics | **Prometheus client_golang** | Standard wiring |
@@ -63,24 +66,33 @@ edit, not a code change. Mistral, DeepSeek, Groq, Cohere, Bedrock,
 plus everything else LiteLLM supports, all work by dropping in an
 `..._API_KEY`.
 
-### 2. Webhooks delivery → **Svix** *(was in original plan)*
+**Virtual keys + spend (item #22, landed):** AF Stack also uses
+LiteLLM's master-key-protected admin surface. `IssueAPIKey` mints a
+matching LiteLLM virtual key (`/key/generate`) alongside every
+`suite_api_keys` row, with the operator-supplied `budget_max_usd`,
+`rate_limit_rpm`, and `rate_limit_tpm` forwarded as `max_budget`,
+`rpm_limit`, and `tpm_limit`. The LiteLLM secret is stored encrypted
+in the AF Stack secrets vault under `litellm/key/{api_key_id}`; only
+an alias + SHA-256 hash live on the row. The LLM gateway reads the
+per-tenant key at request time and uses it for the upstream call so
+LiteLLM enforces budget + rate limit upstream and the dashboard reads
+live spend from `/spend/keys`. `suite_cost_events` is downgraded to a
+write-through audit table — LiteLLM is the canonical balance. Legacy
+keys without a LiteLLM mapping keep working: the provider falls back
+to `LITELLM_MASTER_KEY`. See
+`services/runtime/internal/llmgateway/litellm_admin.go` and
+`services/runtime/internal/tenancy/litellm_mirror.go`.
 
-**Today:** `services/runtime/internal/webhooks/` has our own outbox +
-retry worker (Phase 10.3). ~600 lines.
-
-**Should be:** **Svix** (the company that makes the webhooks layer for
-Resend, Clerk, Lago, etc.). Self-hostable. Battle-tested at scale.
-Includes a UI, retries, signing, dedup, replay protection, all of it.
-
-**Drops:** outbound.go, worker.go, deliveries.go, the whole outbox
-pattern, ~600 LoC.
-
-**Keeps:** our inbound HMAC verify path (it's small and tied to our
-forward_to semantics).
-
-**Migration:** 2–3 days. Svix is a Docker container; we point our
-`POST /api/v1/webhooks/send` at Svix's API. The deliveries we render in
-`/operate/webhook-activity` come from Svix's API instead of our table.
+**Rate limiting moved entirely upstream (item #32, landed):** the
+runtime no longer runs a local token-bucket — `services/runtime/internal/ratelimit`
+is deleted. LiteLLM's per-virtual-key `rpm_limit` / `tpm_limit` is the
+sole enforcement layer. When LiteLLM returns 429, the LLM handler
+proxies `Retry-After` and the `X-RateLimit-Limit / Remaining / Reset`
+trio through to the client unchanged, and the error envelope returns
+`{"error":{"code":"RATE_LIMIT_EXCEEDED","type":"rate_limit_error","details":{"retry_after":N}}}` —
+the standard OpenAI SDK rate-limit signal. See `internal/llmgateway/litellm_provider.go`
+(`extractRateLimitHeaders`, `upstreamErr`) and `internal/server/llm.go`
+(`writeOpenAIErrorWithHeaders`).
 
 ### 3. LLM cache → **GPTCache** or **OpenLIT**
 
@@ -96,38 +108,6 @@ it pre-LLM-call. We'd drop our `llmcache.go` cache logic.
 
 **Considerations:** semantic cache hit-rate is higher (good) but
 introduces an embedding step per query (some cost). Worth A/B.
-
-### 4. MCP — `uv` in the agent container
-
-**Today:** the runtime container is distroless, so `uvx
-mcp-server-github` fails because `uv` isn't there. We end up with all
-MCP servers marked "errored" in the dashboard.
-
-**Should be:** add `uv` to the **agent** container (where AF agents
-run) and let agents declare their MCP servers at startup. The runtime
-queries AgentField for "which agents have which MCP servers ready".
-
-This is the same architectural change as harnesses (option A).
-
-**Migration:** 1 day. `apt-get install uv` in
-`apps/backend/agents/sample/Dockerfile`, then add MCP-registration to
-the AF agent SDK.
-
-### 5. Harnesses — agent container too
-
-**Today:** probe-only in runtime container = always "missing".
-
-**Should be:** same as above. Install harnesses in agent container, AF
-agent declares at startup, runtime queries AF for availability.
-
-`apps/backend/agents/sample/Dockerfile` adds:
-```
-RUN npm install -g @anthropic-ai/claude-code @openai/codex \
-    @google/gemini-cli
-```
-
-The `/build/harnesses` top-level tab moves into a column on
-`/build/agents`.
 
 ### 6. Audit log SAW → **dlog** or stay home-grown
 
@@ -186,16 +166,22 @@ script. **Verdict: keep.**
 
 ## Priority order
 
-1. ~~**LiteLLM** for LLM gateway~~ — **DONE** (this push)
-2. **Svix** for webhooks outbound — drops outbox + retry worker
-   (~600 lines)
-3. **uv in agent container + MCP refactor** — unlocks real
-   MCP-server-github, mcp-server-postgres, etc.
-4. **Harnesses → agent container** — unlocks claude-code etc.
-   actually being usable
+1. **LiteLLM virtual keys** — DONE (item #22 landed). Per-user budgets,
+   per-key rate limits, and `/spend/*` are now the source of truth;
+   `suite_cost_events` is audit-only. The internal rate limiter has
+   been retired (item #32 landed) — LiteLLM is the sole rate-limit
+   enforcer, and 429s flow back with `Retry-After` + `X-RateLimit-*`
+   headers proxied through.
+2. **Billing adapter** — DONE. Stripe and Lago share one provider
+   interface selected by `AF_STACK_BILLING_ADAPTER=stripe|lago|none`.
+3. **Shipwright** — autonomous AI agent factory on top of AgentField,
+   sandboxes, and harnesses.
+4. **AgentField data in dashboard** — DAG, step inspector, workflow memory,
+   and rerun-from-step without duplicating AgentField state.
+5. **Approvals primitive** — general human decision point for any flow.
 
-Items 3 + 4 are coupled because both are "move the binary from runtime
-container to agent container, declare at registration".
+Completed swaps: LiteLLM, Svix, `uvx` in agent containers, and harnesses
+in agent containers.
 
 ## What we KEEP hand-rolled (and why)
 

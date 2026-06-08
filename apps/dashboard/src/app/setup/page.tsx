@@ -6,6 +6,7 @@ import { Boxes } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { brand } from "@/lib/brand"
 import { operatorCount } from "@/lib/session"
 
 export default async function SetupPage() {
@@ -18,12 +19,16 @@ export default async function SetupPage() {
       <Card className="w-full max-w-md">
         <CardHeader>
           <div className="bg-primary text-primary-foreground mb-2 flex aspect-square size-10 items-center justify-center rounded-md">
-            <Boxes className="size-5" />
+            {brand.logos.light ? (
+              <img src={brand.logos.light} alt="" className="size-6 object-contain" />
+            ) : (
+              <Boxes className="size-5" />
+            )}
           </div>
-          <CardTitle>Welcome to your stack</CardTitle>
+          <CardTitle>Welcome to {brand.displayName}</CardTitle>
           <CardDescription>
-            Create the first operator account. This account governs the entire
-            deployment. Subsequent users sign up via invitation.
+            Create the first operator account. This account governs the entire deployment.
+            Subsequent users sign up via invitation.
           </CardDescription>
         </CardHeader>
         <CardContent>

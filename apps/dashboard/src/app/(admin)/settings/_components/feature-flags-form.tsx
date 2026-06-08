@@ -2,78 +2,94 @@
 
 "use client"
 
-// Feature flags — placeholder UI.
-//
-// TODO(Phase 5): Wire to runtime config. Today's toggles are no-op locally so
-// operators can preview the shape; the runtime is the source of truth. Once
-// the config API lands, replace `useState` with a fetch-and-PATCH against
-// `api.modulesState` (or a dedicated endpoint), and surface server errors via
-// `toast.error`.
+import * as React from "react"
 
-import { useState } from "react"
-
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field"
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
-
-type Flag = {
-  id: string
-  label: string
-  description: string
-  defaultValue: boolean
-}
-
-const FLAGS: Flag[] = [
-  {
-    id: "experimental-cost-forecasts",
-    label: "Experimental cost forecasts",
-    description:
-      "Show 30-day spend forecasts on the Cost page based on rolling averages.",
-    defaultValue: false,
-  },
-  {
-    id: "command-palette-recents",
-    label: "Command palette recents",
-    description:
-      "Remember the last few destinations and show them at the top of ⌘K.",
-    defaultValue: true,
-  },
-  {
-    id: "verbose-run-logs",
-    label: "Verbose run logs",
-    description:
-      "Include tool input/output payloads in the inline run log viewer.",
-    defaultValue: false,
-  },
-]
+import { api, type FeatureFlag } from "@/lib/api"
 
 export function FeatureFlagsForm() {
-  // Local-only state. Runtime persistence wired in Phase 5 (see TODO above).
-  const [values, setValues] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(FLAGS.map((f) => [f.id, f.defaultValue])),
-  )
+  const [flags, setFlags] = React.useState<FeatureFlag[]>([])
+  const [loading, setLoading] = React.useState(true)
+  const [savingKey, setSavingKey] = React.useState<string | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    api.config.flags
+      .list()
+      .then((result) => {
+        if (cancelled) return
+        setFlags(result.flags)
+        setError(null)
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        setError(err instanceof Error ? err.message : "Failed to load feature flags")
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  async function setFlag(flag: FeatureFlag, enabled: boolean) {
+    const previous = flags
+    setSavingKey(flag.key)
+    setError(null)
+    setFlags((current) =>
+      current.map((item) => (item.key === flag.key ? { ...item, enabled } : item)),
+    )
+    try {
+      const next = await api.config.flags.set(flag.key, { enabled })
+      setFlags((current) => current.map((item) => (item.key === next.key ? next : item)))
+    } catch (err) {
+      setFlags(previous)
+      setError(err instanceof Error ? err.message : "Failed to update feature flag")
+    } finally {
+      setSavingKey(null)
+    }
+  }
+
+  if (loading) {
+    return (
+      <FieldGroup>
+        {[0, 1, 2].map((idx) => (
+          <div key={idx} className="flex items-center justify-between gap-4 py-2">
+            <div className="flex flex-1 flex-col gap-2">
+              <Skeleton className="h-4 w-48" />
+              <Skeleton className="h-3 w-full max-w-md" />
+            </div>
+            <Skeleton className="h-6 w-10" />
+          </div>
+        ))}
+      </FieldGroup>
+    )
+  }
 
   return (
-    <FieldGroup>
-      {FLAGS.map((flag) => (
-        <Field key={flag.id} orientation="horizontal">
-          <div className="flex flex-1 flex-col gap-0.5">
-            <FieldLabel htmlFor={flag.id}>{flag.label}</FieldLabel>
-            <FieldDescription>{flag.description}</FieldDescription>
-          </div>
-          <Switch
-            id={flag.id}
-            checked={values[flag.id]}
-            onCheckedChange={(next) =>
-              setValues((prev) => ({ ...prev, [flag.id]: next }))
-            }
-          />
-        </Field>
-      ))}
-    </FieldGroup>
+    <div className="flex flex-col gap-4">
+      {error ? <p className="text-destructive text-sm">{error}</p> : null}
+      <FieldGroup>
+        {flags.map((flag) => (
+          <Field key={flag.key} orientation="horizontal">
+            <div className="flex flex-1 flex-col gap-0.5">
+              <FieldLabel htmlFor={flag.key}>{flag.label || flag.key}</FieldLabel>
+              <FieldDescription>{flag.description}</FieldDescription>
+            </div>
+            <Switch
+              id={flag.key}
+              checked={flag.enabled}
+              disabled={savingKey === flag.key}
+              onCheckedChange={(next) => void setFlag(flag, next)}
+            />
+          </Field>
+        ))}
+      </FieldGroup>
+    </div>
   )
 }

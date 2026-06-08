@@ -29,6 +29,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/audit"
 	"github.com/Agent-Field/backai/services/runtime/internal/cost"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
+	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
 )
 
 // ─── Wire shapes ──────────────────────────────────────────────────────────
@@ -270,6 +271,9 @@ func (s *Server) handleAdminListBudgets(w http.ResponseWriter, r *http.Request) 
 	if s.budgetsUnavailable(w) {
 		return
 	}
+	if s.operatorAccessDenied(w, r, rbac.ResourceAdminBudgets, rbac.ActionRead) {
+		return
+	}
 	rows, err := s.budgets.List(ctx)
 	if err != nil {
 		span.RecordError(err)
@@ -289,6 +293,9 @@ func (s *Server) handleAdminGetBudget(w http.ResponseWriter, r *http.Request) {
 	ctx, span := s.dashTracer().Start(r.Context(), "admin.budgets.get")
 	defer span.End()
 	if s.budgetsUnavailable(w) {
+		return
+	}
+	if s.operatorAccessDenied(w, r, rbac.ResourceAdminBudgets, rbac.ActionRead) {
 		return
 	}
 	tenantID := r.PathValue("tenantId")
@@ -314,6 +321,9 @@ func (s *Server) handleAdminSetBudget(w http.ResponseWriter, r *http.Request) {
 	ctx, span := s.dashTracer().Start(r.Context(), "admin.budgets.set")
 	defer span.End()
 	if s.budgetsUnavailable(w) {
+		return
+	}
+	if s.operatorAccessDenied(w, r, rbac.ResourceAdminBudgets, rbac.ActionWrite) {
 		return
 	}
 

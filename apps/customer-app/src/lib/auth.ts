@@ -15,9 +15,11 @@
 // suite_api_keys, suite_billing_customers). See ./provisioning.ts.
 
 import { betterAuth } from "better-auth"
+import { genericOAuth } from "better-auth/plugins"
 import { Pool } from "pg"
 
 import { provisionTenant, lookupCustomerContext } from "@/lib/provisioning"
+import { getCustomerSSOConfig } from "@/lib/sso"
 
 function makeAuth() {
   const databaseUrl =
@@ -26,6 +28,7 @@ function makeAuth() {
     return null
   }
   const pool = new Pool({ connectionString: databaseUrl })
+  const sso = getCustomerSSOConfig()
 
   // Origins the customer-app accepts cross-origin auth requests from.
   // Defaults cover the docker-compose host-port pair (the customer-app
@@ -61,6 +64,27 @@ function makeAuth() {
       autoSignIn: true,
       minPasswordLength: 8,
     },
+    plugins: [
+      ...(sso.enabled
+        ? [
+            genericOAuth({
+              config: [
+                {
+                  providerId: sso.providerId,
+                  issuer: sso.issuer,
+                  discoveryUrl: sso.discoveryUrl,
+                  clientId: process.env.AF_STACK_SSO_CLIENT_ID!,
+                  clientSecret: process.env.AF_STACK_SSO_CLIENT_SECRET!,
+                  scopes: sso.scopes,
+                  pkce: true,
+                  requireIssuerValidation: true,
+                  overrideUserInfo: true,
+                },
+              ],
+            }),
+          ]
+        : []),
+    ],
     session: {
       cookieCache: {
         enabled: true,

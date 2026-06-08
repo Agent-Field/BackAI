@@ -70,6 +70,50 @@ export const MCPCallResultSchema = z.object({
 })
 export type MCPCallResult = z.infer<typeof MCPCallResultSchema>
 
+export const ToolAdapterIdSchema = z.enum([
+  "browser-use",
+  "searxng",
+  "fs",
+  "exec",
+  "http",
+  "sql",
+])
+export type ToolAdapterId = z.infer<typeof ToolAdapterIdSchema>
+
+export const BuiltinToolDefinitionSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  inputSchema: z.record(z.string(), z.unknown()),
+})
+export type BuiltinToolDefinition = z.infer<typeof BuiltinToolDefinitionSchema>
+
+export const ToolAdapterSchema = z.object({
+  id: ToolAdapterIdSchema,
+  label: z.string(),
+  description: z.string(),
+  enabled: z.boolean(),
+  configured: z.boolean(),
+  defaultEnabled: z.boolean(),
+  config: z.record(z.string(), z.unknown()),
+  updatedAt: z.string().nullable(),
+  tools: z.array(BuiltinToolDefinitionSchema),
+})
+export type ToolAdapter = z.infer<typeof ToolAdapterSchema>
+
+export const ToolAdapterListSchema = z.object({
+  adapters: z.array(ToolAdapterSchema),
+})
+export type ToolAdapterList = z.infer<typeof ToolAdapterListSchema>
+
+export const ToolAdapterCallResultSchema = z.object({
+  adapter: ToolAdapterIdSchema,
+  tool: z.string(),
+  status: z.string(),
+  result: z.unknown().optional(),
+  durationMs: z.number(),
+})
+export type ToolAdapterCallResult = z.infer<typeof ToolAdapterCallResultSchema>
+
 // ---------- option shapes ----------
 
 export interface AddMCPServerOptions extends HttpOptions {
@@ -90,6 +134,14 @@ export interface AddMCPServerOptions extends HttpOptions {
 export interface ListMCPToolsOptions extends HttpOptions {
   /** Scope the listing to one server. */
   server?: string
+}
+
+export interface SetToolAdapterEnabledOptions extends HttpOptions {
+  config?: Record<string, unknown>
+}
+
+export interface CallToolAdapterOptions extends HttpOptions {
+  arguments?: Record<string, unknown>
 }
 
 const ALLOWED_TRANSPORTS: readonly MCPTransport[] = ["stdio", "sse"]
@@ -235,7 +287,96 @@ export async function callMcp(
   return MCPCallResultSchema.parse(camelizeCallResult(raw))
 }
 
+/** List built-in adapter catalogue plus the caller tenant's enablement. */
+export async function listAdapters(opts: HttpOptions = {}): Promise<ToolAdapter[]> {
+  const raw = await request<unknown>("GET", "/tools/adapters", null, opts)
+  const parsed = ToolAdapterListSchema.parse(camelizeAdapterList(raw))
+  return parsed.adapters
+}
+
+/** Enable or disable one built-in adapter for the caller tenant. */
+export async function setAdapterEnabled(
+  id: ToolAdapterId,
+  enabled: boolean,
+  opts: SetToolAdapterEnabledOptions = {},
+): Promise<ToolAdapter> {
+  ToolAdapterIdSchema.parse(id)
+  const { config, ...http } = opts
+  const raw = await request<unknown>(
+    "PUT",
+    `/tools/adapters/${encodeURIComponent(id)}/enabled`,
+    { enabled: Boolean(enabled), ...(config !== undefined ? { config } : {}) },
+    http,
+  )
+  return ToolAdapterSchema.parse(camelizeAdapter(raw))
+}
+
+/** Call an enabled built-in adapter. Agent run traces still live in AgentField. */
+export async function callAdapter(
+  adapter: ToolAdapterId,
+  tool: string,
+  opts: CallToolAdapterOptions = {},
+): Promise<ToolAdapterCallResult> {
+  ToolAdapterIdSchema.parse(adapter)
+  if (typeof tool !== "string" || tool.length === 0) {
+    throw new Error("tool name must be a non-empty string")
+  }
+  const { arguments: args, ...http } = opts
+  const raw = await request<unknown>(
+    "POST",
+    "/tools/call",
+    { adapter, tool, ...(args !== undefined ? { arguments: args } : {}) },
+    http,
+  )
+  return ToolAdapterCallResultSchema.parse(camelizeAdapterCall(raw))
+}
+
 // ---------- helpers ----------
+
+function camelizeAdapter(raw: unknown): unknown {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw
+  const src = raw as Record<string, unknown>
+  return {
+    id: src.id,
+    label: src.label,
+    description: src.description,
+    enabled: src.enabled,
+    configured: src.configured,
+    defaultEnabled: src.default_enabled ?? src.defaultEnabled,
+    config: src.config ?? {},
+    updatedAt: src.updated_at ?? src.updatedAt ?? null,
+    tools: Array.isArray(src.tools) ? src.tools.map(camelizeBuiltinTool) : [],
+  }
+}
+
+function camelizeBuiltinTool(raw: unknown): unknown {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw
+  const src = raw as Record<string, unknown>
+  return {
+    name: src.name,
+    description: src.description,
+    inputSchema: src.input_schema ?? src.inputSchema ?? {},
+  }
+}
+
+function camelizeAdapterList(raw: unknown): unknown {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw
+  const src = raw as Record<string, unknown>
+  const adapters = Array.isArray(src.adapters) ? src.adapters.map(camelizeAdapter) : []
+  return { adapters }
+}
+
+function camelizeAdapterCall(raw: unknown): unknown {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw
+  const src = raw as Record<string, unknown>
+  return {
+    adapter: src.adapter,
+    tool: src.tool,
+    status: src.status,
+    result: src.result,
+    durationMs: src.duration_ms ?? src.durationMs ?? 0,
+  }
+}
 
 function camelizeServer(raw: unknown): unknown {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw
@@ -300,6 +441,9 @@ function camelizeCallResult(raw: unknown): unknown {
 
 /** Namespace object — the shape `suite.tools` is built from. */
 export const tools = {
+  listAdapters,
+  setAdapterEnabled,
+  callAdapter,
   listMcpServers,
   addMcpServer,
   removeMcpServer,

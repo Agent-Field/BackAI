@@ -18,6 +18,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/Agent-Field/backai/services/runtime/internal/audit"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
+	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
 	"github.com/Agent-Field/backai/services/runtime/internal/tenancy"
 )
 
@@ -64,6 +66,7 @@ func (s *Server) registerAdminRoutes() {
 	s.mux.HandleFunc("GET /api/v1/admin/keys", s.handleAdminListKeys)
 	s.mux.HandleFunc("POST /api/v1/admin/keys", s.handleAdminIssueKey)
 	s.mux.HandleFunc("DELETE /api/v1/admin/keys/{id}", s.handleAdminRevokeKey)
+	s.mux.HandleFunc("GET /api/v1/admin/keys/{id}/spend", s.handleAdminKeySpend)
 
 	// Audit log.
 	s.mux.HandleFunc("GET /api/v1/admin/audit", s.handleAdminListAudit)
@@ -185,21 +188,43 @@ type membershipListWire struct {
 }
 
 // apiKeyWire mirrors APIKeySchema (no plaintext).
+//
+// LiteLLM fields (item #22): litellm_key_alias is the alias minted at
+// issuance; the secret lives in the secrets vault. budget_max_usd /
+// rate_limit_rpm / rate_limit_tpm are enforced UPSTREAM by LiteLLM —
+// the runtime no longer hand-rolls per-tenant rate limiting in the
+// happy path. live_spend_usd is populated by the list handler when the
+// LiteLLM admin client is configured (read live from /spend/keys).
 type apiKeyWire struct {
-	ID         string   `json:"id"`
-	TenantID   string   `json:"tenant_id"`
-	Prefix     string   `json:"prefix"`
-	Name       *string  `json:"name"`
-	Scopes     []string `json:"scopes"`
-	CreatedBy  *string  `json:"created_by"`
-	CreatedAt  string   `json:"created_at"`
-	LastUsedAt *string  `json:"last_used_at"`
-	ExpiresAt  *string  `json:"expires_at"`
-	RevokedAt  *string  `json:"revoked_at"`
+	ID              string   `json:"id"`
+	TenantID        string   `json:"tenant_id"`
+	Prefix          string   `json:"prefix"`
+	Name            *string  `json:"name"`
+	Scopes          []string `json:"scopes"`
+	CreatedBy       *string  `json:"created_by"`
+	CreatedAt       string   `json:"created_at"`
+	LastUsedAt      *string  `json:"last_used_at"`
+	ExpiresAt       *string  `json:"expires_at"`
+	RevokedAt       *string  `json:"revoked_at"`
+	LiteLLMKeyAlias *string  `json:"litellm_key_alias"`
+	BudgetMaxUSD    *float64 `json:"budget_max_usd"`
+	RateLimitRPM    *int     `json:"rate_limit_rpm"`
+	RateLimitTPM    *int     `json:"rate_limit_tpm"`
+	LiveSpendUSD    *float64 `json:"live_spend_usd"`
 }
 
 type apiKeyListWire struct {
 	Keys []apiKeyWire `json:"keys"`
+}
+
+// keySpendWire is the GET /api/v1/admin/keys/{id}/spend response. Reads
+// live from LiteLLM /spend/keys — suite_cost_events is audit-only.
+type keySpendWire struct {
+	APIKeyID     string   `json:"api_key_id"`
+	Alias        *string  `json:"litellm_key_alias"`
+	SpendUSD     float64  `json:"spend_usd"`
+	MaxBudgetUSD *float64 `json:"max_budget_usd"`
+	RemainingUSD *float64 `json:"remaining_usd"`
 }
 
 // issuedKeyWire mirrors IssuedAPIKeySchema (APIKey + plaintext value).
@@ -332,11 +357,18 @@ type updateTenantInputWire struct {
 }
 
 // issueAPIKeyInputWire mirrors IssueAPIKeyInputSchema.
+//
+// budget_max_usd / rate_limit_rpm / rate_limit_tpm are item-#22
+// additions — when set, IssueAPIKey forwards them to LiteLLM as the
+// virtual key's max_budget / rpm_limit / tpm_limit. nil = unlimited.
 type issueAPIKeyInputWire struct {
-	TenantID  string   `json:"tenant_id"`
-	Name      string   `json:"name,omitempty"`
-	Scopes    []string `json:"scopes"`
-	ExpiresAt *string  `json:"expires_at,omitempty"`
+	TenantID     string   `json:"tenant_id"`
+	Name         string   `json:"name,omitempty"`
+	Scopes       []string `json:"scopes"`
+	ExpiresAt    *string  `json:"expires_at,omitempty"`
+	BudgetMaxUSD *float64 `json:"budget_max_usd,omitempty"`
+	RateLimitRPM *int     `json:"rate_limit_rpm,omitempty"`
+	RateLimitTPM *int     `json:"rate_limit_tpm,omitempty"`
 }
 
 // addMembershipInputWire is the body for POST /api/v1/admin/memberships.
@@ -408,13 +440,17 @@ func marshalAPIKey(k tenancy.APIKey) apiKeyWire {
 		scopes = []string{}
 	}
 	w := apiKeyWire{
-		ID:        k.ID,
-		TenantID:  k.TenantID,
-		Prefix:    k.Prefix,
-		Name:      k.Name,
-		Scopes:    scopes,
-		CreatedBy: k.CreatedBy,
-		CreatedAt: k.CreatedAt.UTC().Format(time.RFC3339Nano),
+		ID:              k.ID,
+		TenantID:        k.TenantID,
+		Prefix:          k.Prefix,
+		Name:            k.Name,
+		Scopes:          scopes,
+		CreatedBy:       k.CreatedBy,
+		CreatedAt:       k.CreatedAt.UTC().Format(time.RFC3339Nano),
+		LiteLLMKeyAlias: k.LiteLLMKeyAlias,
+		BudgetMaxUSD:    k.BudgetMaxUSD,
+		RateLimitRPM:    k.RateLimitRPM,
+		RateLimitTPM:    k.RateLimitTPM,
 	}
 	if k.LastUsedAt != nil {
 		s := k.LastUsedAt.UTC().Format(time.RFC3339Nano)
@@ -574,7 +610,7 @@ func marshalTenantDetail(d tenancy.TenantDetail) tenantDetailWire {
 func (s *Server) handleAdminListTenants(w http.ResponseWriter, r *http.Request) {
 	ctx, span := s.dashTracer().Start(r.Context(), "admin.tenants.list")
 	defer span.End()
-	if s.adminUnavailable(w) {
+	if s.adminAccessDenied(w, r, rbac.ResourceAdminTenants, rbac.ActionRead) {
 		return
 	}
 	rows, err := s.tenancy.ListTenants(ctx)
@@ -593,7 +629,7 @@ func (s *Server) handleAdminListTenants(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleAdminCreateTenant(w http.ResponseWriter, r *http.Request) {
 	ctx, span := s.dashTracer().Start(r.Context(), "admin.tenants.create")
 	defer span.End()
-	if s.adminUnavailable(w) {
+	if s.adminAccessDenied(w, r, rbac.ResourceAdminTenants, rbac.ActionWrite) {
 		return
 	}
 	var in createTenantInputWire
@@ -635,7 +671,7 @@ func (s *Server) handleAdminCreateTenant(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleAdminGetTenant(w http.ResponseWriter, r *http.Request) {
 	ctx, span := s.dashTracer().Start(r.Context(), "admin.tenants.get")
 	defer span.End()
-	if s.adminUnavailable(w) {
+	if s.adminAccessDenied(w, r, rbac.ResourceAdminTenants, rbac.ActionRead) {
 		return
 	}
 	id := r.PathValue("id")
@@ -661,7 +697,7 @@ func (s *Server) handleAdminGetTenant(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAdminGetTenantDrilldown(w http.ResponseWriter, r *http.Request) {
 	ctx, span := s.dashTracer().Start(r.Context(), "admin.tenants.drilldown")
 	defer span.End()
-	if s.adminUnavailable(w) {
+	if s.adminAccessDenied(w, r, rbac.ResourceAdminTenants, rbac.ActionRead) {
 		return
 	}
 	id := r.PathValue("id")
@@ -682,7 +718,7 @@ func (s *Server) handleAdminGetTenantDrilldown(w http.ResponseWriter, r *http.Re
 func (s *Server) handleAdminUpdateTenant(w http.ResponseWriter, r *http.Request) {
 	ctx, span := s.dashTracer().Start(r.Context(), "admin.tenants.update")
 	defer span.End()
-	if s.adminUnavailable(w) {
+	if s.adminAccessDenied(w, r, rbac.ResourceAdminTenants, rbac.ActionWrite) {
 		return
 	}
 	id := r.PathValue("id")
@@ -712,7 +748,7 @@ func (s *Server) handleAdminUpdateTenant(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleAdminDeleteTenant(w http.ResponseWriter, r *http.Request) {
 	ctx, span := s.dashTracer().Start(r.Context(), "admin.tenants.delete")
 	defer span.End()
-	if s.adminUnavailable(w) {
+	if s.adminAccessDenied(w, r, rbac.ResourceAdminTenants, rbac.ActionDelete) {
 		return
 	}
 	id := r.PathValue("id")
@@ -738,7 +774,7 @@ func (s *Server) handleAdminDeleteTenant(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 	ctx, span := s.dashTracer().Start(r.Context(), "admin.users.list")
 	defer span.End()
-	if s.adminUnavailable(w) {
+	if s.adminAccessDenied(w, r, rbac.ResourceAdminUsers, rbac.ActionRead) {
 		return
 	}
 	q := r.URL.Query()
@@ -766,7 +802,7 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAdminListMemberships(w http.ResponseWriter, r *http.Request) {
 	ctx, span := s.dashTracer().Start(r.Context(), "admin.memberships.list")
 	defer span.End()
-	if s.adminUnavailable(w) {
+	if s.adminAccessDenied(w, r, rbac.ResourceAdminMemberships, rbac.ActionRead) {
 		return
 	}
 	q := r.URL.Query()
@@ -788,7 +824,7 @@ func (s *Server) handleAdminListMemberships(w http.ResponseWriter, r *http.Reque
 func (s *Server) handleAdminAddMembership(w http.ResponseWriter, r *http.Request) {
 	ctx, span := s.dashTracer().Start(r.Context(), "admin.memberships.add")
 	defer span.End()
-	if s.adminUnavailable(w) {
+	if s.adminAccessDenied(w, r, rbac.ResourceAdminMemberships, rbac.ActionWrite) {
 		return
 	}
 	var in addMembershipInputWire
@@ -822,7 +858,7 @@ func (s *Server) handleAdminAddMembership(w http.ResponseWriter, r *http.Request
 func (s *Server) handleAdminRemoveMembership(w http.ResponseWriter, r *http.Request) {
 	ctx, span := s.dashTracer().Start(r.Context(), "admin.memberships.remove")
 	defer span.End()
-	if s.adminUnavailable(w) {
+	if s.adminAccessDenied(w, r, rbac.ResourceAdminMemberships, rbac.ActionDelete) {
 		return
 	}
 	tenantID := r.PathValue("tenantId")
@@ -854,7 +890,7 @@ func (s *Server) handleAdminRemoveMembership(w http.ResponseWriter, r *http.Requ
 func (s *Server) handleAdminListKeys(w http.ResponseWriter, r *http.Request) {
 	ctx, span := s.dashTracer().Start(r.Context(), "admin.keys.list")
 	defer span.End()
-	if s.adminUnavailable(w) {
+	if s.adminAccessDenied(w, r, rbac.ResourceAdminKeys, rbac.ActionRead) {
 		return
 	}
 	tenantID := strings.TrimSpace(r.URL.Query().Get("tenant"))
@@ -866,15 +902,49 @@ func (s *Server) handleAdminListKeys(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]apiKeyWire, 0, len(rows))
 	for _, k := range rows {
-		out = append(out, marshalAPIKey(k))
+		out = append(out, s.enrichKeyWithLiveSpend(ctx, k))
 	}
 	writeJSON(w, http.StatusOK, apiKeyListWire{Keys: out})
+}
+
+// enrichKeyWithLiveSpend marshals + populates LiveSpendUSD by hitting
+// LiteLLM /spend/keys when both the key has a LiteLLM mapping and a
+// mirror is wired. Failures are swallowed (the field stays nil and the
+// dashboard renders "—") so a flaky LiteLLM never collapses the list
+// view.
+//
+// Per-row cost: ~1 HTTP round-trip per key. For lists of 100+ keys
+// this gets expensive; future optimisation can batch via /spend/users
+// or cache for a few seconds. For now we keep it simple — typical
+// tenant has <10 keys, and the list page reloads on action only.
+func (s *Server) enrichKeyWithLiveSpend(ctx context.Context, k tenancy.APIKey) apiKeyWire {
+	w := marshalAPIKey(k)
+	if k.LiteLLMKeyAlias == nil || *k.LiteLLMKeyAlias == "" {
+		return w
+	}
+	mirror := s.tenancy.LiteLLMMirror()
+	if mirror == nil || !mirror.Configured() {
+		return w
+	}
+	spendCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	spend, err := mirror.KeySpend(spendCtx, *k.LiteLLMKeyAlias)
+	if err != nil {
+		// Don't propagate — log only. The dashboard already tolerates
+		// nil LiveSpendUSD ("—").
+		s.log.Warn("admin: litellm KeySpend failed",
+			"alias", *k.LiteLLMKeyAlias, "error", err)
+		return w
+	}
+	v := spend.TotalUSD
+	w.LiveSpendUSD = &v
+	return w
 }
 
 func (s *Server) handleAdminIssueKey(w http.ResponseWriter, r *http.Request) {
 	ctx, span := s.dashTracer().Start(r.Context(), "admin.keys.issue")
 	defer span.End()
-	if s.adminUnavailable(w) {
+	if s.adminAccessDenied(w, r, rbac.ResourceAdminKeys, rbac.ActionWrite) {
 		return
 	}
 	var in issueAPIKeyInputWire
@@ -891,9 +961,12 @@ func (s *Server) handleAdminIssueKey(w http.ResponseWriter, r *http.Request) {
 		scopes = []string{}
 	}
 	issue := tenancy.IssueAPIKeyInput{
-		TenantID: in.TenantID,
-		Name:     in.Name,
-		Scopes:   scopes,
+		TenantID:     in.TenantID,
+		Name:         in.Name,
+		Scopes:       scopes,
+		BudgetMaxUSD: in.BudgetMaxUSD,
+		RateLimitRPM: in.RateLimitRPM,
+		RateLimitTPM: in.RateLimitTPM,
 	}
 	if in.ExpiresAt != nil && *in.ExpiresAt != "" {
 		t, err := parseRFC3339(*in.ExpiresAt)
@@ -925,10 +998,66 @@ func (s *Server) handleAdminIssueKey(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, marshalIssuedKey(issued))
 }
 
+// handleAdminKeySpend serves GET /api/v1/admin/keys/{id}/spend. Reads
+// live spend from LiteLLM /spend/keys — suite_cost_events is audit
+// only (item #22).
+func (s *Server) handleAdminKeySpend(w http.ResponseWriter, r *http.Request) {
+	ctx, span := s.dashTracer().Start(r.Context(), "admin.keys.spend")
+	defer span.End()
+	if s.adminAccessDenied(w, r, rbac.ResourceAdminKeys, rbac.ActionRead) {
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, errEnvelope("VALIDATION_FAILED", "key id required"))
+		return
+	}
+	// Lookup the alias from the row (legacy keys may have no alias —
+	// surface a zeroed payload rather than 404 so the dashboard can
+	// render an em-dash on legacy rows).
+	keys, err := s.tenancy.ListKeys(ctx, tenancy.ListKeysOpts{IncludeRevoked: true})
+	if err != nil {
+		span.RecordError(err)
+		writeTenancyError(w, err)
+		return
+	}
+	var found *tenancy.APIKey
+	for i := range keys {
+		if keys[i].ID == id {
+			found = &keys[i]
+			break
+		}
+	}
+	if found == nil {
+		writeJSON(w, http.StatusNotFound, errEnvelope("NOT_FOUND", "api key not found"))
+		return
+	}
+	resp := keySpendWire{
+		APIKeyID: found.ID,
+		Alias:    found.LiteLLMKeyAlias,
+	}
+	mirror := s.tenancy.LiteLLMMirror()
+	if found.LiteLLMKeyAlias != nil && mirror != nil && mirror.Configured() {
+		spend, err := mirror.KeySpend(ctx, *found.LiteLLMKeyAlias)
+		if err != nil {
+			s.log.Warn("admin: litellm KeySpend failed",
+				"alias", *found.LiteLLMKeyAlias, "error", err)
+		} else {
+			resp.SpendUSD = spend.TotalUSD
+			resp.MaxBudgetUSD = spend.MaxBudgetUSD
+			if rem, ok := spend.RemainingUSD(); ok {
+				r := rem
+				resp.RemainingUSD = &r
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func (s *Server) handleAdminRevokeKey(w http.ResponseWriter, r *http.Request) {
 	ctx, span := s.dashTracer().Start(r.Context(), "admin.keys.revoke")
 	defer span.End()
-	if s.adminUnavailable(w) {
+	if s.adminAccessDenied(w, r, rbac.ResourceAdminKeys, rbac.ActionDelete) {
 		return
 	}
 	id := r.PathValue("id")
@@ -954,7 +1083,7 @@ func (s *Server) handleAdminRevokeKey(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAdminListAudit(w http.ResponseWriter, r *http.Request) {
 	ctx, span := s.dashTracer().Start(r.Context(), "admin.audit.list")
 	defer span.End()
-	if s.adminUnavailable(w) {
+	if s.adminAccessDenied(w, r, rbac.ResourceAdminAudit, rbac.ActionRead) {
 		return
 	}
 	q := r.URL.Query()

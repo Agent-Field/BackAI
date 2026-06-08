@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package billing wires Stripe + the runtime's per-tenant usage meter
+// Package billing wires an external billing provider + the runtime's per-tenant usage meter
 // aggregation, behind a single Service that the REST handlers and SDKs
 // consume.
 //
 // The package is structured in three layers:
 //
 //   - Store  — direct SQL against suite_billing_customers + suite_usage_meters.
-//   - Client — thin wrapper around the official stripe-go SDK with a
-//              deterministic stub mode for dev (no STRIPE_SECRET_KEY).
+//   - Client — provider adapter (Stripe or Lago) with deterministic stub
+//     modes for dev.
 //   - Service — composes Store + Client, gating budgets and producing the
-//               wire shapes consumed by the dashboard.
+//     wire shapes consumed by the dashboard.
 //
 // Contract notes
 //
@@ -40,10 +40,14 @@ var (
 	// validation (empty tenant id, negative budget, etc.).
 	ErrInvalidInput = errors.New("billing: invalid input")
 
-	// ErrStripeUnavailable is returned when the Stripe client can't
-	// reach the API. Distinct from configuration errors (which surface
-	// at boot) so the REST layer can translate this to a 502.
-	ErrStripeUnavailable = errors.New("billing: stripe unavailable")
+	// ErrBillingUnavailable is returned when the active billing adapter
+	// can't reach its upstream API. Distinct from configuration errors
+	// so the REST layer can translate this to a 502.
+	ErrBillingUnavailable = errors.New("billing: provider unavailable")
+
+	// ErrStripeUnavailable is kept for old tests/callers; use
+	// ErrBillingUnavailable in new code.
+	ErrStripeUnavailable = ErrBillingUnavailable
 
 	// ErrSignatureInvalid is returned by the webhook verifier when the
 	// Stripe-Signature header doesn't match the body.
@@ -59,15 +63,15 @@ var (
 // Stripe. The remaining nullable fields only have meaning once a Stripe
 // subscription exists.
 type Customer struct {
-	TenantID           string    `json:"tenant_id"`
-	StripeCustomerID   *string   `json:"stripe_customer_id"`
-	Email              *string   `json:"email"`
-	Plan               string    `json:"plan"`
-	TrialEndsAt        *string   `json:"trial_ends_at"`
-	CurrentPeriodEnd   *string   `json:"current_period_end"`
-	SubscriptionStatus *string   `json:"subscription_status"`
-	CreatedAt          string    `json:"created_at"`
-	UpdatedAt          string    `json:"updated_at"`
+	TenantID           string  `json:"tenant_id"`
+	StripeCustomerID   *string `json:"stripe_customer_id"`
+	Email              *string `json:"email"`
+	Plan               string  `json:"plan"`
+	TrialEndsAt        *string `json:"trial_ends_at"`
+	CurrentPeriodEnd   *string `json:"current_period_end"`
+	SubscriptionStatus *string `json:"subscription_status"`
+	CreatedAt          string  `json:"created_at"`
+	UpdatedAt          string  `json:"updated_at"`
 }
 
 // UsageMeter mirrors UsageMeterSchema. One row aggregates a (meter,

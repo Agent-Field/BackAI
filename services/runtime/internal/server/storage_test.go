@@ -8,6 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"log/slog"
 	"mime/multipart"
@@ -378,6 +381,68 @@ func TestStorageDownloadNestedKey(t *testing.T) {
 	}
 }
 
+func TestStorageDownloadResizeTransform(t *testing.T) {
+	store := newStubStorage()
+	store.objects["avatar.png"] = testPNG(t, 8, 4)
+	store.contentType["avatar.png"] = "image/png"
+	srv := newStorageServer(t, store, nil, "")
+	req := httptest.NewRequest("GET", "/api/v1/storage/avatar.png?width=4&format=png", nil)
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "image/png" {
+		t.Fatalf("Content-Type = %q, want image/png", got)
+	}
+	img, _, err := image.Decode(bytes.NewReader(rec.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("decode transformed image: %v", err)
+	}
+	if got := img.Bounds().Dx(); got != 4 {
+		t.Fatalf("width = %d, want 4", got)
+	}
+	if got := img.Bounds().Dy(); got != 2 {
+		t.Fatalf("height = %d, want 2", got)
+	}
+}
+
+func TestStorageDownloadThumbnailDefaults(t *testing.T) {
+	store := newStubStorage()
+	store.objects["wide.png"] = testPNG(t, 16, 8)
+	store.contentType["wide.png"] = "image/png"
+	srv := newStorageServer(t, store, nil, "")
+	req := httptest.NewRequest("GET", "/api/v1/storage/wide.png?transform=thumbnail&height=4", nil)
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	img, _, err := image.Decode(bytes.NewReader(rec.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("decode transformed image: %v", err)
+	}
+	if got := img.Bounds().Dx(); got != 4 {
+		t.Fatalf("width = %d, want 4", got)
+	}
+	if got := img.Bounds().Dy(); got != 2 {
+		t.Fatalf("height = %d, want 2", got)
+	}
+}
+
+func TestStorageDownloadTransformRejectsNonImage(t *testing.T) {
+	store := newStubStorage()
+	store.objects["hello.txt"] = []byte("world")
+	store.contentType["hello.txt"] = "text/plain"
+	srv := newStorageServer(t, store, nil, "")
+	req := httptest.NewRequest("GET", "/api/v1/storage/hello.txt?width=10", nil)
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("expected 415, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestStorageDownloadNotFound(t *testing.T) {
 	store := newStubStorage()
 	srv := newStorageServer(t, store, nil, "")
@@ -387,6 +452,21 @@ func TestStorageDownloadNotFound(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("expected 404, got %d: %s", rec.Code, rec.Body.String())
 	}
+}
+
+func testPNG(t *testing.T, width, height int) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			img.Set(x, y, color.RGBA{R: uint8(x * 10), G: uint8(y * 10), B: 120, A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("encode png: %v", err)
+	}
+	return buf.Bytes()
 }
 
 func TestStorageDownloadAppliesTenantPrefix(t *testing.T) {

@@ -5,11 +5,13 @@ dev or platform team uses to build and operate an AI-native backend.
 
 ## Principle
 
-The dashboard has two mental modes and one audience-scoped view:
+The dashboard has two mental modes, one audience-scoped view, and one
+low-level plumbing section:
 
 1. **Build** — configuring the product you're building
 2. **Operate** — observing the product as it runs
 3. **Customers** — your end-users (when multi-tenancy is enabled)
+4. **Infrastructure** — database, storage, and secret primitives
 
 Group nav by mental mode, not by feature category. A dev wiring up
 webhooks and a dev watching webhook deliveries are doing different jobs;
@@ -34,7 +36,7 @@ they live in different groups.
 ## Top-level navigation
 
 ```
-[Home]   Build   Operate   Customers              ⌘K   [user]
+[Home]   Build   Operate   Customers   Infrastructure          ⌘K   [user]
 ```
 
 The "Customers" group is **always visible** but shows an empty state
@@ -61,15 +63,13 @@ What you wire up when adding capabilities. Daily-touched during dev/staging.
 |---|---|
 | **Agents** | Catalog of registered agents, schemas, sample inputs, attached tools |
 | **Integrations** | MCP servers, skills, harnesses — anything that gives agents new capabilities. Per-tenant install when MT on. |
-| **Database** | Tables you define, SQL runner, RLS policy view, vector collections, memory keys |
-| **Storage** | Buckets you create, signed URL config, lifecycle rules |
-| **Secrets** | Per-tenant or global secrets vault (LLM keys, GitHub tokens, Stripe keys, etc.) |
 | **Webhooks** | Incoming endpoint definitions (Stripe → you, GitHub → you) and outgoing destinations |
 | **Auth** | Identity providers (Google, GitHub, magic link, MFA), session config |
 | **Billing** | The billing integration *your customers* see (Stripe / Lago): plans, metered metrics, webhook handlers |
-| **Jobs** | Background job definitions and cron schedules (the schedule itself, not the runtime queue) |
-| **Sandboxes** | Sandbox adapter config, pool size, network policies (when this module enabled) |
+| **MCP** | Model Context Protocol servers and tools |
+| **Skills** | Installed AF skillkit bundles — install, list, attach |
 | **Modules** | Read-only view of `config.yaml`: which suite modules are enabled, adapter choices. Editing happens in the file (git-tracked). |
+| **Dashboard Plugins** | Read-only list of operator-console tabs discovered from `apps/dashboard/plugins/` at build time. |
 
 ### Operate — observing what's running
 
@@ -78,11 +78,16 @@ Live data. Where you go when something's happening or broken.
 | Tab | What it shows |
 |---|---|
 | **Runs** | Agent executions list with filters (tenant, agent, status, cost, time). Click → summary card with logs inline. "View full trace →" links to the runtime's existing trace UI for the deep graph. |
+| **Shipwright** | Coding-agent tasks with status, repo, AgentField execution link, and patch / PR pointer. |
+| **Approvals** | Human approval requests with payload JSON, status filters, and approve / deny / cancel actions. |
 | **Logs** | Live tail across all services. Search by tenant, agent, request ID. |
 | **Queues** | Live job queue state — pending/running/failed counts, recent jobs, retry button. Distinct from "Jobs" in Build (definitions vs runtime). |
 | **Cost** | Spend by model, agent, tenant, day. Budget alerts. Forecast. |
 | **Sandbox Activity** | Live pool status, recent runs, per-run logs + artifacts + cost (when sandbox module enabled). |
 | **Webhook Activity** | Recent incoming + outgoing deliveries with status, failures, retries. |
+| **Notifications** | Outbox, recent delivery attempts, and notification adapter state. |
+| **Crons** | Scheduled jobs that fire on a cron expression. |
+| **Metrics** | Runtime KPIs and top routes. |
 
 **Hero tab: Cost.** This is the differentiator vs "Supabase + Helicone separately." Polish to Linear/Vercel grade.
 
@@ -102,13 +107,26 @@ When MT is **enabled**:
 | **Customer Billing** | Per-tenant billing status (Stripe subscription, invoices, usage records sent) |
 | **Audit** | Who did what when across tenants. Queryable + exportable for compliance. |
 
+### Infrastructure — low-level backend plumbing
+
+Backend primitives that support every product built on the stack. These
+are intentionally separate from Build so product configuration stays
+focused on what the fork ships.
+
+| Tab | What it shows |
+|---|---|
+| **Adapters** | Active and available config-level swaps for storage, sandbox, notifications, and billing |
+| **Database** | Tables you define, SQL runner, RLS policy view, vector collections, memory keys |
+| **Storage** | Buckets you create, signed URL config, lifecycle rules |
+| **Secrets** | Per-tenant or global secrets vault (LLM keys, GitHub tokens, Stripe keys, etc.) |
+
 ### Settings (standalone)
 
 Suite-level operator settings (not your product config — that lives in Build).
 
 | Surface | What you do here |
 |---|---|
-| Settings | Operator account, dashboard theme, plugin management, feature flags, suite-level (not customer) API keys |
+| Settings | Operator account, dashboard theme, feature flags, suite-level (not customer) API keys |
 
 ## Hero tabs (polish budget)
 

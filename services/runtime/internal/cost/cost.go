@@ -79,6 +79,11 @@ type Event struct {
 	LatencyMS int
 	// OccurredAt is the call timestamp. Zero -> the recorder uses now().
 	OccurredAt time.Time
+	// Modality classifies the call: "text" (default for chat), "embedding",
+	// "audio_speech" (TTS), "audio_transcription" (STT),
+	// "audio_translation" (whisper translate), "image", "video". The
+	// dashboard renders a "cost by modality" stack from this column.
+	Modality string
 }
 
 // Budget is the per-tenant monthly cap. Mirrors BudgetSchema in

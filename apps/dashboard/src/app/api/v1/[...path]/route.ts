@@ -8,24 +8,20 @@
 //
 // This handler resolves RUNTIME_URL at request time so docker-compose's
 // runtime env vars take effect without rebuilds.
+// Do-not-touch zone for most forks: dashboard pages and plugins should call
+// this proxy instead of reimplementing runtime forwarding.
 
 import type { NextRequest } from "next/server"
 
 const RUNTIME_DEFAULT = "http://localhost:8080"
 
-async function proxy(
-  req: NextRequest,
-  { params }: { params: Promise<{ path: string[] }> },
-) {
+async function proxy(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params
   const runtime = process.env.RUNTIME_URL ?? RUNTIME_DEFAULT
   const search = req.nextUrl.search
   const target = `${runtime}/api/v1/${path.join("/")}${search}`
 
-  const body =
-    req.method === "GET" || req.method === "HEAD"
-      ? undefined
-      : await req.arrayBuffer()
+  const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer()
 
   const upstreamHeaders = new Headers()
   req.headers.forEach((value, key) => {
@@ -58,11 +54,7 @@ async function proxy(
 
   const respHeaders = new Headers()
   upstream.headers.forEach((value, key) => {
-    if (
-      ["content-encoding", "content-length", "transfer-encoding"].includes(
-        key.toLowerCase(),
-      )
-    ) {
+    if (["content-encoding", "content-length", "transfer-encoding"].includes(key.toLowerCase())) {
       return
     }
     respHeaders.set(key, value)

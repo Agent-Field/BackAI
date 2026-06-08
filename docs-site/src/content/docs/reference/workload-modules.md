@@ -211,14 +211,13 @@ manually drop the data via your normal migration tooling.
 
 ## Built-in modules in the repo
 
-| Module | Used by | Notes |
-|---|---|---|
-| `workload-modules/notes/` | Example 01 (Notable) | Per-tenant Markdown notes with summarize + suggest-tags |
-| `workload-modules/multimodal-storage/` | Example 04 (Podcast) | ffmpeg + Whisper + Vision in sandbox |
-| `workload-modules/change-stream-listener/` | Example 05 (Reactive enrichment) | PG + Mongo change stream subscriber |
+AF Stack does not currently ship a ready workload module in this directory.
+`workload-modules/git-workload/` is reserved for Shipwright, the next
+near-term example tracked in the strategy doc. The Notable example is
+implemented as example-local handlers today.
 
-The examples directory contains working code; copy-paste an entire
-`workload-modules/<id>/` into your own deploy to vendor it.
+When a workload module ships, copy-paste an entire `workload-modules/<id>/`
+into your own deploy to vendor it.
 
 ## Limits in v1
 

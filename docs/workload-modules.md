@@ -206,14 +206,16 @@ manually drop the data via your normal migration tooling.
 
 ## Built-in modules in the repo
 
-| Module | Used by | Notes |
-|---|---|---|
-| `workload-modules/notes/` | Example 01 (Notable) | Per-tenant Markdown notes with summarize + suggest-tags |
-| `workload-modules/multimodal-storage/` | Example 04 (Podcast) | ffmpeg + Whisper + Vision in sandbox |
-| `workload-modules/change-stream-listener/` | Example 05 (Reactive enrichment) | PG + Mongo change stream subscriber |
+AF Stack does not currently ship a ready workload module in this
+directory. Shipwright's first slice is implemented as a core runtime
+metadata API plus an AgentField-backed example under
+`examples/02-shipwright/`; a future `workload-modules/git-workload/`
+can add deeper branch / diff / PR primitives once the production GitHub
+path lands.
 
-The examples directory contains working code; copy-paste an entire
-`workload-modules/<id>/` into your own deploy to vendor it.
+The Notable example is implemented as example-local handlers today.
+When a workload module ships, copy-paste an entire `workload-modules/<id>/`
+into your own deploy to vendor it.
 
 ## Limits in v1
 

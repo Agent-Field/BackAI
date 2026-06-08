@@ -7,11 +7,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/agentfield"
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
+	"github.com/gorilla/websocket"
 )
 
 func newBareTestServer(t *testing.T) *Server {
@@ -176,6 +178,71 @@ func TestAsyncAgentCallUsesAFAsyncEndpoint(t *testing.T) {
 	}
 	if gotPath != "/api/v1/execute/async/sample.echo" {
 		t.Errorf("expected async path forward, got %q", gotPath)
+	}
+}
+
+func TestRunEventsWebSocketRelaysAgentFieldSSE(t *testing.T) {
+	afSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/workflows/runs/run_123/events/stream" {
+			t.Errorf("unexpected path: %q", r.URL.Path)
+		}
+		if r.Header.Get("Accept") != "text/event-stream" {
+			t.Errorf("expected SSE accept header, got %q", r.Header.Get("Accept"))
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: execution.started\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"execution_started\",\"execution_id\":\"exec_1\"}\n\n"))
+	}))
+	defer afSrv.Close()
+
+	srv := New(config.Default(), slog.Default(), Deps{
+		AF: agentfield.New(agentfield.Config{URL: afSrv.URL}),
+	})
+	httpSrv := httptest.NewServer(srv.srv.Handler)
+	defer httpSrv.Close()
+
+	u, err := url.Parse(httpSrv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.Scheme = "ws"
+	u.Path = "/api/v1/runs/run_123/events"
+	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close()
+
+	var msg map[string]any
+	if err := conn.ReadJSON(&msg); err != nil {
+		t.Fatalf("read websocket message: %v", err)
+	}
+	if msg["type"] != "agentfield.run_event" {
+		t.Fatalf("unexpected message type: %v", msg)
+	}
+	if msg["event"] != "execution.started" {
+		t.Fatalf("unexpected event: %v", msg)
+	}
+	data, ok := msg["data"].(map[string]any)
+	if !ok || data["execution_id"] != "exec_1" {
+		t.Fatalf("unexpected data: %v", msg["data"])
+	}
+}
+
+func TestRunEventsReturns404WhenAgentFieldStreamMissing(t *testing.T) {
+	afSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer afSrv.Close()
+
+	srv := New(config.Default(), slog.Default(), Deps{
+		AF: agentfield.New(agentfield.Config{URL: afSrv.URL}),
+	})
+	req := httptest.NewRequest("GET", "/api/v1/runs/run_404/events", nil)
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

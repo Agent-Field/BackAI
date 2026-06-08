@@ -137,6 +137,12 @@ type Membership struct {
 }
 
 // APIKey matches APIKeySchema (no plaintext).
+//
+// The LiteLLM-related fields land here as nullable so existing rows
+// (which never went through LiteLLM mirroring) and new rows (which do)
+// share one struct. The dashboard surfaces null as "—" and treats
+// non-null budget/limits as "enforced upstream by LiteLLM". See
+// migration 00022_api_keys_litellm.sql.
 type APIKey struct {
 	ID         string     `json:"id"`
 	TenantID   string     `json:"tenant_id"`
@@ -148,6 +154,21 @@ type APIKey struct {
 	LastUsedAt *time.Time `json:"last_used_at"`
 	ExpiresAt  *time.Time `json:"expires_at"`
 	RevokedAt  *time.Time `json:"revoked_at"`
+	// LiteLLMKeyAlias is the alias we sent to LiteLLM at issuance time.
+	// We never store the plaintext LiteLLM secret on this row — the
+	// secrets vault holds it under "litellm/key/{api_key_id}". nil
+	// when no LiteLLM mapping exists (legacy keys, or LiteLLM was
+	// unreachable at issuance).
+	LiteLLMKeyAlias *string `json:"litellm_key_alias"`
+	// BudgetMaxUSD is the per-key lifetime cap LiteLLM enforces.
+	// Nil = unlimited (legacy / unconfigured). The customer sees a
+	// 429 from LiteLLM when their key overruns.
+	BudgetMaxUSD *float64 `json:"budget_max_usd"`
+	// RateLimitRPM is the per-minute request cap LiteLLM enforces.
+	// Nil = unlimited.
+	RateLimitRPM *int `json:"rate_limit_rpm"`
+	// RateLimitTPM is the per-minute token cap LiteLLM enforces.
+	RateLimitTPM *int `json:"rate_limit_tpm"`
 }
 
 // IssuedAPIKey matches IssuedAPIKeySchema = APIKey + value (one-time reveal).
@@ -292,6 +313,16 @@ type IssueAPIKeyInput struct {
 	// CreatedBy is the user id to record on the row. Optional — the
 	// admin handlers don't yet wire a principal but the SDK will.
 	CreatedBy string `json:"-"`
+	// BudgetMaxUSD, when non-nil, becomes the LiteLLM virtual key's
+	// max_budget. Nil = unlimited. LiteLLM enforces this upstream and
+	// returns 429 when exceeded.
+	BudgetMaxUSD *float64 `json:"budget_max_usd,omitempty"`
+	// RateLimitRPM, when non-nil, becomes the LiteLLM virtual key's
+	// rpm_limit. Nil = unlimited.
+	RateLimitRPM *int `json:"rate_limit_rpm,omitempty"`
+	// RateLimitTPM, when non-nil, becomes the LiteLLM virtual key's
+	// tpm_limit (tokens-per-minute). Nil = unlimited.
+	RateLimitTPM *int `json:"rate_limit_tpm,omitempty"`
 }
 
 // AuditFilter scopes ListAudit.

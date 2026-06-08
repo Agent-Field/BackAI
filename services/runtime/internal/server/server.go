@@ -4,10 +4,12 @@
 package server
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -15,13 +17,17 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Agent-Field/backai/services/runtime/internal/activity"
 	"github.com/Agent-Field/backai/services/runtime/internal/agentfield"
+	"github.com/Agent-Field/backai/services/runtime/internal/audit"
 	"github.com/Agent-Field/backai/services/runtime/internal/billing"
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
 	"github.com/Agent-Field/backai/services/runtime/internal/cost"
 	"github.com/Agent-Field/backai/services/runtime/internal/crons"
 	"github.com/Agent-Field/backai/services/runtime/internal/db"
 	"github.com/Agent-Field/backai/services/runtime/internal/dbstudio"
+	"github.com/Agent-Field/backai/services/runtime/internal/featureflags"
+	"github.com/Agent-Field/backai/services/runtime/internal/guardrails"
 	"github.com/Agent-Field/backai/services/runtime/internal/harnesses"
 	"github.com/Agent-Field/backai/services/runtime/internal/hooks"
 	"github.com/Agent-Field/backai/services/runtime/internal/jobs"
@@ -31,26 +37,29 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/mcp"
 	"github.com/Agent-Field/backai/services/runtime/internal/memory"
 	"github.com/Agent-Field/backai/services/runtime/internal/notifications"
+	"github.com/Agent-Field/backai/services/runtime/internal/oauth"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
-	"github.com/Agent-Field/backai/services/runtime/internal/ratelimit"
+	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
 	"github.com/Agent-Field/backai/services/runtime/internal/sandbox"
-	"github.com/Agent-Field/backai/services/runtime/internal/audit"
+	"github.com/Agent-Field/backai/services/runtime/internal/search"
 	"github.com/Agent-Field/backai/services/runtime/internal/secrets"
 	"github.com/Agent-Field/backai/services/runtime/internal/skills"
 	"github.com/Agent-Field/backai/services/runtime/internal/storage"
 	"github.com/Agent-Field/backai/services/runtime/internal/tenancy"
 	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
+	"github.com/Agent-Field/backai/services/runtime/internal/tooladapters"
+	"github.com/Agent-Field/backai/services/runtime/internal/tools"
 	"github.com/Agent-Field/backai/services/runtime/internal/webhooks"
 )
 
 // Server holds the HTTP server and shared dependencies.
 type Server struct {
-	cfg           config.Config
-	log           *slog.Logger
-	mux           *http.ServeMux
-	srv           *http.Server
-	health        *Health
+	cfg    config.Config
+	log    *slog.Logger
+	mux    *http.ServeMux
+	srv    *http.Server
+	health *Health
 	// drain is the Phase 14.3 graceful-shutdown controller. Always
 	// constructed in New(); main.go calls drain.Start() from its
 	// SIGTERM handler. The drain middleware (outermost in the chain)
@@ -60,7 +69,7 @@ type Server struct {
 	// ready is set to true by MarkReady() once main.go has finished
 	// startup (migrations applied, workers spawned). Until then
 	// /ready returns 503 {"status":"booting"}.
-	ready atomic.Bool
+	ready         atomic.Bool
 	db            *db.DB
 	af            *agentfield.Client
 	tel           *observability.Telemetry
@@ -70,13 +79,24 @@ type Server struct {
 	secrets       *secrets.Vault
 	jobs          *jobs.Manager
 	tenancy       *tenancy.Manager
-	limiter       ratelimit.Limiter
 	openapi       *openapi.Builder
 	llmCache      *llmcache.Cache
 	llmGateway    *llmgateway.Gateway
+	// guardrails applies gateway-local PII redaction and moderation to
+	// LLM request/response text. It does not own AgentField state.
+	guardrails *guardrails.Service
 	// memory is the Phase 8.2 suite memory store. nil when no DB is
 	// wired; the /api/v1/memory/* endpoints return 503 in that case.
 	memory *memory.Store
+	// search indexes tenant-scoped app/workload records. nil when no
+	// DB is wired; /api/v1/search returns 503 SEARCH_NOT_CONFIGURED.
+	search *search.Store
+	// activity records tenant-scoped customer/product events. nil when
+	// no DB is wired; /api/v1/activity returns 503 ACTIVITY_NOT_CONFIGURED.
+	activity *activity.Store
+	// featureFlags stores tenant-scoped runtime flags. nil when no DB
+	// is wired; GET serves defaults and mutations return 503.
+	featureFlags *featureflags.Store
 	// dbStudio powers the Phase 8.1 DB studio (/api/v1/db/*). nil when
 	// no DB is wired; endpoints return 503 DB_STUDIO_NOT_CONFIGURED.
 	dbStudio *dbstudio.Studio
@@ -87,6 +107,10 @@ type Server struct {
 	// authority for the cost summary's BudgetUSD field. nil disables
 	// budget endpoints (they return 503).
 	budgets *cost.Budgets
+	// rbac gates cross-tenant operator/admin actions before handlers
+	// opt into app.bypass_rls. nil means admin calls are denied once
+	// the module/store gates pass.
+	rbac *rbac.Enforcer
 	// sandbox powers /api/v1/sandbox/*. nil = endpoints either return
 	// 503 SANDBOX_NOT_CONFIGURED (mutating) or tolerant empty
 	// responses (reads).
@@ -130,6 +154,24 @@ type Server struct {
 	// mutating endpoints return 503 CRONS_NOT_CONFIGURED; reads serve
 	// an empty list so the dashboard renders.
 	crons *crons.Store
+	// toolAdapters powers built-in adapter enablement and stateless
+	// calls. AgentField owns agent tool-call spans/traces.
+	toolAdapters *tooladapters.Service
+	// toolsRegistry is the strict-interface native tool surface
+	// (internal/tools). Construction in main.go via tools.BuildRegistry
+	// at boot; nil ⇒ list returns empty + mutations/invokes return 503.
+	toolsRegistry *tools.Registry
+	// oauthManager stores user-granted third-party OAuth token refs and
+	// retrieves plaintext from the secrets vault for backend agents.
+	oauthManager *oauth.Manager
+	oauthFactory *oauth.Factory
+	// shipwright stores only task/patch metadata for the Shipwright
+	// coding-agent factory. AgentField owns the execution graph, harness
+	// calls, logs, spans, traces, and memory.
+	shipwright ShipwrightStore
+	// approvals stores tenant-scoped human decision gates for general
+	// AF Stack workflows. AgentField run approvals remain in AgentField.
+	approvals ApprovalsStore
 	// metricsRing collects HTTP request durations + per-route counters
 	// for the /api/v1/metrics/summary handler. Always constructed in
 	// New().
@@ -177,11 +219,6 @@ type Deps struct {
 	// the /api/v1/admin/* endpoints return 503 even if the module flag
 	// is on (Phase 6.1 owns the wiring).
 	Tenancy *tenancy.Manager
-	// RateLimiter throttles per-tenant traffic at the public gateway.
-	// nil means no throttling (every request passes through). The
-	// constructor in main.go always wires an InMemory limiter; tests
-	// pass nil to opt out.
-	RateLimiter ratelimit.Limiter
 	// OpenAPIBuilder lets callers pre-populate the /openapi.json spec
 	// (e.g. tests that want a stable snapshot). nil means New()
 	// constructs a fresh Builder with the standard AF Stack title.
@@ -195,10 +232,23 @@ type Deps struct {
 	// main.go constructs one from the runtime's provider env keys
 	// (OPENROUTER_API_KEY etc.).
 	LLMGateway *llmgateway.Gateway
+	// Guardrails is the gateway-local PII/moderation policy layer. nil
+	// disables redaction/moderation while preserving normal LLM gateway
+	// behavior.
+	Guardrails *guardrails.Service
 	// Memory is the Phase 8.2 suite memory store (pgvector-backed
 	// key/value with optional embeddings). nil means /api/v1/memory/*
 	// endpoints return 503 MEMORY_NOT_CONFIGURED.
 	Memory *memory.Store
+	// Search is the app-data search index. It is distinct from AgentField
+	// memory/runs/traces and from suite memory; apps/workload modules
+	// index product records here for FTS/vector/hybrid lookup.
+	Search *search.Store
+	// Activity is the customer/user activity log store. It is separate
+	// from admin audit and AgentField state.
+	Activity *activity.Store
+	// FeatureFlags stores durable runtime feature flags.
+	FeatureFlags *featureflags.Store
 	// DBStudio is the Phase 8.1 read-mostly DB introspection + SQL
 	// runner. nil means /api/v1/db/* endpoints return 503
 	// DB_STUDIO_NOT_CONFIGURED. main.go constructs one wrapped around
@@ -211,6 +261,9 @@ type Deps struct {
 	// Budgets is the per-tenant monthly budget store. nil disables
 	// the /api/v1/admin/budgets endpoints (which return 503).
 	Budgets *cost.Budgets
+	// RBAC gates operator/admin actions. nil uses the built-in Casbin
+	// policy for suite_operators roles.
+	RBAC *rbac.Enforcer
 	// Sandbox is the Phase 9.1 sandbox runs service. nil = the
 	// /api/v1/sandbox/* endpoints either 503 (mutating) or return
 	// tolerant empty responses (reads).
@@ -257,6 +310,23 @@ type Deps struct {
 	// mutating endpoints return 503 CRONS_NOT_CONFIGURED; reads serve
 	// an empty page.
 	Crons *crons.Store
+	// ToolAdapters is the built-in agent tool adapter service. nil =
+	// list returns empty; mutations/calls return 503.
+	ToolAdapters *tooladapters.Service
+	// ToolsRegistry is the strict-interface native tool surface. nil =
+	// /api/v1/tools/native list returns empty; enable/invoke return 503.
+	ToolsRegistry *tools.Registry
+	// OAuthManager/OAuthFactory power OAuth-on-behalf-of-user. nil
+	// leaves the provider list available when Factory exists, but
+	// connect/token/disconnect return 503.
+	OAuthManager *oauth.Manager
+	OAuthFactory *oauth.Factory
+	// Shipwright stores task + patch metadata for the autonomous
+	// coding-agent factory. nil means /api/v1/shipwright/* returns 503.
+	Shipwright ShipwrightStore
+	// Approvals stores tenant-scoped human decision gates. nil means
+	// /api/v1/approvals/* returns 503.
+	Approvals ApprovalsStore
 	// LogRing is the in-memory log buffer the /api/v1/logs endpoint
 	// reads from. Constructed in main.go and shared with the logger.
 	LogRing *logger.Ring
@@ -279,35 +349,46 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		builder.AddTag("jobs", "Background jobs queue")
 		builder.AddTag("admin", "Multi-tenancy admin")
 		builder.AddTag("llm", "OpenAI-compatible LLM gateway")
+		builder.AddTag("realtime", "Postgres LISTEN/NOTIFY WebSocket bridge")
+		builder.AddTag("search", "Tenant-scoped app-data search")
+		builder.AddTag("activity", "Tenant-scoped user/product activity log")
+		builder.AddTag("approvals", "Human approval gates for workflows")
+		builder.AddTag("config", "Runtime configuration and feature flags")
+		builder.AddTag("tools", "Built-in agent tool adapters")
+		builder.AddTag("oauth", "OAuth on behalf of user")
 		builder.AddTag("memory", "Suite memory (pgvector-backed key/value)")
 		builder.AddTag("db", "Database studio (introspection + SQL runner)")
 		builder.AddTag("system", "Health, readiness, metrics")
 	}
 	s := &Server{
-		cfg:           cfg,
-		log:           log,
-		mux:           mux,
-		health:        &Health{StartedAt: time.Now()},
-		drain:         NewDrain(cfg.Server.ShutdownTimeout),
-		db:            deps.DB,
-		af:            deps.AF,
-		tel:           deps.Telemetry,
-		hooks:         deps.Hooks,
-		storage:       deps.Storage,
-		storagePrefix: deps.StoragePrefix,
-		secrets:       deps.Secrets,
-		jobs:          deps.Jobs,
-		tenancy:       deps.Tenancy,
-		limiter:       deps.RateLimiter,
-		openapi:       builder,
-		llmCache:      deps.LLMCache,
-		llmGateway:    deps.LLMGateway,
-		memory:        deps.Memory,
-		dbStudio:      deps.DBStudio,
-		costAgg:       deps.CostAggregate,
-		budgets:       deps.Budgets,
-		sandbox:       deps.Sandbox,
-		billing:       deps.Billing,
+		cfg:             cfg,
+		log:             log,
+		mux:             mux,
+		health:          &Health{StartedAt: time.Now()},
+		drain:           NewDrain(cfg.Server.ShutdownTimeout),
+		db:              deps.DB,
+		af:              deps.AF,
+		tel:             deps.Telemetry,
+		hooks:           deps.Hooks,
+		storage:         deps.Storage,
+		storagePrefix:   deps.StoragePrefix,
+		secrets:         deps.Secrets,
+		jobs:            deps.Jobs,
+		tenancy:         deps.Tenancy,
+		openapi:         builder,
+		llmCache:        deps.LLMCache,
+		llmGateway:      deps.LLMGateway,
+		guardrails:      deps.Guardrails,
+		memory:          deps.Memory,
+		search:          deps.Search,
+		activity:        deps.Activity,
+		featureFlags:    deps.FeatureFlags,
+		dbStudio:        deps.DBStudio,
+		costAgg:         deps.CostAggregate,
+		budgets:         deps.Budgets,
+		rbac:            deps.RBAC,
+		sandbox:         deps.Sandbox,
+		billing:         deps.Billing,
 		notifications:   deps.Notifications,
 		webhooks:        deps.Webhooks,
 		skills:          deps.Skills,
@@ -316,9 +397,18 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		mcp:             deps.MCP,
 		mcpStore:        deps.MCPStore,
 		crons:           deps.Crons,
+		toolAdapters:    deps.ToolAdapters,
+		toolsRegistry:   deps.ToolsRegistry,
+		oauthManager:    deps.OAuthManager,
+		oauthFactory:    deps.OAuthFactory,
+		shipwright:      deps.Shipwright,
+		approvals:       deps.Approvals,
 		metricsRing:     newMetricsRing(MetricsRingSize),
 		logRing:         deps.LogRing,
 		version:         deps.Version,
+	}
+	if s.rbac == nil {
+		s.rbac = rbac.NewDefault()
 	}
 	if deps.DB != nil {
 		s.audit = audit.New(deps.DB.Pool, log)
@@ -331,16 +421,16 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 	// so logs include final status code. CORS wraps last so OPTIONS preflights
 	// short-circuit before hitting the routes.
 	handler := http.Handler(mux)
-	if s.limiter != nil {
-		// Rate-limit middleware sits BETWEEN tracing and the mux so the
-		// 429 response is recorded as a span but doesn't consume an
-		// agent-execute slot.
-		handler = withRateLimit(s.limiter, log)(handler)
-	}
-	// Tenant resolver wraps both rate-limit and the mux so the resolved
-	// tenant id is available to both the limiter (per-tenant buckets)
-	// and downstream handlers. Public paths (/health, /openapi.json,
-	// dashboard reads) bypass internally — see isPublicPath.
+	// Per-tenant request throttling is enforced upstream by LiteLLM via
+	// the virtual-key rpm_limit / tpm_limit issued by tenancy.IssueAPIKey
+	// (see internal/llmgateway/litellm_admin.go). When LiteLLM returns
+	// 429 the LLM handler proxies Retry-After + X-RateLimit-* headers
+	// back to the client unchanged.
+	//
+	// Tenant resolver wraps the mux so the resolved tenant id is
+	// available to downstream handlers. Public paths (/health,
+	// /openapi.json, dashboard reads) bypass internally — see
+	// isPublicPath.
 	handler = s.tenantResolver(handler)
 	if deps.Telemetry != nil {
 		handler = observability.TraceMiddleware(cfg.Observability.ServiceName)(handler)
@@ -380,6 +470,43 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /openapi.json", s.handleOpenAPI)
 	s.openapi.Register("GET", "/openapi.json", openapi.RouteMeta{
 		Summary: "OpenAPI 3.1 spec for this runtime", Tags: []string{"system"},
+	})
+
+	s.mux.HandleFunc("GET /api/v1/realtime", s.handleRealtime)
+	s.openapi.Register("GET", "/api/v1/realtime", openapi.RouteMeta{
+		Summary: "Subscribe to Postgres-backed realtime events", Tags: []string{"realtime"},
+		Parameters: []openapi.Parameter{
+			{Name: "table", In: "query", Required: true,
+				Description: "Table identifier emitted in NOTIFY payloads, e.g. public.messages",
+				Schema:      map[string]any{"type": "string"}},
+			{Name: "filter", In: "query", Required: false,
+				Description: "Optional JSON object matched against payload.record",
+				Schema:      map[string]any{"type": "string"}},
+		},
+	})
+
+	// #15 Realtime run subscriptions — WebSocket stream of live
+	// AgentField run events with server-side tenant/user/agent/run
+	// filters. Bridges AF's SSE stream(s); falls back to polling when
+	// AF's UI module isn't enabled. See internal/server/runs.go.
+	s.mux.HandleFunc("GET /api/v1/realtime/runs", s.handleRunsSubscribe)
+	s.openapi.Register("GET", "/api/v1/realtime/runs", openapi.RouteMeta{
+		Summary: "Subscribe to live AgentField run events", Tags: []string{"realtime"},
+		Parameters: []openapi.Parameter{
+			{Name: "tenant_id", In: "query", Required: false,
+				Description: "Auto-bound to caller's tenant when multi-tenancy is on",
+				Schema:      map[string]any{"type": "string"}},
+			{Name: "user_id", In: "query", Required: false,
+				Schema: map[string]any{"type": "string"}},
+			{Name: "agent", In: "query", Required: false,
+				Description: "Filter to one agent_node_id",
+				Schema:      map[string]any{"type": "string"}},
+			{Name: "run_id", In: "query", Required: false,
+				Schema: map[string]any{"type": "string"}},
+			{Name: "execution_id", In: "query", Required: false,
+				Description: "Pin subscription to one execution (uses per-exec SSE)",
+				Schema:      map[string]any{"type": "string"}},
+		},
 	})
 
 	s.mux.HandleFunc("GET /api/v1/agents", s.handleListAgents)
@@ -429,6 +556,24 @@ func (s *Server) registerRoutes() {
 	s.openapi.Register("GET", "/api/v1/runs", openapi.RouteMeta{
 		Summary: "List recent agent runs", Tags: []string{"dashboard"},
 	})
+	s.mux.HandleFunc("GET /api/v1/runs/{id}/events", s.handleRunEvents)
+	s.openapi.Register("GET", "/api/v1/runs/{id}/events", openapi.RouteMeta{
+		Summary: "Subscribe to AgentField run events", Tags: []string{"agents"},
+		Parameters: []openapi.Parameter{
+			{Name: "id", In: "path", Required: true,
+				Description: "AgentField run/workflow id",
+				Schema:      map[string]any{"type": "string"}},
+		},
+	})
+	// #25 AgentField data in dashboard: per-run summary + control actions.
+	// Each verb proxies to AgentField's agent-api surface. See
+	// internal/server/run_agentfield.go for handler details.
+	s.mux.HandleFunc("GET /api/v1/runs/{id}/agentfield", s.handleRunAgentField)
+	s.mux.HandleFunc("POST /api/v1/runs/{id}/cancel", s.handleRunCancel)
+	s.mux.HandleFunc("POST /api/v1/runs/{id}/pause", s.handleRunPause)
+	s.mux.HandleFunc("POST /api/v1/runs/{id}/resume", s.handleRunResume)
+	s.mux.HandleFunc("POST /api/v1/runs/{id}/request-approval", s.handleRunRequestApproval)
+	s.registerRunAgentFieldOpenAPI()
 	s.mux.HandleFunc("GET /api/v1/home/overview", s.handleHomeOverview)
 	s.openapi.Register("GET", "/api/v1/home/overview", openapi.RouteMeta{
 		Summary: "Dashboard home overview", Tags: []string{"dashboard"},
@@ -488,6 +633,22 @@ func (s *Server) registerRoutes() {
 	s.registerMemoryRoutes()
 	s.registerMemoryOpenAPI()
 
+	// App-data search (Phase 2 completeness). Endpoints return 503 when
+	// no search.Store is wired (no DB at boot). This is separate from
+	// AgentField stateful primitives and suite memory.
+	s.registerSearchRoutes()
+	s.registerSearchOpenAPI()
+
+	// User activity log (Phase 2 completeness). Product/customer events
+	// live here; admin mutations stay in suite_audit_log.
+	s.registerActivityRoutes()
+	s.registerActivityOpenAPI()
+
+	// Runtime feature flags (Phase 2 completeness). GET can serve the
+	// built-in defaults even without a DB; mutations need persistence.
+	s.registerConfigRoutes()
+	s.registerConfigOpenAPI()
+
 	// DB studio (Phase 8.1). Endpoints return 503 when no
 	// dbstudio.Studio is wired (no DB at boot).
 	s.registerDBStudioRoutes()
@@ -498,6 +659,12 @@ func (s *Server) registerRoutes() {
 	// wired (the latter is Phase 6.1's responsibility).
 	s.registerAdminRoutes()
 	s.registerAdminOpenAPI()
+
+	// GDPR/data-rights endpoints for AF Stack-held app/backend records.
+	// AgentField-owned runs/spans/traces/sessions/memory stay in
+	// AgentField and are only referenced in exports when AF Stack stores
+	// an execution id.
+	s.registerGDPRRoutes()
 
 	// Cost ledger + budgets (Phase 7). Cost-event endpoint degrades to
 	// empty list when no Aggregate is wired; budget endpoints are gated
@@ -558,6 +725,32 @@ func (s *Server) registerRoutes() {
 	// is wired; reads degrade to empty pages.
 	s.registerCronsRoutes()
 	s.registerCronsOpenAPI()
+
+	// Built-in tool adapters (Phase 2 AI completeness). This owns
+	// tenant-scoped enablement + stateless calls; AgentField owns traces.
+	s.registerToolAdapterRoutes()
+	s.registerToolAdapterOpenAPI()
+
+	// Native tool adapters (#16 — strict-interface adapter set in
+	// internal/tools/). Lives alongside the legacy /api/v1/tools/adapters
+	// surface; new agents call into the `native:<tool>` MCP namespace.
+	s.registerNativeToolRoutes()
+	s.registerNativeToolOpenAPI()
+
+	// OAuth-on-behalf-of-user (Phase 2 AI completeness). Stores
+	// third-party user grants in the secrets vault for backend agents.
+	s.registerOAuthRoutes()
+	s.registerOAuthOpenAPI()
+
+	// Shipwright (Phase 3 Tier 1). AF Stack owns task/patch metadata;
+	// AgentField owns the coding-agent execution state.
+	s.registerShipwrightRoutes()
+	s.registerShipwrightOpenAPI()
+
+	// Approvals (Phase 3 Tier 1). General-purpose human decision gates
+	// for AF Stack workflows; distinct from AgentField run approvals.
+	s.registerApprovalRoutes()
+	s.registerApprovalOpenAPI()
 
 	// Metrics summary (Phase 12.2). Always wired — runtime + ring data
 	// is available even without a DB.
@@ -1087,92 +1280,6 @@ func loadCORSAllowlist() map[string]struct{} {
 	return out
 }
 
-// rateLimitedRoutes is the list of URL-prefix matchers the rate-limit
-// middleware applies to. Anything not matching here passes through
-// untouched (e.g. /health, /openapi.json, dashboard reads).
-//
-// Decision: match on path PREFIX, not exact route. ServeMux's pattern
-// table is keyed on the templated path so a fully precise lookup would
-// require re-parsing; prefixes are good enough for throttling and keep
-// the middleware oblivious to the route table.
-var rateLimitedRoutes = []string{
-	"/api/v1/agents/",        // every agent invocation (sync + async)
-	"/api/v1/llm/",           // future LLM gateway routes
-	"/api/v1/storage/upload", // multipart uploads only
-}
-
-// routeKey returns the bucket label for a request. The limiter key is
-// (tenantID, route) — using a coarse label here means every agent call
-// shares one bucket per tenant, which is what we want for v1. When LLM
-// metering arrives, switch to per-endpoint keys.
-//
-// An empty return means "not throttled".
-func routeKey(path string) string {
-	switch {
-	case strings.HasPrefix(path, "/api/v1/agents/"):
-		return "agents"
-	case strings.HasPrefix(path, "/api/v1/llm/"):
-		return "llm"
-	case strings.HasPrefix(path, "/api/v1/storage/upload"):
-		return "storage.upload"
-	default:
-		_ = rateLimitedRoutes // keep var alive for readers who grep
-		return ""
-	}
-}
-
-// withRateLimit is the per-tenant throttle. Placed AFTER the tenant
-// resolver (Phase 6.1) so tenantctx.TenantID(ctx) returns a real id;
-// when the resolver isn't wired yet, Allow() falls back to a shared
-// bucket keyed on the empty tenant id (still throttles abusive
-// unauthenticated callers).
-//
-// A 429 response:
-//   - sets Retry-After (seconds, rounded up; minimum 1)
-//   - emits the standard error envelope with code RATE_LIMITED + a
-//     details.retry_after_seconds field for clients that prefer JSON
-//   - never logs the request body — only path / method / tenant id.
-func withRateLimit(lim ratelimit.Limiter, log *slog.Logger) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			route := routeKey(r.URL.Path)
-			if route == "" {
-				next.ServeHTTP(w, r)
-				return
-			}
-			tenantID := tenantctx.TenantID(r.Context())
-			allowed, retryAfter, err := lim.Allow(r.Context(), tenantID, route)
-			if err != nil {
-				// Fail-open: a Limiter that returns an err (Redis blip)
-				// shouldn't take down the gateway. Log + admit.
-				log.Warn("rate-limit lookup failed; admitting request",
-					"tenant", tenantID, "route", route, "error", err)
-				next.ServeHTTP(w, r)
-				return
-			}
-			if allowed {
-				next.ServeHTTP(w, r)
-				return
-			}
-			// Round retryAfter up to the nearest second; floor at 1 so
-			// clients never busy-loop on a 0-second hint.
-			secs := int(retryAfter / time.Second)
-			if retryAfter%time.Second != 0 {
-				secs++
-			}
-			if secs < 1 {
-				secs = 1
-			}
-			w.Header().Set("Retry-After", strconv.Itoa(secs))
-			writeError(w, http.StatusTooManyRequests,
-				"RATE_LIMITED",
-				"request exceeded per-tenant rate limit",
-				map[string]any{"retry_after_seconds": secs},
-			)
-		})
-	}
-}
-
 // withLogging is a tiny structured-log middleware. OTel tracing comes in 1.7.
 //
 // Also feeds the metrics ring buffer so /api/v1/metrics/summary has a
@@ -1213,6 +1320,15 @@ func (s *statusWriter) Flush() {
 	if f, ok := s.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
+}
+
+// Hijack propagates WebSocket upgrades through the logging middleware.
+func (s *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := s.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, http.ErrNotSupported
+	}
+	return h.Hijack()
 }
 
 // Unwrap lets the stdlib's ResponseController find the underlying

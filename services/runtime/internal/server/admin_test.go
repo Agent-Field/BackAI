@@ -81,6 +81,7 @@ func adminEndpoints() []endpointCase {
 		{"GET", "/api/v1/admin/keys", ""},
 		{"POST", "/api/v1/admin/keys", `{"tenant_id":"t","scopes":[]}`},
 		{"DELETE", "/api/v1/admin/keys/k-1", ""},
+		{"GET", "/api/v1/admin/keys/k-1/spend", ""},
 
 		{"GET", "/api/v1/admin/audit", ""},
 	}
@@ -388,7 +389,7 @@ func TestAdminTenantDrilldownWireShape(t *testing.T) {
 
 // TestAdminTenantDrilldownNilBillingSerialisesAsNull pins the contract
 // for tenants without a suite_billing_customers row — the dashboard
-// expects `billing: null` so the "Open Stripe Portal" card stays hidden.
+// expects `billing: null` so the "Open Billing Portal" card stays hidden.
 func TestAdminTenantDrilldownNilBillingSerialisesAsNull(t *testing.T) {
 	d := tenantDrilldownWire{
 		Tenant: tenantWire{

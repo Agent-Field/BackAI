@@ -19,7 +19,7 @@ import respx
 from af_stack import suite, tools
 from af_stack._http import AFStackError
 from af_stack._http import close as http_close
-from af_stack.tools import MCPCallResult, MCPServer, MCPTool, Tools
+from af_stack.tools import MCPCallResult, MCPServer, MCPTool, ToolAdapter, ToolAdapterCallResult, Tools
 
 BASE = "http://localhost:8080/api/v1"
 
@@ -55,6 +55,28 @@ def _tool_row(**overrides: object) -> dict[str, object]:
             "properties": {"q": {"type": "string"}},
             "required": ["q"],
         },
+    }
+    base.update(overrides)
+    return base
+
+
+def _adapter_row(**overrides: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "id": "http",
+        "label": "HTTP",
+        "description": "Make outbound HTTP calls",
+        "enabled": True,
+        "configured": True,
+        "default_enabled": True,
+        "config": {},
+        "updated_at": None,
+        "tools": [
+            {
+                "name": "request",
+                "description": "Perform one HTTP request",
+                "input_schema": {"type": "object"},
+            }
+        ],
     }
     base.update(overrides)
     return base
@@ -347,13 +369,89 @@ async def test_call_mcp_propagates_error_flag() -> None:
     assert result.content[0]["text"] == "Rate limited"
 
 
+# ─── built-in adapters ────────────────────────────────────────────────────
+
+
+async def test_list_adapters_parses_rows() -> None:
+    with respx.mock(assert_all_called=True) as router:
+        route = router.get(f"{BASE}/tools/adapters").mock(
+            return_value=httpx.Response(200, json={"adapters": [_adapter_row()]})
+        )
+        adapters = await tools.list_adapters()
+
+    assert isinstance(adapters[0], ToolAdapter)
+    assert adapters[0].id == "http"
+    assert adapters[0].default_enabled is True
+    assert adapters[0].tools[0].input_schema == {"type": "object"}
+    assert route.calls.last.request.method == "GET"
+
+
+async def test_set_adapter_enabled_puts_config() -> None:
+    with respx.mock(assert_all_called=True) as router:
+        route = router.put(f"{BASE}/tools/adapters/sql/enabled").mock(
+            return_value=httpx.Response(
+                200, json=_adapter_row(id="sql", enabled=True)
+            )
+        )
+        adapter = await tools.set_adapter_enabled(
+            "sql", True, config={"max_rows": 25}
+        )
+
+    assert adapter.id == "sql"
+    body = json.loads(route.calls.last.request.read().decode())
+    assert body == {"enabled": True, "config": {"max_rows": 25}}
+
+
+async def test_call_adapter_posts_arguments() -> None:
+    payload = {
+        "adapter": "http",
+        "tool": "request",
+        "status": "succeeded",
+        "result": {"status_code": 200},
+        "duration_ms": 12,
+    }
+    with respx.mock(assert_all_called=True) as router:
+        route = router.post(f"{BASE}/tools/call").mock(
+            return_value=httpx.Response(200, json=payload)
+        )
+        result = await tools.call_adapter(
+            "http", "request", {"url": "https://example.com"}
+        )
+
+    assert isinstance(result, ToolAdapterCallResult)
+    assert result.duration_ms == 12
+    assert result.result == {"status_code": 200}
+    body = json.loads(route.calls.last.request.read().decode())
+    assert body == {
+        "adapter": "http",
+        "tool": "request",
+        "arguments": {"url": "https://example.com"},
+    }
+
+
 # ─── namespace ────────────────────────────────────────────────────────────
 
 
-async def test_suite_tools_namespace_matches_singleton() -> None:
+async def test_suite_tools_namespace_matches_module() -> None:
+    # Module-level form: ``suite.tools`` is the ``af_stack.tools`` module
+    # itself; ``tools.<verb>`` resolves to the same function objects.
     assert suite.tools is tools
-    assert isinstance(suite.tools, Tools)
-    # Bound methods aren't `is`-comparable; check they resolve to the same
-    # underlying function on the class.
-    assert suite.tools.list_mcp_servers.__func__ is Tools.list_mcp_servers
-    assert suite.tools.call_mcp.__func__ is Tools.call_mcp
+    assert suite.tools.list_mcp_servers is tools.list_mcp_servers
+    assert suite.tools.call_mcp is tools.call_mcp
+    assert suite.tools.call_adapter is tools.call_adapter
+
+
+def test_tools_class_is_deprecated_shim() -> None:
+    # The ``Tools`` class is kept for backward compat but is no longer
+    # the canonical surface — instantiating it emits a DeprecationWarning
+    # and instance methods forward to the module-level functions.
+    import warnings
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        instance = Tools()
+    assert any(issubclass(w.category, DeprecationWarning) for w in caught)
+    # Bound methods still resolve to a callable that forwards verbatim.
+    assert callable(instance.list_mcp_servers)
+    assert callable(instance.call_mcp)
+    assert callable(instance.call_adapter)

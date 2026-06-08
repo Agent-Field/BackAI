@@ -26,38 +26,52 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Agent-Field/backai/services/runtime/internal/activity"
 	"github.com/Agent-Field/backai/services/runtime/internal/agentfield"
+	"github.com/Agent-Field/backai/services/runtime/internal/approvals"
 	"github.com/Agent-Field/backai/services/runtime/internal/billing"
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
 	"github.com/Agent-Field/backai/services/runtime/internal/cost"
 	"github.com/Agent-Field/backai/services/runtime/internal/crons"
 	"github.com/Agent-Field/backai/services/runtime/internal/db"
 	"github.com/Agent-Field/backai/services/runtime/internal/dbstudio"
+	"github.com/Agent-Field/backai/services/runtime/internal/featureflags"
+	"github.com/Agent-Field/backai/services/runtime/internal/guardrails"
 	"github.com/Agent-Field/backai/services/runtime/internal/harnesses"
 	"github.com/Agent-Field/backai/services/runtime/internal/hooks"
 	"github.com/Agent-Field/backai/services/runtime/internal/jobs"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmcache"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmgateway"
+	"github.com/Agent-Field/backai/services/runtime/internal/llmgateway/adapters"
+	cartesiaadapter "github.com/Agent-Field/backai/services/runtime/internal/llmgateway/adapters/cartesia"
+	elevenlabsadapter "github.com/Agent-Field/backai/services/runtime/internal/llmgateway/adapters/elevenlabs"
+	faladapter "github.com/Agent-Field/backai/services/runtime/internal/llmgateway/adapters/fal"
+	fluxadapter "github.com/Agent-Field/backai/services/runtime/internal/llmgateway/adapters/flux"
+	litellmadapter "github.com/Agent-Field/backai/services/runtime/internal/llmgateway/adapters/litellm"
 	"github.com/Agent-Field/backai/services/runtime/internal/logger"
 	"github.com/Agent-Field/backai/services/runtime/internal/mcp"
 	"github.com/Agent-Field/backai/services/runtime/internal/memory"
 	"github.com/Agent-Field/backai/services/runtime/internal/notifications"
 	notificationslog "github.com/Agent-Field/backai/services/runtime/internal/notifications/adapters/log"
 	notificationsresend "github.com/Agent-Field/backai/services/runtime/internal/notifications/adapters/resend"
+	"github.com/Agent-Field/backai/services/runtime/internal/oauth"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
-	"github.com/Agent-Field/backai/services/runtime/internal/ratelimit"
-	"github.com/Agent-Field/backai/services/runtime/internal/secrets"
 	"github.com/Agent-Field/backai/services/runtime/internal/sandbox"
 	dockersandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/docker"
 	e2bsandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/e2b"
 	firecrackersandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/firecracker"
 	gvisorsandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/gvisor"
+	"github.com/Agent-Field/backai/services/runtime/internal/search"
+	"github.com/Agent-Field/backai/services/runtime/internal/secrets"
 	"github.com/Agent-Field/backai/services/runtime/internal/server"
+	"github.com/Agent-Field/backai/services/runtime/internal/shipwright"
 	"github.com/Agent-Field/backai/services/runtime/internal/skills"
 	"github.com/Agent-Field/backai/services/runtime/internal/storage"
 	minioadapter "github.com/Agent-Field/backai/services/runtime/internal/storage/adapters/minio"
 	s3adapter "github.com/Agent-Field/backai/services/runtime/internal/storage/adapters/s3"
 	"github.com/Agent-Field/backai/services/runtime/internal/tenancy"
+	"github.com/Agent-Field/backai/services/runtime/internal/tooladapters"
+	"github.com/Agent-Field/backai/services/runtime/internal/tools"
 	"github.com/Agent-Field/backai/services/runtime/internal/webhooks"
 )
 
@@ -316,14 +330,16 @@ func main() {
 	}
 
 	// Secrets vault. Requires PG (for the suite_secrets table) and a
-	// KEK loaded from AF_STACK_KMS_KEY. When either is missing the
-	// vault is left nil and /api/v1/secrets/* returns 503 with a
-	// SECRETS_NOT_CONFIGURED envelope.
+	// cipher loaded from AF_STACK_KMS_PROVIDER. The default provider is
+	// env, which preserves the AF_STACK_KMS_KEY path; cloud providers
+	// unwrap a data key through AWS/GCP/Azure KMS at boot. When either
+	// database or cipher setup is missing, /api/v1/secrets/* returns
+	// 503 with a SECRETS_NOT_CONFIGURED envelope.
 	var vault *secrets.Vault
 	if database != nil && database.Pool != nil {
-		cipher, kekErr := secrets.LoadKEK(log)
+		cipher, kekErr := secrets.LoadCipher(ctx, log)
 		if kekErr != nil {
-			log.Error("secrets: KEK load failed; secrets vault disabled",
+			log.Error("secrets: KMS load failed; secrets vault disabled",
 				"error", kekErr,
 			)
 		} else {
@@ -360,40 +376,29 @@ func main() {
 		log.Info("jobs manager not configured (no database); /api/v1/jobs/* will return empty responses")
 	}
 
-	// Rate limiter. Always constructed (in-process, no external deps).
-	// When DB is available, wire a QuotaSource that reads
-	// suite_tenants.quota->>'rpm' so per-tenant overrides apply. The
-	// closure swallows DB errors and returns (0, false) so a slow query
-	// can never block an inbound request.
-	var quotas ratelimit.QuotaSource
-	if database != nil && database.Pool != nil {
-		pool := database.Pool
-		quotas = func(ctx context.Context, tenantID string) (int, bool) {
-			if tenantID == "" {
-				return 0, false
-			}
-			lookupCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-			defer cancel()
-			var rpm int
-			err := pool.QueryRow(lookupCtx, `
-				select coalesce(nullif((quota->>'rpm'), '')::int, 0)
-				from suite_tenants where id = $1
-			`, tenantID).Scan(&rpm)
-			if err != nil || rpm <= 0 {
-				return 0, false
-			}
-			return rpm, true
-		}
-	}
-	limiterOpts := []ratelimit.Option{}
-	if quotas != nil {
-		limiterOpts = append(limiterOpts, ratelimit.WithQuotaSource(quotas))
-	}
-	limiter := ratelimit.NewInMemory(limiterOpts...)
-	log.Info("rate limiter ready", "default_rpm", ratelimit.DefaultRPM)
+	// Rate limiting is enforced upstream by LiteLLM via per-virtual-key
+	// rpm_limit / tpm_limit on each suite_api_keys row (issued through
+	// tenancy.IssueAPIKey, see internal/llmgateway/litellm_admin.go +
+	// internal/tenancy/litellm_mirror.go). The runtime no longer runs a
+	// local token-bucket — 429s flow back from LiteLLM with the standard
+	// Retry-After / X-RateLimit-* headers and the LLM handler proxies
+	// them through to the client.
+
+	// LiteLLM admin client — talks to the master-key-protected /key/* +
+	// /spend/* surface on the same sidecar the gateway calls. Used by
+	// tenancy.IssueAPIKey to mint a matching LiteLLM virtual key
+	// alongside every suite_api_keys row (item #22). Always constructed;
+	// Configured() reports false when env isn't set so the mirroring
+	// path silently skips.
+	litellmAdmin := buildLiteLLMAdmin(log)
 
 	// Tenancy manager — required when the multi-tenancy module is enabled,
 	// optional otherwise (admin endpoints already gate on the flag).
+	//
+	// WithLiteLLM hands the mirror + secrets sink to the manager so
+	// IssueAPIKey can mint a LiteLLM virtual key per AF Stack api key
+	// and stash the LiteLLM secret in the vault. Both are no-ops when
+	// the underlying admin / vault isn't configured.
 	var tenancyMgr *tenancy.Manager
 	if database != nil && database.Pool != nil {
 		var tenErr error
@@ -401,8 +406,16 @@ func main() {
 		if tenErr != nil {
 			log.Error("tenancy manager init failed", "error", tenErr)
 		} else {
+			var sink tenancy.SecretSink
+			if vault != nil {
+				sink = tenancySecretSink{v: vault}
+			}
+			tenancyMgr.WithLiteLLM(llmgateway.NewTenancyMirror(litellmAdmin), sink)
 			log.Info("tenancy manager ready",
-				"multi_tenancy_enabled", cfg.Modules.Enabled["multi-tenancy"])
+				"multi_tenancy_enabled", cfg.Modules.Enabled["multi-tenancy"],
+				"litellm_mirror", litellmAdmin.Configured(),
+				"litellm_secrets_sink", sink != nil,
+			)
 		}
 	}
 
@@ -432,6 +445,17 @@ func main() {
 	// and pre/post-call hooks on this side.
 	llmGW := buildLLMGateway(log, afClient)
 
+	// Gateway guardrails (Phase 2 completeness). This runs at the AF
+	// Stack LLM gateway boundary only: request/response text can be
+	// redacted or blocked before it leaves/enters the app, while
+	// AgentField keeps ownership of AI-stateful runs, spans, traces,
+	// memory, and tool-call history.
+	guardrailsSvc, guardrailsErr := buildGuardrails(log)
+	if guardrailsErr != nil {
+		log.Error("guardrails: config error", "error", guardrailsErr)
+		os.Exit(1)
+	}
+
 	// Cost ledger + budgets (Phase 7). The Recorder + Budgets are
 	// constructed unconditionally so the hook handlers can be
 	// registered against the hooks.Engine even when no DB is wired —
@@ -450,6 +474,13 @@ func main() {
 		costRecorder = cost.NewRecorder(database.Pool, log)
 		costBudgets = cost.NewBudgets(database.Pool, log)
 		costAggregate = cost.NewAggregate(database.Pool, log)
+		// LiteLLM is the source of truth for cumulative spend (item #22).
+		// Hand the admin client to the aggregator so the dashboard reads
+		// live totals from /spend/keys; the suite_cost_events sum is now
+		// audit-only.
+		if litellmAdmin.Configured() {
+			costAggregate.WithLiteLLM(llmgateway.NewCostSpendReader(litellmAdmin))
+		}
 		if hookEngine != nil {
 			if err := hookEngine.Register(hooks.HookLLMPreCall, cost.PreCallHandler(costBudgets)); err != nil {
 				log.Error("cost: pre-call hook registration failed", "error", err)
@@ -498,6 +529,81 @@ func main() {
 		log.Info("memory store not configured (no database); /api/v1/memory/* will return 503")
 	}
 
+	// App-data search (Phase 2 completeness). This indexes product and
+	// workload-module records, not AgentField memory/runs/traces. FTS
+	// works with only Postgres; vector/hybrid mode uses the same LLM
+	// gateway embedder when provider credentials are configured.
+	var searchStore *search.Store
+	if database != nil && database.Pool != nil {
+		var embedder search.Embedder
+		if llmGW != nil {
+			embedder = memory.NewLLMGatewayEmbedder(llmGW, "")
+		}
+		ss, searchErr := search.New(database.Pool, embedder, log)
+		if searchErr != nil {
+			log.Error("search: init failed", "error", searchErr)
+		} else {
+			searchStore = ss
+			log.Info("search store ready",
+				"embedder", embedder != nil,
+				"model", memory.DefaultEmbeddingModel,
+			)
+		}
+	} else {
+		log.Info("search store not configured (no database); /api/v1/search will return 503")
+	}
+
+	// User activity log (Phase 2 completeness). This is product/customer
+	// activity for the app built on the stack, separate from admin audit
+	// and AgentField state.
+	var activityStore *activity.Store
+	if database != nil && database.Pool != nil {
+		as, activityErr := activity.New(database.Pool, log)
+		if activityErr != nil {
+			log.Error("activity: init failed", "error", activityErr)
+		} else {
+			activityStore = as
+			log.Info("activity store ready")
+		}
+	} else {
+		log.Info("activity store not configured (no database); /api/v1/activity will return 503")
+	}
+
+	// Feature flags (Phase 2 completeness). GET can fall back to built-in
+	// defaults without a store; writes require the DB-backed store.
+	var featureFlagStore *featureflags.Store
+	if database != nil && database.Pool != nil {
+		fs, flagErr := featureflags.New(database.Pool, log)
+		if flagErr != nil {
+			log.Error("feature flags: init failed", "error", flagErr)
+		} else {
+			featureFlagStore = fs
+			log.Info("feature flag store ready")
+		}
+	} else {
+		log.Info("feature flag store not configured (no database); /api/v1/config/flags writes will return 503")
+	}
+
+	// Shipwright (Phase 3 Tier 1). The runtime stores customer task /
+	// patch metadata only; AgentField owns the coding-agent execution
+	// state, harness tool calls, logs, spans, traces, and memory.
+	var shipwrightStore *shipwright.Store
+	if database != nil && database.Pool != nil {
+		shipwrightStore = shipwright.NewWithPool(database.Pool)
+		log.Info("shipwright store ready",
+			"agent_call", strings.TrimSpace(os.Getenv("AF_STACK_SHIPWRIGHT_AGENT_CALL")))
+	} else {
+		log.Info("shipwright store not configured (no database); /api/v1/shipwright/* will return 503")
+	}
+
+	var approvalsStore *approvals.Store
+	if database != nil && database.Pool != nil {
+		approvalsStore = approvals.NewWithPool(database.Pool)
+		log.Info("approvals store ready")
+	} else {
+		log.Info("approvals store not configured (no database); /api/v1/approvals/* will return 503")
+	}
+
 	// Sandbox service composes adapter + recorder (DB) + cost recorder.
 	// adapter==nil leaves sandboxSvc=nil; the server tolerates a missing
 	// sandbox service across all endpoints (reads degrade to empty
@@ -509,6 +615,70 @@ func main() {
 			sandboxRecorder = sandbox.NewRecorder(database.Pool, log)
 		}
 		sandboxSvc = sandbox.NewService(sb, sandboxRecorder, costRecorder, log)
+	}
+
+	// Built-in agent tool adapters (Phase 2 completeness). The service
+	// stores tenant enablement/config in AF Stack and dispatches
+	// stateless calls through existing primitives. AgentField remains
+	// the owner of tool-call spans/traces inside agent runs.
+	var toolAdapterSvc *tooladapters.Service
+	if database != nil && database.Pool != nil {
+		searxngURL := strings.TrimSpace(os.Getenv("AF_STACK_SEARXNG_URL"))
+		browserUseURL := strings.TrimSpace(os.Getenv("AF_STACK_BROWSER_USE_URL"))
+		toolAdapterSvc = tooladapters.New(database.Pool, sandboxSvc, tooladapters.Config{
+			SearXNGURL:    searxngURL,
+			BrowserUseURL: browserUseURL,
+		}, log)
+		log.Info("tool adapters ready",
+			"searxng_configured", searxngURL != "",
+			"browser_use_configured", browserUseURL != "",
+			"sandbox_configured", sandboxSvc != nil,
+		)
+	} else {
+		log.Info("tool adapters not configured (no database); /api/v1/tools/* will return empty/503")
+	}
+
+	// Strict-interface native tool registry (#16 — internal/tools/).
+	// Sits alongside the legacy tooladapters service. The factory reads
+	// env (AF_STACK_TOOL_BROWSER, AF_STACK_TOOL_SEARCH, BROWSER_USE_URL,
+	// SEARXNG_URL, STEEL_API_KEY, etc.) to pick adapters; per-tenant
+	// enable lives in suite_tenant_tools.
+	var toolsRegistry *tools.Registry
+	{
+		var pool *pgxpool.Pool
+		if database != nil {
+			pool = database.Pool
+		}
+		reg, regErr := tools.BuildRegistry(tools.FactoryDeps{
+			Pool:    pool,
+			Sandbox: sandboxSvc,
+			Logger:  log,
+		})
+		if regErr != nil {
+			log.Error("native tools: registry build failed", "error", regErr)
+		} else {
+			toolsRegistry = reg
+			log.Info("native tools ready", "count", len(reg.All()))
+		}
+	}
+
+	// OAuth-on-behalf-of-user (Phase 2 completeness). OAuth grants are
+	// AF Stack app-auth state: the DB stores metadata/refs, while token
+	// bytes live in the encrypted secrets vault. Agents retrieve tokens
+	// through the gateway when they need to call third-party APIs as a
+	// user; AgentField still owns AI run state.
+	oauthFactory := oauth.NewFactoryFromEnv()
+	var oauthManager *oauth.Manager
+	if database != nil && database.Pool != nil && vault != nil {
+		om, oauthErr := oauth.NewManager(database.Pool, vault, log)
+		if oauthErr != nil {
+			log.Error("oauth: manager init failed", "error", oauthErr)
+		} else {
+			oauthManager = om
+			log.Info("oauth: manager ready", "providers", len(oauthFactory.List()))
+		}
+	} else {
+		log.Info("oauth: not configured (requires database + secrets vault); /api/v1/oauth token operations return 503")
 	}
 
 	// Notifications (Phase 10.1). The adapter choice comes from
@@ -550,9 +720,9 @@ func main() {
 	var webhooksSvc *webhooks.Service
 	{
 		var (
-			deliveryStore  *webhooks.DeliveryStore
-			endpointStore  *webhooks.EndpointStore
-			inboundSvc     *webhooks.InboundService
+			deliveryStore *webhooks.DeliveryStore
+			endpointStore *webhooks.EndpointStore
+			inboundSvc    *webhooks.InboundService
 		)
 		if database != nil && database.Pool != nil {
 			deliveryStore = webhooks.NewDeliveryStore(database.Pool, log)
@@ -600,23 +770,24 @@ func main() {
 
 	// Billing (Phase 10.4). Composes:
 	//   - billing.Store  : reads/writes suite_billing_customers + suite_usage_meters.
-	//   - billing.Client : real stripe-go client when STRIPE_SECRET_KEY is
-	//                      set, otherwise a deterministic stub for dev.
+	//   - billing.Client : selected by AF_STACK_BILLING_ADAPTER
+	//                      (stripe | lago | none), with deterministic
+	//                      stubs when provider credentials are unset.
 	//   - billing.Service: per-tenant verbs (meter, has_budget, portal_link)
-	//                      + the Stripe webhook dispatcher.
+	//                      + the Stripe webhook dispatcher when active.
 	//
 	// nil DB pool leaves billing.Store at HasPool()==false; reads serve
-	// empty / synthesised rows, writes silently drop. The stub Stripe
-	// client always returns deterministic placeholder values so the
-	// dashboard renders something useful even without a real Stripe key.
+	// empty / synthesised rows, writes silently drop. Stub adapters always
+	// return deterministic placeholder values so the dashboard renders
+	// something useful even without real provider keys.
 	var billingSvc *billing.Service
 	{
 		var billingStore *billing.Store
 		if database != nil && database.Pool != nil {
 			billingStore = billing.NewStore(database.Pool, log)
 		}
-		stripeClient := billing.NewClientFromEnv(log)
-		billingSvc = billing.NewService(billingStore, stripeClient, billing.NewMeterRegistry(), log)
+		billingClient := billing.NewClientFromEnv(log)
+		billingSvc = billing.NewService(billingStore, billingClient, billing.NewMeterRegistry(), log)
 	}
 
 	// Skills (Phase 11.3). The Store + Installer are independent: the
@@ -713,23 +884,26 @@ func main() {
 	}
 
 	srv := server.New(cfg, log, server.Deps{
-		DB:            database,
-		AF:            afClient,
-		Telemetry:     tel,
-		Hooks:         hookEngine,
-		Storage:       store,
-		StoragePrefix: cfg.Storage.TenantPrefix,
-		Secrets:       vault,
-		Jobs:          jobsManager,
-		RateLimiter:   limiter,
-		Tenancy:       tenancyMgr,
-		LLMCache:      llmResponseCache,
-		LLMGateway:    llmGW,
-		DBStudio:      studioSvc,
-		Memory:        memoryStore,
-		CostAggregate: costAggregate,
-		Budgets:       costBudgets,
-		Sandbox:       sandboxSvc,
+		DB:              database,
+		AF:              afClient,
+		Telemetry:       tel,
+		Hooks:           hookEngine,
+		Storage:         store,
+		StoragePrefix:   cfg.Storage.TenantPrefix,
+		Secrets:         vault,
+		Jobs:            jobsManager,
+		Tenancy:         tenancyMgr,
+		LLMCache:        llmResponseCache,
+		LLMGateway:      llmGW,
+		Guardrails:      guardrailsSvc,
+		DBStudio:        studioSvc,
+		Memory:          memoryStore,
+		Search:          searchStore,
+		Activity:        activityStore,
+		FeatureFlags:    featureFlagStore,
+		CostAggregate:   costAggregate,
+		Budgets:         costBudgets,
+		Sandbox:         sandboxSvc,
 		Notifications:   notificationsSvc,
 		Webhooks:        webhooksSvc,
 		Billing:         billingSvc,
@@ -739,6 +913,12 @@ func main() {
 		MCP:             mcpPool,
 		MCPStore:        mcpStore,
 		Crons:           cronsStore,
+		ToolAdapters:    toolAdapterSvc,
+		ToolsRegistry:   toolsRegistry,
+		OAuthManager:    oauthManager,
+		OAuthFactory:    oauthFactory,
+		Shipwright:      shipwrightStore,
+		Approvals:       approvalsStore,
 		LogRing:         logRing,
 		Version:         version,
 	})
@@ -960,6 +1140,80 @@ func buildNotificationsAdapter(log *slog.Logger) notifications.Adapter {
 	}
 }
 
+// buildGuardrails constructs the gateway-local PII/moderation layer.
+//
+// Defaults:
+//   - enabled
+//   - regex PII redaction
+//   - moderation enabled, with operator-supplied block regexes
+//
+// Presidio wiring:
+//   - AF_STACK_PII_PROVIDER=presidio
+//   - AF_STACK_PRESIDIO_ANALYZER_URL=http://presidio-analyzer:3000
+//   - AF_STACK_PRESIDIO_ANONYMIZER_URL=http://presidio-anonymizer:3000
+func buildGuardrails(log *slog.Logger) (*guardrails.Service, error) {
+	if envBool("AF_STACK_GUARDRAILS_ENABLED", true) == false {
+		log.Info("guardrails: disabled by AF_STACK_GUARDRAILS_ENABLED=false")
+		return nil, nil
+	}
+	provider := strings.ToLower(strings.TrimSpace(os.Getenv("AF_STACK_PII_PROVIDER")))
+	if provider == "" {
+		provider = guardrails.ProviderRegex
+	}
+	svc, err := guardrails.New(guardrails.Config{
+		Enabled:               true,
+		RedactPII:             envBool("AF_STACK_PII_REDACTION_ENABLED", true),
+		Moderate:              envBool("AF_STACK_MODERATION_ENABLED", true),
+		Provider:              provider,
+		PresidioAnalyzerURL:   os.Getenv("AF_STACK_PRESIDIO_ANALYZER_URL"),
+		PresidioAnonymizerURL: os.Getenv("AF_STACK_PRESIDIO_ANONYMIZER_URL"),
+		BlockPatterns:         splitEnvList(os.Getenv("AF_STACK_MODERATION_BLOCK_PATTERNS")),
+		Timeout:               3 * time.Second,
+	}, log)
+	if err != nil {
+		return nil, err
+	}
+	log.Info("guardrails: ready",
+		"provider", svc.Provider(),
+		"pii_redaction", envBool("AF_STACK_PII_REDACTION_ENABLED", true),
+		"moderation", envBool("AF_STACK_MODERATION_ENABLED", true),
+		"moderation_rules", len(splitEnvList(os.Getenv("AF_STACK_MODERATION_BLOCK_PATTERNS"))),
+	)
+	return svc, nil
+}
+
+func envBool(key string, def bool) bool {
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	if raw == "" {
+		return def
+	}
+	switch raw {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return def
+	}
+}
+
+func splitEnvList(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	fields := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == '\n'
+	})
+	out := make([]string, 0, len(fields))
+	for _, field := range fields {
+		field = strings.TrimSpace(field)
+		if field != "" {
+			out = append(out, field)
+		}
+	}
+	return out
+}
+
 // buildLLMGateway constructs the LLM gateway.
 //
 // The runtime no longer hand-rolls a client per upstream provider —
@@ -984,21 +1238,116 @@ func buildNotificationsAdapter(log *slog.Logger) notifications.Adapter {
 func buildLLMGateway(log *slog.Logger, afClient *agentfield.Client) *llmgateway.Gateway {
 	_ = afClient // reserved for forward-compat
 
-	url := os.Getenv("AF_STACK_LITELLM_URL")
-	if url == "" {
-		url = "http://litellm:4000"
-	}
-	masterKey := os.Getenv("LITELLM_MASTER_KEY")
-	if masterKey == "" {
-		masterKey = "sk-litellm-dev"
-	}
+	url, masterKey := litellmEnv()
 
 	log.Info("llm gateway: litellm sidecar", "url", url)
-	return llmgateway.New(llmgateway.NewLiteLLMProvider(llmgateway.LiteLLMConfig{
+	provider := llmgateway.NewLiteLLMProvider(llmgateway.LiteLLMConfig{
 		ProviderID: "litellm",
 		BaseURL:    url,
 		MasterKey:  masterKey,
-	}))
+	})
+	gateway := llmgateway.New(provider)
+	multimodal := buildMultimodal(log, provider)
+	if multimodal != nil {
+		gateway = gateway.WithMultimodal(multimodal)
+	}
+	return gateway
+}
+
+// buildMultimodal assembles the first-party multimodal adapter registry
+// + the LiteLLM fallback. Each first-party adapter checks its provider
+// key at construction; missing key → adapter excluded → models that
+// route to it return a clear 503 ("configure ELEVENLABS_API_KEY", etc.).
+func buildMultimodal(log *slog.Logger, provider *llmgateway.LiteLLMProvider) *llmgateway.Multimodal {
+	// First-party adapters. nil entries are silently skipped by the
+	// registry so the order here doubles as the routing priority.
+	registry := adapters.NewRegistry(
+		elevenlabsadapter.NewFromEnv(),
+		cartesiaadapter.NewFromEnv(),
+		fluxadapter.NewFromEnv(),
+		faladapter.NewFromEnv(),
+	)
+	// Log which first-party providers are live so the operator sees the
+	// status at boot.
+	for _, name := range registry.Names() {
+		log.Info("multimodal adapter ready", "adapter", name)
+	}
+	// LiteLLM fallback always present (provider is non-nil here).
+	fallback := litellmadapter.New(provider)
+	mm := llmgateway.NewMultimodal(registry, fallback)
+	log.Info("multimodal facade ready",
+		"first_party_adapters", len(registry.Names()),
+		"fallback", fallback.Name())
+	return mm
+}
+
+// buildLiteLLMAdmin constructs the LiteLLM admin client used by tenancy
+// (item #22 — virtual keys). It points at the same sidecar as the
+// gateway but talks to the master-key-protected /key/* + /spend/*
+// surface. Returns an admin instance even when env isn't set — the
+// instance's Configured() reports false and callers skip mirroring.
+func buildLiteLLMAdmin(log *slog.Logger) *llmgateway.LiteLLMAdmin {
+	url, masterKey := litellmEnv()
+	admin := llmgateway.NewLiteLLMAdmin(url, masterKey)
+	if admin.Configured() {
+		log.Info("litellm admin client ready", "url", url)
+	} else {
+		log.Info("litellm admin client not configured; tenancy will skip virtual-key mirroring")
+	}
+	return admin
+}
+
+// litellmEnv reads the sidecar URL + master key with the same defaults
+// as the legacy gateway helper. Kept in one place so buildLLMGateway
+// and buildLiteLLMAdmin can never drift.
+func litellmEnv() (url, masterKey string) {
+	url = os.Getenv("AF_STACK_LITELLM_URL")
+	if url == "" {
+		url = "http://litellm:4000"
+	}
+	masterKey = os.Getenv("LITELLM_MASTER_KEY")
+	if masterKey == "" {
+		masterKey = "sk-litellm-dev"
+	}
+	return url, masterKey
+}
+
+// tenancySecretSink adapts *secrets.Vault to the tenancy.SecretSink
+// interface. The tenancy package can't import secrets directly without
+// reversing the dep arrow (secrets is a leaf); this adapter is the
+// minimum-surface bridge. Used by item #22 to store the LiteLLM secret
+// alongside each suite_api_keys row.
+type tenancySecretSink struct{ v *secrets.Vault }
+
+// Put stores the LiteLLM secret under (tenantID, key).
+func (s tenancySecretSink) Put(ctx context.Context, tenantID, key string, in tenancy.SecretPutInput) error {
+	if s.v == nil {
+		return fmt.Errorf("secrets vault not configured")
+	}
+	_, err := s.v.Put(ctx, tenantID, key, secrets.PutInput{
+		Value:       in.Value,
+		Description: in.Description,
+	})
+	return err
+}
+
+// Delete removes the secret. Best-effort: a missing row returns nil so
+// the caller can treat re-revoke as idempotent.
+func (s tenancySecretSink) Delete(ctx context.Context, tenantID, key string) error {
+	if s.v == nil {
+		return nil
+	}
+	return s.v.Delete(ctx, tenantID, key)
+}
+
+// Get returns the decrypted secret. Used by the LLM gateway at request
+// time to pick the per-tenant LiteLLM key (falls back to master key
+// when this returns empty).
+func (s tenancySecretSink) Get(ctx context.Context, tenantID, key string) ([]byte, error) {
+	if s.v == nil {
+		return nil, fmt.Errorf("secrets vault not configured")
+	}
+	return s.v.Get(ctx, tenantID, key)
 }
 
 // startJobsManager runs the River migrations idempotently, registers built-in

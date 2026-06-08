@@ -5,11 +5,13 @@ operator dashboard at `localhost:33000`. Same Postgres, same better-auth
 instance, **different audience**: customers are tenant users; operators are
 not.
 
+For fork customization rules, see [`EDITING.md`](EDITING.md).
+
 ## What it is
 
-The dashboard answers the question *"what does the operator who runs AF
-Stack see?"*. This app answers *"what does the END USER on top of AF Stack
-see?"*. Same platform, opposite side of the LLM gateway.
+The dashboard answers the question _"what does the operator who runs AF
+Stack see?"_. This app answers _"what does the END USER on top of AF Stack
+see?"_. Same platform, opposite side of the LLM gateway.
 
 A customer can:
 
@@ -26,14 +28,14 @@ A customer can:
 
 ## How it relates to the dashboard
 
-|                       | Dashboard `:33000`                  | Customer-app `:34000`             |
-| --------------------- | ----------------------------------- | --------------------------------- |
-| Audience              | Operator (whoever runs AF Stack)    | Tenant customer                   |
-| Better-auth users     | Same `user` table                   | Same `user` table                 |
-| Tenant scope          | All tenants                         | One tenant (customer's own)       |
-| API key creation      | `POST /api/v1/admin/keys`           | Auto on signup + `/api-key`       |
-| Cost view             | All tenants' calls                  | Their own tenant only             |
-| Brand                 | "AF Stack", neutral grey            | "SWE-AF", purple                  |
+|                   | Dashboard `:33000`               | Customer-app `:34000`       |
+| ----------------- | -------------------------------- | --------------------------- |
+| Audience          | Operator (whoever runs AF Stack) | Tenant customer             |
+| Better-auth users | Same `user` table                | Same `user` table           |
+| Tenant scope      | All tenants                      | One tenant (customer's own) |
+| API key creation  | `POST /api/v1/admin/keys`        | Auto on signup + `/api-key` |
+| Cost view         | All tenants' calls               | Their own tenant only       |
+| Brand             | "AF Stack", neutral grey         | "SWE-AF", purple            |
 
 Both apps share:
 

@@ -12,6 +12,14 @@
 // Both methods short-circuit to empty/zero output when the pool is
 // nil so a runtime booted without DB still serves the dashboard
 // skeleton.
+//
+// Source of truth (item #22): cumulative cost + per-key budget
+// remaining live in LiteLLM. The dashboard reads totals from
+// Aggregate.FromLiteLLM when LiteLLM is configured and falls back to
+// the suite_cost_events query when it isn't. suite_cost_events itself
+// is now a write-through AUDIT TABLE — it stays useful for forensic
+// queries, per-modality breakdowns, and the per-event log on the
+// /cost/events page, but is NOT the canonical balance.
 
 package cost
 
@@ -100,16 +108,64 @@ type EventList struct {
 
 // Aggregate holds the read-side handles.
 type Aggregate struct {
-	pool *pgxpool.Pool
-	log  *slog.Logger
+	pool    *pgxpool.Pool
+	log     *slog.Logger
+	litellm LiteLLMSpendReader
 }
 
-// NewAggregate constructs an Aggregate. Pool/log may be nil.
+// LiteLLMSpendReader is the minimum surface FromLiteLLM needs from a
+// LiteLLM admin client. Defined as an interface so cost doesn't import
+// llmgateway or tenancy. main.go wires the adapter.
+type LiteLLMSpendReader interface {
+	// KeySpend reads cumulative spend for a single LiteLLM virtual key
+	// by its alias (the AF Stack alias shape is "af-{tenant}-{key}").
+	KeySpend(ctx context.Context, alias string) (Totals, error)
+}
+
+// Totals is the LiteLLM-sourced cost rollup returned by FromLiteLLM.
+//
+// LiteLLM is the source of truth here — the dashboard prefers these
+// numbers over the suite_cost_events sum, which is now a write-through
+// audit table. nil MaxBudgetUSD = unlimited (per-key budget not
+// configured upstream).
+type Totals struct {
+	SpendUSD     float64
+	MaxBudgetUSD *float64
+}
+
+// NewAggregate constructs an Aggregate. Pool/log may be nil. The LiteLLM
+// reader is wired via WithLiteLLM later in main.go (so cost stays
+// importable without a LiteLLM dependency at boot mode).
 func NewAggregate(pool *pgxpool.Pool, log *slog.Logger) *Aggregate {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Aggregate{pool: pool, log: log}
+}
+
+// WithLiteLLM attaches the LiteLLM spend reader. nil disables the
+// FromLiteLLM path (which then returns an empty/unset Totals).
+func (a *Aggregate) WithLiteLLM(reader LiteLLMSpendReader) *Aggregate {
+	if a == nil {
+		return nil
+	}
+	a.litellm = reader
+	return a
+}
+
+// FromLiteLLM reads cumulative spend for one AF Stack api key directly
+// from LiteLLM. This is the canonical balance — suite_cost_events is
+// audit data only (#22).
+//
+// alias is the LiteLLM key alias minted at issuance time. The dashboard
+// has it from suite_api_keys.litellm_key_alias. Returns a zero Totals
+// (no error) when no reader is wired so the dashboard renders an
+// em-dash without the call failing.
+func (a *Aggregate) FromLiteLLM(ctx context.Context, alias string) (Totals, error) {
+	if a == nil || a.litellm == nil || alias == "" {
+		return Totals{}, nil
+	}
+	return a.litellm.KeySpend(ctx, alias)
 }
 
 // Summary computes the dashboard's cost summary for [PeriodStart,

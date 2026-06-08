@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -84,12 +85,12 @@ func (p *LiteLLMProvider) Chat(ctx context.Context, req ChatRequest) (ChatRespon
 	// Force stream=false; the streaming path has its own method.
 	body := chatRequestBody(req, false)
 
-	respBody, status, err := p.do(ctx, "POST", "/chat/completions", body, false)
+	respBody, status, hdrs, err := p.do(ctx, "POST", "/chat/completions", body, false)
 	if err != nil {
 		return ChatResponse{}, err
 	}
 	if status >= 400 {
-		return ChatResponse{}, p.upstreamErr(status, respBody)
+		return ChatResponse{}, p.upstreamErr(status, respBody, hdrs)
 	}
 
 	var out ChatResponse
@@ -150,7 +151,7 @@ func (p *LiteLLMProvider) ChatStream(ctx context.Context, req ChatRequest) (<-ch
 
 		if resp.StatusCode >= 400 {
 			b, _ := readBodyLimited(resp.Body, 1<<20)
-			errCh <- p.upstreamErr(resp.StatusCode, b)
+			errCh <- p.upstreamErr(resp.StatusCode, b, resp.Header)
 			return
 		}
 
@@ -218,12 +219,12 @@ func (p *LiteLLMProvider) Embeddings(ctx context.Context, req EmbeddingsRequest)
 			Code: ErrCodeInvalidRequest, Message: "encode embeddings request: " + err.Error(),
 		}
 	}
-	respBody, status, err := p.do(ctx, "POST", "/embeddings", body, false)
+	respBody, status, headers, err := p.do(ctx, "POST", "/embeddings", body, false)
 	if err != nil {
 		return EmbeddingsResponse{}, err
 	}
 	if status >= 400 {
-		return EmbeddingsResponse{}, p.upstreamErr(status, respBody)
+		return EmbeddingsResponse{}, p.upstreamErr(status, respBody, headers)
 	}
 	var out EmbeddingsResponse
 	if err := json.Unmarshal(respBody, &out); err != nil {
@@ -242,12 +243,12 @@ func (p *LiteLLMProvider) Images(ctx context.Context, req ImagesRequest) (Images
 			Code: ErrCodeInvalidRequest, Message: "encode images request: " + err.Error(),
 		}
 	}
-	respBody, status, err := p.do(ctx, "POST", "/images/generations", body, false)
+	respBody, status, headers, err := p.do(ctx, "POST", "/images/generations", body, false)
 	if err != nil {
 		return ImagesResponse{}, err
 	}
 	if status >= 400 {
-		return ImagesResponse{}, p.upstreamErr(status, respBody)
+		return ImagesResponse{}, p.upstreamErr(status, respBody, headers)
 	}
 	var out ImagesResponse
 	if err := json.Unmarshal(respBody, &out); err != nil {
@@ -256,6 +257,113 @@ func (p *LiteLLMProvider) Images(ctx context.Context, req ImagesRequest) (Images
 		}
 	}
 	return out, nil
+}
+
+// AudioSpeech generates speech audio via LiteLLM.
+func (p *LiteLLMProvider) AudioSpeech(ctx context.Context, req AudioSpeechRequest) (RawResponse, error) {
+	resp, status, headers, err := p.doRaw(ctx, "POST", "/audio/speech", req.Body, "application/json", "*/*", 64<<20)
+	if err != nil {
+		return RawResponse{}, err
+	}
+	if status >= 400 {
+		return RawResponse{}, p.upstreamErr(status, resp.Body, headers)
+	}
+	if resp.ContentType == "" {
+		resp.ContentType = "audio/mpeg"
+	}
+	return resp, nil
+}
+
+// AudioTranscription transcribes audio via LiteLLM.
+func (p *LiteLLMProvider) AudioTranscription(ctx context.Context, req AudioTranscriptionRequest) (RawResponse, error) {
+	resp, status, headers, err := p.doRaw(ctx, "POST", "/audio/transcriptions", req.Body, req.ContentType, "application/json", 16<<20)
+	if err != nil {
+		return RawResponse{}, err
+	}
+	if status >= 400 {
+		return RawResponse{}, p.upstreamErr(status, resp.Body, headers)
+	}
+	if resp.ContentType == "" {
+		resp.ContentType = "application/json"
+	}
+	return resp, nil
+}
+
+// ─── Raw variants used by the multimodal adapter ─────────────────────────
+//
+// The adapters package owns a unified MultimodalAdapter shape that
+// keeps the LLM gateway free of provider-specific wire DTOs. These thin
+// wrappers expose the underlying LiteLLM verb without forcing the
+// adapter to depend on the llmgateway-internal request structs.
+
+// AudioSpeechRaw is the raw-bytes variant used by the multimodal adapter.
+// Wraps AudioSpeech with the structured DTO removed so the caller
+// (a tiny adapter wrapper) doesn't have to construct llmgateway.AudioSpeechRequest.
+func (p *LiteLLMProvider) AudioSpeechRaw(ctx context.Context, model string, body []byte) ([]byte, string, error) {
+	resp, err := p.AudioSpeech(ctx, AudioSpeechRequest{Model: model, Body: body})
+	if err != nil {
+		return nil, "", err
+	}
+	return resp.Body, resp.ContentType, nil
+}
+
+// AudioTranscriptionRaw is the raw-bytes STT variant. When translate is
+// true the call hits /audio/translations instead of /audio/transcriptions.
+func (p *LiteLLMProvider) AudioTranscriptionRaw(ctx context.Context, model, ct string, body []byte, translate bool) ([]byte, string, error) {
+	if translate {
+		resp, status, headers, err := p.doRaw(ctx, "POST", "/audio/translations", body, ct, "application/json", 16<<20)
+		if err != nil {
+			return nil, "", err
+		}
+		if status >= 400 {
+			return nil, "", p.upstreamErr(status, resp.Body, headers)
+		}
+		if resp.ContentType == "" {
+			resp.ContentType = "application/json"
+		}
+		return resp.Body, resp.ContentType, nil
+	}
+	resp, err := p.AudioTranscription(ctx, AudioTranscriptionRequest{Model: model, ContentType: ct, Body: body})
+	if err != nil {
+		return nil, "", err
+	}
+	return resp.Body, resp.ContentType, nil
+}
+
+// ImagesRaw routes between /images/generations, /images/edits, and
+// /images/variations depending on the flags. edit/variations bodies
+// are multipart/form-data with multipartCT set to the Content-Type
+// header (boundary included).
+func (p *LiteLLMProvider) ImagesRaw(ctx context.Context, edit, variations bool, multipartCT string, body []byte) ([]byte, error) {
+	switch {
+	case edit:
+		resp, status, headers, err := p.doRaw(ctx, "POST", "/images/edits", body, multipartCT, "application/json", 32<<20)
+		if err != nil {
+			return nil, err
+		}
+		if status >= 400 {
+			return nil, p.upstreamErr(status, resp.Body, headers)
+		}
+		return resp.Body, nil
+	case variations:
+		resp, status, headers, err := p.doRaw(ctx, "POST", "/images/variations", body, multipartCT, "application/json", 32<<20)
+		if err != nil {
+			return nil, err
+		}
+		if status >= 400 {
+			return nil, p.upstreamErr(status, resp.Body, headers)
+		}
+		return resp.Body, nil
+	default:
+		resp, status, headers, err := p.doRaw(ctx, "POST", "/images/generations", body, "application/json", "application/json", 16<<20)
+		if err != nil {
+			return nil, err
+		}
+		if status >= 400 {
+			return nil, p.upstreamErr(status, resp.Body, headers)
+		}
+		return resp.Body, nil
+	}
 }
 
 // ─── HTTP plumbing ───────────────────────────────────────────────────────
@@ -278,11 +386,19 @@ func (p *LiteLLMProvider) newRequest(ctx context.Context, method, path string, b
 	} else {
 		req.Header.Set("Accept", "application/json")
 	}
-	// Internal sidecar auth. The LITELLM_MASTER_KEY is shared between
-	// the runtime and the LiteLLM container at compose-time; customers
-	// never see it. Their tenant key is checked one layer earlier.
-	if p.cfg.MasterKey != "" {
-		req.Header.Set("Authorization", "Bearer "+p.cfg.MasterKey)
+	// Auth header. When the caller stashed a per-tenant LiteLLM key on
+	// the context (item #22 — virtual keys), use it so LiteLLM
+	// attributes spend + enforces budget/rate-limit against that key.
+	// Falls back to the shared LITELLM_MASTER_KEY when no override is
+	// present — preserves pre-#22 behaviour for the boot mode without
+	// tenancy / vault, and for legacy suite_api_keys rows that never
+	// went through LiteLLM mirroring.
+	authKey := litellmKeyFromContext(ctx)
+	if authKey == "" {
+		authKey = p.cfg.MasterKey
+	}
+	if authKey != "" {
+		req.Header.Set("Authorization", "Bearer "+authKey)
 	}
 	for k, v := range p.cfg.ExtraHeaders {
 		req.Header.Set(k, v)
@@ -290,14 +406,14 @@ func (p *LiteLLMProvider) newRequest(ctx context.Context, method, path string, b
 	return req, nil
 }
 
-func (p *LiteLLMProvider) do(ctx context.Context, method, path string, body []byte, stream bool) ([]byte, int, error) {
+func (p *LiteLLMProvider) do(ctx context.Context, method, path string, body []byte, stream bool) ([]byte, int, http.Header, error) {
 	httpReq, err := p.newRequest(ctx, method, path, body, stream)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		return nil, 0, &APIError{
+		return nil, 0, nil, &APIError{
 			Code:    ErrCodeUpstreamError,
 			Message: fmt.Sprintf("upstream call: %v", err),
 			Status:  http.StatusBadGateway,
@@ -305,12 +421,121 @@ func (p *LiteLLMProvider) do(ctx context.Context, method, path string, body []by
 	}
 	defer resp.Body.Close()
 	respBody, _ := readBodyLimited(resp.Body, 16<<20)
-	return respBody, resp.StatusCode, nil
+	return respBody, resp.StatusCode, resp.Header, nil
+}
+
+func (p *LiteLLMProvider) doRaw(
+	ctx context.Context,
+	method string,
+	path string,
+	body []byte,
+	contentType string,
+	accept string,
+	maxResponseBytes int64,
+) (RawResponse, int, http.Header, error) {
+	if p.cfg.BaseURL == "" {
+		return RawResponse{}, 0, nil, &APIError{
+			Code: ErrCodeUpstreamError, Message: "litellm base URL not configured",
+			Status: http.StatusServiceUnavailable,
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, method, p.cfg.BaseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return RawResponse{}, 0, nil, err
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	if accept == "" {
+		accept = "application/json"
+	}
+	req.Header.Set("Accept", accept)
+	authKey := litellmKeyFromContext(ctx)
+	if authKey == "" {
+		authKey = p.cfg.MasterKey
+	}
+	if authKey != "" {
+		req.Header.Set("Authorization", "Bearer "+authKey)
+	}
+	for k, v := range p.cfg.ExtraHeaders {
+		req.Header.Set(k, v)
+	}
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return RawResponse{}, 0, nil, &APIError{
+			Code:    ErrCodeUpstreamError,
+			Message: fmt.Sprintf("upstream call: %v", err),
+			Status:  http.StatusBadGateway,
+		}
+	}
+	defer resp.Body.Close()
+	respBody, _ := readBodyLimited(resp.Body, maxResponseBytes)
+	return RawResponse{
+		Body:        respBody,
+		ContentType: resp.Header.Get("Content-Type"),
+	}, resp.StatusCode, resp.Header, nil
+}
+
+// rateLimitHeaderNames is the set of upstream response headers we proxy
+// through verbatim on a 429. LiteLLM emits all four standard headers
+// (Retry-After + the X-RateLimit-* trio) on virtual-key RPM/TPM denials;
+// the OpenAI / Anthropic / Google upstreams emit the same names when
+// LiteLLM passes their 429 through, so the same set covers both
+// "LiteLLM's own RPM limit" and "upstream provider's limit" cases.
+//
+// All-lowercase canonical form here matches http.Header's canonicalised
+// key shape (textproto.CanonicalMIMEHeaderKey).
+var rateLimitHeaderNames = []string{
+	"Retry-After",
+	"X-RateLimit-Limit",
+	"X-RateLimit-Remaining",
+	"X-RateLimit-Reset",
+}
+
+// extractRateLimitHeaders picks the rate-limit-relevant headers off an
+// upstream response so the handler can re-emit them when surfacing the
+// 429 to the client. Returns nil when none are present (typical for
+// non-429 upstream errors), so the APIError.Headers field stays nil and
+// the handler skips the proxy step.
+func extractRateLimitHeaders(h http.Header) map[string]string {
+	if h == nil {
+		return nil
+	}
+	var out map[string]string
+	for _, name := range rateLimitHeaderNames {
+		if v := h.Get(name); v != "" {
+			if out == nil {
+				out = make(map[string]string, len(rateLimitHeaderNames))
+			}
+			out[name] = v
+		}
+	}
+	return out
+}
+
+// parseRetryAfter converts a Retry-After header value into seconds for
+// the error envelope's `retry_after` field. Supports both the integer-
+// seconds form (RFC 7231 §7.1.3) and a missing/unparseable value (in
+// which case we return 0 — the handler omits the field).
+func parseRetryAfter(v string) int {
+	if v == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }
 
 // upstreamErr converts a non-2xx upstream response into an APIError
 // with the OpenAI-compat error code mapped from the status.
-func (p *LiteLLMProvider) upstreamErr(status int, body []byte) error {
+//
+// On 429 responses, rate-limit headers (Retry-After, X-RateLimit-*) are
+// captured into APIError.Headers so the handler can proxy them through
+// to the client verbatim — LiteLLM enforces virtual-key RPM/TPM upstream
+// (item #22), and the runtime no longer runs a local limiter (item #32).
+func (p *LiteLLMProvider) upstreamErr(status int, body []byte, headers http.Header) error {
 	code := ErrCodeUpstreamError
 	switch status {
 	case http.StatusBadRequest:
@@ -328,14 +553,27 @@ func (p *LiteLLMProvider) upstreamErr(status int, body []byte) error {
 		msg = extracted
 	}
 
+	details := map[string]any{
+		"upstream_status":       status,
+		"upstream_body_preview": previewBody(body),
+	}
+
+	var hdrs map[string]string
+	if status == http.StatusTooManyRequests {
+		hdrs = extractRateLimitHeaders(headers)
+		if hdrs != nil {
+			if retryAfter := parseRetryAfter(hdrs["Retry-After"]); retryAfter > 0 {
+				details["retry_after"] = retryAfter
+			}
+		}
+	}
+
 	return &APIError{
 		Code:    code,
 		Message: msg,
 		Status:  status,
-		Details: map[string]any{
-			"upstream_status":       status,
-			"upstream_body_preview": previewBody(body),
-		},
+		Details: details,
+		Headers: hdrs,
 	}
 }
 

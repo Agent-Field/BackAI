@@ -148,8 +148,29 @@ describe("storage.download", () => {
     expect(headers.accept).toBe("application/octet-stream")
   })
 
+  it("adds transform query params for resized downloads", async () => {
+    enqueue(binaryResponse(new Uint8Array([137, 80, 78, 71])))
+    await storage.download("images/avatar.png", {
+      transform: "thumbnail",
+      width: 128,
+      height: 128,
+      format: "png",
+    })
+    const url = new URL(nthCall(0).url)
+    expect(url.pathname).toBe("/api/v1/storage/images%2Favatar.png")
+    expect(url.searchParams.get("transform")).toBe("thumbnail")
+    expect(url.searchParams.get("width")).toBe("128")
+    expect(url.searchParams.get("height")).toBe("128")
+    expect(url.searchParams.get("format")).toBe("png")
+  })
+
   it("throws on empty key", async () => {
     await expect(storage.download("")).rejects.toThrow(/non-empty/i)
+  })
+
+  it("validates transform dimensions", async () => {
+    await expect(storage.download("x.png", { width: 0 })).rejects.toThrow(/width/i)
+    await expect(storage.download("x.png", { height: -1 })).rejects.toThrow(/height/i)
   })
 })
 

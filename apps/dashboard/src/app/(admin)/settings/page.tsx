@@ -1,27 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Settings index. Shallow surface — operator account, appearance, plugins,
-// feature flags. Account is a separate route (per docs/dashboard-ia.md) so a
-// link card is offered here as well.
+// Settings index. Shallow surface: operator account, appearance, feature
+// flags. Account is a separate route (per docs/dashboard-ia.md) so a link card
+// is offered here as well.
 
 import Link from "next/link"
 import { ArrowRight, KeyRound, ShieldCheck, UserIcon } from "lucide-react"
 
 import { PageHeader } from "@/components/layout/page-header"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { requireOperator } from "@/lib/session"
 
 import { AppearanceForm } from "./_components/appearance-form"
 import { FeatureFlagsForm } from "./_components/feature-flags-form"
-import { PluginsList } from "./_components/plugins-list"
 
 export default async function SettingsPage() {
   const session = await requireOperator()
@@ -31,14 +24,13 @@ export default async function SettingsPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Settings"
-        description="Operator account, dashboard theme, plugins, feature flags"
+        description="Operator account, dashboard theme, feature flags"
       />
 
       <Tabs defaultValue="account" className="gap-6">
         <TabsList>
           <TabsTrigger value="account">Account</TabsTrigger>
           <TabsTrigger value="appearance">Appearance</TabsTrigger>
-          <TabsTrigger value="plugins">Plugins</TabsTrigger>
           <TabsTrigger value="flags">Feature flags</TabsTrigger>
         </TabsList>
 
@@ -47,23 +39,15 @@ export default async function SettingsPage() {
             <CardHeader>
               <CardTitle>Operator account</CardTitle>
               <CardDescription>
-                Signed in as{" "}
-                <span className="text-foreground font-medium">
-                  {user.email}
-                </span>
-                . Update your profile, password, and sessions on the account
-                page.
+                Signed in as <span className="text-foreground font-medium">{user.email}</span>.
+                Update your profile, password, and sessions on the account page.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               <div className="grid gap-3 sm:grid-cols-3">
                 <SummaryRow icon={UserIcon} label="Name" value={user.name ?? "—"} />
                 <SummaryRow icon={KeyRound} label="Email" value={user.email} />
-                <SummaryRow
-                  icon={ShieldCheck}
-                  label="Role"
-                  value="Operator"
-                />
+                <SummaryRow icon={ShieldCheck} label="Role" value="Operator" />
               </div>
               <div>
                 <Button
@@ -83,27 +67,10 @@ export default async function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Appearance</CardTitle>
-              <CardDescription>
-                Choose how the dashboard renders for your account.
-              </CardDescription>
+              <CardDescription>Choose how the dashboard renders for your account.</CardDescription>
             </CardHeader>
             <CardContent>
               <AppearanceForm />
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="plugins">
-          <Card>
-            <CardHeader>
-              <CardTitle>Installed plugins</CardTitle>
-              <CardDescription>
-                Plugins live in <code>apps/dashboard/plugins/</code> and are
-                auto-discovered at build time.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <PluginsList />
             </CardContent>
           </Card>
         </TabsContent>
@@ -112,10 +79,7 @@ export default async function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Feature flags</CardTitle>
-              <CardDescription>
-                Toggle preview features. These are local-only today; runtime
-                wiring lands in Phase 5.
-              </CardDescription>
+              <CardDescription>Toggle runtime feature flags for this tenant.</CardDescription>
             </CardHeader>
             <CardContent>
               <FeatureFlagsForm />

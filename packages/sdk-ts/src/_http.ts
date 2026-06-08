@@ -180,6 +180,40 @@ export async function rawRequest(
   return response
 }
 
+/** Raw body helper for multipart/binary endpoints. */
+export async function rawBodyRequest(
+  method: string,
+  path: string,
+  body: BodyInit | null,
+  opts: HttpOptions = {},
+  contentType?: string,
+): Promise<Response> {
+  const baseUrl = resolveBaseUrl(opts.baseUrl)
+  const { headers, requestId } = buildHeaders(opts, false)
+  if (contentType !== undefined && contentType !== "") {
+    headers["content-type"] = contentType
+  }
+
+  const fetchFn = (globalThis as { fetch?: typeof fetch }).fetch
+  if (fetchFn === undefined) {
+    throw new SuiteError({
+      code: "NO_FETCH",
+      message: "globalThis.fetch is not available in this runtime",
+      status: 0,
+      requestId,
+      details: null,
+    })
+  }
+
+  const init: RequestInit = { method, headers }
+  if (body !== null) init.body = body
+  if (opts.signal !== undefined) init.signal = opts.signal
+
+  const response = await fetchFn(buildUrl(baseUrl, path), init)
+  if (!response.ok) throw await parseError(response, requestId)
+  return response
+}
+
 /** Request + parse JSON. */
 export async function request<T = unknown>(
   method: string,

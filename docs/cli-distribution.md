@@ -45,43 +45,43 @@ One line. Same as AF. Sets up `af-stack` on PATH.
 
 Same Go binary distributed multiple ways, pick whichever:
 
-| Channel | Install | Build |
-|---|---|---|
-| **Install script** (primary) | `curl -fsSL https://backai.dev/install.sh \| bash` | Hosted script + GH releases |
-| Homebrew (macOS) | `brew install agent-field/tap/af-stack` | goreleaser auto-updates tap |
-| Scoop (Windows) | `scoop install af-stack` | goreleaser auto-updates bucket |
-| Direct binary | GitHub Releases | goreleaser cross-compile |
-| Docker image | `docker run afstack/cli:latest` | goreleaser |
+| Channel                      | Install                                            | Build                          |
+| ---------------------------- | -------------------------------------------------- | ------------------------------ |
+| **Install script** (primary) | `curl -fsSL https://backai.dev/install.sh \| bash` | Hosted script + GH releases    |
+| Homebrew (macOS)             | `brew install agent-field/tap/af-stack`            | goreleaser auto-updates tap    |
+| Scoop (Windows)              | `scoop install af-stack`                           | goreleaser auto-updates bucket |
+| Direct binary                | GitHub Releases                                    | goreleaser cross-compile       |
+| Docker image                 | `docker run afstack/cli:latest`                    | goreleaser                     |
 
 ## Why this is strategic
 
-| Reason | Detail |
-|---|---|
-| Matches AgentField | Same `curl install.sh` pattern; consistent ecosystem identity |
-| Cross-language | Python and JS devs both get one install path |
-| No runtime dep | Go binary runs standalone; no node/python required at runtime |
-| Fast | Native binary; no Node startup tax for every command |
-| Code sharing | Suite runtime is Go; CLI shares internal packages |
-| Industry standard for this shape | Caddy, Gitea, Stripe CLI, flyctl, gh, Supabase all use this |
-| Doesn't fragment | One install command, one tool, one mental model |
+| Reason                           | Detail                                                        |
+| -------------------------------- | ------------------------------------------------------------- |
+| Matches AgentField               | Same `curl install.sh` pattern; consistent ecosystem identity |
+| Cross-language                   | Python and JS devs both get one install path                  |
+| No runtime dep                   | Go binary runs standalone; no node/python required at runtime |
+| Fast                             | Native binary; no Node startup tax for every command          |
+| Code sharing                     | Suite runtime is Go; CLI shares internal packages             |
+| Industry standard for this shape | Caddy, Gitea, Stripe CLI, flyctl, gh, Supabase all use this   |
+| Doesn't fragment                 | One install command, one tool, one mental model               |
 
 ## What the CLI does
 
 ```bash
-# Scaffold (alternative to git clone)
-af-stack init <project>
+# Fork bootstrap
+af-stack init --name "DocuChat" --color "#0A66C2" --logo ./logo.png
 
 # Dev loop
-af-stack dev / up / down / logs / status
+af-stack dev --detach
 
-# Modules
-af-stack module enable/disable/list <name>
+# Scaffolds
+af-stack agent new <name>
+af-stack module new <id>
+af-stack plugin new <id>
 
 # Tools
 af-stack mcp add/list/remove <url>
-af-stack harness install <claude-code|codex|gemini|opencode>
-af-stack sandbox install <gvisor>
-af-stack skill install <pkg>
+af-stack adapter list
 
 # Identity + multi-tenancy
 af-stack tenant create/list/update
@@ -93,7 +93,7 @@ af-stack keys issue/rotate/revoke
 af-stack db migrate / rollback / status
 
 # Deploy
-af-stack deploy --target=fly|railway|render|helm|nomad
+af-stack deploy --target=fly|railway|render|helm
 
 # Misc
 af-stack import-module <github-url>
@@ -126,12 +126,12 @@ Trigger on git tag push.
 
 ## What we explicitly don't do
 
-| Thing | Why not |
-|---|---|
-| npm wrapper for CLI | Fragments the install story; adds Node dep |
-| bunx | Niche audience |
-| pipx | Wrong tool for cross-language CLI |
-| Auto-update daemon | User-explicit only |
+| Thing                                     | Why not                                                        |
+| ----------------------------------------- | -------------------------------------------------------------- |
+| npm wrapper for CLI                       | Fragments the install story; adds Node dep                     |
+| bunx                                      | Niche audience                                                 |
+| pipx                                      | Wrong tool for cross-language CLI                              |
+| Auto-update daemon                        | User-explicit only                                             |
 | Multiple binaries (CLI + server separate) | Single binary, modal commands (`af-stack serve` is the server) |
 
 ## Reference

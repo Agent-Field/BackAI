@@ -75,11 +75,20 @@ flyctl deploy --config deploy/fly/fly.dashboard.toml --app <dashboard-app-name>
 ## Validation
 
 ```bash
+scripts/validate-deploy-targets.py   # static config check; flyctl validate when authenticated
+scripts/test-fly-staging.sh          # deploy/probe staging when env is configured
 flyctl status --app <app-name>
 curl https://<app-name>.fly.dev/health   # {"status":"ok",...}
 curl https://<app-name>.fly.dev/ready    # 200 when DB+AF are reachable
 curl https://<dashboard-app-name>.fly.dev/  # dashboard login page
 ```
+
+The staging script requires `FLY_API_TOKEN`,
+`AF_STACK_FLY_STAGING_RUNTIME_APP`, and
+`AF_STACK_FLY_STAGING_DASHBOARD_APP`. Optional URL/region overrides are
+`AF_STACK_FLY_STAGING_RUNTIME_URL`,
+`AF_STACK_FLY_STAGING_DASHBOARD_URL`, and
+`AF_STACK_FLY_STAGING_REGION`.
 
 ## Common pitfalls
 

@@ -11,7 +11,10 @@ package billing_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -58,17 +61,18 @@ func TestPeriodBoundary_UnknownBucketFallsBackToMonth(t *testing.T) {
 
 func TestStubClient_CreateCustomerDeterministic(t *testing.T) {
 	// No STRIPE_SECRET_KEY -> stub.
+	t.Setenv("AF_STACK_BILLING_ADAPTER", "stripe")
 	t.Setenv("STRIPE_SECRET_KEY", "")
 	c := billing.NewClientFromEnv(nil)
 	if !c.IsStub() {
 		t.Fatal("expected stub client when STRIPE_SECRET_KEY is empty")
 	}
 
-	id1, err := c.CreateCustomer("user@example.com")
+	id1, err := c.CreateCustomer(context.Background(), "tenant-1", "user@example.com")
 	if err != nil {
 		t.Fatalf("CreateCustomer: %v", err)
 	}
-	id2, err := c.CreateCustomer("user@example.com")
+	id2, err := c.CreateCustomer(context.Background(), "tenant-1", "user@example.com")
 	if err != nil {
 		t.Fatalf("CreateCustomer (second call): %v", err)
 	}
@@ -81,9 +85,10 @@ func TestStubClient_CreateCustomerDeterministic(t *testing.T) {
 }
 
 func TestStubClient_PortalLinkPointsAtExample(t *testing.T) {
+	t.Setenv("AF_STACK_BILLING_ADAPTER", "stripe")
 	t.Setenv("STRIPE_SECRET_KEY", "")
 	c := billing.NewClientFromEnv(nil)
-	link, err := c.CreatePortalLink("cus_stub_x", "https://app.example.com/back")
+	link, err := c.CreatePortalLink(context.Background(), "cus_stub_x", "https://app.example.com/back")
 	if err != nil {
 		t.Fatalf("CreatePortalLink: %v", err)
 	}
@@ -96,9 +101,10 @@ func TestStubClient_PortalLinkPointsAtExample(t *testing.T) {
 }
 
 func TestStubClient_GetCustomerReturnsFreeRow(t *testing.T) {
+	t.Setenv("AF_STACK_BILLING_ADAPTER", "stripe")
 	t.Setenv("STRIPE_SECRET_KEY", "")
 	c := billing.NewClientFromEnv(nil)
-	cust, err := c.GetCustomer("cus_stub_x")
+	cust, err := c.GetCustomer(context.Background(), "cus_stub_x")
 	if err != nil {
 		t.Fatalf("GetCustomer: %v", err)
 	}
@@ -110,9 +116,96 @@ func TestStubClient_GetCustomerReturnsFreeRow(t *testing.T) {
 	}
 }
 
+func TestNewClientFromEnv_LagoStub(t *testing.T) {
+	t.Setenv("AF_STACK_BILLING_ADAPTER", "lago")
+	t.Setenv("LAGO_API_URL", "")
+	t.Setenv("LAGO_API_KEY", "")
+	c := billing.NewClientFromEnv(nil)
+	if c == nil {
+		t.Fatal("expected lago stub client")
+	}
+	if c.AdapterName() != "lago" {
+		t.Fatalf("AdapterName = %q, want lago", c.AdapterName())
+	}
+	if !c.IsStub() {
+		t.Fatal("expected lago stub when env is incomplete")
+	}
+	id, err := c.CreateCustomer(context.Background(), "tenant-abc", "")
+	if err != nil {
+		t.Fatalf("CreateCustomer: %v", err)
+	}
+	if id != "lago_stub_tenant-abc" {
+		t.Fatalf("id = %q, want tenant-derived lago stub id", id)
+	}
+	link, err := c.CreatePortalLink(context.Background(), id, "https://app.example.com")
+	if err != nil {
+		t.Fatalf("CreatePortalLink: %v", err)
+	}
+	if !strings.Contains(link.URL, "lago-portal-stub") {
+		t.Fatalf("link URL = %q, want lago stub URL", link.URL)
+	}
+}
+
+func TestLagoClient_CreateCustomerAndPortal(t *testing.T) {
+	var sawAuth bool
+	var createdExternalID string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer lago-key" {
+			sawAuth = true
+		}
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/customers":
+			var body struct {
+				Customer struct {
+					ExternalID string `json:"external_id"`
+					Email      string `json:"email"`
+				} `json:"customer"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode lago create body: %v", err)
+			}
+			createdExternalID = body.Customer.ExternalID
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"customer":{"external_id":"tenant-123","email":"user@example.com"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/customers/tenant-123/portal_url":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"customer":{"portal_url":"https://lago.example.com/customer/portal"}}`))
+		default:
+			t.Fatalf("unexpected Lago request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	t.Setenv("AF_STACK_BILLING_ADAPTER", "lago")
+	t.Setenv("LAGO_API_URL", server.URL)
+	t.Setenv("LAGO_API_KEY", "lago-key")
+	c := billing.NewClientFromEnv(nil)
+	if c.AdapterName() != "lago" || c.IsStub() {
+		t.Fatalf("expected real lago adapter, got name=%q stub=%v", c.AdapterName(), c.IsStub())
+	}
+	id, err := c.CreateCustomer(context.Background(), "tenant-123", "user@example.com")
+	if err != nil {
+		t.Fatalf("CreateCustomer: %v", err)
+	}
+	if id != "tenant-123" || createdExternalID != "tenant-123" {
+		t.Fatalf("external id mismatch: id=%q created=%q", id, createdExternalID)
+	}
+	link, err := c.CreatePortalLink(context.Background(), id, "")
+	if err != nil {
+		t.Fatalf("CreatePortalLink: %v", err)
+	}
+	if link.URL != "https://lago.example.com/customer/portal" {
+		t.Fatalf("portal URL = %q", link.URL)
+	}
+	if !sawAuth {
+		t.Fatal("Lago adapter did not send bearer auth")
+	}
+}
+
 // ─── Service degraded modes ──────────────────────────────────────────────
 
 func TestService_NilStoreReturnsEmpty(t *testing.T) {
+	t.Setenv("AF_STACK_BILLING_ADAPTER", "stripe")
 	t.Setenv("STRIPE_SECRET_KEY", "")
 	svc := billing.NewService(nil, billing.NewClientFromEnv(nil), nil, nil)
 	ctx := context.Background()
@@ -166,6 +259,7 @@ func TestService_PortalLinkWithoutClientFails(t *testing.T) {
 }
 
 func TestService_PortalLinkWithStubProvisionsAndReturns(t *testing.T) {
+	t.Setenv("AF_STACK_BILLING_ADAPTER", "stripe")
 	t.Setenv("STRIPE_SECRET_KEY", "")
 	svc := billing.NewService(nil, billing.NewClientFromEnv(nil), nil, nil)
 	link, err := svc.PortalLink(context.Background(), "tenant-123", "https://app.example.com")

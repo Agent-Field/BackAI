@@ -11,98 +11,13 @@ deployed together.
 This is the Cal.com / Plane / Outline pattern, applied to AI
 backends.
 
-## Layer stack (what we ship, what we vendor)
+## Layered architecture
 
-```
-                                                Your customers
-                                                       ↓
-┌──────────────────────────────────────────────────────────────────┐
-│ apps/customer-app/                                               │
-│   YOUR product. Next.js. You edit this to be your SaaS.          │
-│   Auth, sign-up, dashboard, code-helper demo,                    │
-│   billing page, API key panel.                                   │
-│   Brand: customize via brand.css.                                │
-└────────────────────────────┬─────────────────────────────────────┘
-                             │ session cookie + REST
-┌──────────────────────────────────────────────────────────────────┐
-│ apps/dashboard/                                                  │
-│   Operator console. Next.js. View-only on most config;           │
-│   CRUD for tenants, keys, secrets, MCP, skills, crons,           │
-│   webhooks. Plugin system for custom tabs.                       │
-└────────────────────────────┬─────────────────────────────────────┘
-                             │ same-origin proxy
-                             ↓
-┌──────────────────────────────────────────────────────────────────┐
-│ services/runtime/                                                │
-│   Go. Single binary. Hosts:                                      │
-│                                                                  │
-│   ┌─ LLM Gateway ──┐ ┌─ Sandboxes ─┐ ┌─ MCP Host ──┐ ┌─ Jobs ─┐  │
-│   │  Cost ledger   │ │  Adapters   │ │  stdio / SSE│ │ River  │  │
-│   │  Budgets       │ │  Pool       │ │  Secret env │ │ Crons  │  │
-│   │  Cache         │ │             │ │             │ │        │  │
-│   └────────────────┘ └─────────────┘ └─────────────┘ └────────┘  │
-│   ┌─ Memory ───────┐ ┌─ Webhooks ──┐ ┌─ Notifications ─────────┐ │
-│   │  pgvector      │ │ In + Out    │ │  Outbox + workers       │ │
-│   │  Scope-aware   │ │ HMAC + dedup│ │  Adapters (log/resend)  │ │
-│   └────────────────┘ └─────────────┘ └─────────────────────────┘ │
-│   ┌─ Multi-tenancy ┐ ┌─ Secrets ───┐ ┌─ Audit ─────────────────┐ │
-│   │  PG RLS keyed  │ │  AES-256-GCM│ │  Append-only            │ │
-│   │  on session    │ │  envelope   │ │  Every mutation         │ │
-│   │  GUC           │ │  encryption │ │                         │ │
-│   └────────────────┘ └─────────────┘ └─────────────────────────┘ │
-│   ┌─ Billing ──────┐ ┌─ Storage ───┐ ┌─ Observability ─────────┐ │
-│   │  Stripe        │ │  MinIO / S3 │ │  slog ring + /api/logs  │ │
-│   │  Customer +    │ │  Adapter    │ │  Prometheus /metrics    │ │
-│   │  meter sync    │ │             │ │  OTel tracing           │ │
-│   └────────────────┘ └─────────────┘ └─────────────────────────┘ │
-└────────────────────────────┬─────────────────────────────────────┘
-                             │
-        ┌────────────────────┼───────────────────────┐
-        ↓                    ↓                       ↓
-┌────────────────┐  ┌──────────────────┐  ┌──────────────────────┐
-│   Postgres     │  │  Object storage  │  │  AgentField          │
-│   pgvector     │  │  MinIO / S3 / R2 │  │  control plane       │
-│                │  │                  │  │  (vendored)          │
-└────────────────┘  └──────────────────┘  └──────────┬───────────┘
-                                                     │ JSON-RPC
-                                                     ↓
-                            ┌────────────────────────────────────┐
-                            │  apps/backend/agents/<name>/       │
-                            │    Python AF agents. ONE container │
-                            │    per agent (or one for all dev). │
-                            │                                    │
-                            │    HARNESSES install HERE:         │
-                            │    - claude-code (CLI)             │
-                            │    - codex                         │
-                            │    - gemini                        │
-                            │    - opencode                      │
-                            │                                    │
-                            │    Each agent declares which       │
-                            │    harnesses it has at startup.    │
-                            └────────────────────────────────────┘
-```
+For the layered stack diagram (8 bands, Supabase-shaped, with all OSS
+choices logged), see [`STACK.md`](STACK.md).
 
-### Outbound to external providers
-
-```
-LLM Gateway → LiteLLM (sidecar) → 100+ providers
-                                  OpenRouter / OpenAI / Anthropic /
-                                  Google / Mistral / DeepSeek / Groq /
-                                  Cohere / Bedrock / etc.
-
-Sandbox → adapter:
-   - docker (dev, mounts host docker.sock)
-   - gVisor (prod, userspace kernel)
-   - Firecracker (hard MT, microVMs via Flintlock)
-   - e2b (managed, needs E2B_API_KEY)
-
-Webhooks → outbound delivery via safehttp (blocks private CIDRs)
-
-MCP servers → stdio (uvx, npx, local binary)
-            → SSE (https://mcp.example.com/sse)
-
-Storage → S3-compatible (MinIO dev, AWS S3 / R2 / Cloudflare prod)
-```
+This document focuses on **extension points and adapter contracts** —
+how to add agents, dashboard tabs, workload modules, and swap adapters.
 
 ## What's vendored vs what's ours
 
@@ -227,10 +142,9 @@ The agent declares at registration which harnesses it has installed.
 AgentField stores this. The runtime queries AgentField for "which
 agents have harness X ready?" rather than probing its own PATH.
 
-**The `/build/harnesses` tab as a top-level item should be merged into
-`/build/agents`** as a "harnesses available" column per agent.
-
-This refactor is queued — should land in the next push.
+The standalone `/build/harnesses` tab is folded into `/build/agents`.
+The REST surface stays in place as the data source, but the dashboard
+presents harness readiness where it belongs: next to registered agents.
 
 ## How LiteLLM is wired
 
@@ -277,11 +191,11 @@ plugins live inside the dashboard fork). Tradeoff.
 
 In order of impact:
 
-1. **Harnesses → AgentField agent layer** (you flagged this twice now)
-2. **Notable plugin → moved to example** (done in this commit — was
-   leaking into operator console)
-3. **Skills installer → real local-path support** (in progress)
-4. **MCP → bundle uv in agent container so uvx-based servers work**
-5. **Deep research example → wire end-to-end**
+1. **Skills installer → real local-path support** (in progress)
+2. **Deep research example → wire end-to-end**
+3. **LiteLLM virtual keys** — see [`STRATEGY.md`](STRATEGY.md)
+4. **Billing adapter** — Stripe + Lago behind one interface
+5. **Shipwright** — autonomous AI agent factory
 
-_LLM Gateway → LiteLLM landed — see `How LiteLLM is wired` above._
+_LLM Gateway → LiteLLM, Svix outbound webhooks, uvx in agent containers,
+and harnesses in agent containers have landed._

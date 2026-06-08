@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "generate:brand": "node ../../scripts/generate-brand.mjs",
+    "predev": "pnpm run generate:brand",
+    "prebuild": "pnpm run generate:brand",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

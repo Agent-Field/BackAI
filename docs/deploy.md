@@ -28,7 +28,9 @@ Every prod target needs all of these, regardless of platform:
 | Var                          | What                                          |
 | ---------------------------- | --------------------------------------------- |
 | `AF_STACK_DATABASE_URL`      | Postgres URL with pgvector enabled            |
-| `AF_STACK_KMS_KEY`           | `openssl rand -hex 32` — secrets vault key    |
+| `AF_STACK_KMS_PROVIDER`      | `env`, `aws`, `gcp`, or `azure`               |
+| `AF_STACK_KMS_KEY`           | `openssl rand -hex 32` when provider is `env` |
+| `AF_STACK_KMS_ENCRYPTED_DATA_KEY` | base64 cloud-KMS-wrapped 32-byte data key for BYOK |
 | `AF_STACK_AUTH_SECRET`       | `openssl rand -hex 32` — session signing key  |
 | `AF_STACK_S3_ENDPOINT`       | S3-compatible endpoint                        |
 | `AF_STACK_S3_BUCKET`         | Bucket for sandbox artefacts + uploads        |
@@ -86,9 +88,12 @@ docker compose -f docker-compose.prod.yml up -d
   9.2). Never expose `/var/run/docker.sock` to a multi-tenant runtime.
 - **Reusing `AF_STACK_AUTH_SECRET` across stacks.** Sessions issued by
   one stack are valid on the other. Each stack should generate its own.
-- **Rotating `AF_STACK_KMS_KEY` without re-encrypting.** Every secret in
-  the vault becomes unreadable. Rotation flow lands in Phase 14.4 —
-  until then, treat this key as write-once.
+- **Rotating KMS material without re-encrypting.** With
+  `AF_STACK_KMS_PROVIDER=env`, changing `AF_STACK_KMS_KEY` makes existing
+  rows unreadable. With cloud BYOK, changing the encrypted data key has
+  the same effect unless it unwraps to the same 32-byte data key. Rotate
+  by re-encrypting rows or by rewrapping the same data key under the new
+  cloud KMS key.
 - **External Postgres connection limits.** Run pgbouncer (or use Neon's
   built-in pooler) if you scale runtime replicas past 4. The runtime
   opens up to 25 connections per replica by default.

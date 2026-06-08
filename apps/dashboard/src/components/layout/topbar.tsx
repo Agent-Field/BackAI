@@ -28,15 +28,21 @@ type TopbarProps = {
     name?: string | null
     email?: string | null
   } | null
+  billingDisabled?: boolean
 }
 
-export function Topbar({ user }: TopbarProps) {
+export function Topbar({ user, billingDisabled = false }: TopbarProps) {
   const router = useRouter()
   const { theme, setTheme } = useTheme()
   const palette = useCommandPalette()
 
   const initials =
-    user?.name?.split(" ").map((s) => s[0]).join("").slice(0, 2).toUpperCase() ||
+    user?.name
+      ?.split(" ")
+      .map((s) => s[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() ||
     user?.email?.[0]?.toUpperCase() ||
     "U"
 
@@ -69,13 +75,7 @@ export function Topbar({ user }: TopbarProps) {
             <DropdownMenuTrigger
               render={
                 <Button variant="ghost" size="icon" aria-label="Toggle theme">
-                  {theme === "light" ? (
-                    <Sun />
-                  ) : theme === "dark" ? (
-                    <Moon />
-                  ) : (
-                    <Monitor />
-                  )}
+                  {theme === "light" ? <Sun /> : theme === "dark" ? <Moon /> : <Monitor />}
                 </Button>
               }
             />
@@ -99,12 +99,7 @@ export function Topbar({ user }: TopbarProps) {
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="rounded-full"
-                  aria-label="User menu"
-                >
+                <Button variant="ghost" size="icon" className="rounded-full" aria-label="User menu">
                   <Avatar className="size-8">
                     <AvatarFallback>{initials}</AvatarFallback>
                   </Avatar>
@@ -114,12 +109,8 @@ export function Topbar({ user }: TopbarProps) {
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuLabel>
                 <div className="flex flex-col">
-                  <span className="truncate text-sm font-medium">
-                    {user?.name ?? "Operator"}
-                  </span>
-                  <span className="text-muted-foreground truncate text-xs">
-                    {user?.email}
-                  </span>
+                  <span className="truncate text-sm font-medium">{user?.name ?? "Operator"}</span>
+                  <span className="text-muted-foreground truncate text-xs">{user?.email}</span>
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
@@ -142,7 +133,11 @@ export function Topbar({ user }: TopbarProps) {
         </div>
       </header>
 
-      <CommandPalette open={palette.open} onOpenChange={palette.setOpen} />
+      <CommandPalette
+        open={palette.open}
+        onOpenChange={palette.setOpen}
+        billingDisabled={billingDisabled}
+      />
     </>
   )
 }

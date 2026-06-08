@@ -232,30 +232,38 @@ func (s *Service) HasBudget(ctx context.Context, tenantID string, additionalUSD 
 	return true, nil
 }
 
-// PortalLink mints a Stripe Customer Portal URL for tenantID.
+// AdapterName returns the configured external billing adapter.
+func (s *Service) AdapterName() string {
+	if s == nil || s.client == nil {
+		return "none"
+	}
+	return s.client.AdapterName()
+}
+
+// PortalLink mints a billing-provider customer portal URL for tenantID.
 //
-// When the tenant doesn't have a stripe_customer_id yet, this provisions
-// one via Client.CreateCustomer (using the customer's email if known),
-// upserts the row, and then mints the portal link.
+// When the tenant doesn't have an external billing customer id yet, this
+// provisions one via Client.CreateCustomer (using the customer's email
+// if known), upserts the row, and then mints the portal link.
 //
 // In stub mode, the URL is deterministic and points at example.com so
 // the dashboard can still render the button.
 func (s *Service) PortalLink(ctx context.Context, tenantID, returnURL string) (PortalLink, error) {
 	if s == nil || s.client == nil {
-		return PortalLink{}, fmt.Errorf("%w: stripe client not configured", ErrStripeUnavailable)
+		return PortalLink{}, fmt.Errorf("%w: billing adapter not configured", ErrBillingUnavailable)
 	}
 	tenantID = strings.TrimSpace(tenantID)
 	if tenantID == "" {
 		return PortalLink{}, fmt.Errorf("%w: tenant_id is required", ErrInvalidInput)
 	}
 
-	var stripeID string
+	var externalCustomerID string
 	var email string
 	if s.store != nil && s.store.HasPool() {
 		cust, err := s.store.GetCustomer(ctx, tenantID)
 		if err == nil {
 			if cust.StripeCustomerID != nil {
-				stripeID = *cust.StripeCustomerID
+				externalCustomerID = *cust.StripeCustomerID
 			}
 			if cust.Email != nil {
 				email = *cust.Email
@@ -263,17 +271,17 @@ func (s *Service) PortalLink(ctx context.Context, tenantID, returnURL string) (P
 		}
 	}
 
-	if stripeID == "" {
-		newID, err := s.client.CreateCustomer(email)
+	if externalCustomerID == "" {
+		newID, err := s.client.CreateCustomer(ctx, tenantID, email)
 		if err != nil {
 			return PortalLink{}, err
 		}
-		stripeID = newID
+		externalCustomerID = newID
 		// Upsert so the next portal call short-circuits to the existing id.
 		if s.store != nil && s.store.HasPool() {
 			c := Customer{
 				TenantID:         tenantID,
-				StripeCustomerID: &stripeID,
+				StripeCustomerID: &externalCustomerID,
 				Plan:             "free",
 			}
 			if email != "" {
@@ -281,16 +289,16 @@ func (s *Service) PortalLink(ctx context.Context, tenantID, returnURL string) (P
 			}
 			if _, err := s.store.UpsertCustomer(ctx, c); err != nil {
 				// Non-fatal: portal still works, we just couldn't cache.
-				s.log.Warn("billing: upsert after stripe provision failed",
+				s.log.Warn("billing: upsert after external customer provision failed",
 					"tenant", tenantID, "error", err)
 			}
 		}
 	}
 
-	return s.client.CreatePortalLink(stripeID, returnURL)
+	return s.client.CreatePortalLink(ctx, externalCustomerID, returnURL)
 }
 
-// Client returns the underlying Stripe client. Exposed so the webhook
+// Client returns the underlying billing adapter. Exposed so the webhook
 // handler can verify signatures without re-reading the env var.
 func (s *Service) Client() Client {
 	if s == nil {

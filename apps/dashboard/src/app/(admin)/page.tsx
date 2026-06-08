@@ -8,25 +8,14 @@
 // flat sparklines, empty tables produce inline empty states, and the
 // alerts panel hides itself entirely when there is nothing to show.
 
-import {
-  Activity,
-  AlertTriangle,
-  Boxes,
-  CircleDollarSign,
-  ServerCrash,
-} from "lucide-react"
+import { Activity, AlertTriangle, Boxes, CircleDollarSign, ServerCrash } from "lucide-react"
 
 import { PageHeader } from "@/components/layout/page-header"
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { api, type HomeOverview } from "@/lib/api"
 
 import { AlertsList } from "./_home/alerts-list"
+import { GettingStartedPanel, type GettingStartedState } from "./_home/getting-started-panel"
 import { KpiCard } from "./_home/kpi-card"
 import { RunsTable } from "./_home/runs-table"
 import { WebhookList } from "./_home/webhook-list"
@@ -64,16 +53,28 @@ async function loadHome(): Promise<HomeOverview | null> {
   }
 }
 
+async function loadGettingStarted(): Promise<GettingStartedState> {
+  const [tenantsResult, keysResult, budgetsResult] = await Promise.allSettled([
+    api.admin.tenants.list(),
+    api.admin.keys.list(),
+    api.budgets.list(),
+  ])
+
+  return {
+    hasTenant: tenantsResult.status === "fulfilled" && tenantsResult.value.tenants.length > 0,
+    hasApiKey:
+      keysResult.status === "fulfilled" && keysResult.value.keys.some((key) => !key.revoked_at),
+    hasBudget: budgetsResult.status === "fulfilled" && budgetsResult.value.budgets.length > 0,
+  }
+}
+
 export default async function HomePage() {
-  const data = await loadHome()
+  const [data, gettingStarted] = await Promise.all([loadHome(), loadGettingStarted()])
 
   if (!data) {
     return (
       <div className="flex flex-col gap-6">
-        <PageHeader
-          title="Home"
-          description="What's happening right now across your stack."
-        />
+        <PageHeader title="Home" description="What's happening right now across your stack." />
         <Empty className="border-dashed">
           <EmptyHeader>
             <EmptyMedia variant="icon">
@@ -81,8 +82,8 @@ export default async function HomePage() {
             </EmptyMedia>
             <EmptyTitle>Runtime unreachable</EmptyTitle>
             <EmptyDescription>
-              The dashboard could not reach the agent runtime. Activity, runs,
-              and cost data will appear here once the runtime is online.
+              The dashboard could not reach the agent runtime. Activity, runs, and cost data will
+              appear here once the runtime is online.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -92,9 +93,11 @@ export default async function HomePage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader
-        title="Home"
-        description="What's happening right now across your stack."
+      <PageHeader title="Home" description="What's happening right now across your stack." />
+
+      <GettingStartedPanel
+        state={gettingStarted}
+        customerAppUrl={process.env.CUSTOMER_APP_URL ?? "http://localhost:34000"}
       />
 
       <AlertsList alerts={data.alerts} />

@@ -1,13 +1,25 @@
 # Theming and Branding
 
-The AF Stack dashboard is themed entirely through CSS custom properties.
-Override the variables in a single file and you can reskin every page —
-sidebar, buttons, cards, badges, charts — without forking the codebase.
+AF Stack branding starts in root [`brand.yaml`](../brand.yaml). For a
+new fork, prefer the CLI:
+
+```bash
+af-stack init --name "DocuChat" --color "#0A66C2" --logo ./logo.png
+```
+
+That writes `brand.yaml`, copies the logo into the generated app public
+paths, and runs `pnpm run generate:brand`. If you edit `brand.yaml`
+manually later, run `pnpm run generate:brand` again.
 
 ## Where the variables live
 
-All design tokens are defined in
-`apps/dashboard/src/app/globals.css` under two scopes:
+Generated brand tokens live in:
+
+- `apps/dashboard/src/app/brand.css`
+- `apps/customer-app/src/app/brand.css`
+
+The app-level design tokens are defined in each app's `globals.css`
+under two scopes:
 
 - `:root` — the light-mode defaults.
 - `.dark` — the dark-mode overrides (the dashboard ships with dark
@@ -23,81 +35,70 @@ subset; everything you don't touch falls back to the defaults.
 
 ### Surface
 
-| Variable | Meaning |
-|---|---|
-| `--background` | Page background. |
-| `--foreground` | Default body text. |
-| `--card` / `--card-foreground` | Card surface + text on cards. |
-| `--popover` / `--popover-foreground` | Dropdowns, dialogs. |
-| `--muted` / `--muted-foreground` | Subtle background + helper text. |
-| `--border` | Default border colour. |
-| `--input` | Input field border. |
-| `--ring` | Focus ring. |
-| `--radius` | Border radius (default `0.625rem`). |
+| Variable                             | Meaning                             |
+| ------------------------------------ | ----------------------------------- |
+| `--background`                       | Page background.                    |
+| `--foreground`                       | Default body text.                  |
+| `--card` / `--card-foreground`       | Card surface + text on cards.       |
+| `--popover` / `--popover-foreground` | Dropdowns, dialogs.                 |
+| `--muted` / `--muted-foreground`     | Subtle background + helper text.    |
+| `--border`                           | Default border colour.              |
+| `--input`                            | Input field border.                 |
+| `--ring`                             | Focus ring.                         |
+| `--radius`                           | Border radius (default `0.625rem`). |
 
 ### Brand
 
-| Variable | Meaning |
-|---|---|
-| `--primary` / `--primary-foreground` | Primary buttons, active sidebar item. |
-| `--accent` / `--accent-foreground` | Hover state on muted controls. |
+| Variable                                 | Meaning                               |
+| ---------------------------------------- | ------------------------------------- |
+| `--primary` / `--primary-foreground`     | Primary buttons, active sidebar item. |
+| `--accent` / `--accent-foreground`       | Hover state on muted controls.        |
 | `--secondary` / `--secondary-foreground` | Secondary buttons, badge backgrounds. |
-| `--destructive` | Delete buttons, error badges. |
+| `--destructive`                          | Delete buttons, error badges.         |
 
 ### Sidebar (an isolated palette so the chrome reads as a separate surface)
 
-| Variable | Meaning |
-|---|---|
-| `--sidebar` | Sidebar background. |
-| `--sidebar-foreground` | Sidebar text. |
-| `--sidebar-primary` | Active nav item background. |
-| `--sidebar-accent` | Hover state on nav items. |
-| `--sidebar-border` | Vertical rule between sidebar and main. |
+| Variable               | Meaning                                 |
+| ---------------------- | --------------------------------------- |
+| `--sidebar`            | Sidebar background.                     |
+| `--sidebar-foreground` | Sidebar text.                           |
+| `--sidebar-primary`    | Active nav item background.             |
+| `--sidebar-accent`     | Hover state on nav items.               |
+| `--sidebar-border`     | Vertical rule between sidebar and main. |
 
 ### Charts (five-step categorical palette)
 
-| Variable | Used by |
-|---|---|
+| Variable                   | Used by                                        |
+| -------------------------- | ---------------------------------------------- |
 | `--chart-1` to `--chart-5` | Cost area chart, sparklines, top-N breakdowns. |
 
-## Reskinning the dashboard
+## Reskinning the apps
 
-The supported pattern is to drop a file at
-`apps/dashboard/src/app/brand.css` that overrides the variables you
-want changed, and import it from `apps/dashboard/src/app/layout.tsx`
-**after** `globals.css`.
+The supported pattern is to edit `brand.yaml`, not the generated files.
+The generator writes `apps/dashboard/src/app/brand.css` and
+`apps/customer-app/src/app/brand.css` from the same config.
 
-```css
-/* apps/dashboard/src/app/brand.css */
+```yaml
+# brand.yaml
 
-:root {
-  --primary: oklch(0.55 0.21 145); /* a confident emerald */
-  --primary-foreground: oklch(0.985 0 0);
-  --accent: oklch(0.96 0.04 145);
-  --sidebar-primary: oklch(0.45 0.21 145);
-  --chart-1: oklch(0.65 0.21 145);
-  --chart-2: oklch(0.55 0.21 165);
-  --chart-3: oklch(0.45 0.21 185);
-  --radius: 0.5rem;
-}
+name: docuchat
+codename: docuchat
+display_name: DocuChat
+short_description: AI-powered document Q&A.
 
-.dark {
-  --primary: oklch(0.78 0.18 145);
-  --primary-foreground: oklch(0.18 0 0);
-  --accent: oklch(0.32 0.08 145);
-  --sidebar-primary: oklch(0.66 0.18 145);
-}
+palette:
+  primary: "#0A66C2"
+  accent: "#16A34A"
+  dark_mode: true
 ```
 
-```tsx
-// apps/dashboard/src/app/layout.tsx
-import "./globals.css"
-import "./brand.css" // <-- add this line
+```bash
+pnpm run generate:brand
 ```
 
-That's it. No props to wire, no theme provider to swap. Plugins and
-the rest of the dashboard inherit the new tokens automatically because
-every shadcn component reads from the same CSS variable surface.
+That's it. No props to wire, no theme provider to swap. Plugins, the
+dashboard, and the customer app inherit the new tokens automatically
+because every shadcn component reads from the same CSS variable surface.
 
 ## What NOT to override
 
@@ -111,14 +112,15 @@ every shadcn component reads from the same CSS variable surface.
 
 ## Logo and favicon
 
-The wordmark in the sidebar lives at
-`apps/dashboard/src/app/(admin)/_layout/sidebar.tsx`. Replace the
-markup or set the `--af-brand-logo` data URL in your `brand.css` if you
-want to centralise the swap.
+Set logo paths in `brand.yaml`, or pass `--logo` to `af-stack init`.
+`scripts/generate-brand.mjs` copies configured logos into:
 
-Favicons live under `apps/dashboard/public/`. Replace `favicon.ico`,
-`icon.png`, and `apple-icon.png` in place — Next.js picks them up
-automatically.
+- `apps/dashboard/public/brand/`
+- `apps/customer-app/public/brand/`
+
+The generated `brand.ts` modules expose the final public paths to each
+layout shell. Favicons still live under each app's `public/` directory;
+replace them in place when you need browser-tab assets.
 
 ## Verifying
 

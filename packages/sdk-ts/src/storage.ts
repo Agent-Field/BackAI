@@ -52,6 +52,17 @@ export interface ListStorageOptions extends HttpOptions {
   limit?: number
 }
 
+export interface DownloadStorageOptions extends HttpOptions {
+  /** Resize target width in pixels. */
+  width?: number
+  /** Resize target height in pixels. */
+  height?: number
+  /** `thumbnail` preserves aspect ratio within the target box; `resize` uses exact dimensions when both are set. */
+  transform?: "resize" | "thumbnail"
+  /** Output format for transformed images. */
+  format?: "png" | "jpeg" | "jpg" | "gif"
+}
+
 /** Upload bytes to `key`. Returns the persisted object metadata. */
 export async function upload(
   data: Uint8Array | ArrayBuffer | Blob | string,
@@ -98,17 +109,30 @@ export async function upload(
 /** Download an object's bytes by key. */
 export async function download(
   key: string,
-  opts: HttpOptions = {},
+  opts: DownloadStorageOptions = {},
 ): Promise<Uint8Array> {
   if (typeof key !== "string" || key.length === 0) {
     throw new Error("storage key must be a non-empty string")
   }
+  const { width, height, transform, format, ...http } = opts
+  const qs = new URLSearchParams()
+  if (width !== undefined) {
+    if (width <= 0) throw new Error("width must be a positive integer")
+    qs.set("width", String(width))
+  }
+  if (height !== undefined) {
+    if (height <= 0) throw new Error("height must be a positive integer")
+    qs.set("height", String(height))
+  }
+  if (transform !== undefined) qs.set("transform", transform)
+  if (format !== undefined) qs.set("format", format)
   const headers = { ...(opts.headers ?? {}), accept: "application/octet-stream" }
+  const path = `/storage/${encodeURIComponent(key)}${qs.size > 0 ? `?${qs.toString()}` : ""}`
   const response = await rawRequest(
     "GET",
-    `/storage/${encodeURIComponent(key)}`,
+    path,
     null,
-    { ...opts, headers },
+    { ...http, headers },
   )
   const buf = await response.arrayBuffer()
   return new Uint8Array(buf)

@@ -9,7 +9,7 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
-import { MailIcon } from "lucide-react"
+import { Building2Icon, MailIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -22,6 +22,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { signIn } from "@/lib/auth-client"
+import { SSO_PROVIDER_ID } from "@/lib/sso"
 
 const LoginSchema = z.object({
   email: z.email("Enter a valid email"),
@@ -30,7 +31,14 @@ const LoginSchema = z.object({
 
 type LoginValues = z.infer<typeof LoginSchema>
 
-function LoginFormInner() {
+type LoginFormProps = {
+  sso?: {
+    enabled: boolean
+    label: string
+  }
+}
+
+function LoginFormInner({ sso }: LoginFormProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const next = searchParams.get("next") ?? "/"
@@ -77,6 +85,23 @@ function LoginFormInner() {
         return
       }
       toast.success("Magic link sent. Check your email.")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleSSO = async () => {
+    setSubmitting(true)
+    try {
+      const result = await signIn.oauth2({
+        providerId: SSO_PROVIDER_ID,
+        callbackURL: next,
+      })
+      if (result.error) {
+        toast.error(result.error.message ?? "Could not start SSO.")
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not start SSO.")
     } finally {
       setSubmitting(false)
     }
@@ -131,6 +156,17 @@ function LoginFormInner() {
           >
             <MailIcon data-icon="inline-start" /> Email me a magic link
           </Button>
+          {sso?.enabled ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleSSO}
+              disabled={submitting}
+              className="w-full"
+            >
+              <Building2Icon data-icon="inline-start" /> Continue with {sso.label}
+            </Button>
+          ) : null}
           <FieldDescription className="text-center">
             Don&apos;t have an account?{" "}
             <Link className="underline-offset-4 hover:underline" href="/signup">
@@ -143,7 +179,7 @@ function LoginFormInner() {
   )
 }
 
-export function LoginForm() {
+export function LoginForm({ sso }: LoginFormProps) {
   return (
     <Card className="w-full max-w-sm">
       <CardHeader>
@@ -151,7 +187,7 @@ export function LoginForm() {
         <CardDescription>Welcome back to your stack.</CardDescription>
       </CardHeader>
       <Suspense fallback={null}>
-        <LoginFormInner />
+        <LoginFormInner sso={sso} />
       </Suspense>
     </Card>
   )

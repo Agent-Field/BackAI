@@ -31,6 +31,27 @@ helm install af-stack deploy/helm/af-stack \
   --namespace af-stack --create-namespace
 ```
 
+## CI smoke test
+
+The chart has a kind-based smoke test:
+
+```bash
+scripts/test-helm-kind.sh
+```
+
+The script creates a disposable kind cluster, optionally builds the
+runtime and dashboard images from the current checkout, installs the
+chart with `values-dev.yaml`, and probes the chart-owned runtime
+endpoints: `/health` and `/ready`.
+
+For fast checks without creating a cluster:
+
+```bash
+scripts/validate-deploy-targets.py
+```
+
+That runs `helm lint` and `helm template` when Helm is installed.
+
 ## Two presets
 
 | Preset | File | What it does |

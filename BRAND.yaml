@@ -1,26 +1,31 @@
-# Brand placeholder for this project.
-#
-# The directory is named `af-stack` and the docs refer to the product as
-# "AF Stack" or "the Stack" or "STACK_NAME". When the final name is chosen,
-# run a global rename:
-#
-#   1. Rename the folder:           mv platform/af-stack platform/<new-folder>
-#   2. Replace all references:      rg -l "STACK_NAME|AF Stack|af-stack" | xargs sed -i '' 's/.../<new>/g'
-#   3. Update this file's `name` field.
-#
-# Keep every reference to the product name passing through this file or the
-# STACK_NAME token so renaming stays mechanical.
+schema_version: 1
 
 name: af-stack
 codename: af-stack
 display_name: AF Stack
-short_description: The open backend platform for the AI era. AgentField + everything else.
-status: planning
-created: 2026-06-06
+short_description: The open backend platform for the AI era.
 
-# Candidate final names (decide later):
-# - AgentField Stack       (boring, instant funnel to AF brand)
-# - AgentField Studio      (dashboard-forward)
-# - Hangar                 (standalone brand, "by AgentField")
-# - Loft                   (standalone, calm aesthetic)
-# - AgentField Foundry     (industrial vibe; Microsoft Foundry conflict)
+palette:
+  primary: "#111827"
+  accent: "#2563EB"
+  dark_mode: true
+
+logos:
+  light: ./brand/logo-light.svg
+  dark: ./brand/logo-dark.svg
+  favicon: ./brand/favicon.ico
+
+domains:
+  dashboard: admin.localhost
+  customer_app: app.localhost
+  api: api.localhost
+
+surfaces:
+  dashboard:
+    display_name: AF Stack
+    subtitle: Operator console
+    description: The open backend platform for the AI era.
+  customer_app:
+    display_name: AF Stack
+    subtitle: Customer app
+    description: Customer app for AF Stack.

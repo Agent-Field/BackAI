@@ -1,7 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { chat, embed, llm, llmCacheStats, llmModels, suite } from "../src/index.js"
+import {
+  chat,
+  embed,
+  llm,
+  llmCacheStats,
+  llmModels,
+  suite,
+  llmImage,
+  llmSpeech,
+  llmTranscribe,
+} from "../src/index.js"
 
 let fetchMock: ReturnType<typeof vi.fn>
 let responseQueue: Response[]
@@ -184,7 +194,7 @@ describe("embed", () => {
     expect(body.data[0].embedding).toEqual([0.1, 0.2, 0.3])
 
     const c = nthCall(0)
-    expect(c.url).toBe("http://test.local/api/v1/llm/embeddings")
+    expect(c.url).toBe("http://test.local/api/v1/embeddings")
     const reqBody = JSON.parse(c.init.body as string) as Record<string, unknown>
     expect(reqBody.model).toBe("text-embedding-3-small")
     expect(reqBody.input).toBe("hello world")
@@ -200,6 +210,72 @@ describe("embed", () => {
 
   it("rejects empty input array", async () => {
     await expect(embed({ model: "m", input: [] })).rejects.toThrow(/input/)
+  })
+})
+
+// ─── multimodal ──────────────────────────────────────────────────────────
+
+describe("image", () => {
+  it("POSTs to the top-level images endpoint", async () => {
+    enqueueResponse(jsonResponse({ data: [{ url: "https://example.test/image.png" }] }))
+    await llmImage({
+      prompt: "a product diagram",
+      model: "gpt-image-1",
+      responseFormat: "url",
+    })
+    const c = nthCall(0)
+    expect(c.url).toBe("http://test.local/api/v1/images/generations")
+    const body = JSON.parse(c.init.body as string) as Record<string, unknown>
+    expect(body.prompt).toBe("a product diagram")
+    expect(body.model).toBe("gpt-image-1")
+    expect(body.response_format).toBe("url")
+  })
+})
+
+describe("speech", () => {
+  it("POSTs to the audio speech endpoint and returns raw response", async () => {
+    enqueueResponse(new Response("mp3 bytes", {
+      status: 200,
+      headers: { "content-type": "audio/mpeg" },
+    }))
+    const response = await llmSpeech({
+      model: "tts-1",
+      input: "hello",
+      voice: "alloy",
+      responseFormat: "mp3",
+    })
+    expect(await response.text()).toBe("mp3 bytes")
+
+    const c = nthCall(0)
+    expect(c.url).toBe("http://test.local/api/v1/audio/speech")
+    const body = JSON.parse(c.init.body as string) as Record<string, unknown>
+    expect(body.model).toBe("tts-1")
+    expect(body.input).toBe("hello")
+    expect(body.voice).toBe("alloy")
+    expect(body.response_format).toBe("mp3")
+  })
+})
+
+describe("transcribe", () => {
+  it("POSTs multipart form data to the audio transcription endpoint", async () => {
+    enqueueResponse(jsonResponse({ text: "hello" }))
+    const file = new Blob(["audio bytes"], { type: "audio/mpeg" })
+    await llmTranscribe({
+      model: "whisper-1",
+      file,
+      filename: "clip.mp3",
+      language: "en",
+    })
+
+    const c = nthCall(0)
+    expect(c.url).toBe("http://test.local/api/v1/audio/transcriptions")
+    expect(c.init.body).toBeInstanceOf(FormData)
+    const h = headersOf(c.init)
+    expect(h["content-type"]).toBeUndefined()
+    const form = c.init.body as FormData
+    expect(form.get("model")).toBe("whisper-1")
+    expect(form.get("language")).toBe("en")
+    expect(form.get("file")).toBeInstanceOf(Blob)
   })
 })
 
@@ -251,5 +327,8 @@ describe("namespace exports", () => {
     expect(suite.llm).toBe(llm)
     expect(suite.llm.chat).toBe(llm.chat)
     expect(suite.llm.models).toBe(llm.models)
+    expect(suite.llm.image).toBe(llm.image)
+    expect(suite.llm.speech).toBe(llm.speech)
+    expect(suite.llm.transcribe).toBe(llm.transcribe)
   })
 })

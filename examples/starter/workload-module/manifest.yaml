@@ -1,0 +1,12 @@
+id: starter
+name: Starter
+version: 0.1.0
+description: Minimal workload module with one route and one table.
+
+requires:
+  - multi-tenancy
+
+routes:
+  - method: POST
+    path: /events
+    handler: starter.CreateEvent

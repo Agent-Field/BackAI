@@ -43,6 +43,12 @@ func (s *Server) registerStorageOpenAPI() {
 		Parameters: []openapi.Parameter{
 			{Name: "key", In: "path", Required: true,
 				Schema: map[string]any{"type": "string"}},
+			{Name: "width", In: "query", Schema: map[string]any{"type": "integer"}},
+			{Name: "height", In: "query", Schema: map[string]any{"type": "integer"}},
+			{Name: "transform", In: "query",
+				Schema: map[string]any{"type": "string", "enum": []string{"resize", "thumbnail"}}},
+			{Name: "format", In: "query",
+				Schema: map[string]any{"type": "string", "enum": []string{"png", "jpeg", "gif"}}},
 		},
 	})
 	b.Register("DELETE", "/api/v1/storage/{key}", openapi.RouteMeta{
@@ -120,9 +126,108 @@ func (s *Server) registerMemoryOpenAPI() {
 	})
 }
 
+// registerSearchOpenAPI describes the app-data search routes.
+func (s *Server) registerSearchOpenAPI() {
+	b := s.openapi
+	b.Register("POST", "/api/v1/search", openapi.RouteMeta{
+		Summary: "Search tenant-scoped app data", Tags: []string{"search"},
+	})
+	b.Register("PUT", "/api/v1/search/documents", openapi.RouteMeta{
+		Summary: "Upsert a searchable app-data document", Tags: []string{"search"},
+	})
+	b.Register("DELETE", "/api/v1/search/documents/{namespace}/{key}", openapi.RouteMeta{
+		Summary: "Delete a searchable app-data document", Tags: []string{"search"},
+		Parameters: []openapi.Parameter{
+			{Name: "namespace", In: "path", Required: true, Schema: map[string]any{"type": "string"}},
+			{Name: "key", In: "path", Required: true, Schema: map[string]any{"type": "string"}},
+		},
+	})
+}
+
+// registerActivityOpenAPI describes the user activity log routes.
+func (s *Server) registerActivityOpenAPI() {
+	b := s.openapi
+	b.Register("GET", "/api/v1/activity", openapi.RouteMeta{
+		Summary: "List tenant-scoped user activity", Tags: []string{"activity"},
+		Parameters: []openapi.Parameter{
+			{Name: "user_id", In: "query", Schema: map[string]any{"type": "string"}},
+			{Name: "action", In: "query", Schema: map[string]any{"type": "string"}},
+			{Name: "resource_type", In: "query", Schema: map[string]any{"type": "string"}},
+			{Name: "resource_id", In: "query", Schema: map[string]any{"type": "string"}},
+			{Name: "from", In: "query", Schema: map[string]any{"type": "string", "format": "date-time"}},
+			{Name: "to", In: "query", Schema: map[string]any{"type": "string", "format": "date-time"}},
+			{Name: "limit", In: "query", Schema: map[string]any{"type": "integer"}},
+			{Name: "offset", In: "query", Schema: map[string]any{"type": "integer"}},
+		},
+	})
+	b.Register("POST", "/api/v1/activity", openapi.RouteMeta{
+		Summary: "Append a user activity event", Tags: []string{"activity"},
+	})
+}
+
+// registerConfigOpenAPI describes runtime config routes.
+func (s *Server) registerConfigOpenAPI() {
+	b := s.openapi
+	b.Register("GET", "/api/v1/config/flags", openapi.RouteMeta{
+		Summary: "List runtime feature flags", Tags: []string{"config"},
+	})
+	b.Register("PUT", "/api/v1/config/flags/{key}", openapi.RouteMeta{
+		Summary: "Set a runtime feature flag", Tags: []string{"config"},
+		Parameters: []openapi.Parameter{
+			{Name: "key", In: "path", Required: true, Schema: map[string]any{"type": "string"}},
+		},
+	})
+}
+
 // NOTE: registerAdminOpenAPI lives in admin.go (alongside the handler
 // declarations). It used to be here, but co-locating it with the
 // handlers makes future param/response schema edits easier.
+
+// registerRunAgentFieldOpenAPI describes the #25 per-run AgentField
+// proxy routes:
+//
+//	GET  /api/v1/runs/{id}/agentfield        — summary + deep-link URL
+//	POST /api/v1/runs/{id}/cancel
+//	POST /api/v1/runs/{id}/pause
+//	POST /api/v1/runs/{id}/resume
+//	POST /api/v1/runs/{id}/request-approval
+//
+// Handlers live in internal/server/run_agentfield.go. We don't model the
+// AgentField response schema here — it's exposed as a `extra` JSON blob
+// so AgentField additive schema changes don't require a runtime release.
+func (s *Server) registerRunAgentFieldOpenAPI() {
+	b := s.openapi
+	idParam := openapi.Parameter{
+		Name: "id", In: "path", Required: true,
+		Description: "AgentField run id",
+		Schema:      map[string]any{"type": "string"},
+	}
+	b.Register("GET", "/api/v1/runs/{id}/agentfield", openapi.RouteMeta{
+		Summary:    "AgentField summary + deep-link URL for a run",
+		Tags:       []string{"agents"},
+		Parameters: []openapi.Parameter{idParam},
+	})
+	b.Register("POST", "/api/v1/runs/{id}/cancel", openapi.RouteMeta{
+		Summary:    "Cancel a run (proxied to AgentField)",
+		Tags:       []string{"agents"},
+		Parameters: []openapi.Parameter{idParam},
+	})
+	b.Register("POST", "/api/v1/runs/{id}/pause", openapi.RouteMeta{
+		Summary:    "Pause a run (proxied to AgentField)",
+		Tags:       []string{"agents"},
+		Parameters: []openapi.Parameter{idParam},
+	})
+	b.Register("POST", "/api/v1/runs/{id}/resume", openapi.RouteMeta{
+		Summary:    "Resume a paused run (proxied to AgentField)",
+		Tags:       []string{"agents"},
+		Parameters: []openapi.Parameter{idParam},
+	})
+	b.Register("POST", "/api/v1/runs/{id}/request-approval", openapi.RouteMeta{
+		Summary:    "Request operator approval for a run (proxied to AgentField)",
+		Tags:       []string{"agents"},
+		Parameters: []openapi.Parameter{idParam},
+	})
+}
 
 // registerSandboxOpenAPI describes /api/v1/sandbox/* routes.
 func (s *Server) registerSandboxOpenAPI() {

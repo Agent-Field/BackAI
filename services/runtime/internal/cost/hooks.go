@@ -100,6 +100,7 @@ func PostCallHandler(r *Recorder) hooks.Handler {
 			Model:    stringFromMap(m, "model"),
 			Provider: stringFromMap(m, "provider"),
 			Agent:    stringFromMap(m, "agent"),
+			Modality: stringFromMap(m, "modality"),
 
 			PromptTokens:     intFromMap(m, "prompt_tokens"),
 			CompletionTokens: intFromMap(m, "completion_tokens"),

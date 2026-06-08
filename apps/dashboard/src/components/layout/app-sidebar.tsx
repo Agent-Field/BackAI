@@ -19,12 +19,8 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import { Badge } from "@/components/ui/badge"
-import {
-  getNavGroupsWithPlugins,
-  NAV_HOME,
-  NAV_SETTINGS,
-  type NavItem,
-} from "@/lib/nav"
+import { brand } from "@/lib/brand"
+import { getNavGroupsWithPlugins, NAV_HOME, NAV_SETTINGS, type NavItem } from "@/lib/nav"
 
 function isActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/"
@@ -41,10 +37,7 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
           <item.icon />
           <span>{item.label}</span>
           {item.requiresMultiTenancy ? (
-            <Badge
-              variant="outline"
-              className="ml-auto text-[10px] font-normal"
-            >
+            <Badge variant="outline" className="ml-auto text-[10px] font-normal">
               MT
             </Badge>
           ) : null}
@@ -54,9 +47,9 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
   )
 }
 
-export function AppSidebar() {
+export function AppSidebar({ billingDisabled = false }: { billingDisabled?: boolean }) {
   const pathname = usePathname()
-  const navGroups = getNavGroupsWithPlugins()
+  const navGroups = getNavGroupsWithPlugins({ billingDisabled })
 
   return (
     <Sidebar collapsible="icon" variant="inset">
@@ -68,13 +61,15 @@ export function AppSidebar() {
               render={
                 <Link href="/" className="flex items-center gap-2">
                   <div className="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-md">
-                    <Boxes className="size-4" />
+                    {brand.logos.light ? (
+                      <img src={brand.logos.light} alt="" className="size-5 object-contain" />
+                    ) : (
+                      <Boxes className="size-4" />
+                    )}
                   </div>
                   <div className="grid flex-1 text-left text-sm leading-tight">
-                    <span className="truncate font-semibold">AF Stack</span>
-                    <span className="text-muted-foreground truncate text-xs">
-                      Operator console
-                    </span>
+                    <span className="truncate font-semibold">{brand.displayName}</span>
+                    <span className="text-muted-foreground truncate text-xs">{brand.subtitle}</span>
                   </div>
                 </Link>
               }

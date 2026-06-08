@@ -1,12 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// recorder.go — best-effort ledger writer for LLM cost events.
+// recorder.go — best-effort audit writer for LLM cost events.
 //
 // One Recorder is constructed per process and shared with the
 // hooks.HookLLMPostCall handler. Record() inserts a single row into
 // suite_cost_events. The write is best-effort: a failure logs but never
-// errors the LLM call — losing a ledger row is preferable to failing a
+// errors the LLM call — losing a row is preferable to failing a
 // user-visible request.
+//
+// SOURCE OF TRUTH (item #22): cumulative spend + budget remaining live
+// in LiteLLM. suite_cost_events is a write-through AUDIT TABLE — it
+// preserves per-event detail (modality, agent, cached, latency) that
+// LiteLLM doesn't surface, and powers the operator's "event log" view.
+// The dashboard reads canonical totals from cost.Aggregate.FromLiteLLM,
+// not from a sum over this table.
 
 package cost
 
@@ -86,12 +93,17 @@ func (r *Recorder) Record(ctx context.Context, ev Event) error {
 	writeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
+	modality := ev.Modality
+	if modality == "" {
+		modality = "text"
+	}
+
 	_, err := r.pool.Exec(writeCtx, `
         insert into suite_cost_events
             (tenant_id, api_key_id, model, provider, agent,
              prompt_tokens, completion_tokens, total_tokens,
-             cost_usd, cached, latency_ms, occurred_at)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+             cost_usd, cached, latency_ms, occurred_at, modality)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
     `,
 		tenantPtr,
 		apiKeyPtr,
@@ -105,6 +117,7 @@ func (r *Recorder) Record(ctx context.Context, ev Event) error {
 		ev.Cached,
 		ev.LatencyMS,
 		occurredAt,
+		modality,
 	)
 	if err != nil {
 		r.log.Warn("cost: ledger write failed",

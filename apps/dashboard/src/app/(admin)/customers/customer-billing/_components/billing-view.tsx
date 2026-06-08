@@ -2,11 +2,11 @@
 
 "use client"
 
-// CustomerBillingView — per-tenant Stripe billing rollup (Phase 10.4).
+// CustomerBillingView — per-tenant billing rollup (Phase 10.4).
 //
 // Pulls api.billing.customers() for the customer list and pairs each row
 // with a meter aggregation from api.billing.meters({ tenant }) to surface
-// usage + cost for the current billing period. The "Open Stripe Portal"
+// usage + cost for the current billing period. The portal button
 // button mints a short-lived portal URL via api.billing.portalLink() and
 // opens it in a new tab.
 //
@@ -94,6 +94,23 @@ type BillingRow = {
   error: string | null
 }
 
+function adapterLabel(adapter: string): string {
+  switch (adapter) {
+    case "stripe":
+      return "Stripe"
+    case "lago":
+      return "Lago"
+    case "none":
+      return "None"
+    default:
+      return adapter
+  }
+}
+
+function isStubCustomerId(id: string | null): boolean {
+  return id?.startsWith("cus_stub_") === true || id?.startsWith("lago_stub_") === true
+}
+
 function csvEscape(value: string): string {
   if (/[,"\n\r]/.test(value)) {
     return `"${value.replace(/"/g, '""')}"`
@@ -104,7 +121,7 @@ function csvEscape(value: string): string {
 function buildCsv(rows: BillingRow[]): string {
   const header = [
     "tenant_id",
-    "stripe_customer_id",
+    "billing_customer_id",
     "email",
     "plan",
     "subscription_status",
@@ -133,6 +150,7 @@ function buildCsv(rows: BillingRow[]): string {
 
 export function CustomerBillingView() {
   const [rows, setRows] = React.useState<BillingRow[]>([])
+  const [adapter, setAdapter] = React.useState("none")
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
   const [exporting, setExporting] = React.useState(false)
@@ -143,6 +161,7 @@ export function CustomerBillingView() {
     setError(null)
     try {
       const list = await api.billing.customers()
+      setAdapter(list.adapter)
       const details = await Promise.all(
         list.customers.map((customer) =>
           api.billing
@@ -215,7 +234,7 @@ export function CustomerBillingView() {
           : e instanceof Error
             ? e.message
             : "Failed to open portal"
-      toast.error("Could not open Stripe portal", { description: message })
+      toast.error(`Could not open ${adapterLabel(adapter)} portal`, { description: message })
     } finally {
       setOpening(null)
     }
@@ -258,7 +277,7 @@ export function CustomerBillingView() {
       },
       {
         id: "stripe_customer_id",
-        header: "Stripe ID",
+        header: `${adapterLabel(adapter)} ID`,
         cell: ({ row }) => (
           <span className="text-muted-foreground font-mono text-xs">
             {row.original.customer.stripe_customer_id ?? "—"}
@@ -302,21 +321,17 @@ export function CustomerBillingView() {
         cell: ({ row }) => {
           const tid = row.original.customer.tenant_id
           const busy = opening === tid
-          // Stub mode: stripe_customer_id starts with "cus_stub_" when
-          // the runtime is running without STRIPE_SECRET_KEY. The
-          // Portal link would just go to example.com, so hide the
-          // button and show the dev hint instead.
-          const isStub = (
-            row.original.customer.stripe_customer_id ?? ""
-          ).startsWith("cus_stub_")
+          // Stub mode uses a provider-specific prefix and returns an
+          // example.com portal placeholder.
+          const isStub = isStubCustomerId(row.original.customer.stripe_customer_id)
           if (isStub) {
             return (
               <div className="flex justify-end">
                 <span
                   className="text-muted-foreground text-xs"
-                  title="Set STRIPE_SECRET_KEY in your .env and restart the runtime to enable the Stripe Portal."
+                  title={`Configure ${adapterLabel(adapter)} credentials in your .env and restart the runtime to enable the provider portal.`}
                 >
-                  Stripe stub — set <code className="font-mono">STRIPE_SECRET_KEY</code>
+                  {adapterLabel(adapter)} stub
                 </span>
               </div>
             )
@@ -329,7 +344,7 @@ export function CustomerBillingView() {
                 onClick={() => void handleOpenPortal(tid)}
                 disabled={busy}
               >
-                {busy ? "Opening…" : "Open Stripe Portal"}
+                {busy ? "Opening…" : `Open ${adapterLabel(adapter)} Portal`}
                 <ExternalLink />
               </Button>
             </div>
@@ -339,7 +354,7 @@ export function CustomerBillingView() {
     ],
     // handleOpenPortal closes over `opening` — re-create columns when it changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [opening],
+    [adapter, opening],
   )
 
   const table = useReactTable({
@@ -425,11 +440,10 @@ export function CustomerBillingView() {
       </div>
 
       <p className="text-muted-foreground text-[11px]">
-        Stripe customers + per-tenant usage meters from
+        {adapterLabel(adapter)} customers + per-tenant usage meters from
         <code className="font-mono"> /api/v1/billing/*</code>. Portal links
-        are short-lived (~24h). When the runtime is in stub mode (no
-        STRIPE_SECRET_KEY), the portal opens
-        <code className="font-mono"> example.com</code> as a placeholder.
+        are short-lived (~24h). Stub adapters open
+        <code className="font-mono"> example.com</code> placeholders.
       </p>
     </div>
   )
@@ -466,7 +480,7 @@ function BillingEmpty({ error }: { error: string | null }) {
               <code className="font-mono">{error}</code>.
             </>
           ) : (
-            "Provision a tenant + open its Stripe portal to seed the first row."
+            "Provision a tenant + open its billing portal to seed the first row."
           )}
         </EmptyDescription>
       </EmptyHeader>

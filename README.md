@@ -4,7 +4,7 @@
 
 ### The open backend platform for the AI era.
 
-*Self-host AgentField with everything else you need to ship a real product.*
+_Self-host AgentField with everything else you need to ship a real product._
 
 [![Status: planning](https://img.shields.io/badge/status-pre--alpha-orange)](#)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
@@ -12,18 +12,68 @@
 
 </div>
 
-> **Working name**. The brand is being decided. See [`BRAND.yaml`](BRAND.yaml).
+> **Working name**. The brand is configured in [`brand.yaml`](brand.yaml).
+> The legacy uppercase `BRAND.yaml` path has been retired.
 
 ## What this is
 
-A single fork-friendly monorepo that bundles **AgentField** with everything
-around it: identity, multi-tenancy, sandboxes, storage, queues, public
-APIs, billing, dashboard. Clone the repo. Customize. Deploy.
+AF Stack is a single fork-friendly monorepo that bundles **AgentField**
+with the backend services around it: identity, multi-tenancy, sandboxes,
+storage, queues, public APIs, billing, dashboard, customer app, and
+deploy targets.
 
 Not a hosted service. Not a closed SDK. Not a framework. **A complete,
 self-hostable backend platform where AI is a native compute primitive.**
 
-## Why
+## Canonical DX
+
+The default path is **fork and edit**:
+
+```bash
+git clone https://github.com/Agent-Field/backai docuchat
+cd docuchat
+af-stack init --name "DocuChat" --color "#0A66C2" --logo ./logo.png
+docker compose up
+```
+
+Your product code lives inside the fork. You brand it, add agents,
+customize the customer app, add workload modules, add dashboard plugins,
+and deploy the whole thing as one unit.
+
+API-only consumption is supported for mobile apps and existing products,
+but it is the secondary path. The primary experience is closer to
+Cal.com or Plane than to a hosted BaaS: the repo is the product.
+
+## What You Edit
+
+| Surface | Path | What belongs there |
+| --- | --- | --- |
+| Customer product | `apps/customer-app/` | Your end-user UI, flows, pages, and brand-specific app logic. |
+| Agents | `apps/backend/agents/<name>/` | Python AgentField agents, reasoners, MCP config, and harness setup. |
+| Workload modules | `workload-modules/<id>/` | Domain backend routes, migrations, jobs, and crons. |
+| Dashboard plugins | `apps/dashboard/plugins/<id>/` | Operator-console tabs for your domain metrics and controls. |
+
+Start from [`examples/starter/`](examples/starter/) when you want the
+smallest complete fork: one agent, one customer-app flow, one workload
+module, and one dashboard plugin.
+
+## Pre-Wired vs Configurable
+
+| Area | Pre-wired default | Configurable by you |
+| --- | --- | --- |
+| Data | Postgres 16 + pgvector | External Postgres, RLS policy shape, workload tables. |
+| Storage | MinIO in dev, S3 contract in prod | S3, R2, GCS, Azure Blob via adapter/env. |
+| Identity | better-auth, first-operator bootstrap | OAuth providers, trusted origins, operator creation CLI. |
+| LLM routing | AgentField path + LiteLLM sidecar | Provider keys, model map, budgets, virtual-key strategy. |
+| Sandboxes | Docker in dev, e2b/gVisor/Firecracker options | Adapter choice, limits, provider credentials. |
+| Delivery | Svix for outbound webhooks, log notifications | Resend/Postmark/etc. notifications, billing adapter. |
+| Deploy | Docker Compose, Helm, Fly, Railway, Render | Your domains, secrets, scaling, managed services. |
+
+For the layered architecture and OSS placement, read
+[`STACK.md`](STACK.md). For the product strategy, consumption model, and
+execution checklist, read [`POSITIONING.md`](POSITIONING.md).
+
+## Why This Exists
 
 Building an AI-native product today means assembling 10+ services: auth,
 db, storage, queue, gateway, agent runtime, sandboxes, webhooks, billing,
@@ -42,14 +92,14 @@ the suite runtime for everything else.
 OpenAI-compatible endpoint at `/api/v1/llm/*` is a shim that routes
 through AF so identity, traces, cost, policy, and audit are preserved.
 
-## Two SDKs, clear boundary
+## SDK Boundary
 
 > **`app.*` defines agents. `suite.*` calls them and runs everything else.**
 
-| SDK | Use inside |
-|---|---|
-| **AgentField** (`app.*`) | Agent processes |
-| **Suite** (`suite.*`) | App handlers, jobs, dashboard — anywhere outside an agent |
+| SDK                      | Use inside                                                |
+| ------------------------ | --------------------------------------------------------- |
+| **AgentField** (`app.*`) | Agent processes                                           |
+| **Suite** (`suite.*`)    | App handlers, jobs, dashboard — anywhere outside an agent |
 
 Plus a REST + OpenAPI surface so any language works.
 
@@ -83,6 +133,8 @@ Plus a REST + OpenAPI surface so any language works.
 git clone https://github.com/Agent-Field/backai my-app
 cd my-app
 cp .env.example .env
+# (optional) brand your fork
+# af-stack init --name "DocuChat" --color "#0A66C2" --logo ./logo.png
 # (optional) edit .env: set OPENROUTER_API_KEY to enable LLM features
 docker compose up
 ```
@@ -103,8 +155,6 @@ Endpoints once up:
 - Health + metrics: `http://localhost:8080/health` · `/ready` · `/metrics`
 - AgentField control plane: `http://localhost:8081/`
 - MinIO console: `http://localhost:9001/`
-
-Dashboard (Next.js) lands in Phase 3.
 
 To enable multi-tenancy: set `modules.multi-tenancy.enabled: true` in
 `apps/backend/config.yaml`. See [`docs/multi-tenancy.md`](docs/multi-tenancy.md)
@@ -173,6 +223,10 @@ await suite.admin.budgets.set({
 Every call is recorded with tenant, agent, model, tokens, cost, and
 cache-hit flag. Budgets are per-tenant; when a tenant exceeds its
 monthly cap, subsequent calls fail with `HTTP 402 BUDGET_EXCEEDED`.
+Gateway guardrails are on by default: regex PII redaction runs before
+and after provider calls, and optional moderation regexes can block
+requests or responses. See [`docs/guardrails.md`](docs/guardrails.md)
+for Presidio sidecar configuration.
 
 End-to-end tests:
 
@@ -271,39 +325,39 @@ the fork.
 
 ## Status
 
-This is being built in the open. See [`ROADMAP.md`](ROADMAP.md) for the
-phased build plan and [GitHub Issues](https://github.com/Agent-Field/backai/issues)
-for what's in flight.
+v1 feature-complete. See [`STRATEGY.md`](STRATEGY.md) for the v1.1 plan:
+LiteLLM virtual keys and the Stripe/Lago billing adapter have landed.
+Shipwright now has the first task metadata API / SDK / AgentField example
+slice in-tree, including durable patch capture and optional draft GitHub
+PR creation when `GH_TOKEN` is configured. Remaining Tier 1 work is the
+production hardening path. AgentField run data is surfaced via inline
+summary/actions plus link-out to AgentField, and the general approvals
+primitive has landed.
 
-| Phase | What | Status |
-|---|---|---|
-| 0 | Foundations | in progress |
-| 1 | Runtime + AF wiring | |
-| 2 | First end-to-end + 60s quickstart | |
-| 3 | Identity + dashboard shell | |
-| 4 | Hero — Agent Runs | |
-| 5 | Jobs + secrets + storage | |
-| 6 | Multi-tenancy + gateway | |
-| 7 | Hero — LLM Gateway | |
-| 8 | Hero — DB studio + memory | |
-| 9 | Hero — Sandboxes | |
-| 10 | Notifications + webhooks + billing | |
-| 11 | MCP + skills + harnesses | |
-| 12 | Hero — Tenants + remaining tabs | |
-| 13 | Examples + workload modules | |
-| 14 | Deploy + production hardening | |
-| 15 | Documentation + polish | |
-| 16 | Security audit + launch | |
+For the full layered stack diagram, see [`STACK.md`](STACK.md).
 
 ## Documentation
 
 Architecture and product docs live in this repo:
 
-- [`PRD.md`](PRD.md) — Product Requirements Document
-- [`TECH-SPEC.md`](TECH-SPEC.md) — Technical specification
-- [`ROADMAP.md`](ROADMAP.md) — Phased build plan
-- [`PLAN.md`](PLAN.md) — Architectural plan (full)
-- [`docs/`](docs/) — Validation walkthroughs, SDK strategy, AF analysis
+- [`STACK.md`](STACK.md) — Layered architecture (Supabase-shaped, 8 bands)
+- [`STRATEGY.md`](STRATEGY.md) — What's shipping next
+- [`PRODUCT.md`](PRODUCT.md) — What it is, what it isn't, the DX
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — Extension points + adapter contracts
+- [`OSS-AUDIT.md`](OSS-AUDIT.md) — Every OSS we vendor + rationale
+- [`NAVBAR.md`](NAVBAR.md) — Operator-console inventory
+- [`docs/realtime.md`](docs/realtime.md) — Postgres NOTIFY → WebSocket bridge
+- [`docs/search.md`](docs/search.md) — Postgres FTS + pgvector app-data search
+- [`docs/activity.md`](docs/activity.md) — tenant-scoped customer activity log
+- [`docs/feature-flags.md`](docs/feature-flags.md) — runtime feature flags
+- [`docs/storage-transforms.md`](docs/storage-transforms.md) — resize and thumbnail images on storage GETs
+- [`docs/embeddings.md`](docs/embeddings.md) — OpenAI-compatible embeddings through LiteLLM
+- [`docs/multimodal.md`](docs/multimodal.md) — image generation, speech, and transcription
+- [`docs/run-subscriptions.md`](docs/run-subscriptions.md) — live AgentField run events over WebSocket
+- [`docs/tool-adapters.md`](docs/tool-adapters.md) — built-in browser-use, SearXNG, fs, exec, HTTP, and SQL adapters
+- [`docs/oauth.md`](docs/oauth.md) — OAuth grants for backend agents acting as a user
+- [`docs/`](docs/) — Per-area guides
+- [`docs/archive/`](docs/archive/) — Historical Phase 0-16 planning
 
 ## Built on AgentField
 

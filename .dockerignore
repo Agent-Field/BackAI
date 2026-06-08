@@ -28,6 +28,8 @@ docs
 examples
 deploy
 scripts
+!scripts/
+!scripts/generate-brand.mjs
 
 # Don't ignore the runtime Dockerfile context
 !services

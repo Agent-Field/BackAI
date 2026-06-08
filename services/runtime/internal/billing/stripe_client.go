@@ -6,8 +6,8 @@
 //
 //   - Real:  STRIPE_SECRET_KEY is set. Calls hit the Stripe API.
 //   - Stub:  STRIPE_SECRET_KEY is unset. Calls return deterministic
-//            placeholder values so the dashboard renders something
-//            useful in dev / CI without a real Stripe account.
+//     placeholder values so the dashboard renders something
+//     useful in dev / CI without a real Stripe account.
 //
 // The wrapper deliberately exposes a small surface — CreateCustomer /
 // GetCustomer / CreatePortalLink — because the webhook handler does the
@@ -17,31 +17,37 @@
 package billing
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	stripe "github.com/stripe/stripe-go/v82"
-	stripecustomer "github.com/stripe/stripe-go/v82/customer"
 	stripeportal "github.com/stripe/stripe-go/v82/billingportal/session"
+	stripecustomer "github.com/stripe/stripe-go/v82/customer"
 	stripewebhook "github.com/stripe/stripe-go/v82/webhook"
 )
 
-// Client is the interface the Service depends on. Implemented by
-// realStripeClient (when STRIPE_SECRET_KEY is set) and stubStripeClient
-// (when unset). Keeping it small means tests can stub it without a
-// full Stripe mock.
+// Client is the provider-neutral interface the Service depends on.
+// Implemented by Stripe and Lago adapters. Keeping it small means tests
+// can stub it without a full provider mock.
 type Client interface {
-	// CreateCustomer returns the new Stripe customer id (e.g. "cus_...").
-	CreateCustomer(email string) (string, error)
+	// AdapterName returns "stripe", "lago", or a stub variant. It is
+	// surfaced to the dashboard so operators can see which provider is
+	// active.
+	AdapterName() string
+	// CreateCustomer returns the external provider customer id. tenantID
+	// is passed so adapters like Lago can use it as external_id.
+	CreateCustomer(ctx context.Context, tenantID, email string) (string, error)
 	// GetCustomer fetches the customer by id. Returns a minimally-populated
 	// Customer (TenantID is left empty — the caller fills it in from the
 	// metadata it stored on creation).
-	GetCustomer(id string) (Customer, error)
+	GetCustomer(ctx context.Context, id string) (Customer, error)
 	// CreatePortalLink mints a short-lived Stripe Customer Portal URL.
-	CreatePortalLink(customerID, returnURL string) (PortalLink, error)
+	CreatePortalLink(ctx context.Context, customerID, returnURL string) (PortalLink, error)
 	// VerifyWebhook validates the Stripe-Signature header against body
 	// + the configured webhook secret. Returns the decoded event JSON
 	// (as a *stripe.Event) on success.
@@ -50,6 +56,9 @@ type Client interface {
 	// by the REST surface to mark stub-only behaviour in responses.
 	IsStub() bool
 }
+
+// EnvBillingAdapter selects the external billing provider.
+const EnvBillingAdapter = "AF_STACK_BILLING_ADAPTER"
 
 // EnvSecretKey is the env var that activates the real Stripe client.
 const EnvSecretKey = "STRIPE_SECRET_KEY"
@@ -60,24 +69,42 @@ const EnvWebhookSecret = "STRIPE_WEBHOOK_SECRET"
 
 // NewClientFromEnv returns the configured Client.
 //
-// When STRIPE_SECRET_KEY is set, it returns the real client (with
-// stripe.Key set globally — stripe-go's package-level convention).
-// When unset, it returns a stub that produces deterministic output.
+// AF_STACK_BILLING_ADAPTER selects the provider:
+//   - stripe (default): official stripe-go SDK, stubbed when
+//     STRIPE_SECRET_KEY is unset.
+//   - lago: Lago HTTP API, stubbed when LAGO_API_URL or LAGO_API_KEY is
+//     unset.
+//   - none: nil client; reads still work from local store, portal
+//     mutations return provider unavailable.
 //
 // log defaults to slog.Default() when nil.
 func NewClientFromEnv(log *slog.Logger) Client {
 	if log == nil {
 		log = slog.Default()
 	}
+	adapter := strings.ToLower(strings.TrimSpace(os.Getenv(EnvBillingAdapter)))
+	if adapter == "" {
+		adapter = "stripe"
+	}
+	switch adapter {
+	case "none", "off", "disabled":
+		log.Info("billing: external adapter disabled", "adapter", "none")
+		return nil
+	case "lago":
+		return NewLagoClientFromEnv(log)
+	case "stripe":
+	default:
+		log.Warn("billing: unknown adapter; falling back to stripe", "adapter", adapter)
+	}
 	if key := os.Getenv(EnvSecretKey); key != "" {
 		stripe.Key = key
-		log.Info("billing: stripe client configured", "mode", "real")
+		log.Info("billing: adapter configured", "adapter", "stripe", "mode", "real")
 		return &realStripeClient{
 			webhookSecret: os.Getenv(EnvWebhookSecret),
 			log:           log,
 		}
 	}
-	log.Info("billing: stripe client running in stub mode (STRIPE_SECRET_KEY unset)")
+	log.Info("billing: adapter running in stub mode", "adapter", "stripe", "reason", EnvSecretKey+" unset")
 	return &stubStripeClient{log: log}
 }
 
@@ -88,9 +115,10 @@ type realStripeClient struct {
 	log           *slog.Logger
 }
 
-func (c *realStripeClient) IsStub() bool { return false }
+func (c *realStripeClient) AdapterName() string { return "stripe" }
+func (c *realStripeClient) IsStub() bool        { return false }
 
-func (c *realStripeClient) CreateCustomer(email string) (string, error) {
+func (c *realStripeClient) CreateCustomer(_ context.Context, _ string, email string) (string, error) {
 	params := &stripe.CustomerParams{}
 	if email != "" {
 		params.Email = stripe.String(email)
@@ -102,7 +130,7 @@ func (c *realStripeClient) CreateCustomer(email string) (string, error) {
 	return cust.ID, nil
 }
 
-func (c *realStripeClient) GetCustomer(id string) (Customer, error) {
+func (c *realStripeClient) GetCustomer(_ context.Context, id string) (Customer, error) {
 	if id == "" {
 		return Customer{}, fmt.Errorf("%w: customer id is required", ErrInvalidInput)
 	}
@@ -124,7 +152,7 @@ func (c *realStripeClient) GetCustomer(id string) (Customer, error) {
 	return out, nil
 }
 
-func (c *realStripeClient) CreatePortalLink(customerID, returnURL string) (PortalLink, error) {
+func (c *realStripeClient) CreatePortalLink(_ context.Context, customerID, returnURL string) (PortalLink, error) {
 	if customerID == "" {
 		return PortalLink{}, fmt.Errorf("%w: customer id is required", ErrInvalidInput)
 	}
@@ -168,9 +196,10 @@ type stubStripeClient struct {
 	log *slog.Logger
 }
 
-func (c *stubStripeClient) IsStub() bool { return true }
+func (c *stubStripeClient) AdapterName() string { return "stripe" }
+func (c *stubStripeClient) IsStub() bool        { return true }
 
-func (c *stubStripeClient) CreateCustomer(email string) (string, error) {
+func (c *stubStripeClient) CreateCustomer(_ context.Context, _ string, email string) (string, error) {
 	// Use the email (or a fixed sentinel) as the stable suffix so the
 	// same tenant always lands on the same stub id within a process.
 	suffix := email
@@ -180,7 +209,7 @@ func (c *stubStripeClient) CreateCustomer(email string) (string, error) {
 	return "cus_stub_" + sanitiseStubID(suffix), nil
 }
 
-func (c *stubStripeClient) GetCustomer(id string) (Customer, error) {
+func (c *stubStripeClient) GetCustomer(_ context.Context, id string) (Customer, error) {
 	if id == "" {
 		return Customer{}, fmt.Errorf("%w: customer id is required", ErrInvalidInput)
 	}
@@ -194,7 +223,7 @@ func (c *stubStripeClient) GetCustomer(id string) (Customer, error) {
 	}, nil
 }
 
-func (c *stubStripeClient) CreatePortalLink(customerID, returnURL string) (PortalLink, error) {
+func (c *stubStripeClient) CreatePortalLink(_ context.Context, customerID, returnURL string) (PortalLink, error) {
 	if customerID == "" {
 		return PortalLink{}, fmt.Errorf("%w: customer id is required", ErrInvalidInput)
 	}

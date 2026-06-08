@@ -25,6 +25,8 @@ type fakeProvider struct {
 	embedErr  error
 	imgResp   ImagesResponse
 	imgErr    error
+	rawResp   RawResponse
+	rawErr    error
 	chunks    []ChatStreamChunk
 	streamErr error
 }
@@ -51,6 +53,12 @@ func (f *fakeProvider) Embeddings(_ context.Context, _ EmbeddingsRequest) (Embed
 }
 func (f *fakeProvider) Images(_ context.Context, _ ImagesRequest) (ImagesResponse, error) {
 	return f.imgResp, f.imgErr
+}
+func (f *fakeProvider) AudioSpeech(_ context.Context, _ AudioSpeechRequest) (RawResponse, error) {
+	return f.rawResp, f.rawErr
+}
+func (f *fakeProvider) AudioTranscription(_ context.Context, _ AudioTranscriptionRequest) (RawResponse, error) {
+	return f.rawResp, f.rawErr
 }
 
 // ─── Gateway-level unit tests ─────────────────────────────────────────────
@@ -158,6 +166,58 @@ func TestGatewayImagesMissingPrompt(t *testing.T) {
 	apiErr, ok := AsAPIError(err)
 	if !ok || apiErr.Code != ErrCodeInvalidRequest {
 		t.Errorf("expected INVALID_REQUEST, got %v", err)
+	}
+}
+
+func TestGatewayAudioSpeechHappyPath(t *testing.T) {
+	g := New(&fakeProvider{rawResp: RawResponse{Body: []byte("mp3"), ContentType: "audio/mpeg"}})
+	resp, err := g.AudioSpeech(context.Background(), AudioSpeechRequest{
+		Model: "tts-1",
+		Input: "hello",
+		Body:  []byte(`{"model":"tts-1","input":"hello","voice":"alloy"}`),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(resp.Body) != "mp3" || resp.ContentType != "audio/mpeg" {
+		t.Errorf("unexpected response: %+v", resp)
+	}
+}
+
+func TestGatewayAudioTranscriptionHappyPath(t *testing.T) {
+	g := New(&fakeProvider{rawResp: RawResponse{Body: []byte(`{"text":"hello"}`), ContentType: "application/json"}})
+	resp, err := g.AudioTranscription(context.Background(), AudioTranscriptionRequest{
+		Model:       "whisper-1",
+		ContentType: "multipart/form-data; boundary=x",
+		Body:        []byte("--x\r\n"),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(resp.Body) != `{"text":"hello"}` {
+		t.Errorf("unexpected response body: %s", resp.Body)
+	}
+}
+
+func TestGatewayAudioValidationMissingFields(t *testing.T) {
+	g := New(&fakeProvider{})
+	_, err := g.AudioSpeech(context.Background(), AudioSpeechRequest{Input: "hello", Body: []byte(`{}`)})
+	apiErr, ok := AsAPIError(err)
+	if !ok || apiErr.Code != ErrCodeInvalidRequest {
+		t.Fatalf("expected INVALID_REQUEST for speech missing model, got %v", err)
+	}
+	_, err = g.AudioSpeech(context.Background(), AudioSpeechRequest{Model: "tts-1", Body: []byte(`{}`)})
+	apiErr, ok = AsAPIError(err)
+	if !ok || apiErr.Code != ErrCodeInvalidRequest {
+		t.Fatalf("expected INVALID_REQUEST for speech missing input, got %v", err)
+	}
+	_, err = g.AudioTranscription(context.Background(), AudioTranscriptionRequest{
+		ContentType: "multipart/form-data; boundary=x",
+		Body:        []byte("--x\r\n"),
+	})
+	apiErr, ok = AsAPIError(err)
+	if !ok || apiErr.Code != ErrCodeInvalidRequest {
+		t.Fatalf("expected INVALID_REQUEST for transcription missing model, got %v", err)
 	}
 }
 
@@ -310,7 +370,7 @@ func TestLiteLLMProviderChat429Maps(t *testing.T) {
 		t.Fatalf("expected APIError, got %v", err)
 	}
 	if apiErr.Code != ErrCodeModelRateLimited {
-		t.Errorf("expected MODEL_RATE_LIMITED, got %q", apiErr.Code)
+		t.Errorf("expected RATE_LIMIT_EXCEEDED, got %q", apiErr.Code)
 	}
 }
 
@@ -439,6 +499,60 @@ func TestLiteLLMProviderImagesHappyPath(t *testing.T) {
 	}
 	if resp.Data[0].URL != "https://x" {
 		t.Errorf("expected URL passthrough, got %q", resp.Data[0].URL)
+	}
+}
+
+func TestLiteLLMProviderAudioSpeechHappyPath(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/audio/speech" {
+			t.Errorf("unexpected path: %q", r.URL.Path)
+		}
+		if ct := r.Header.Get("Content-Type"); ct != "application/json" {
+			t.Errorf("expected json content-type, got %q", ct)
+		}
+		w.Header().Set("Content-Type", "audio/mpeg")
+		_, _ = w.Write([]byte("mp3 bytes"))
+	}))
+	defer upstream.Close()
+
+	p := NewLiteLLMProvider(LiteLLMConfig{BaseURL: upstream.URL})
+	resp, err := p.AudioSpeech(context.Background(), AudioSpeechRequest{
+		Model: "tts-1",
+		Input: "hello",
+		Body:  []byte(`{"model":"tts-1","input":"hello","voice":"alloy"}`),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(resp.Body) != "mp3 bytes" || resp.ContentType != "audio/mpeg" {
+		t.Errorf("unexpected response: %+v", resp)
+	}
+}
+
+func TestLiteLLMProviderAudioTranscriptionHappyPath(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/audio/transcriptions" {
+			t.Errorf("unexpected path: %q", r.URL.Path)
+		}
+		if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "multipart/form-data; boundary=x") {
+			t.Errorf("expected multipart content-type, got %q", ct)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"text":"hello"}`))
+	}))
+	defer upstream.Close()
+
+	p := NewLiteLLMProvider(LiteLLMConfig{BaseURL: upstream.URL})
+	resp, err := p.AudioTranscription(context.Background(), AudioTranscriptionRequest{
+		Model:       "whisper-1",
+		ContentType: "multipart/form-data; boundary=x",
+		Body:        []byte("--x\r\n"),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(resp.Body) != `{"text":"hello"}` || resp.ContentType != "application/json" {
+		t.Errorf("unexpected response: %+v", resp)
 	}
 }
 
@@ -719,7 +833,7 @@ func TestReadBodyLimitedNil(t *testing.T) {
 // Verify the SSEWriter rejects a non-Flusher writer.
 type noFlushWriter struct{ http.ResponseWriter }
 
-func (n *noFlushWriter) Header() http.Header        { return http.Header{} }
+func (n *noFlushWriter) Header() http.Header         { return http.Header{} }
 func (n *noFlushWriter) Write(b []byte) (int, error) { return len(b), nil }
 func (n *noFlushWriter) WriteHeader(int)             {}
 
@@ -746,7 +860,7 @@ func TestSSEWriterRaw(t *testing.T) {
 type failWriter struct{ httptest.ResponseRecorder }
 
 func (f *failWriter) Write(b []byte) (int, error) { return 0, io.ErrClosedPipe }
-func (f *failWriter) Flush()                       {}
+func (f *failWriter) Flush()                      {}
 
 func TestSSEWriterFailedStops(t *testing.T) {
 	rec := &failWriter{}

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// billing.go — REST handlers for Phase 10.4 Stripe billing.
+// billing.go — REST handlers for Phase 10.4 provider-backed billing.
 //
 // Endpoints map 1:1 to BillingCustomerSchema / BillingCustomerListSchema
 // / UsageMeterSchema / UsageMeterListSchema / PortalLinkSchema in
@@ -10,7 +10,7 @@
 // (pointer fields), and keep arrays non-nil even when empty.
 //
 // The handlers delegate the real work to billing.Service which composes
-// the per-tenant Store + the Stripe Client (real or stub). When the
+// the per-tenant Store + the active billing adapter (Stripe, Lago, or stub). When the
 // service isn't wired (no DB at boot), the read endpoints return empty
 // pages and the mutating ones return 503 BILLING_NOT_CONFIGURED.
 //
@@ -20,13 +20,13 @@
 // inbound framework's generic handler at /webhooks/in/{slug} would
 // otherwise eat this path, but:
 //
-//   1. The Go ServeMux exact-match rule means /webhooks/in/stripe (this
-//      handler) wins over /webhooks/in/{slug} (the generic handler) for
-//      that exact path. Even when Phase 10.2 registers its catch-all,
-//      our specific path keeps precedence.
-//   2. If a future operator pre-seeds suite_webhook_endpoints with
-//      slug='stripe', the inbound framework would never see the request
-//      because of #1 — but the seed is still harmless (just unused).
+//  1. The Go ServeMux exact-match rule means /webhooks/in/stripe (this
+//     handler) wins over /webhooks/in/{slug} (the generic handler) for
+//     that exact path. Even when Phase 10.2 registers its catch-all,
+//     our specific path keeps precedence.
+//  2. If a future operator pre-seeds suite_webhook_endpoints with
+//     slug='stripe', the inbound framework would never see the request
+//     because of #1 — but the seed is still harmless (just unused).
 //
 // If Phase 10.2 changes the inbound mux pattern to match-all-then-
 // dispatch (not the current ServeMux model), this handler must be
@@ -50,6 +50,7 @@ import (
 // billingCustomerListResponse mirrors BillingCustomerListSchema.
 type billingCustomerListResponse struct {
 	Customers []billing.Customer `json:"customers"`
+	Adapter   string             `json:"adapter"`
 }
 
 // usageMeterListResponse mirrors UsageMeterListSchema.
@@ -84,7 +85,7 @@ func (s *Server) registerBillingOpenAPI() {
 		return
 	}
 	b := s.openapi
-	b.AddTag("billing", "Stripe billing + per-tenant usage meters")
+	b.AddTag("billing", "Billing adapter + per-tenant usage meters")
 	b.Register("GET", "/api/v1/billing/customers", openapi.RouteMeta{
 		Summary: "List billing customers (per-tenant)", Tags: []string{"billing"},
 	})
@@ -109,7 +110,7 @@ func (s *Server) registerBillingOpenAPI() {
 		},
 	})
 	b.Register("POST", "/api/v1/billing/customers/{tenantId}/portal", openapi.RouteMeta{
-		Summary: "Mint a short-lived Stripe Customer Portal link",
+		Summary: "Mint a short-lived billing customer portal link",
 		Tags:    []string{"billing"},
 		Parameters: []openapi.Parameter{
 			{Name: "tenantId", In: "path", Required: true,
@@ -143,8 +144,8 @@ func writeBillingError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error(), nil)
 	case errors.Is(err, billing.ErrNotFound):
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "billing customer not found", nil)
-	case errors.Is(err, billing.ErrStripeUnavailable):
-		writeError(w, http.StatusBadGateway, "STRIPE_UNAVAILABLE", err.Error(), nil)
+	case errors.Is(err, billing.ErrBillingUnavailable):
+		writeError(w, http.StatusBadGateway, "BILLING_PROVIDER_UNAVAILABLE", err.Error(), nil)
 	case errors.Is(err, billing.ErrSignatureInvalid):
 		writeError(w, http.StatusBadRequest, "WEBHOOK_SIGNATURE_INVALID", err.Error(), nil)
 	default:
@@ -158,11 +159,12 @@ func (s *Server) handleBillingListCustomers(w http.ResponseWriter, r *http.Reque
 	ctx, span := s.dashTracer().Start(r.Context(), "dashboard.billing.list_customers")
 	defer span.End()
 
-	resp := billingCustomerListResponse{Customers: []billing.Customer{}}
+	resp := billingCustomerListResponse{Customers: []billing.Customer{}, Adapter: "none"}
 	if s.billing == nil {
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
+	resp.Adapter = s.billing.AdapterName()
 	customers, err := s.billing.ListCustomers(ctx)
 	if err != nil {
 		writeBillingError(w, err)

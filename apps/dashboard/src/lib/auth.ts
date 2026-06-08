@@ -11,16 +11,31 @@
 // without a live database.
 
 import { betterAuth } from "better-auth"
-import { magicLink } from "better-auth/plugins"
+import { genericOAuth, magicLink } from "better-auth/plugins"
 import { Pool } from "pg"
 
+import { getDashboardSSOConfig } from "./sso"
+
+async function ensureOperatorsTable(pool: Pool) {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS suite_operators (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id text UNIQUE,
+      email text UNIQUE NOT NULL,
+      name text,
+      role text NOT NULL DEFAULT 'owner' CHECK (role IN ('owner','admin')),
+      created_at timestamptz NOT NULL DEFAULT now()
+    )
+  `)
+}
+
 function makeAuth() {
-  const databaseUrl =
-    process.env.DATABASE_URL ?? process.env.AF_STACK_DATABASE_URL
+  const databaseUrl = process.env.DATABASE_URL ?? process.env.AF_STACK_DATABASE_URL
   if (!databaseUrl) {
     return null
   }
   const pool = new Pool({ connectionString: databaseUrl })
+  const sso = getDashboardSSOConfig()
 
   // Origins the dashboard accepts cross-origin auth requests from. Defaults
   // cover the docker-compose host-port pair plus dev. Operators override via
@@ -57,8 +72,11 @@ function makeAuth() {
       user: {
         create: {
           after: async (user) => {
+            const client = await pool.connect()
             try {
-              await pool.query(
+              await client.query("begin")
+              await ensureOperatorsTable(pool)
+              await client.query(
                 `INSERT INTO suite_users (email, name)
                  VALUES ($1, $2)
                  ON CONFLICT (email) DO NOTHING`,
@@ -68,7 +86,7 @@ function makeAuth() {
               // an owner of the default tenant. Once an admin builds
               // tenant-management flows we can swap this for an
               // invitation-based join.
-              await pool.query(
+              await client.query(
                 `INSERT INTO suite_memberships (user_id, tenant_id, role)
                  SELECT u.id, '00000000-0000-0000-0000-000000000000'::uuid, 'owner'
                  FROM suite_users u
@@ -76,11 +94,27 @@ function makeAuth() {
                  ON CONFLICT DO NOTHING`,
                 [user.email],
               )
+              await client.query(
+                "select pg_advisory_xact_lock(hashtext('af_stack_operator_bootstrap'))",
+              )
+              await client.query(
+                `INSERT INTO suite_operators (user_id, email, name, role)
+                 SELECT $1, $2, $3, 'owner'
+                 WHERE NOT EXISTS (SELECT 1 FROM suite_operators)
+                 ON CONFLICT (email) DO UPDATE
+                   SET user_id = COALESCE(suite_operators.user_id, excluded.user_id),
+                       name = COALESCE(excluded.name, suite_operators.name)`,
+                [user.id, user.email, user.name ?? null],
+              )
+              await client.query("commit")
             } catch (e) {
+              await client.query("rollback").catch(() => {})
               // Don't block sign-up on the mirror — log and let the
               // user in. They'll get 401 on protected APIs until the
               // mirror is repaired, which is loud + recoverable.
               console.error("[suite_users mirror] failed:", e)
+            } finally {
+              client.release()
             }
           },
         },
@@ -101,6 +135,28 @@ function makeAuth() {
           : undefined,
     },
     plugins: [
+      ...(sso.enabled
+        ? [
+            genericOAuth({
+              config: [
+                {
+                  providerId: sso.providerId,
+                  issuer: sso.issuer,
+                  discoveryUrl: sso.discoveryUrl,
+                  clientId:
+                    process.env.AF_STACK_SSO_CLIENT_ID ?? process.env.DASHBOARD_SSO_CLIENT_ID!,
+                  clientSecret:
+                    process.env.AF_STACK_SSO_CLIENT_SECRET ??
+                    process.env.DASHBOARD_SSO_CLIENT_SECRET!,
+                  scopes: sso.scopes,
+                  pkce: true,
+                  requireIssuerValidation: true,
+                  overrideUserInfo: true,
+                },
+              ],
+            }),
+          ]
+        : []),
       magicLink({
         sendMagicLink: async ({ email, url }) => {
           // Dev fallback: log the link. The notifications module wires
@@ -129,9 +185,7 @@ export const auth =
     {},
     {
       get() {
-        throw new Error(
-          "DATABASE_URL or AF_STACK_DATABASE_URL must be set for better-auth.",
-        )
+        throw new Error("DATABASE_URL or AF_STACK_DATABASE_URL must be set for better-auth.")
       },
     },
   ) as ReturnType<typeof betterAuth>)

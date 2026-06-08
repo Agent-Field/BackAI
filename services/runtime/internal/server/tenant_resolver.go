@@ -109,6 +109,9 @@ var publicPrefixes = []string{
 	// the tenant resolver bypasses because the InboundService resolves
 	// the endpoint's tenant from the slug-keyed row in PG.
 	"/webhooks",
+	// OAuth provider callbacks validate their own signed state because
+	// providers may not return the same app session cookie shape.
+	"/oauth/callback",
 	// Billing dashboard surface (Phase 10.4). Same auth shape as
 	// admin/* — the dashboard's session gates it.
 	"/api/v1/billing",
@@ -145,7 +148,7 @@ func isPublicPath(p string) bool {
 // described in the file header. It depends on:
 //
 //   - s.tenancy   — required for API-key and session paths; when nil
-//                   only the default-tenant fallback works.
+//     only the default-tenant fallback works.
 //   - s.db        — required for session lookups (better-auth tables).
 //   - s.hooks     — optional; pre/post-auth hooks fire when non-nil.
 //
@@ -210,6 +213,24 @@ func (s *Server) tenantResolver(next http.Handler) http.Handler {
 			}(apiKeyID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
+		}
+
+		// WebSocket clients in browsers cannot attach arbitrary headers.
+		// Accept api_key on the realtime handshake only; normal HTTP
+		// surfaces must continue using Authorization: Bearer.
+		if path == "/api/v1/realtime" {
+			if token := strings.TrimSpace(r.URL.Query().Get("api_key")); token != "" {
+				tenantID, apiKeyID, err := s.resolveBearer(ctx, token)
+				if err != nil {
+					writeAuthError(w, http.StatusUnauthorized, "INVALID_API_KEY",
+						"invalid API key")
+					return
+				}
+				ctx = tenantctx.WithTenantAndUser(ctx, tenantID, apiKeyID, "")
+				s.firePostAuth(ctx, preAuthPayload, tenantID, apiKeyID, "", srcAPIKey)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
 		}
 
 		// Fall through to session resolution. We only run this when
@@ -311,24 +332,9 @@ var errNoSession = errors.New("server: no session")
 // better-auth defaults the cookie name to `better-auth.session_token`
 // (or `__Secure-better-auth.session_token` over TLS). We accept either.
 func (s *Server) resolveSession(ctx context.Context, r *http.Request) (tenantID, userID string, err error) {
-	var token string
-	for _, name := range []string{
-		"better-auth.session_token",
-		"__Secure-better-auth.session_token",
-	} {
-		if c, cookieErr := r.Cookie(name); cookieErr == nil && c.Value != "" {
-			token = c.Value
-			break
-		}
-	}
+	token := betterAuthSessionToken(r)
 	if token == "" {
 		return "", "", errNoSession
-	}
-	// better-auth signs cookies as "<token>.<base64-hmac>". The token row
-	// in the `session` table only stores the bare token portion, so strip
-	// any signature suffix before querying.
-	if i := strings.IndexByte(token, '.'); i >= 0 {
-		token = token[:i]
 	}
 
 	// Resolve session -> better-auth user id -> suite_users.id via
@@ -362,6 +368,26 @@ func (s *Server) resolveSession(ctx context.Context, r *http.Request) (tenantID,
 		return "", "", err
 	}
 	return mem.TenantID, userID, nil
+}
+
+func betterAuthSessionToken(r *http.Request) string {
+	var token string
+	for _, name := range []string{
+		"better-auth.session_token",
+		"__Secure-better-auth.session_token",
+	} {
+		if c, cookieErr := r.Cookie(name); cookieErr == nil && c.Value != "" {
+			token = c.Value
+			break
+		}
+	}
+	// better-auth signs cookies as "<token>.<base64-hmac>". The token row
+	// in the `session` table only stores the bare token portion, so strip
+	// any signature suffix before querying.
+	if i := strings.IndexByte(token, '.'); i >= 0 {
+		token = token[:i]
+	}
+	return token
 }
 
 // writeAuthError emits the standard error envelope with a fixed code.

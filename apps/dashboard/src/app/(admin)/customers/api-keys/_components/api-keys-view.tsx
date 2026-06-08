@@ -104,11 +104,18 @@ const TENANT_ALL = "all"
 
 // Local form shape — keeps RHF + zodResolver happy by avoiding `.default()`
 // (which would split input/output types).
+//
+// budget_max_usd / rate_limit_rpm / rate_limit_tpm are item-#22 LiteLLM
+// virtual-key knobs. Empty string = unlimited (forwarded as null on the
+// wire so LiteLLM treats the field as absent).
 const IssueKeyFormSchema = z.object({
   tenant_id: z.string().min(1, "Pick a tenant"),
   name: z.string(),
   scopes: z.array(z.string()),
   expires_at: z.string(),
+  budget_max_usd: z.string(),
+  rate_limit_rpm: z.string(),
+  rate_limit_tpm: z.string(),
 })
 type IssueKeyFormValues = z.infer<typeof IssueKeyFormSchema>
 
@@ -212,6 +219,22 @@ export function APIKeysView() {
               ))
             )}
           </div>
+        ),
+      },
+      {
+        id: "budget",
+        header: "Budget",
+        cell: ({ row }) => <BudgetCell apiKey={row.original} />,
+      },
+      {
+        id: "rate_limit_rpm",
+        header: "RPM",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground text-xs">
+            {row.original.rate_limit_rpm != null
+              ? row.original.rate_limit_rpm.toLocaleString()
+              : "—"}
+          </span>
         ),
       },
       {
@@ -398,6 +421,78 @@ export function APIKeysView() {
   )
 }
 
+// parsePositiveNumber maps an optional string input to a positive
+// number, undefined (empty), or an Error (invalid). Used by the issue
+// dialog to validate budget/rate-limit inputs before round-trip.
+function parsePositiveNumber(v: string): number | undefined | Error {
+  const trimmed = v.trim()
+  if (trimmed === "") return undefined
+  const n = Number(trimmed)
+  if (!Number.isFinite(n) || n <= 0) return new Error("invalid")
+  return n
+}
+
+function parsePositiveInt(v: string): number | undefined | Error {
+  const result = parsePositiveNumber(v)
+  if (result === undefined || result instanceof Error) return result
+  if (!Number.isInteger(result)) return new Error("invalid")
+  return result
+}
+
+// BudgetCell renders the "$spent / $cap (X% remaining)" widget for one
+// row. When neither budget nor live spend is known the cell renders an
+// em-dash — legacy keys without LiteLLM mapping and degraded modes
+// (LiteLLM unreachable) take this branch.
+//
+// Source of truth: live_spend_usd + budget_max_usd both come from
+// LiteLLM via the runtime's admin endpoint — suite_cost_events is
+// audit-only (#22).
+function BudgetCell({ apiKey }: { apiKey: APIKey }) {
+  const budget = apiKey.budget_max_usd ?? null
+  const spent = apiKey.live_spend_usd ?? null
+  if (budget == null && spent == null) {
+    return <span className="text-muted-foreground text-xs">—</span>
+  }
+  if (budget == null) {
+    // No cap set — show running spend only.
+    return (
+      <span className="font-mono text-xs">
+        {spent != null ? `$${spent.toFixed(2)}` : "—"}
+      </span>
+    )
+  }
+  const pct =
+    budget > 0
+      ? Math.min(100, Math.max(0, ((spent ?? 0) / budget) * 100))
+      : 0
+  const remainingPct = Math.max(0, 100 - pct)
+  return (
+    <div className="flex flex-col gap-1 min-w-[140px]">
+      <span className="font-mono text-xs">
+        ${(spent ?? 0).toFixed(2)} / ${budget.toFixed(2)}
+      </span>
+      <div
+        className="h-1 w-full overflow-hidden rounded-full bg-muted"
+        role="progressbar"
+        aria-valuenow={Math.round(pct)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
+        <div
+          className={cn(
+            "h-full transition-all",
+            pct >= 90 ? "bg-destructive" : pct >= 75 ? "bg-amber-500" : "bg-primary",
+          )}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span className="text-muted-foreground text-[10px]">
+        {Math.round(remainingPct)}% remaining
+      </span>
+    </div>
+  )
+}
+
 function SkeletonRows({ columns }: { columns: number }) {
   return (
     <>
@@ -476,6 +571,9 @@ function IssueKeyDialog({
       name: "",
       scopes: [],
       expires_at: "",
+      budget_max_usd: "",
+      rate_limit_rpm: "",
+      rate_limit_tpm: "",
     },
     mode: "onBlur",
   })
@@ -487,6 +585,9 @@ function IssueKeyDialog({
         name: "",
         scopes: [],
         expires_at: "",
+        budget_max_usd: "",
+        rate_limit_rpm: "",
+        rate_limit_tpm: "",
       })
     }
   }, [open, form, tenants, defaultTenant])
@@ -494,12 +595,36 @@ function IssueKeyDialog({
   const handleSubmit = async (values: IssueKeyFormValues) => {
     setSubmitting(true)
     try {
+      // Parse the optional numeric fields. Empty string -> undefined
+      // (omitted on the wire); invalid -> reject before round-tripping
+      // so the customer sees the error immediately.
+      const budget = parsePositiveNumber(values.budget_max_usd)
+      const rpm = parsePositiveInt(values.rate_limit_rpm)
+      const tpm = parsePositiveInt(values.rate_limit_tpm)
+      if (
+        budget instanceof Error ||
+        rpm instanceof Error ||
+        tpm instanceof Error
+      ) {
+        const which =
+          budget instanceof Error
+            ? "Budget"
+            : rpm instanceof Error
+              ? "Rate limit RPM"
+              : "Rate limit TPM"
+        toast.error("Invalid input", { description: `${which} must be a positive number.` })
+        setSubmitting(false)
+        return
+      }
       const issued = await api.admin.keys.issue({
         tenant_id: values.tenant_id,
         name: values.name || undefined,
         scopes: values.scopes,
         // datetime-local omits TZ — leave it as the runtime received it.
         expires_at: values.expires_at || undefined,
+        budget_max_usd: budget,
+        rate_limit_rpm: rpm,
+        rate_limit_tpm: tpm,
       })
       toast.success("API key issued", { description: issued.prefix })
       onIssued(issued)
@@ -605,6 +730,48 @@ function IssueKeyDialog({
               />
               <FieldDescription>
                 Optional. Leave blank for a non-expiring key.
+              </FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="issue-budget">Budget max (USD)</FieldLabel>
+              <Input
+                id="issue-budget"
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                placeholder="Unlimited"
+                {...form.register("budget_max_usd")}
+              />
+              <FieldDescription>
+                LiteLLM enforces upstream. Leave blank for no cap.
+              </FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="issue-rpm">Rate limit (RPM)</FieldLabel>
+              <Input
+                id="issue-rpm"
+                type="number"
+                inputMode="numeric"
+                step="1"
+                placeholder="Unlimited"
+                {...form.register("rate_limit_rpm")}
+              />
+              <FieldDescription>
+                Requests per minute. Empty = no cap.
+              </FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="issue-tpm">Rate limit (TPM)</FieldLabel>
+              <Input
+                id="issue-tpm"
+                type="number"
+                inputMode="numeric"
+                step="1"
+                placeholder="Unlimited"
+                {...form.register("rate_limit_tpm")}
+              />
+              <FieldDescription>
+                Tokens per minute. Empty = no cap.
               </FieldDescription>
             </Field>
           </FieldGroup>

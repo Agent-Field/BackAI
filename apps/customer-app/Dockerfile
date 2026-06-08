@@ -24,7 +24,13 @@ RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
 COPY --from=deps /app /app
 COPY apps/customer-app apps/customer-app
+COPY BRAND.yaml brand.yaml
+COPY scripts/generate-brand.mjs scripts/generate-brand.mjs
 COPY tsconfig.base.json ./
+
+# Recreate workspace package links after copying the app source. Docker's
+# directory overlay can mask pnpm's app-local symlinks from the deps stage.
+RUN pnpm install --frozen-lockfile --filter=customer-app...
 
 WORKDIR /app/apps/customer-app
 ENV NEXT_TELEMETRY_DISABLED=1

@@ -339,6 +339,20 @@ func (s *Server) handleStorageDownload(w http.ResponseWriter, r *http.Request) {
 	storeKey := s.objectKey(rawKey)
 	span.SetAttributes(attribute.String("storage.key", storeKey))
 
+	transform, err := parseStorageTransform(r.URL.Query())
+	if err != nil {
+		writeStorageTransformError(w, err)
+		return
+	}
+	if transform.Enabled {
+		span.SetAttributes(
+			attribute.String("storage.transform.mode", transform.Mode),
+			attribute.Int("storage.transform.width", transform.Width),
+			attribute.Int("storage.transform.height", transform.Height),
+			attribute.String("storage.transform.format", transform.Format),
+		)
+	}
+
 	body, obj, err := s.storage.Download(ctx, storeKey)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
@@ -357,6 +371,24 @@ func (s *Server) handleStorageDownload(w http.ResponseWriter, r *http.Request) {
 	ct := obj.ContentType
 	if ct == "" {
 		ct = "application/octet-stream"
+	}
+	if transform.Enabled {
+		out, transformedCT, err := transformStorageImage(body, ct, transform)
+		if err != nil {
+			span.RecordError(err)
+			writeError(w, http.StatusUnsupportedMediaType, "UNSUPPORTED_TRANSFORM", err.Error(), nil)
+			return
+		}
+		w.Header().Set("Content-Type", transformedCT)
+		w.Header().Set("Content-Length", strconv.Itoa(len(out)))
+		w.Header().Set("Cache-Control", "private, max-age=300")
+		if obj.ETag != "" {
+			w.Header().Set("ETag", strings.Trim(obj.ETag, `"`)+"-transform")
+		}
+		w.Header().Set("Last-Modified", obj.LastModified.UTC().Format(http.TimeFormat))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(out)
+		return
 	}
 	w.Header().Set("Content-Type", ct)
 	if obj.Size > 0 {

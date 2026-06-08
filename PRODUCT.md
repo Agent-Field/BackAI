@@ -321,4 +321,4 @@ already exists so you can build the thing you actually want to build.
 - [Architecture → Overview](/architecture/overview) — how it's built
 - [Reference → API](/reference/api) — interactive Scalar browser
 - [Examples](https://github.com/Agent-Field/backai/tree/main/examples) — three ready-to-run apps
-- [`PRD.md`](https://github.com/Agent-Field/backai/blob/main/PRD.md) — original product requirements doc with all 120 mapped to code
+- [`docs/archive/PRD-v0.md`](docs/archive/PRD-v0.md) — original product requirements doc with all 120 mapped to code

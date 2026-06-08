@@ -33,7 +33,8 @@ import (
 // resolve tenant) belongs in the HTTP handler layer (server/llm.go),
 // not here. Gateway is the shim; the handler is the policy.
 type Gateway struct {
-	provider ProviderClient
+	provider   ProviderClient
+	multimodal *Multimodal // optional; nil falls back to ProviderClient verbs
 }
 
 // ProviderClient is the abstraction Gateway delegates to. Tests can
@@ -54,6 +55,10 @@ type ProviderClient interface {
 	Embeddings(ctx context.Context, req EmbeddingsRequest) (EmbeddingsResponse, error)
 	// Images generates one or more images.
 	Images(ctx context.Context, req ImagesRequest) (ImagesResponse, error)
+	// AudioSpeech generates speech audio from text.
+	AudioSpeech(ctx context.Context, req AudioSpeechRequest) (RawResponse, error)
+	// AudioTranscription transcribes audio to text.
+	AudioTranscription(ctx context.Context, req AudioTranscriptionRequest) (RawResponse, error)
 }
 
 // New constructs a Gateway with the given provider client.
@@ -136,6 +141,40 @@ func (g *Gateway) Images(ctx context.Context, req ImagesRequest) (ImagesResponse
 	return g.provider.Images(ctx, req)
 }
 
+// AudioSpeech generates speech audio from text.
+func (g *Gateway) AudioSpeech(ctx context.Context, req AudioSpeechRequest) (RawResponse, error) {
+	if g == nil || g.provider == nil {
+		return RawResponse{}, ErrNoProvider
+	}
+	if strings.TrimSpace(req.Model) == "" {
+		return RawResponse{}, &APIError{Code: ErrCodeInvalidRequest, Message: "model is required"}
+	}
+	if strings.TrimSpace(req.Input) == "" {
+		return RawResponse{}, &APIError{Code: ErrCodeInvalidRequest, Message: "input is required"}
+	}
+	if len(req.Body) == 0 {
+		return RawResponse{}, &APIError{Code: ErrCodeInvalidRequest, Message: "request body is required"}
+	}
+	return g.provider.AudioSpeech(ctx, req)
+}
+
+// AudioTranscription transcribes audio to text.
+func (g *Gateway) AudioTranscription(ctx context.Context, req AudioTranscriptionRequest) (RawResponse, error) {
+	if g == nil || g.provider == nil {
+		return RawResponse{}, ErrNoProvider
+	}
+	if strings.TrimSpace(req.Model) == "" {
+		return RawResponse{}, &APIError{Code: ErrCodeInvalidRequest, Message: "model is required"}
+	}
+	if strings.TrimSpace(req.ContentType) == "" {
+		return RawResponse{}, &APIError{Code: ErrCodeInvalidRequest, Message: "content-type is required"}
+	}
+	if len(req.Body) == 0 {
+		return RawResponse{}, &APIError{Code: ErrCodeInvalidRequest, Message: "request body is required"}
+	}
+	return g.provider.AudioTranscription(ctx, req)
+}
+
 // EstimateCostUSD looks up the model in the pricing catalog and returns
 // the cost for the given token usage. Convenience wrapper over the
 // pricing package so handlers + tests can compute cost without
@@ -161,9 +200,17 @@ func validateChat(req ChatRequest) error {
 const (
 	ErrCodeInvalidRequest    = "INVALID_REQUEST"
 	ErrCodeModelNotSupported = "MODEL_NOT_SUPPORTED"
-	ErrCodeModelRateLimited  = "MODEL_RATE_LIMITED"
-	ErrCodeBudgetExceeded    = "BUDGET_EXCEEDED"
-	ErrCodeUpstreamError     = "UPSTREAM_ERROR"
+	// ErrCodeModelRateLimited is the 429 envelope code. Renamed from
+	// the legacy MODEL_RATE_LIMITED to RATE_LIMIT_EXCEEDED with item
+	// #32 — the runtime no longer runs a local token-bucket, so every
+	// 429 originates from LiteLLM's per-virtual-key rpm_limit /
+	// tpm_limit enforcement (item #22) and is surfaced with the
+	// upstream Retry-After + X-RateLimit-* headers proxied through
+	// verbatim. The Go symbol keeps the old name to preserve internal
+	// call-site stability; only the wire value changed.
+	ErrCodeModelRateLimited = "RATE_LIMIT_EXCEEDED"
+	ErrCodeBudgetExceeded   = "BUDGET_EXCEEDED"
+	ErrCodeUpstreamError    = "UPSTREAM_ERROR"
 )
 
 // ErrNoProvider is returned when Gateway has no provider wired. Indicates
@@ -189,6 +236,12 @@ type APIError struct {
 	// Details is the optional structured detail payload (e.g. an
 	// upstream provider's raw error body for debugging).
 	Details map[string]any
+	// Headers are response headers the handler should proxy back to
+	// the client verbatim. Populated by ProviderClient implementations
+	// for 429 responses so Retry-After / X-RateLimit-* survive the
+	// upstream → runtime → SDK hop (item #32 — LiteLLM enforces RPM
+	// upstream; we just surface its 429 + headers).
+	Headers map[string]string
 }
 
 // Error satisfies the error interface.

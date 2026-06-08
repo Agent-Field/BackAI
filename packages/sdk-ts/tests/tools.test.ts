@@ -9,6 +9,9 @@ import {
   enableMcpServer,
   listMcpTools,
   callMcp,
+  listToolAdapters,
+  setToolAdapterEnabled,
+  callToolAdapter,
   suite,
   SuiteError,
 } from "../src/index.js"
@@ -104,6 +107,27 @@ function toolRow(overrides: Record<string, unknown> = {}): Record<string, unknow
   }
 }
 
+function adapterRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: "http",
+    label: "HTTP",
+    description: "Make outbound HTTP calls",
+    enabled: true,
+    configured: true,
+    default_enabled: true,
+    config: {},
+    updated_at: null,
+    tools: [
+      {
+        name: "request",
+        description: "Perform one HTTP request",
+        input_schema: { type: "object" },
+      },
+    ],
+    ...overrides,
+  }
+}
+
 // ---------- tests ----------
 
 describe("tools.listMcpServers", () => {
@@ -143,6 +167,68 @@ describe("tools.listMcpServers", () => {
     enqueueResponse(jsonResponse({ servers: [] }))
     const result = await tools.listMcpServers()
     expect(result).toEqual([])
+  })
+})
+
+describe("tools built-in adapters", () => {
+  it("lists adapters and parses snake_case fields", async () => {
+    enqueueResponse(jsonResponse({ adapters: [adapterRow()] }))
+
+    const adapters = await listToolAdapters()
+
+    expect(adapters).toHaveLength(1)
+    expect(adapters[0]?.id).toBe("http")
+    expect(adapters[0]?.defaultEnabled).toBe(true)
+    expect(adapters[0]?.tools[0]?.inputSchema).toEqual({ type: "object" })
+    expect(nthCall(0).url).toBe("http://test.local/api/v1/tools/adapters")
+  })
+
+  it("enables an adapter with config", async () => {
+    enqueueResponse(jsonResponse(adapterRow({ id: "sql", enabled: true })))
+
+    const adapter = await setToolAdapterEnabled("sql", true, {
+      config: { max_rows: 25 },
+    })
+
+    expect(adapter.id).toBe("sql")
+    const c = nthCall(0)
+    expect(c.url).toBe("http://test.local/api/v1/tools/adapters/sql/enabled")
+    expect(c.init.method).toBe("PUT")
+    expect(JSON.parse(c.init.body as string)).toEqual({
+      enabled: true,
+      config: { max_rows: 25 },
+    })
+  })
+
+  it("calls a built-in adapter", async () => {
+    enqueueResponse(
+      jsonResponse({
+        adapter: "http",
+        tool: "request",
+        status: "succeeded",
+        result: { status_code: 200 },
+        duration_ms: 12,
+      }),
+    )
+
+    const result = await callToolAdapter("http", "request", {
+      arguments: { url: "https://example.com" },
+    })
+
+    expect(result.durationMs).toBe(12)
+    expect(result.result).toEqual({ status_code: 200 })
+    const body = JSON.parse(nthCall(0).init.body as string) as Record<string, unknown>
+    expect(body).toEqual({
+      adapter: "http",
+      tool: "request",
+      arguments: { url: "https://example.com" },
+    })
+  })
+
+  it("is also available under suite.tools", async () => {
+    enqueueResponse(jsonResponse({ adapters: [adapterRow()] }))
+    const adapters = await suite.tools.listAdapters()
+    expect(adapters[0]?.id).toBe("http")
   })
 })
 

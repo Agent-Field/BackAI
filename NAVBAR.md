@@ -36,11 +36,13 @@ it.
 
 ---
 
-## Build group — "what's wired into this stack?"
+## Build group — "what does this fork ship?"
 
 Every Build tab answers a single question for the developer: *"What
-have I configured this runtime to do?"* They're observation surfaces
-for code+env decisions, plus tier-3 CRUD where relevant.
+product configuration does my fork ship?"* These are code, env, and
+runtime configuration surfaces for agents, modules, integrations,
+webhook endpoints, auth, and billing. Low-level plumbing now lives in
+Infrastructure.
 
 ### Agents
 
@@ -57,38 +59,8 @@ for code+env decisions, plus tier-3 CRUD where relevant.
 | | |
 |---|---|
 | **Built?** | ✅ Real (directory page, not data) |
-| **What it shows** | 6-card directory linking to MCP, Skills, Harnesses, Agents, Webhooks, Sandboxes — with live counts |
+| **What it shows** | 5-card directory linking to MCP, Skills, Agents, Webhooks, Sandboxes — with live counts |
 | **DX gap** | None. This is navigation, by design. |
-
-### Database
-
-| | |
-|---|---|
-| **Built?** | ✅ Real |
-| **What it shows** | Schema browser, row viewer (paginated), structure tab, RLS policies tab, SQL runner, memory browser |
-| **Source** | `GET /api/v1/db/tables`, `/api/v1/db/rows`, `/api/v1/memory` |
-| **How developer configures** | **Code/migrations**: schema lives in `services/runtime/internal/db/migrations/`. Add a workload module with its own migrations under `workload-modules/<id>/migrations/`. |
-| **DX gap** | The SQL runner is RLS-aware (binds the operator's session) so it can't shoot tenants in the foot. Could surface this more clearly in UI copy. |
-
-### Storage
-
-| | |
-|---|---|
-| **Built?** | ✅ Real |
-| **What it shows** | Object browser scoped to the runtime's bucket. Upload, download via signed URL, delete. |
-| **Source** | `GET /api/v1/storage/objects`, `POST /api/v1/storage/objects` |
-| **How developer configures** | **Env**: `AF_STACK_S3_ADAPTER=minio` (default) or `s3`. Then `AF_STACK_S3_ENDPOINT`, `AF_STACK_S3_BUCKET`, `AF_STACK_S3_ACCESS_KEY`, `AF_STACK_S3_SECRET_KEY`. |
-| **DX gap** | The browser shows sandbox stdout/stderr blobs by default; could add tenant filter. |
-
-### Secrets
-
-| | |
-|---|---|
-| **Built?** | ✅ Real (CRUD + reveal with audit) |
-| **What it shows** | Vault entries, masked. Reveal pops a Dialog and writes a `secret.reveal` audit row. |
-| **Source** | `/api/v1/secrets` |
-| **How developer configures** | **UI/REST** for per-tenant secrets. **Env** for the KMS key that encrypts them: `AF_STACK_KMS_KEY` (32-byte hex). |
-| **DX gap** | None. This one is right. |
 
 ### Webhooks
 
@@ -107,9 +79,9 @@ for code+env decisions, plus tier-3 CRUD where relevant.
 | **Built?** | ✅ Real (observation only) |
 | **What it shows** | Which providers are enabled, which env vars they need, session storage layout |
 | **Source** | `process.env` on the dashboard side |
-| **How developer configures** | **Code+Env**: 1) edit `apps/dashboard/src/lib/auth.ts` to add a provider (e.g. add `github:` block in `socialProviders`), 2) set the corresponding `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`, 3) restart |
-| **DX gap** | The page is honest about being read-only but doesn't explicitly say "edit `apps/dashboard/src/lib/auth.ts`". Should add a code snippet. |
-| **Current OAuth** | Email+password is wired. Google OAuth shape is in the code path but you need to provide the keys. GitHub OAuth has the env var contract documented but the code uses Google's pattern as-is — for GitHub the `apps/dashboard/src/lib/auth.ts` needs a `github:` block (one-liner). |
+| **How developer configures** | **Env first** for shipped providers: `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` for Google, or `AF_STACK_SSO_*` for enterprise SSO through an OIDC broker. Additional providers are code-owned edits in `apps/dashboard/src/lib/auth.ts`. |
+| **DX gap** | The page is read-only. It reports the active auth env contract and callback URL, but it does not mutate auth provider config at runtime. |
+| **Current OAuth / SSO** | Email+password and magic links are wired. Google OAuth is enabled when keys are present. Enterprise SSO/SAML is wired through better-auth generic OAuth: Authentik or WorkOS handles SAML and exposes OIDC to AF Stack. |
 
 ### Billing
 
@@ -120,26 +92,6 @@ for code+env decisions, plus tier-3 CRUD where relevant.
 | **Source** | `/api/v1/billing/customers` + `/api/v1/billing/meters` |
 | **How developer configures** | **Env**: `STRIPE_SECRET_KEY=sk_test_…` or leave unset for stub. The adapter switches itself. |
 | **DX gap** | "Open Stripe Portal" link goes to `example.com` in stub mode — confusing without context. The page should hide the button in stub mode (or make it explicit). |
-
-### Jobs
-
-| | |
-|---|---|
-| **Built?** | ✅ Real (read-only list of job definitions) |
-| **What it shows** | Defined job kinds + lifetime stats (succeeded / failed / running) |
-| **Source** | `/api/v1/jobs/definitions` |
-| **How developer configures** | **Code**: drop a Go job under `services/runtime/internal/jobs/sample.go` shape, or Python under `apps/backend/jobs/`. River discovers them. |
-| **DX gap** | "Enqueue manually" button is in the Operate → Queues tab but you'd expect it here too. |
-
-### Sandboxes
-
-| | |
-|---|---|
-| **Built?** | ✅ Real (adapter config view) |
-| **What it shows** | Active adapter + capability matrix (max timeout, GPU support, network, mounts) + the config snippet to switch + adapter list |
-| **Source** | `/api/v1/sandbox/pool` |
-| **How developer configures** | **Env**: `AF_STACK_SANDBOX_ADAPTER=docker|gvisor|firecracker|e2b` |
-| **DX gap** | None major. |
 
 ### MCP
 
@@ -161,15 +113,15 @@ for code+env decisions, plus tier-3 CRUD where relevant.
 | **How developer configures** | **UI/REST**: install by source string (`af-skill://vendor/name@version`, `/abs/path` to a `skill.toml`, or `embedded` for built-ins). |
 | **DX gap** | The `af-skill://` source format is a stub registry — just URL parsing today. Local path works fully. |
 
-### Harnesses
+### Harnesses (folded into Agents)
 
 | | |
 |---|---|
-| **Built?** | ✅ Probe-only (currently broken by container architecture) |
+| **Built?** | ✅ Probe-only, surfaced on Build → Agents |
 | **What it shows** | The 4 supported CLI providers (Claude Code, Codex, Gemini, OpenCode) with status badge (ready / needs_auth / missing / errored) |
 | **Source** | `/api/v1/harnesses` |
-| **How developer configures** | **Host**: install the CLI binary where the runtime can reach it. Currently broken because the runtime runs in a distroless container. |
-| **DX gap** | **This whole tab is misleading until the option-A refactor lands** (harnesses owned by AgentField agent containers). Right now you can never get them to "ready" unless you bake them into a custom runtime image. |
+| **How developer configures** | **Agent container**: install the CLI binary in `apps/backend/agents/<name>/Dockerfile`; the agent declares capabilities through AgentField. |
+| **DX gap** | The dedicated tab is gone. Next pass should make the Agents page show harness readiness per registered agent once the API exposes per-agent ownership. |
 
 ### Modules
 
@@ -195,6 +147,24 @@ Every Operate tab is a live monitoring surface.
 | **What it shows** | Agent execution history with status, agent name, tenant, duration, cost |
 | **Source** | `/api/v1/runs` |
 | **DX gap** | Drill-down sheet exists; could add a "rerun with same input" button. |
+
+### Shipwright
+
+| | |
+|---|---|
+| **Built?** | ✅ Real |
+| **What it shows** | Coding-agent task queue with status, repo, AgentField execution link, and final patch / PR pointer |
+| **Source** | `/api/v1/shipwright/tasks` |
+| **DX gap** | The page links out to AgentField for live DAG / step detail rather than rebuilding that inspector in AF Stack, by design. Production hardening remains around deeper git workload primitives. |
+
+### Approvals
+
+| | |
+|---|---|
+| **Built?** | ✅ Real |
+| **What it shows** | Tenant-scoped human approval requests with payload JSON, status filter, and approve / deny / cancel actions |
+| **Source** | `/api/v1/approvals` |
+| **DX gap** | No blocking wait helper yet in the SDK; callers poll `suite.approvals.get()` or list pending requests. |
 
 ### Logs
 
@@ -277,6 +247,15 @@ Every Operate tab is a live monitoring surface.
 | **Why it's a plugin** | Reference implementation of the plugin pattern so external developers can see how to add their own tabs |
 | **DX gap** | None. This is a teaching example. |
 
+### Dashboard Plugins
+
+| | |
+|---|---|
+| **Built?** | ✅ Real |
+| **What it shows** | Read-only list of dashboard plugins bundled into the current build, including source folder, sidebar group, and route. |
+| **Source** | `apps/dashboard/plugins/*` via build-time scanner |
+| **DX gap** | None for v1. Plugins are fork code, not marketplace packages. |
+
 ---
 
 ## Customers group — only renders when multi-tenancy is on
@@ -318,6 +297,7 @@ These tabs hide entirely when MT is off (single-tenant deploy).
 | **What it shows** | Per-tenant Stripe customer status + usage meters + Stripe Portal button |
 | **Source** | `/api/v1/billing/customers`, `/api/v1/billing/meters` |
 | **DX gap** | In stub mode the Portal button goes to example.com — should hide or label clearly. |
+| **Visibility** | Hidden from sidebar when `AF_STACK_BILLING_ADAPTER=none`; direct visits show an "Enable billing" empty state. |
 
 ### Audit
 
@@ -334,6 +314,55 @@ This was an example plugin leaking through. Fixed in this commit.
 Examples that want their own dashboard surfaces should ship a plugin
 under `examples/<id>/dashboard-plugin/` and the operator copies it into
 `apps/dashboard/plugins/<id>/` only when running that example.
+
+---
+
+## Infrastructure group — "what low-level plumbing backs the stack?"
+
+Infrastructure tabs are the operator's read/write surfaces for storage,
+database, and secret primitives. They are intentionally separate from
+Build so product configuration does not mix with low-level backend
+plumbing.
+
+### Adapters
+
+| | |
+|---|---|
+| **Built?** | ✅ Real (read-only) |
+| **What it shows** | Active adapter plus available and planned choices for Storage, Sandbox, Notifications, and Billing |
+| **Source** | Dashboard env (`AF_STACK_S3_ADAPTER`, `AF_STACK_SANDBOX_ADAPTER`, `AF_STACK_NOTIFICATIONS_ADAPTER`, `AF_STACK_BILLING_ADAPTER`, `STRIPE_SECRET_KEY`) |
+| **How developer configures** | **Env/config**: edit the relevant env var or deploy target, then restart. |
+| **DX gap** | No in-UI swap by design. Config stays in the fork/deploy target. |
+
+### Database
+
+| | |
+|---|---|
+| **Built?** | ✅ Real |
+| **What it shows** | Schema browser, row viewer (paginated), structure tab, RLS policies tab, SQL runner, memory browser |
+| **Source** | `GET /api/v1/db/tables`, `/api/v1/db/rows`, `/api/v1/memory` |
+| **How developer configures** | **Code/migrations**: schema lives in `services/runtime/internal/db/migrations/`. Add a workload module with its own migrations under `workload-modules/<id>/migrations/`. |
+| **DX gap** | The SQL runner is RLS-aware (binds the operator's session) so it can't shoot tenants in the foot. Could surface this more clearly in UI copy. |
+
+### Storage
+
+| | |
+|---|---|
+| **Built?** | ✅ Real |
+| **What it shows** | Object browser scoped to the runtime's bucket. Upload, download via signed URL, delete. |
+| **Source** | `GET /api/v1/storage/objects`, `POST /api/v1/storage/objects` |
+| **How developer configures** | **Env**: `AF_STACK_S3_ADAPTER=minio` (default) or `s3`. Then `AF_STACK_S3_ENDPOINT`, `AF_STACK_S3_BUCKET`, `AF_STACK_S3_ACCESS_KEY`, `AF_STACK_S3_SECRET_KEY`. |
+| **DX gap** | The browser shows sandbox stdout/stderr blobs by default; could add tenant filter. |
+
+### Secrets
+
+| | |
+|---|---|
+| **Built?** | ✅ Real (CRUD + reveal with audit) |
+| **What it shows** | Vault entries, masked. Reveal pops a Dialog and writes a `secret.reveal` audit row. |
+| **Source** | `/api/v1/secrets` |
+| **How developer configures** | **UI/REST** for per-tenant secrets. **Env** for the KMS key that encrypts them: `AF_STACK_KMS_KEY` (32-byte hex). |
+| **DX gap** | None. This one is right. |
 
 ---
 
@@ -367,20 +396,13 @@ To answer your specific question:
    GOOGLE_CLIENT_ID=<your-id>
    GOOGLE_CLIENT_SECRET=<your-secret>
    ```
-   Restart the dashboard. The sign-in page auto-shows a "Continue with
-   Google" button.
+   Restart the dashboard. The better-auth Google provider is then active.
 
-3. **GitHub OAuth env vars are documented but the code block isn't
-   added yet.** The fix: in `apps/dashboard/src/lib/auth.ts`,
-   add to `socialProviders`:
-   ```ts
-   github:
-     process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET
-       ? { clientId: process.env.GITHUB_CLIENT_ID,
-           clientSecret: process.env.GITHUB_CLIENT_SECRET }
-       : undefined,
-   ```
-   Restart. Working OAuth in 30 seconds.
+3. **Enterprise SSO/SAML is wired through OIDC.** Set
+   `AF_STACK_SSO_ISSUER`, `AF_STACK_SSO_CLIENT_ID`, and
+   `AF_STACK_SSO_CLIENT_SECRET`. Use Authentik for the self-hosted
+   SAML-to-OIDC bridge, or WorkOS for the managed broker. The callback is
+   `<BETTER_AUTH_URL>/api/auth/oauth2/callback/enterprise-sso`.
 
 4. **Magic link** is wired via the `magicLink` plugin but the
    `sendMagicLink` callback currently logs the link to stdout instead
@@ -399,7 +421,7 @@ To answer your specific question:
 These are intentionally code-only — the dashboard observes them but
 won't write to them, because a forkable template invites code edits:
 
-- **Adding an OAuth provider** → edit `apps/dashboard/src/lib/auth.ts`
+- **Adding an OAuth provider beyond Google / enterprise SSO** → edit `apps/dashboard/src/lib/auth.ts`
 - **Changing the default LLM model** → edit `pricing.go` catalog
 - **Changing rate-limit defaults** → edit `ratelimit/config.go`
 - **Adding a new module** → write a Go package + register in main.go

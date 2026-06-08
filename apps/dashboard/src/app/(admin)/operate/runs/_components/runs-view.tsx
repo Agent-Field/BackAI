@@ -198,6 +198,26 @@ export function RunsView() {
           </span>
         ),
       },
+      {
+        // #25: link-out to AgentField's deep view for this run.
+        // Small external-link icon — keeps the table uncluttered while
+        // giving operators a one-click jump to the DAG / step inspector.
+        id: "agentfield_link",
+        header: "",
+        cell: ({ row }) => (
+          <a
+            href={api.traceUrl(row.original.id)}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="text-muted-foreground hover:text-foreground inline-flex"
+            aria-label="View in AgentField"
+            title="View in AgentField"
+          >
+            <ExternalLink className="size-3.5" />
+          </a>
+        ),
+      },
     ],
     [],
   )

@@ -14,22 +14,23 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command"
-import {
-  getNavGroupsWithPlugins,
-  NAV_HOME,
-  NAV_SETTINGS,
-} from "@/lib/nav"
+import { getNavGroupsWithPlugins, NAV_HOME, NAV_SETTINGS } from "@/lib/nav"
 import type { NavItem } from "@/lib/nav"
 
 type CommandPaletteProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
+  billingDisabled?: boolean
 }
 
-export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+export function CommandPalette({
+  open,
+  onOpenChange,
+  billingDisabled = false,
+}: CommandPaletteProps) {
   const router = useRouter()
   const [value, setValue] = useState("")
-  const navGroups = getNavGroupsWithPlugins()
+  const navGroups = getNavGroupsWithPlugins({ billingDisabled })
 
   useEffect(() => {
     if (!open) setValue("")
@@ -49,9 +50,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       <item.icon />
       <span>{item.label}</span>
       {item.description ? (
-        <span className="text-muted-foreground ml-2 truncate text-xs">
-          {item.description}
-        </span>
+        <span className="text-muted-foreground ml-2 truncate text-xs">{item.description}</span>
       ) : null}
     </CommandItem>
   )
@@ -63,20 +62,14 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       title="Navigate"
       description="Jump to any section of the dashboard."
     >
-      <CommandInput
-        value={value}
-        onValueChange={setValue}
-        placeholder="Type to search…"
-      />
+      <CommandInput value={value} onValueChange={setValue} placeholder="Type to search…" />
       <CommandList>
         <CommandEmpty>No results.</CommandEmpty>
         <CommandGroup heading="Overview">{navItem(NAV_HOME)}</CommandGroup>
         {navGroups.map((group) => (
           <div key={group.id}>
             <CommandSeparator />
-            <CommandGroup heading={group.label}>
-              {group.items.map(navItem)}
-            </CommandGroup>
+            <CommandGroup heading={group.label}>{group.items.map(navItem)}</CommandGroup>
           </div>
         ))}
         <CommandSeparator />

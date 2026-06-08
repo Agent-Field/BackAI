@@ -40,6 +40,64 @@ export {
 } from "./agents.js"
 export { SuiteError, type HttpOptions, type SseEvent } from "./_http.js"
 export {
+  realtime,
+  subscribe as subscribeRealtime,
+  type RealtimeEvent,
+  type RealtimeFilter,
+  type SubscribeOptions as RealtimeSubscribeOptions,
+} from "./realtime.js"
+export {
+  runs,
+  subscribe as subscribeRuns,
+  subscribeById as subscribeRunEvents,
+  type AgentRunEvent,
+  type RunEvent,
+  type RunEventType,
+  type RunsSubscribeFilter,
+  type SubscribeRunOptions,
+} from "./runs.js"
+export {
+  searchIndex,
+  search,
+  upsert as upsertSearchDocument,
+  delete as deleteSearchDocument,
+  SearchModeSchema,
+  SearchDocumentSchema,
+  SearchHitSchema,
+  SearchResultSchema,
+  type SearchMode,
+  type SearchDocument,
+  type SearchHit,
+  type SearchResult,
+  type SearchOptions,
+  type UpsertSearchDocumentOptions,
+  type DeleteSearchDocumentOptions,
+} from "./search.js"
+export {
+  activity,
+  log as logActivity,
+  list as listActivity,
+  ActivityActorTypeSchema,
+  ActivityEntrySchema,
+  ActivityListSchema,
+  type ActivityActorType,
+  type ActivityEntry,
+  type ActivityList,
+  type LogActivityOptions,
+  type ListActivityOptions,
+} from "./activity.js"
+export {
+  flags,
+  list as listFeatureFlags,
+  set as setFeatureFlag,
+  isEnabled as isFeatureFlagEnabled,
+  FeatureFlagSchema,
+  FeatureFlagListSchema,
+  type FeatureFlag,
+  type FeatureFlagList,
+  type SetFeatureFlagOptions,
+} from "./flags.js"
+export {
   jobs,
   enqueue as enqueueJob,
   get as getJob,
@@ -69,6 +127,7 @@ export {
   type StorageList,
   type SignedURL,
   type UploadOptions,
+  type DownloadStorageOptions,
   type ListStorageOptions,
 } from "./storage.js"
 
@@ -134,8 +193,16 @@ export {
   llm,
   chat,
   embed,
+  image as llmImage,
+  speech as llmSpeech,
+  transcribe as llmTranscribe,
   models as llmModels,
   cacheStats as llmCacheStats,
+  audio,
+  images,
+  audioTranslate,
+  imageEdit,
+  imageVariations,
   LLMModelSchema,
   LLMModelListSchema,
   CacheStatsSchema,
@@ -146,6 +213,11 @@ export {
   type ChatChunk,
   type ChatOptions,
   type EmbedOptions,
+  type ImageOptions,
+  type SpeechOptions,
+  type TranscriptionOptions,
+  type ImageEditOptions,
+  type ImageVariationOptions,
 } from "./llm.js"
 
 export {
@@ -279,6 +351,25 @@ export {
   type ListWebhookDeliveriesOptions,
 } from "./webhooks.js"
 
+// ─── OAuth-on-behalf-of-user ─────────────────────────────────────────────
+
+export {
+  oauth,
+  authorizeUrl as oauthAuthorizeUrl,
+  connected as oauthConnected,
+  token as oauthToken,
+  disconnect as oauthDisconnect,
+  ConnectionSchema as OAuthConnectionSchema,
+  ConnectionListSchema as OAuthConnectionListSchema,
+  AccessTokenSchema as OAuthAccessTokenSchema,
+  type Connection as OAuthConnection,
+  type ConnectionList as OAuthConnectionList,
+  type AccessToken as OAuthAccessToken,
+  type AuthorizeUrlOptions as OAuthAuthorizeUrlOptions,
+  type TokenOptions as OAuthTokenOptions,
+  type DisconnectOptions as OAuthDisconnectOptions,
+} from "./oauth.js"
+
 // ─── Skills (Phase 11.3) ─────────────────────────────────────────────────
 
 export {
@@ -323,6 +414,14 @@ export {
   enableMcpServer,
   listMcpTools,
   callMcp,
+  listAdapters as listToolAdapters,
+  setAdapterEnabled as setToolAdapterEnabled,
+  callAdapter as callToolAdapter,
+  ToolAdapterIdSchema,
+  BuiltinToolDefinitionSchema,
+  ToolAdapterSchema,
+  ToolAdapterListSchema,
+  ToolAdapterCallResultSchema,
   MCPTransportSchema,
   MCPServerStatusSchema,
   MCPServerSchema,
@@ -337,32 +436,83 @@ export {
   type MCPTool,
   type MCPToolList,
   type MCPCallResult,
+  type ToolAdapterId,
+  type BuiltinToolDefinition,
+  type ToolAdapter,
+  type ToolAdapterList,
+  type ToolAdapterCallResult,
   type AddMCPServerOptions,
   type ListMCPToolsOptions,
+  type SetToolAdapterEnabledOptions,
+  type CallToolAdapterOptions,
 } from "./tools.js"
+export {
+  approvals,
+  ApprovalStatusSchema,
+  ApprovalSchema,
+  ApprovalListSchema,
+  type ApprovalStatus,
+  type Approval,
+  type ApprovalList,
+  type RequestApprovalInput,
+  type ListApprovalsOptions,
+  type DecideApprovalInput,
+} from "./approvals.js"
+export {
+  shipwright,
+  ShipwrightStatusSchema,
+  ShipwrightTaskSchema,
+  ShipwrightPatchSchema,
+  ShipwrightTaskResponseSchema,
+  ShipwrightTaskListSchema,
+  type ShipwrightStatus,
+  type ShipwrightTask,
+  type ShipwrightPatch,
+  type ShipwrightTaskResponse,
+  type ShipwrightTaskList,
+  type CreateShipwrightTaskInput,
+  type ListShipwrightTasksOptions,
+  type CompleteShipwrightTaskInput,
+} from "./shipwright.js"
 
 import { agents } from "./agents.js"
 import { jobs } from "./jobs.js"
 import { secrets } from "./secrets.js"
 import { storage } from "./storage.js"
 import { admin } from "./admin/index.js"
-import { llm } from "./llm.js"
+import { llm, audio, images } from "./llm.js"
 import { cost } from "./cost.js"
 import { memory } from "./memory.js"
+import { search, searchIndex } from "./search.js"
+import { activity } from "./activity.js"
+import { flags } from "./flags.js"
+import { runs } from "./runs.js"
 import { sandbox } from "./sandbox.js"
 import { notifications } from "./notifications.js"
 import { billing } from "./billing.js"
 import { webhooks } from "./webhooks.js"
 import { tools } from "./tools.js"
 import { harnesses } from "./harnesses.js"
+import { oauth } from "./oauth.js"
+import { shipwright } from "./shipwright.js"
+import { approvals } from "./approvals.js"
 
-/** Top-level namespace: `suite.agents.*`, `suite.jobs.*`, `suite.secrets.*`, `suite.storage.*`, `suite.llm.*`, `suite.cost.*`, `suite.memory.*`, `suite.sandbox.*`, `suite.notifications.*`, `suite.webhooks.*`, `suite.billing.*`, `suite.tools.*`, `suite.admin.*`. */
+/** Top-level namespace: `suite.agents.*`, `suite.approvals.*`, `suite.shipwright.*`, `suite.search(...)`, `suite.searchIndex.*`, `suite.activity.*`, `suite.flags.*`, `suite.runs.*`, `suite.jobs.*`, `suite.secrets.*`, `suite.storage.*`, `suite.llm.*`, `suite.cost.*`, `suite.memory.*`, `suite.sandbox.*`, `suite.notifications.*`, `suite.webhooks.*`, `suite.billing.*`, `suite.tools.*`, `suite.admin.*`. */
 export const suite = {
-  agents,
+	agents,
+	approvals,
+	shipwright,
+	search,
+  searchIndex,
+  activity,
+  flags,
+  runs,
   jobs,
   secrets,
   storage,
   llm,
+  audio,
+  images,
   cost,
   memory,
   sandbox,
@@ -371,5 +521,6 @@ export const suite = {
   billing,
   tools,
   harnesses,
+  oauth,
   admin,
 } as const

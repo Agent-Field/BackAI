@@ -66,7 +66,7 @@ func LoadKEK(log *slog.Logger) (*Cipher, error) {
 			"action", "set AF_STACK_KMS_KEY to 32 random bytes hex-encoded for prod",
 		)
 		sum := sha256.Sum256([]byte(devKEKSeed))
-		return newCipher(sum[:], true)
+		return newCipherWithKeyID(sum[:], CurrentKeyID, true)
 	}
 
 	key, err := hex.DecodeString(raw)
@@ -76,18 +76,25 @@ func LoadKEK(log *slog.Logger) (*Cipher, error) {
 	if len(key) != kekSize {
 		return nil, fmt.Errorf("secrets: AF_STACK_KMS_KEY must decode to %d bytes (got %d)", kekSize, len(key))
 	}
-	return newCipher(key, false)
+	return newCipherWithKeyID(key, CurrentKeyID, false)
 }
 
 // NewCipherFromKey constructs a Cipher from a raw 32-byte AES key.
 // Intended for tests; production code should use LoadKEK.
 func NewCipherFromKey(key []byte) (*Cipher, error) {
-	return newCipher(key, false)
+	return newCipherWithKeyID(key, CurrentKeyID, false)
 }
 
 func newCipher(key []byte, devMode bool) (*Cipher, error) {
+	return newCipherWithKeyID(key, CurrentKeyID, devMode)
+}
+
+func newCipherWithKeyID(key []byte, keyID string, devMode bool) (*Cipher, error) {
 	if len(key) != kekSize {
 		return nil, fmt.Errorf("secrets: KEK must be %d bytes (got %d)", kekSize, len(key))
+	}
+	if strings.TrimSpace(keyID) == "" {
+		return nil, fmt.Errorf("secrets: kms key id is required")
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -97,7 +104,7 @@ func newCipher(key []byte, devMode bool) (*Cipher, error) {
 	if err != nil {
 		return nil, fmt.Errorf("secrets: gcm init: %w", err)
 	}
-	return &Cipher{aead: aead, keyID: CurrentKeyID, devMode: devMode}, nil
+	return &Cipher{aead: aead, keyID: keyID, devMode: devMode}, nil
 }
 
 // KeyID returns the kms_key_id label that should be stored alongside

@@ -3,10 +3,12 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,8 +17,13 @@ import (
 	"testing"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
+	"github.com/Agent-Field/backai/services/runtime/internal/guardrails"
 	"github.com/Agent-Field/backai/services/runtime/internal/hooks"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmgateway"
+	"github.com/Agent-Field/backai/services/runtime/internal/llmgateway/adapters"
+	litellmadapter "github.com/Agent-Field/backai/services/runtime/internal/llmgateway/adapters/litellm"
+	"github.com/Agent-Field/backai/services/runtime/internal/tenancy"
+	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 )
 
 // ─── helpers ──────────────────────────────────────────────────────────────
@@ -42,11 +49,80 @@ func upstreamChatServer(t *testing.T, body string, status int) *httptest.Server 
 }
 
 func gatewayFor(upstreamURL, providerID string) *llmgateway.Gateway {
-	return llmgateway.New(llmgateway.NewLiteLLMProvider(llmgateway.LiteLLMConfig{
+	provider := llmgateway.NewLiteLLMProvider(llmgateway.LiteLLMConfig{
 		ProviderID: providerID,
 		BaseURL:    upstreamURL,
 		MasterKey:  "test-key",
+	})
+	// Wire a multimodal facade with the LiteLLM-backed fallback so the
+	// translations + image-edit/variation paths can dispatch through
+	// the same provider in tests (production wires the same fallback
+	// from main.go).
+	fallback := litellmadapter.New(provider, "openai/whisper-1", "openai/tts-1",
+		"openai/tts-1-hd", "openai/dall-e-2", "openai/dall-e-3", "openai/gpt-image-1")
+	mm := llmgateway.NewMultimodal(adapters.NewRegistry(), fallback)
+	return llmgateway.New(provider).WithMultimodal(mm)
+}
+
+type llmTestSecretSink struct {
+	values map[string]string
+}
+
+func (s *llmTestSecretSink) Put(ctx context.Context, tenantID, key string, in tenancy.SecretPutInput) error {
+	if s.values == nil {
+		s.values = map[string]string{}
+	}
+	s.values[tenantID+"|"+key] = in.Value
+	return nil
+}
+
+func (s *llmTestSecretSink) Delete(ctx context.Context, tenantID, key string) error {
+	delete(s.values, tenantID+"|"+key)
+	return nil
+}
+
+func (s *llmTestSecretSink) Get(ctx context.Context, tenantID, key string) ([]byte, error) {
+	if v, ok := s.values[tenantID+"|"+key]; ok {
+		return []byte(v), nil
+	}
+	return nil, tenancy.ErrAPIKeyNotFound
+}
+
+func TestAttachLiteLLMKeyUsesTenantVirtualKey(t *testing.T) {
+	seenAuth := ""
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-virtual-key","object":"chat.completion","created":1,"model":"m",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+		}`))
 	}))
+	defer upstream.Close()
+
+	sink := &llmTestSecretSink{values: map[string]string{}}
+	if err := sink.Put(context.Background(), "tenant-1", tenancy.LiteLLMSecretKey("api-key-1"), tenancy.SecretPutInput{
+		Value: "sk-litellm-tenant-virtual",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mgr := (&tenancy.Manager{}).WithLiteLLM(nil, sink)
+	srv := newLLMTestServer(t, Deps{
+		Tenancy:    mgr,
+		LLMGateway: gatewayFor(upstream.URL, "litellm"),
+	})
+	ctx := tenantctx.WithTenant(context.Background(), "tenant-1", "api-key-1")
+	_, err := srv.llmGateway.Chat(srv.attachLiteLLMKey(ctx), llmgateway.ChatRequest{
+		Model:    "m",
+		Messages: []llmgateway.ChatMessage{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if seenAuth != "Bearer sk-litellm-tenant-virtual" {
+		t.Fatalf("Authorization = %q, want tenant virtual key", seenAuth)
+	}
 }
 
 // ─── chat/completions ─────────────────────────────────────────────────────
@@ -146,6 +222,83 @@ func TestLLMChatUpstream5xxBecomes502(t *testing.T) {
 	assertOpenAIErrorCode(t, rec.Body.Bytes(), llmgateway.ErrCodeUpstreamError)
 }
 
+// TestLLMChat429PassesThroughHeaders is item #32's signature integration
+// test: LiteLLM enforces per-virtual-key RPM upstream (item #22) and the
+// runtime no longer runs a local token-bucket. When LiteLLM returns 429,
+// the runtime MUST proxy Retry-After + the X-RateLimit-* trio through to
+// the client unchanged so SDK consumers (openai-python's RateLimitError,
+// etc.) see the standard signal.
+//
+// Also verifies the error envelope:
+//   - status code 429,
+//   - code "RATE_LIMIT_EXCEEDED" (renamed from MODEL_RATE_LIMITED with #32),
+//   - error.type "rate_limit_error" (openai-python branches on this),
+//   - details.retry_after parsed from Retry-After for clients that
+//     prefer JSON over headers.
+func TestLLMChat429PassesThroughHeaders(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "30")
+		w.Header().Set("X-RateLimit-Limit", "60")
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.Header().Set("X-RateLimit-Reset", "1700000000")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"rate limit exceeded: rpm cap reached"}}`))
+	}))
+	defer upstream.Close()
+	srv := newLLMTestServer(t, Deps{LLMGateway: gatewayFor(upstream.URL, "litellm")})
+
+	req := httptest.NewRequest("POST", "/api/v1/llm/chat/completions",
+		strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429; body=%s", rec.Code, rec.Body.String())
+	}
+
+	// Rate-limit headers must reach the client verbatim — that's the
+	// whole point of item #32 (kill the local limiter, let LiteLLM speak).
+	for name, want := range map[string]string{
+		"Retry-After":           "30",
+		"X-RateLimit-Limit":     "60",
+		"X-RateLimit-Remaining": "0",
+		"X-RateLimit-Reset":     "1700000000",
+	} {
+		if got := rec.Header().Get(name); got != want {
+			t.Errorf("header %s = %q, want %q", name, got, want)
+		}
+	}
+
+	// Error envelope shape: code RATE_LIMIT_EXCEEDED, type rate_limit_error,
+	// details.retry_after populated from Retry-After header.
+	var env struct {
+		Error struct {
+			Code    string         `json:"code"`
+			Message string         `json:"message"`
+			Type    string         `json:"type"`
+			Details map[string]any `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("body not JSON: %v body=%s", err, rec.Body.String())
+	}
+	if env.Error.Code != "RATE_LIMIT_EXCEEDED" {
+		t.Errorf("error.code = %q, want RATE_LIMIT_EXCEEDED", env.Error.Code)
+	}
+	if env.Error.Type != "rate_limit_error" {
+		t.Errorf("error.type = %q, want rate_limit_error", env.Error.Type)
+	}
+	if env.Error.Message == "" {
+		t.Errorf("error.message empty")
+	}
+	if env.Error.Details["retry_after"] == nil {
+		t.Errorf("details.retry_after missing; details=%v", env.Error.Details)
+	} else if got := env.Error.Details["retry_after"]; got != float64(30) {
+		t.Errorf("details.retry_after = %v, want 30", got)
+	}
+}
+
 // ─── streaming ────────────────────────────────────────────────────────────
 
 func TestLLMChatStreamingForwardsAndTerminates(t *testing.T) {
@@ -197,12 +350,14 @@ func TestLLMEmbeddingsHappyPath(t *testing.T) {
 	defer upstream.Close()
 
 	srv := newLLMTestServer(t, Deps{LLMGateway: gatewayFor(upstream.URL, "openrouter")})
-	req := httptest.NewRequest("POST", "/api/v1/llm/embeddings",
-		strings.NewReader(`{"model":"m","input":"hi"}`))
-	rec := httptest.NewRecorder()
-	srv.mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	for _, path := range []string{"/api/v1/embeddings", "/api/v1/llm/embeddings"} {
+		req := httptest.NewRequest("POST", path,
+			strings.NewReader(`{"model":"m","input":"hi"}`))
+		rec := httptest.NewRecorder()
+		srv.mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: expected 200, got %d body=%s", path, rec.Code, rec.Body.String())
+		}
 	}
 }
 
@@ -227,12 +382,14 @@ func TestLLMImagesHappyPath(t *testing.T) {
 	defer upstream.Close()
 
 	srv := newLLMTestServer(t, Deps{LLMGateway: gatewayFor(upstream.URL, "openrouter")})
-	req := httptest.NewRequest("POST", "/api/v1/llm/images/generations",
-		strings.NewReader(`{"prompt":"a cat"}`))
-	rec := httptest.NewRecorder()
-	srv.mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	for _, path := range []string{"/api/v1/images/generations", "/api/v1/llm/images/generations"} {
+		req := httptest.NewRequest("POST", path,
+			strings.NewReader(`{"prompt":"a cat"}`))
+		rec := httptest.NewRecorder()
+		srv.mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: expected 200, got %d body=%s", path, rec.Code, rec.Body.String())
+		}
 	}
 }
 
@@ -242,6 +399,106 @@ func TestLLMImagesMissingPrompt(t *testing.T) {
 	srv := newLLMTestServer(t, Deps{LLMGateway: gatewayFor(upstream.URL, "openrouter")})
 	req := httptest.NewRequest("POST", "/api/v1/llm/images/generations",
 		strings.NewReader(`{"model":"dall-e-3"}`))
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestLLMAudioSpeechHappyPath(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/audio/speech" {
+			t.Errorf("unexpected upstream path: %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "audio/mpeg")
+		_, _ = w.Write([]byte("mp3 bytes"))
+	}))
+	defer upstream.Close()
+
+	srv := newLLMTestServer(t, Deps{LLMGateway: gatewayFor(upstream.URL, "openrouter")})
+	req := httptest.NewRequest("POST", "/api/v1/audio/speech",
+		strings.NewReader(`{"model":"tts-1","input":"hello","voice":"alloy"}`))
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Content-Type") != "audio/mpeg" {
+		t.Errorf("expected audio content-type, got %q", rec.Header().Get("Content-Type"))
+	}
+	if rec.Body.String() != "mp3 bytes" {
+		t.Errorf("expected raw audio bytes, got %q", rec.Body.String())
+	}
+}
+
+func TestLLMAudioSpeechMissingInput(t *testing.T) {
+	upstream := upstreamChatServer(t, `{}`, http.StatusOK)
+	defer upstream.Close()
+	srv := newLLMTestServer(t, Deps{LLMGateway: gatewayFor(upstream.URL, "openrouter")})
+	req := httptest.NewRequest("POST", "/api/v1/audio/speech",
+		strings.NewReader(`{"model":"tts-1"}`))
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestLLMAudioTranscriptionHappyPath(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/audio/transcriptions" {
+			t.Errorf("unexpected upstream path: %q", r.URL.Path)
+		}
+		if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "multipart/form-data; boundary=") {
+			t.Errorf("expected multipart content-type, got %q", ct)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"text":"hello world"}`))
+	}))
+	defer upstream.Close()
+
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	if err := mw.WriteField("model", "whisper-1"); err != nil {
+		t.Fatal(err)
+	}
+	part, err := mw.CreateFormFile("file", "audio.mp3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = part.Write([]byte("audio bytes"))
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := newLLMTestServer(t, Deps{LLMGateway: gatewayFor(upstream.URL, "openrouter")})
+	req := httptest.NewRequest("POST", "/api/v1/audio/transcriptions", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != `{"text":"hello world"}` {
+		t.Errorf("expected transcription JSON passthrough, got %s", rec.Body.String())
+	}
+}
+
+func TestLLMAudioTranscriptionMissingFile(t *testing.T) {
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	if err := mw.WriteField("model", "whisper-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	upstream := upstreamChatServer(t, `{}`, http.StatusOK)
+	defer upstream.Close()
+	srv := newLLMTestServer(t, Deps{LLMGateway: gatewayFor(upstream.URL, "openrouter")})
+	req := httptest.NewRequest("POST", "/api/v1/audio/transcriptions", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
 	rec := httptest.NewRecorder()
 	srv.mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -404,6 +661,110 @@ func TestLLMPreHookCanRejectWithBudgetExceeded(t *testing.T) {
 	}
 }
 
+func TestLLMGuardrailsRedactsChatBeforeUpstream(t *testing.T) {
+	var upstreamBody map[string]any
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstreamBody); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-guard","object":"chat.completion","created":1,"model":"m",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":4,"completion_tokens":1,"total_tokens":5}
+		}`))
+	}))
+	defer upstream.Close()
+
+	gr, err := guardrails.New(guardrails.Config{Enabled: true, RedactPII: true, Moderate: true}, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := newLLMTestServer(t, Deps{
+		LLMGateway: gatewayFor(upstream.URL, "litellm"),
+		Guardrails: gr,
+	})
+	req := httptest.NewRequest("POST", "/api/v1/llm/chat/completions",
+		strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"email alice@example.com"}]}`))
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	encoded, _ := json.Marshal(upstreamBody)
+	if strings.Contains(string(encoded), "alice@example.com") {
+		t.Fatalf("upstream received unredacted PII: %s", string(encoded))
+	}
+	if !strings.Contains(string(encoded), "[REDACTED_EMAIL_ADDRESS]") {
+		t.Fatalf("upstream did not receive redaction marker: %s", string(encoded))
+	}
+}
+
+func TestLLMGuardrailsModerationBlocksBeforeUpstream(t *testing.T) {
+	upstreamCalled := int32(0)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&upstreamCalled, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer upstream.Close()
+
+	gr, err := guardrails.New(guardrails.Config{
+		Enabled:       true,
+		RedactPII:     true,
+		Moderate:      true,
+		BlockPatterns: []string{`(?i)blocked topic`},
+	}, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := newLLMTestServer(t, Deps{
+		LLMGateway: gatewayFor(upstream.URL, "litellm"),
+		Guardrails: gr,
+	})
+	req := httptest.NewRequest("POST", "/api/v1/llm/chat/completions",
+		strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"blocked topic"}]}`))
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	assertOpenAIErrorCode(t, rec.Body.Bytes(), guardrails.CodeContentBlocked)
+	if atomic.LoadInt32(&upstreamCalled) != 0 {
+		t.Fatal("upstream should not be called for moderated prompt")
+	}
+}
+
+func TestLLMGuardrailsRedactsChatResponse(t *testing.T) {
+	upstream := upstreamChatServer(t, `{
+		"id":"chatcmpl-guard-response","object":"chat.completion","created":1,"model":"m",
+		"choices":[{"index":0,"message":{"role":"assistant","content":"send to bob@example.com"},"finish_reason":"stop"}],
+		"usage":{"prompt_tokens":4,"completion_tokens":1,"total_tokens":5}
+	}`, http.StatusOK)
+	defer upstream.Close()
+
+	gr, err := guardrails.New(guardrails.Config{Enabled: true, RedactPII: true, Moderate: true}, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := newLLMTestServer(t, Deps{
+		LLMGateway: gatewayFor(upstream.URL, "litellm"),
+		Guardrails: gr,
+	})
+	req := httptest.NewRequest("POST", "/api/v1/llm/chat/completions",
+		strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "bob@example.com") {
+		t.Fatalf("client received unredacted PII: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "[REDACTED_EMAIL_ADDRESS]") {
+		t.Fatalf("client did not receive redaction marker: %s", rec.Body.String())
+	}
+}
+
 // ─── OpenAPI registration ────────────────────────────────────────────────
 
 func TestLLMRoutesAppearInOpenAPI(t *testing.T) {
@@ -417,8 +778,12 @@ func TestLLMRoutesAppearInOpenAPI(t *testing.T) {
 	body := rec.Body.String()
 	for _, path := range []string{
 		"/api/v1/llm/chat/completions",
+		"/api/v1/embeddings",
 		"/api/v1/llm/embeddings",
+		"/api/v1/images/generations",
 		"/api/v1/llm/images/generations",
+		"/api/v1/audio/speech",
+		"/api/v1/audio/transcriptions",
 		"/api/v1/llm/models",
 		"/api/v1/llm/cache/stats",
 	} {
@@ -451,5 +816,165 @@ func assertOpenAIErrorCode(t *testing.T, body []byte, wantCode string) {
 	}
 	if env.Error.Type == "" {
 		t.Errorf("expected error.type populated, got body=%s", body)
+	}
+}
+
+// ─── #14 — Multimodal: translations + image edits + variations + modality ───
+
+func TestLLMAudioTranslationsHappyPath(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/audio/translations" {
+			t.Errorf("unexpected upstream path: %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"text":"hello (translated)"}`))
+	}))
+	defer upstream.Close()
+
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	if err := mw.WriteField("model", "openai/whisper-1"); err != nil {
+		t.Fatal(err)
+	}
+	part, err := mw.CreateFormFile("file", "audio.mp3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = part.Write([]byte("french audio"))
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := newLLMTestServer(t, Deps{LLMGateway: gatewayFor(upstream.URL, "openrouter")})
+	req := httptest.NewRequest("POST", "/api/v1/audio/translations", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "translated") {
+		t.Errorf("expected translated text passthrough, got %s", rec.Body.String())
+	}
+}
+
+func TestLLMImageEditsHappyPath(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/images/edits" {
+			t.Errorf("unexpected upstream path: %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"created":1234,"data":[{"url":"https://example.com/a.png"}]}`))
+	}))
+	defer upstream.Close()
+
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	_ = mw.WriteField("model", "openai/dall-e-2")
+	_ = mw.WriteField("prompt", "add a hat")
+	part, _ := mw.CreateFormFile("image", "image.png")
+	_, _ = part.Write([]byte("\x89PNGfakeimage"))
+	_ = mw.Close()
+
+	srv := newLLMTestServer(t, Deps{LLMGateway: gatewayFor(upstream.URL, "openrouter")})
+	req := httptest.NewRequest("POST", "/api/v1/images/edits", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "https://example.com/a.png") {
+		t.Errorf("expected image URL in response, got %s", rec.Body.String())
+	}
+}
+
+func TestLLMImageEditsMissingImage(t *testing.T) {
+	upstream := upstreamChatServer(t, `{}`, http.StatusOK)
+	defer upstream.Close()
+
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	_ = mw.WriteField("model", "openai/dall-e-2")
+	_ = mw.WriteField("prompt", "x")
+	_ = mw.Close()
+
+	srv := newLLMTestServer(t, Deps{LLMGateway: gatewayFor(upstream.URL, "openrouter")})
+	req := httptest.NewRequest("POST", "/api/v1/images/edits", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestLLMImageVariationsHappyPath(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/images/variations" {
+			t.Errorf("unexpected upstream path: %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"created":1234,"data":[{"url":"https://example.com/v.png"}]}`))
+	}))
+	defer upstream.Close()
+
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	_ = mw.WriteField("model", "openai/dall-e-2")
+	_ = mw.WriteField("n", "2")
+	part, _ := mw.CreateFormFile("image", "image.png")
+	_, _ = part.Write([]byte("\x89PNGfakeimage"))
+	_ = mw.Close()
+
+	srv := newLLMTestServer(t, Deps{LLMGateway: gatewayFor(upstream.URL, "openrouter")})
+	req := httptest.NewRequest("POST", "/api/v1/images/variations", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "https://example.com/v.png") {
+		t.Errorf("expected variation URL in response, got %s", rec.Body.String())
+	}
+}
+
+// TestLLMSpeechCarriesModalityToHook verifies that the multimodal pre/post
+// hook payloads carry modality=audio_speech (item #14 cost tracking).
+func TestLLMSpeechCarriesModalityToHook(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "audio/mpeg")
+		_, _ = w.Write([]byte("mp3"))
+	}))
+	defer upstream.Close()
+
+	var modSeen string
+	var mu sync.Mutex
+	engine := hooks.NewEngine(slog.Default())
+	engine.Register(hooks.HookLLMPostCall, func(_ context.Context, payload any) (any, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if p, ok := payload.(LLMPostCallPayload); ok {
+			modSeen = p.Modality
+		}
+		return payload, nil
+	})
+
+	srv := newLLMTestServer(t, Deps{
+		LLMGateway: gatewayFor(upstream.URL, "openrouter"),
+		Hooks:      engine,
+	})
+	req := httptest.NewRequest("POST", "/api/v1/audio/speech",
+		strings.NewReader(`{"model":"openai/tts-1","input":"hi","voice":"alloy"}`))
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if modSeen != ModalityAudioSpeech {
+		t.Errorf("expected post-call modality=%q, got %q", ModalityAudioSpeech, modSeen)
 	}
 }

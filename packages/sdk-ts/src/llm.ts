@@ -6,7 +6,8 @@
 // shape mirrors the OpenAI Chat Completions / Embeddings API so callers
 // can use any OpenAI-compatible client (e.g. the `openai` npm package)
 // by pointing it at `/api/v1/llm`. The functions below are ergonomic
-// shortcuts around the same surface.
+// shortcuts around the same surface; embeddings use the top-level
+// `/api/v1/embeddings` suite path by default.
 //
 // Endpoint paths and JSON shapes are the canonical contract from
 // `apps/dashboard/src/lib/api.ts` (Phase 7 section). The zod schemas
@@ -16,6 +17,7 @@
 import { z } from "zod"
 import {
   parseSse,
+  rawBodyRequest,
   rawRequest,
   request,
   toCamel,
@@ -104,6 +106,38 @@ export interface EmbedOptions extends HttpOptions {
   dimensions?: number
   /** Pass-through for any provider-specific extras. */
   extra?: Record<string, unknown>
+}
+
+export interface ImageOptions extends HttpOptions {
+  model?: string
+  n?: number
+  size?: string
+  quality?: string
+  style?: string
+  responseFormat?: "url" | "b64_json"
+  user?: string
+  extra?: Record<string, unknown>
+}
+
+export interface SpeechOptions extends HttpOptions {
+  model: string
+  input: string
+  voice: string
+  responseFormat?: "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm"
+  speed?: number
+  instructions?: string
+  extra?: Record<string, unknown>
+}
+
+export interface TranscriptionOptions extends HttpOptions {
+  model: string
+  file: Blob
+  filename?: string
+  language?: string
+  prompt?: string
+  responseFormat?: "json" | "text" | "srt" | "verbose_json" | "vtt"
+  temperature?: number
+  extra?: Record<string, string | Blob>
 }
 
 // ---------- chat ----------
@@ -230,7 +264,223 @@ export async function embed(
   if (extra !== undefined) {
     for (const [k, v] of Object.entries(extra)) body[k] = v
   }
-  return rawRequest("POST", "/llm/embeddings", body, http)
+  return rawRequest("POST", "/embeddings", body, http)
+}
+
+// ---------- images ----------
+
+/** Generate images via the OpenAI-compatible image endpoint. */
+export async function image(
+  input: { prompt: string } & ImageOptions,
+): Promise<Response> {
+  const {
+    prompt,
+    model,
+    n,
+    size,
+    quality,
+    style,
+    responseFormat,
+    user,
+    extra,
+    ...http
+  } = input
+  if (typeof prompt !== "string" || prompt.length === 0) {
+    throw new Error("prompt must be a non-empty string")
+  }
+  const body: Record<string, unknown> = { prompt }
+  if (model !== undefined) body.model = model
+  if (n !== undefined) body.n = n
+  if (size !== undefined) body.size = size
+  if (quality !== undefined) body.quality = quality
+  if (style !== undefined) body.style = style
+  if (responseFormat !== undefined) body.response_format = responseFormat
+  if (user !== undefined) body.user = user
+  if (extra !== undefined) {
+    for (const [k, v] of Object.entries(extra)) body[k] = v
+  }
+  return rawRequest("POST", "/images/generations", body, http)
+}
+
+// ---------- audio ----------
+
+/** Generate speech audio. Returns a raw Response so callers can read bytes. */
+export async function speech(input: SpeechOptions): Promise<Response> {
+  const {
+    model,
+    input: text,
+    voice,
+    responseFormat,
+    speed,
+    instructions,
+    extra,
+    ...http
+  } = input
+  if (typeof model !== "string" || model.length === 0) {
+    throw new Error("model must be a non-empty string")
+  }
+  if (typeof text !== "string" || text.length === 0) {
+    throw new Error("input must be a non-empty string")
+  }
+  if (typeof voice !== "string" || voice.length === 0) {
+    throw new Error("voice must be a non-empty string")
+  }
+  const body: Record<string, unknown> = { model, input: text, voice }
+  if (responseFormat !== undefined) body.response_format = responseFormat
+  if (speed !== undefined) body.speed = speed
+  if (instructions !== undefined) body.instructions = instructions
+  if (extra !== undefined) {
+    for (const [k, v] of Object.entries(extra)) body[k] = v
+  }
+  return rawRequest("POST", "/audio/speech", body, http)
+}
+
+/** Transcribe an audio file with OpenAI-compatible multipart upload. */
+export async function transcribe(input: TranscriptionOptions): Promise<Response> {
+  return sttRequest("/audio/transcriptions", input)
+}
+
+/** Translate an audio file to English (Whisper translation endpoint). */
+export async function audioTranslate(
+  input: TranscriptionOptions,
+): Promise<Response> {
+  return sttRequest("/audio/translations", input)
+}
+
+async function sttRequest(
+  path: string,
+  input: TranscriptionOptions,
+): Promise<Response> {
+  const {
+    model,
+    file,
+    filename,
+    language,
+    prompt,
+    responseFormat,
+    temperature,
+    extra,
+    ...http
+  } = input
+  if (typeof model !== "string" || model.length === 0) {
+    throw new Error("model must be a non-empty string")
+  }
+  if (!(file instanceof Blob)) {
+    throw new Error("file must be a Blob or File")
+  }
+  const form = new FormData()
+  form.append("model", model)
+  form.append("file", file, filename)
+  if (language !== undefined) form.append("language", language)
+  if (prompt !== undefined) form.append("prompt", prompt)
+  if (responseFormat !== undefined) form.append("response_format", responseFormat)
+  if (temperature !== undefined) form.append("temperature", String(temperature))
+  if (extra !== undefined) {
+    for (const [k, v] of Object.entries(extra)) form.append(k, v)
+  }
+  return rawBodyRequest("POST", path, form, http)
+}
+
+// ---------- images: edits + variations ----------
+
+export interface ImageEditOptions extends HttpOptions {
+  model: string
+  image: Blob
+  prompt: string
+  mask?: Blob
+  imageFilename?: string
+  maskFilename?: string
+  n?: number
+  size?: string
+  responseFormat?: "url" | "b64_json"
+  extra?: Record<string, string | Blob>
+}
+
+export interface ImageVariationOptions extends HttpOptions {
+  model: string
+  image: Blob
+  imageFilename?: string
+  n?: number
+  size?: string
+  responseFormat?: "url" | "b64_json"
+  extra?: Record<string, string | Blob>
+}
+
+/** Edit an image with an OpenAI-compatible multipart upload. */
+export async function imageEdit(input: ImageEditOptions): Promise<Response> {
+  const {
+    model,
+    image,
+    prompt,
+    mask,
+    imageFilename,
+    maskFilename,
+    n,
+    size,
+    responseFormat,
+    extra,
+    ...http
+  } = input
+  if (typeof model !== "string" || model.length === 0) {
+    throw new Error("model must be a non-empty string")
+  }
+  if (typeof prompt !== "string" || prompt.length === 0) {
+    throw new Error("prompt must be a non-empty string")
+  }
+  if (!(image instanceof Blob)) {
+    throw new Error("image must be a Blob or File")
+  }
+  const form = new FormData()
+  form.append("model", model)
+  form.append("prompt", prompt)
+  form.append("image", image, imageFilename ?? "image.png")
+  if (mask !== undefined) {
+    if (!(mask instanceof Blob)) {
+      throw new Error("mask must be a Blob or File")
+    }
+    form.append("mask", mask, maskFilename ?? "mask.png")
+  }
+  if (n !== undefined) form.append("n", String(n))
+  if (size !== undefined) form.append("size", size)
+  if (responseFormat !== undefined)
+    form.append("response_format", responseFormat)
+  if (extra !== undefined) {
+    for (const [k, v] of Object.entries(extra)) form.append(k, v)
+  }
+  return rawBodyRequest("POST", "/images/edits", form, http)
+}
+
+/** Generate variations of an image with an OpenAI-compatible multipart upload. */
+export async function imageVariations(
+  input: ImageVariationOptions,
+): Promise<Response> {
+  const {
+    model,
+    image,
+    imageFilename,
+    n,
+    size,
+    responseFormat,
+    extra,
+    ...http
+  } = input
+  if (typeof model !== "string" || model.length === 0) {
+    throw new Error("model must be a non-empty string")
+  }
+  if (!(image instanceof Blob)) {
+    throw new Error("image must be a Blob or File")
+  }
+  const form = new FormData()
+  form.append("model", model)
+  form.append("image", image, imageFilename ?? "image.png")
+  if (n !== undefined) form.append("n", String(n))
+  if (size !== undefined) form.append("size", size)
+  if (responseFormat !== undefined)
+    form.append("response_format", responseFormat)
+  if (extra !== undefined) {
+    for (const [k, v] of Object.entries(extra)) form.append(k, v)
+  }
+  return rawBodyRequest("POST", "/images/variations", form, http)
 }
 
 // ---------- models ----------
@@ -251,6 +501,32 @@ export async function cacheStats(opts: HttpOptions = {}): Promise<CacheStats> {
 export const llm = {
   chat,
   embed,
+  image,
+  speech,
+  transcribe,
+  audioTranslate,
+  imageEdit,
+  imageVariations,
   models,
   cacheStats,
+} as const
+
+/** `suite.audio.*` — TTS + STT verbs.
+ *
+ * Returns raw `Response` objects so callers can stream bytes (TTS) or
+ * read JSON (STT). For multimodal-only callers that want a tighter
+ * surface, this namespace is the entry point — `suite.llm.*` aliases the
+ * same functions for OpenAI-SDK-style consumers.
+ */
+export const audio = {
+  speech,
+  transcribe,
+  translate: audioTranslate,
+} as const
+
+/** `suite.images.*` — image generation, edit, variations. */
+export const images = {
+  generate: image,
+  edit: imageEdit,
+  variations: imageVariations,
 } as const

@@ -111,6 +111,7 @@ services:
       AF_STACK_AGENTFIELD_URL: http://agentfield:8080
       # KMS for the secrets vault (envelope encryption). Override in
       # production with `openssl rand -hex 32`.
+      AF_STACK_AUTH_SECRET: ${AF_STACK_AUTH_SECRET:-dev-secret-change-me-in-prod}
       AF_STACK_KMS_KEY: ${AF_STACK_KMS_KEY:-dev-secret-change-me}
       # Module enable flags. AF_STACK_MODULE_<UPPER_SNAKE>=true flips a
       # module on regardless of what config.yaml says. Helpful for
@@ -125,6 +126,25 @@ services:
       # sidecar auth; customers never see it.
       AF_STACK_LITELLM_URL: ${AF_STACK_LITELLM_URL:-http://litellm:4000}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-litellm-dev}
+      # Gateway guardrails: regex PII redaction is on by default.
+      # Set AF_STACK_PII_PROVIDER=presidio and Presidio URLs to use
+      # a Presidio analyzer/anonymizer sidecar.
+      AF_STACK_GUARDRAILS_ENABLED: ${AF_STACK_GUARDRAILS_ENABLED:-true}
+      AF_STACK_PII_REDACTION_ENABLED: ${AF_STACK_PII_REDACTION_ENABLED:-true}
+      AF_STACK_PII_PROVIDER: ${AF_STACK_PII_PROVIDER:-regex}
+      AF_STACK_PRESIDIO_ANALYZER_URL: ${AF_STACK_PRESIDIO_ANALYZER_URL:-}
+      AF_STACK_PRESIDIO_ANONYMIZER_URL: ${AF_STACK_PRESIDIO_ANONYMIZER_URL:-}
+      AF_STACK_MODERATION_ENABLED: ${AF_STACK_MODERATION_ENABLED:-true}
+      AF_STACK_MODERATION_BLOCK_PATTERNS: ${AF_STACK_MODERATION_BLOCK_PATTERNS:-}
+      # OAuth-on-behalf-of-user. These are distinct from dashboard
+      # sign-in OAuth vars; agents use these grants to call third-party
+      # APIs as the user.
+      AF_STACK_PUBLIC_URL: ${AF_STACK_PUBLIC_URL:-}
+      AF_STACK_OAUTH_ALLOWED_RETURN_ORIGINS: ${AF_STACK_OAUTH_ALLOWED_RETURN_ORIGINS:-}
+      OAUTH_GOOGLE_CLIENT_ID: ${OAUTH_GOOGLE_CLIENT_ID:-}
+      OAUTH_GOOGLE_CLIENT_SECRET: ${OAUTH_GOOGLE_CLIENT_SECRET:-}
+      OAUTH_GITHUB_CLIENT_ID: ${OAUTH_GITHUB_CLIENT_ID:-}
+      OAUTH_GITHUB_CLIENT_SECRET: ${OAUTH_GITHUB_CLIENT_SECRET:-}
       # MinIO-backed object storage.
       AF_STACK_S3_ADAPTER: minio
       AF_STACK_S3_ENDPOINT: minio:9000
@@ -198,6 +218,12 @@ services:
       NEXT_PUBLIC_RUNTIME_UI_URL: http://localhost:8081
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      AF_STACK_SSO_LABEL: ${AF_STACK_SSO_LABEL:-}
+      AF_STACK_SSO_ISSUER: ${AF_STACK_SSO_ISSUER:-}
+      AF_STACK_SSO_DISCOVERY_URL: ${AF_STACK_SSO_DISCOVERY_URL:-}
+      AF_STACK_SSO_CLIENT_ID: ${AF_STACK_SSO_CLIENT_ID:-}
+      AF_STACK_SSO_CLIENT_SECRET: ${AF_STACK_SSO_CLIENT_SECRET:-}
+      AF_STACK_SSO_SCOPES: ${AF_STACK_SSO_SCOPES:-}
     ports:
       - "${AF_STACK_DASHBOARD_PORT:-3000}:3000"
     depends_on:

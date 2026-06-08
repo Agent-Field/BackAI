@@ -35,12 +35,17 @@ Treat the bucket as recoverable but not load-bearing — sandbox logs
 can be discarded after 30 days; webhook payloads after the dedup
 window expires.
 
-### Secrets vault key (`AF_STACK_KMS_KEY`)
+### Secrets vault key material
 
-This is the AES-256 envelope-encryption key for `suite_secrets`. If you
-lose it, every stored secret is permanently unreadable. **Back this up
-separately from the database** — store it in your team's password
-manager / HashiCorp Vault / cloud KMS. Never commit it.
+`suite_secrets` values are encrypted with a 32-byte data key. With
+`AF_STACK_KMS_PROVIDER=env`, that data key is `AF_STACK_KMS_KEY`. With
+cloud BYOK (`aws`, `gcp`, or `azure`), the runtime unwraps
+`AF_STACK_KMS_ENCRYPTED_DATA_KEY` through the configured cloud KMS key at
+boot.
+
+If you lose the env key, the encrypted data key, or access to the cloud
+KMS key that unwraps it, every stored secret is permanently unreadable.
+**Back this up separately from the database**. Never commit it.
 
 ## Frequency recommendations
 
@@ -136,17 +141,16 @@ helper for this.
 
 ## KMS key rotation
 
-The `AF_STACK_KMS_KEY` encrypts secret values inside `suite_secrets`.
-To rotate:
+The active data key encrypts secret values inside `suite_secrets`. To
+rotate:
 
-1. Set `AF_STACK_KMS_KEY_NEW=<new 64-char hex>` alongside the existing
-   key.
+1. Set `AF_STACK_KMS_KEY_NEW=<new 64-char hex>` for the env provider, or
+   configure a newly wrapped cloud BYOK data key alongside the current
+   one.
 2. Run `af-stack secrets rotate-kms` — re-encrypts every row with the
    new key in a transaction (uses both old + new keys during the migration).
-3. Restart the runtime with `AF_STACK_KMS_KEY` set to the new value
-   only.
-4. Archive the old key in your password manager labelled
-   `<env>-pre-<timestamp>`.
+3. Restart the runtime with only the new env key or wrapped data key.
+4. Archive the old key material labelled `<env>-pre-<timestamp>`.
 
 ## Backup verification
 

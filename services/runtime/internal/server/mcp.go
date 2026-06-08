@@ -4,13 +4,13 @@
 //
 // Endpoints (mirror api.ts MCP block):
 //
-//   GET    /api/v1/mcp/servers              -> MCPServerListSchema
-//   GET    /api/v1/mcp/servers/{name}       -> MCPServerSchema
-//   POST   /api/v1/mcp/servers              -> MCPServerSchema (body: CreateMCPServerInput)
-//   DELETE /api/v1/mcp/servers/{name}       -> {"deleted": true}
-//   PUT    /api/v1/mcp/servers/{name}/enabled -> MCPServerSchema (body: {enabled})
-//   GET    /api/v1/mcp/tools?server=<name>  -> MCPToolListSchema
-//   POST   /api/v1/mcp/call                 -> CallMCPResultSchema (body: CallMCPInput)
+//	GET    /api/v1/mcp/servers              -> MCPServerListSchema
+//	GET    /api/v1/mcp/servers/{name}       -> MCPServerSchema
+//	POST   /api/v1/mcp/servers              -> MCPServerSchema (body: CreateMCPServerInput)
+//	DELETE /api/v1/mcp/servers/{name}       -> {"deleted": true}
+//	PUT    /api/v1/mcp/servers/{name}/enabled -> MCPServerSchema (body: {enabled})
+//	GET    /api/v1/mcp/tools?server=<name>  -> MCPToolListSchema
+//	POST   /api/v1/mcp/call                 -> CallMCPResultSchema (body: CallMCPInput)
 //
 // When the pool isn't wired (no DB at boot) GET endpoints return
 // tolerant empty pages; mutating endpoints return 503 MCP_NOT_CONFIGURED.
@@ -27,10 +27,12 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/mcp"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
 	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
+	"github.com/Agent-Field/backai/services/runtime/internal/tools"
 )
 
 // ─── Wire shapes ──────────────────────────────────────────────────────────
@@ -277,32 +279,87 @@ func (s *Server) handleEnableMCPServer(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleListMCPTools(w http.ResponseWriter, r *http.Request) {
 	resp := mcpToolListResponse{Tools: []mcp.Tool{}}
-	if s.mcp == nil {
-		writeJSON(w, http.StatusOK, resp)
-		return
-	}
 	server := strings.TrimSpace(r.URL.Query().Get("server"))
-	tools, err := s.mcp.Tools(r.Context(), server, s.callerTenant(r))
+	tenant := s.callerTenant(r)
+
+	// Native tool catalogue is always available when the registry is
+	// wired — even if the external MCP pool isn't. We surface native
+	// tools alongside external MCP tools so agents see a unified list.
+	nativeToolsInjected, err := s.appendNativeMCPTools(r.Context(), &resp, server, tenant)
 	if err != nil {
-		// ErrServerNotFound when ?server=<unknown> is the only
-		// non-empty path; treat as a 404 rather than 500.
-		writeMCPError(w, err)
+		writeNativeToolError(w, err)
 		return
 	}
-	if tools != nil {
-		resp.Tools = tools
+
+	if s.mcp != nil && !nativeToolsInjected {
+		tools, err := s.mcp.Tools(r.Context(), server, tenant)
+		if err != nil {
+			// When the filter targets a native server, the mcp pool
+			// won't know about it — fall through with an empty list
+			// rather than a 404.
+			if !isNativeServerFilter(server) {
+				writeMCPError(w, err)
+				return
+			}
+		}
+		if tools != nil {
+			resp.Tools = append(resp.Tools, tools...)
+		}
+	} else if s.mcp != nil && nativeToolsInjected {
+		// When filter targets native:* we've already populated; skip
+		// the external pool.
+	} else if s.mcp != nil {
+		tools, err := s.mcp.Tools(r.Context(), server, tenant)
+		if err != nil {
+			writeMCPError(w, err)
+			return
+		}
+		if tools != nil {
+			resp.Tools = append(resp.Tools, tools...)
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// appendNativeMCPTools adds native:<tool> entries to resp.Tools when the
+// registry is wired. Returns (nativeOnly, err) — nativeOnly==true means
+// the server filter is "native:*" so the caller should NOT additionally
+// query the external pool.
+func (s *Server) appendNativeMCPTools(ctx context.Context, resp *mcpToolListResponse, server, tenant string) (bool, error) {
+	if s.toolsRegistry == nil {
+		return isNativeServerFilter(server), nil
+	}
+	nativeOnly := isNativeServerFilter(server)
+	if server != "" && !nativeOnly {
+		return false, nil
+	}
+	natives, err := s.toolsRegistry.ListNativeMCPTools(ctx, tenant)
+	if err != nil {
+		return nativeOnly, err
+	}
+	for _, n := range natives {
+		if nativeOnly && n.Server != server {
+			continue
+		}
+		desc := n.Description
+		resp.Tools = append(resp.Tools, mcp.Tool{
+			ID:          n.ID,
+			Server:      n.Server,
+			Name:        n.Name,
+			Description: &desc,
+			InputSchema: n.InputSchema,
+		})
+	}
+	return nativeOnly, nil
+}
+
+func isNativeServerFilter(server string) bool {
+	return server != "" && strings.HasPrefix(server, "native:")
 }
 
 // ─── POST /api/v1/mcp/call ────────────────────────────────────────────────
 
 func (s *Server) handleCallMCP(w http.ResponseWriter, r *http.Request) {
-	if s.mcp == nil {
-		writeError(w, http.StatusServiceUnavailable, "MCP_NOT_CONFIGURED",
-			"mcp module is not configured on this runtime", nil)
-		return
-	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "could not read body", nil)
@@ -314,12 +371,50 @@ func (s *Server) handleCallMCP(w http.ResponseWriter, r *http.Request) {
 			"invalid JSON body: "+err.Error(), nil)
 		return
 	}
-	if strings.TrimSpace(in.Server) == "" || strings.TrimSpace(in.Tool) == "" {
+	server := strings.TrimSpace(in.Server)
+	tool := strings.TrimSpace(in.Tool)
+	if server == "" || tool == "" {
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED",
 			"server and tool are required", nil)
 		return
 	}
-	res, err := s.mcp.Call(r.Context(), in.Server, in.Tool, in.Arguments, s.callerTenant(r))
+
+	// Route native:<tool> to the internal/tools registry. This is what
+	// makes `app.mcp.call("native:browser", "navigate", {...})` work
+	// from inside an agent — the agent's MCP host POSTs here, and we
+	// fan out to either the external pool or the native registry.
+	if tools.IsNativeServer(server) {
+		if s.toolsRegistry == nil {
+			writeError(w, http.StatusServiceUnavailable, "TOOLS_NOT_CONFIGURED",
+				"native tool registry is not configured", nil)
+			return
+		}
+		start := time.Now()
+		result, err := s.toolsRegistry.CallNative(r.Context(), s.callerTenant(r), server, tool, in.Arguments)
+		dur := time.Since(start).Milliseconds()
+		if err != nil {
+			writeNativeToolError(w, err)
+			return
+		}
+		// Map the native result into the MCP CallResult shape so the
+		// agent's MCP client parses it identically to external tools.
+		writeJSON(w, http.StatusOK, mcp.CallResult{
+			Content: []map[string]any{{
+				"type": "json",
+				"data": result,
+			}},
+			IsError:    false,
+			DurationMS: dur,
+		})
+		return
+	}
+
+	if s.mcp == nil {
+		writeError(w, http.StatusServiceUnavailable, "MCP_NOT_CONFIGURED",
+			"mcp module is not configured on this runtime", nil)
+		return
+	}
+	res, err := s.mcp.Call(r.Context(), server, tool, in.Arguments, s.callerTenant(r))
 	if err != nil {
 		writeMCPError(w, err)
 		return

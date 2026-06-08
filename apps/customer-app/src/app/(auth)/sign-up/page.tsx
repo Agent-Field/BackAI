@@ -12,13 +12,7 @@ import { toast } from "sonner"
 import { Copy, KeyRound } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -26,14 +20,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field"
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { signUp } from "@/lib/auth-client"
+import { brand } from "@/lib/brand"
 
 const SignUpSchema = z.object({
   name: z.string().min(1, "What should we call you?"),
@@ -108,7 +98,7 @@ export default function SignUpPage() {
     <>
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Create your SWE-AF account</CardTitle>
+          <CardTitle>Create your {brand.displayName} account</CardTitle>
           <CardDescription>
             A tenant, billing customer, and API key are provisioned on signup.
           </CardDescription>
@@ -125,9 +115,7 @@ export default function SignUpPage() {
                   {...form.register("name")}
                 />
                 {form.formState.errors.name ? (
-                  <FieldDescription>
-                    {form.formState.errors.name.message}
-                  </FieldDescription>
+                  <FieldDescription>{form.formState.errors.name.message}</FieldDescription>
                 ) : null}
               </Field>
               <Field data-invalid={form.formState.errors.email ? true : undefined}>
@@ -140,14 +128,10 @@ export default function SignUpPage() {
                   {...form.register("email")}
                 />
                 {form.formState.errors.email ? (
-                  <FieldDescription>
-                    {form.formState.errors.email.message}
-                  </FieldDescription>
+                  <FieldDescription>{form.formState.errors.email.message}</FieldDescription>
                 ) : null}
               </Field>
-              <Field
-                data-invalid={form.formState.errors.password ? true : undefined}
-              >
+              <Field data-invalid={form.formState.errors.password ? true : undefined}>
                 <FieldLabel htmlFor="password">Password</FieldLabel>
                 <Input
                   id="password"
@@ -157,9 +141,7 @@ export default function SignUpPage() {
                   {...form.register("password")}
                 />
                 {form.formState.errors.password ? (
-                  <FieldDescription>
-                    {form.formState.errors.password.message}
-                  </FieldDescription>
+                  <FieldDescription>{form.formState.errors.password.message}</FieldDescription>
                 ) : null}
               </Field>
               <Button type="submit" disabled={submitting} className="w-full">
@@ -167,10 +149,7 @@ export default function SignUpPage() {
               </Button>
               <FieldDescription className="text-center">
                 Have an account?{" "}
-                <Link
-                  className="underline-offset-4 hover:underline"
-                  href="/sign-in"
-                >
+                <Link className="underline-offset-4 hover:underline" href="/sign-in">
                   Sign in
                 </Link>
               </FieldDescription>
@@ -192,8 +171,8 @@ export default function SignUpPage() {
               Your API key
             </DialogTitle>
             <DialogDescription>
-              This is the only time you will see the full key. Copy it now.
-              You can issue a new one from the API Key page if you lose it.
+              This is the only time you will see the full key. Copy it now. You can issue a new one
+              from the API Key page if you lose it.
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3">

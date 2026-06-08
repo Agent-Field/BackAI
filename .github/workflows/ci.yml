@@ -5,6 +5,11 @@ name: CI
 # `pull_request` triggers below.
 on:
   workflow_dispatch:
+    inputs:
+      run_helm_kind_smoke:
+        description: "Run the full Helm kind deploy smoke test"
+        required: false
+        default: "true"
   # push:
   #   branches: [main]
   # pull_request:
@@ -29,6 +34,7 @@ jobs:
       docs: ${{ steps.filter.outputs.docs }}
       docs_site: ${{ steps.filter.outputs.docs_site }}
       compose: ${{ steps.filter.outputs.compose }}
+      deploy: ${{ steps.filter.outputs.deploy }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -61,6 +67,14 @@ jobs:
             compose:
               - 'docker-compose*.yml'
               - 'scripts/postgres-init.sh'
+            deploy:
+              - '.github/workflows/ci.yml'
+              - 'deploy/**'
+              - 'docker-compose*.yml'
+              - 'scripts/validate-deploy-targets.py'
+              - 'scripts/test-helm-kind.sh'
+              - 'scripts/test-fly-staging.sh'
+              - 'scripts/test-prod-compose-smoke.sh'
 
   lint-go:
     name: Lint (Go)
@@ -174,6 +188,75 @@ jobs:
             docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet
           fi
 
+  validate-deploy-targets:
+    name: Validate deploy targets
+    needs: changes
+    if: needs.changes.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Validate Helm, Fly, Railway, Render, and prod compose
+        run: scripts/validate-deploy-targets.py
+
+  helm-kind-smoke:
+    name: Helm kind smoke
+    needs: changes
+    if: needs.changes.outputs.deploy == 'true' && (github.event_name != 'workflow_dispatch' || github.event.inputs.run_helm_kind_smoke == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - uses: helm/kind-action@v1
+        with:
+          install_only: true
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+      - name: Deploy chart to kind and probe health endpoints
+        run: scripts/test-helm-kind.sh
+
+  fly-staging-smoke:
+    name: Fly staging smoke
+    needs: changes
+    if: needs.changes.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy Fly staging apps and probe health endpoints
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          AF_STACK_FLY_STAGING_RUNTIME_APP: ${{ vars.AF_STACK_FLY_STAGING_RUNTIME_APP }}
+          AF_STACK_FLY_STAGING_DASHBOARD_APP: ${{ vars.AF_STACK_FLY_STAGING_DASHBOARD_APP }}
+          AF_STACK_FLY_STAGING_REGION: ${{ vars.AF_STACK_FLY_STAGING_REGION }}
+          AF_STACK_FLY_STAGING_RUNTIME_URL: ${{ vars.AF_STACK_FLY_STAGING_RUNTIME_URL }}
+          AF_STACK_FLY_STAGING_DASHBOARD_URL: ${{ vars.AF_STACK_FLY_STAGING_DASHBOARD_URL }}
+        run: scripts/test-fly-staging.sh
+
+  prod-compose-smoke:
+    name: Production compose smoke
+    needs: changes
+    if: needs.changes.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bring up production compose and probe services
+        env:
+          AF_STACK_PROD_COMPOSE_SMOKE: ${{ vars.AF_STACK_PROD_COMPOSE_SMOKE }}
+          AF_STACK_DOMAIN: ${{ vars.AF_STACK_PROD_COMPOSE_DOMAIN }}
+          ACME_EMAIL: ${{ vars.AF_STACK_PROD_COMPOSE_ACME_EMAIL }}
+          AF_STACK_DATABASE_URL: ${{ secrets.AF_STACK_PROD_COMPOSE_DATABASE_URL }}
+          AGENTFIELD_STORAGE_POSTGRES_URL: ${{ secrets.AGENTFIELD_STORAGE_POSTGRES_URL }}
+          AF_STACK_KMS_KEY: ${{ secrets.AF_STACK_PROD_COMPOSE_KMS_KEY }}
+          AF_STACK_AUTH_SECRET: ${{ secrets.AF_STACK_PROD_COMPOSE_AUTH_SECRET }}
+          AF_STACK_S3_ENDPOINT: ${{ vars.AF_STACK_PROD_COMPOSE_S3_ENDPOINT }}
+          AF_STACK_S3_BUCKET: ${{ vars.AF_STACK_PROD_COMPOSE_S3_BUCKET }}
+          AF_STACK_S3_ACCESS_KEY: ${{ secrets.AF_STACK_PROD_COMPOSE_S3_ACCESS_KEY }}
+          AF_STACK_S3_SECRET_KEY: ${{ secrets.AF_STACK_PROD_COMPOSE_S3_SECRET_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+        run: scripts/test-prod-compose-smoke.sh
+
   docs-lint:
     name: Lint docs
     needs: changes
@@ -228,6 +311,10 @@ jobs:
         lint-typescript,
         test-typescript,
         validate-compose,
+        validate-deploy-targets,
+        helm-kind-smoke,
+        fly-staging-smoke,
+        prod-compose-smoke,
         docs-lint,
         build-docs-site,
       ]

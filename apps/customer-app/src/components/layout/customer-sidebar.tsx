@@ -10,6 +10,7 @@ import {
   KeyRound,
   LayoutDashboard,
   LogOut,
+  Plug,
   Settings,
   Terminal,
 } from "lucide-react"
@@ -25,6 +26,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
+import { brand } from "@/lib/brand"
 
 type NavItem = {
   href: string
@@ -35,6 +37,7 @@ type NavItem = {
 const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/code-helper", label: "Code Helper", icon: Code2 },
+  { href: "/integrations", label: "Integrations", icon: Plug },
   { href: "/billing", label: "Billing", icon: CreditCard },
   { href: "/api-key", label: "API Key", icon: KeyRound },
   { href: "/settings", label: "Settings", icon: Settings },
@@ -44,8 +47,11 @@ function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(href + "/")
 }
 
-export function CustomerSidebar() {
+export function CustomerSidebar({ billingDisabled = false }: { billingDisabled?: boolean }) {
   const pathname = usePathname()
+  const navItems = billingDisabled
+    ? NAV_ITEMS.filter((item) => item.href !== "/billing")
+    : NAV_ITEMS
 
   return (
     <Sidebar collapsible="icon">
@@ -57,15 +63,17 @@ export function CustomerSidebar() {
               render={
                 <Link href="/dashboard" className="flex items-center gap-2">
                   <div className="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-md">
-                    <Terminal className="size-4" />
+                    {brand.logos.light ? (
+                      <img src={brand.logos.light} alt="" className="size-5 object-contain" />
+                    ) : (
+                      <Terminal className="size-4" />
+                    )}
                   </div>
                   <div className="grid flex-1 text-left text-sm leading-tight">
                     <span className="truncate font-semibold tracking-tight">
-                      SWE-AF
+                      {brand.displayName}
                     </span>
-                    <span className="text-muted-foreground truncate text-xs">
-                      Code answers, metered
-                    </span>
+                    <span className="text-muted-foreground truncate text-xs">{brand.subtitle}</span>
                   </div>
                 </Link>
               }
@@ -78,7 +86,7 @@ export function CustomerSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {NAV_ITEMS.map((item) => (
+              {navItems.map((item) => (
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton
                     tooltip={item.label}

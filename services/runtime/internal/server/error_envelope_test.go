@@ -17,7 +17,6 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -29,17 +28,6 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/agentfield"
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
 )
-
-// alwaysDenyLimiter is a Limiter that denies every request with a
-// deterministic Retry-After. Lets us test the middleware response shape
-// without time-based flakes.
-type alwaysDenyLimiter struct {
-	retry time.Duration
-}
-
-func (a alwaysDenyLimiter) Allow(_ context.Context, _, _ string) (bool, time.Duration, error) {
-	return false, a.retry, nil
-}
 
 // envelopeCase is one (method, path, expectedStatus) triple to exercise.
 //
@@ -181,42 +169,10 @@ func TestReadyReturnsEnvelopeOn503(t *testing.T) {
 	assertEnvelope(t, rec.Body.Bytes(), rec.Code)
 }
 
-// TestRateLimit429ReturnsEnvelopeAndRetryAfter wires a deterministic
-// always-deny limiter, hits a throttled route, and confirms the response
-// is 429 with both the Retry-After header and the canonical envelope
-// (code=RATE_LIMITED, details.retry_after_seconds populated).
-func TestRateLimit429ReturnsEnvelopeAndRetryAfter(t *testing.T) {
-	srv := New(config.Default(), slog.Default(), Deps{
-		AF:          agentfield.New(agentfield.Config{URL: "http://example", RequestTimeout: time.Second}),
-		RateLimiter: alwaysDenyLimiter{retry: 7 * time.Second},
-	})
-	req := httptest.NewRequest("POST", "/api/v1/agents/sample.echo", strings.NewReader("{}"))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	srv.srv.Handler.ServeHTTP(rec, req) // through the full middleware stack
-
-	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("status = %d, want 429; body=%s", rec.Code, rec.Body.String())
-	}
-	if got := rec.Header().Get("Retry-After"); got == "" {
-		t.Errorf("Retry-After header missing")
-	}
-	assertEnvelope(t, rec.Body.Bytes(), rec.Code)
-
-	var env struct {
-		Error struct {
-			Code    string         `json:"code"`
-			Details map[string]any `json:"details"`
-		} `json:"error"`
-	}
-	_ = json.Unmarshal(rec.Body.Bytes(), &env)
-	if env.Error.Code != "RATE_LIMITED" {
-		t.Errorf("code = %q, want RATE_LIMITED", env.Error.Code)
-	}
-	if env.Error.Details["retry_after_seconds"] == nil {
-		t.Errorf("details.retry_after_seconds missing")
-	}
-}
+// Rate-limit 429 passthrough is covered by TestLLMChat429PassesThroughHeaders
+// in llm_test.go — the runtime no longer enforces rate limits locally;
+// LiteLLM emits 429 + Retry-After + X-RateLimit-* headers and the LLM
+// handler proxies them back to the client (item #32).
 
 // assertEnvelope decodes body and asserts the canonical
 // {error: {code, message, details?}} contract.

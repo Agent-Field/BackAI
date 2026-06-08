@@ -81,6 +81,12 @@ type Manager struct {
 	hooks  *hooks.Engine
 	log    *slog.Logger
 	tracer trace.Tracer
+	// litellm + secrets are attached via WithLiteLLM at boot. Both
+	// are optional — when nil, IssueAPIKey / RevokeAPIKey behave as
+	// in pre-#22 builds (no upstream LiteLLM mirror, no per-tenant
+	// secret). See litellm_mirror.go.
+	litellm LiteLLMMirror
+	secrets SecretSink
 }
 
 // New constructs a Manager. pool is required; engine and log may be
@@ -1010,6 +1016,17 @@ func (m *Manager) IssueAPIKey(ctx context.Context, in IssueAPIKeyInput) (IssuedA
 //
 // The plaintext is shown ONCE — the table only ever stores the bcrypt
 // hash of the secret half.
+//
+// When a LiteLLMMirror is wired (WithLiteLLM) this method ALSO mints a
+// LiteLLM virtual key with the supplied budget + rate-limits, stores
+// the LiteLLM secret in the secrets vault under
+// "litellm/key/{api_key_id}", and updates the suite_api_keys row with
+// the alias + hash. Failure of the LiteLLM call rolls back the AF
+// Stack row insert so callers see an atomic operation (#22).
+//
+// If no LiteLLMMirror is wired, the legacy path runs (insert only) and
+// the LLM gateway falls back to LITELLM_MASTER_KEY for upstream calls.
+// This keeps existing rows + dev setups working unchanged.
 func (m *Manager) IssueKey(ctx context.Context, in IssueAPIKeyInput) (IssuedAPIKey, error) {
 	ctx, span := m.tracer.Start(ctx, "tenancy.issue_key",
 		trace.WithAttributes(attribute.String("tenancy.tenant_id", in.TenantID)),
@@ -1053,11 +1070,13 @@ func (m *Manager) IssueKey(ctx context.Context, in IssueAPIKeyInput) (IssuedAPIK
 
 	err = m.pool.QueryRow(ctx, `
 		insert into suite_api_keys
-			(tenant_id, prefix, hashed_secret, name, scopes, created_by, expires_at)
-		values ($1, $2, $3, $4, $5, $6, $7)
+			(tenant_id, prefix, hashed_secret, name, scopes, created_by, expires_at,
+			 budget_max_usd, rate_limit_rpm, rate_limit_tpm)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		returning id::text, created_at
 	`,
 		in.TenantID, prefix, string(hash), namePtr, in.Scopes, createdByPtr, in.ExpiresAt,
+		in.BudgetMaxUSD, in.RateLimitRPM, in.RateLimitTPM,
 	).Scan(&id, &createdAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -1068,15 +1087,66 @@ func (m *Manager) IssueKey(ctx context.Context, in IssueAPIKeyInput) (IssuedAPIK
 		return IssuedAPIKey{}, fmt.Errorf("tenancy: insert key: %w", err)
 	}
 
+	// LiteLLM mirror. Atomic with respect to the row above: if the
+	// LiteLLM call fails we delete the row before returning so the
+	// caller never sees a half-issued key. The mirror skips silently
+	// when LiteLLM isn't wired.
+	var (
+		litellmAlias string
+		litellmHash  string
+	)
+	if m.litellm != nil && m.litellm.Configured() {
+		litellmAlias, litellmHash, err = m.issueLiteLLMKey(ctx, in.TenantID, id, in)
+		if err != nil {
+			// Roll back. Use a fresh background context so a cancelled
+			// request ctx doesn't leave the row stranded — RLS isn't
+			// active during the admin path, and the row id is local.
+			rollbackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, delErr := m.pool.Exec(rollbackCtx, `delete from suite_api_keys where id = $1`, id); delErr != nil {
+				m.log.Error("tenancy: failed to rollback suite_api_keys row after litellm failure",
+					"key_id", id, "error", delErr)
+			}
+			span.RecordError(err)
+			return IssuedAPIKey{}, fmt.Errorf("tenancy: litellm mirror: %w", err)
+		}
+		// Persist alias + hash on the row. Done in a separate UPDATE
+		// rather than the original INSERT because we don't know the
+		// alias until LiteLLM responds (the API key id is server-side
+		// generated).
+		if litellmAlias != "" {
+			if _, err := m.pool.Exec(ctx, `
+				update suite_api_keys
+				set litellm_key_alias = $2, litellm_key_hash = $3
+				where id = $1
+			`, id, litellmAlias, litellmHash); err != nil {
+				m.log.Warn("tenancy: failed to persist litellm alias/hash on row",
+					"key_id", id, "alias", litellmAlias, "error", err)
+				// Non-fatal — the secret is in the vault under
+				// LiteLLMSecretKey(id), so the LLM gateway can still
+				// look up by id even without the alias on the row.
+				// The cost is that operator inspection of the row
+				// won't show the alias.
+			}
+		}
+	}
+
 	pub := APIKey{
-		ID:        id,
-		TenantID:  in.TenantID,
-		Prefix:    prefix,
-		Name:      namePtr,
-		Scopes:    append([]string{}, in.Scopes...),
-		CreatedBy: createdByPtr,
-		CreatedAt: createdAt,
-		ExpiresAt: in.ExpiresAt,
+		ID:           id,
+		TenantID:     in.TenantID,
+		Prefix:       prefix,
+		Name:         namePtr,
+		Scopes:       append([]string{}, in.Scopes...),
+		CreatedBy:    createdByPtr,
+		CreatedAt:    createdAt,
+		ExpiresAt:    in.ExpiresAt,
+		BudgetMaxUSD: in.BudgetMaxUSD,
+		RateLimitRPM: in.RateLimitRPM,
+		RateLimitTPM: in.RateLimitTPM,
+	}
+	if litellmAlias != "" {
+		a := litellmAlias
+		pub.LiteLLMKeyAlias = &a
 	}
 	return IssuedAPIKey{
 		APIKey: pub,
@@ -1116,7 +1186,8 @@ func (m *Manager) listKeysImpl(ctx context.Context, opts ListKeysOpts) ([]APIKey
 		where = " where " + strings.Join(conds, " and ")
 	}
 	q := `select id::text, tenant_id::text, prefix, name, scopes, created_by::text,
-		         created_at, last_used_at, expires_at, revoked_at
+		         created_at, last_used_at, expires_at, revoked_at,
+		         litellm_key_alias, budget_max_usd, rate_limit_rpm, rate_limit_tpm
 		  from suite_api_keys ` + where + ` order by created_at desc`
 	if opts.Limit > 0 {
 		q += fmt.Sprintf(" limit %d", opts.Limit)
@@ -1150,11 +1221,35 @@ func (m *Manager) RevokeAPIKey(ctx context.Context, id string) error {
 // RevokeKey sets revoked_at = now(). ErrAPIKeyNotFound when no row
 // matched OR when already revoked (collapsed into a single not-
 // actionable surface).
+//
+// When a LiteLLMMirror is wired the matching virtual key is deleted
+// upstream and the vault entry is cleared. Failures there are logged
+// but never propagated — the runtime's auth layer already rejects the
+// revoked AF Stack key before the LLM gateway gets a chance to forward
+// to LiteLLM, so a stale LiteLLM key is a leak (LiteLLM admin can clean
+// up), not a security hole.
 func (m *Manager) RevokeKey(ctx context.Context, id string) error {
 	ctx, span := m.tracer.Start(ctx, "tenancy.revoke_key",
 		trace.WithAttributes(attribute.String("tenancy.api_key_id", id)),
 	)
 	defer span.End()
+
+	// Pull the alias + tenant id before flipping revoked_at — once
+	// revoked, downstream cleanup still needs them.
+	var (
+		tenantID *string
+		alias    *string
+	)
+	if err := m.pool.QueryRow(ctx, `
+		select tenant_id::text, litellm_key_alias
+		from suite_api_keys where id = $1
+	`, id).Scan(&tenantID, &alias); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrAPIKeyNotFound
+		}
+		span.RecordError(err)
+		return fmt.Errorf("tenancy: load key for revoke: %w", err)
+	}
 
 	tag, err := m.pool.Exec(ctx, `
 		update suite_api_keys
@@ -1167,6 +1262,25 @@ func (m *Manager) RevokeKey(ctx context.Context, id string) error {
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrAPIKeyNotFound
+	}
+
+	// Best-effort upstream cleanup. Run with a bounded fresh context
+	// so a slow LiteLLM doesn't tie up the admin handler past the
+	// row update — the row revocation is what matters for security.
+	if (alias != nil && *alias != "") || m.secrets != nil {
+		cleanCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		go func() {
+			defer cancel()
+			var tid string
+			if tenantID != nil {
+				tid = *tenantID
+			}
+			var al string
+			if alias != nil {
+				al = *alias
+			}
+			m.revokeLiteLLMKey(cleanCtx, tid, id, al)
+		}()
 	}
 	return nil
 }
@@ -1406,12 +1520,15 @@ func scanTenant(r rowScanner) (Tenant, error) {
 }
 
 // scanAPIKey reads a `select id, tenant_id, prefix, name, scopes,
-// created_by, created_at, last_used_at, expires_at, revoked_at` row.
-// hashed_secret is NEVER projected by callers of this helper.
+// created_by, created_at, last_used_at, expires_at, revoked_at,
+// litellm_key_alias, budget_max_usd, rate_limit_rpm, rate_limit_tpm`
+// row. hashed_secret + litellm_key_hash are NEVER projected by callers
+// of this helper.
 func scanAPIKey(r rowScanner) (APIKey, error) {
 	var k APIKey
 	if err := r.Scan(&k.ID, &k.TenantID, &k.Prefix, &k.Name, &k.Scopes, &k.CreatedBy,
-		&k.CreatedAt, &k.LastUsedAt, &k.ExpiresAt, &k.RevokedAt); err != nil {
+		&k.CreatedAt, &k.LastUsedAt, &k.ExpiresAt, &k.RevokedAt,
+		&k.LiteLLMKeyAlias, &k.BudgetMaxUSD, &k.RateLimitRPM, &k.RateLimitTPM); err != nil {
 		return APIKey{}, err
 	}
 	if k.Scopes == nil {

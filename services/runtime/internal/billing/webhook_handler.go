@@ -56,6 +56,9 @@ func (s *Service) HandleStripeWebhook(ctx context.Context, body []byte, sigHeade
 	if s.client == nil {
 		return errors.New("billing: stripe client not configured")
 	}
+	if s.client.AdapterName() != "stripe" {
+		return fmt.Errorf("%w: stripe webhook received while billing adapter is %s", ErrInvalidInput, s.client.AdapterName())
+	}
 
 	// Stub mode: there's no webhook secret + the stub client's
 	// VerifyWebhook always fails. We accept the event JSON without

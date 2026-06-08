@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "generate:brand": "node ../../scripts/generate-brand.mjs",
     "generate:plugins": "node scripts/generate-plugins-manifest.mjs",
-    "predev": "node scripts/generate-plugins-manifest.mjs",
-    "prebuild": "node scripts/generate-plugins-manifest.mjs",
+    "predev": "pnpm run generate:brand && node scripts/generate-plugins-manifest.mjs",
+    "prebuild": "pnpm run generate:brand && node scripts/generate-plugins-manifest.mjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

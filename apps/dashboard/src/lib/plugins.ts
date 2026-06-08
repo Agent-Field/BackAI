@@ -144,7 +144,7 @@ function normalize(def: PluginDefinition): LoadedPlugin {
 }
 
 /**
- * Returns all installed plugins. Inert when no plugins are present —
+ * Returns all discovered plugins. Inert when no plugins are present —
  * never throws when `plugins.generated.ts` is missing or empty.
  */
 export function loadPlugins(): LoadedPlugin[] {
@@ -174,7 +174,7 @@ export function loadPlugins(): LoadedPlugin[] {
 }
 
 /**
- * Returns the public Plugin manifest (api.ts shape) for every installed
+ * Returns the public Plugin manifest (api.ts shape) for every discovered
  * plugin. Used by the dashboard to merge with the runtime's
  * `/api/v1/plugins` response (which is intentionally empty — build-time
  * discovery is owned by the dashboard).

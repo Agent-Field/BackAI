@@ -130,6 +130,22 @@ export const AgentListSchema = z.object({
 })
 export type AgentList = z.infer<typeof AgentListSchema>
 
+export const FeatureFlagSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  description: z.string(),
+  enabled: z.boolean(),
+  source: z.string(),
+  metadata: z.record(z.string(), z.unknown()),
+  updated_at: z.string().nullable(),
+})
+export type FeatureFlag = z.infer<typeof FeatureFlagSchema>
+
+export const FeatureFlagListSchema = z.object({
+  flags: z.array(FeatureFlagSchema),
+})
+export type FeatureFlagList = z.infer<typeof FeatureFlagListSchema>
+
 export const RunSchema = z.object({
   id: z.string(),
   agent: z.string(),
@@ -150,6 +166,45 @@ export const RunListSchema = z.object({
   has_more: z.boolean(),
 })
 export type RunList = z.infer<typeof RunListSchema>
+
+// #25 AgentField data in dashboard — per-run summary surfaced from
+// AgentField. The dashboard renders status / agent / timing / cost in a
+// summary card and a "View in AgentField" link-out for the deep DAG +
+// step inspector.
+//
+// Only fields the summary card consumes are typed here. The raw
+// AgentField payload is preserved server-side under `extra` so the
+// dashboard can introspect new fields without an SDK release.
+export const RunOverviewSchema = z.object({
+  execution_id: z.string(),
+  run_id: z.string().optional(),
+  status: z.string(),
+  agent_name: z.string().optional(),
+  reasoner: z.string().optional(),
+  started_at: z.string().optional(),
+  ended_at: z.string().optional(),
+  duration_ms: z.number().nullable().optional(),
+  cost_usd: z.number().default(0),
+  approval_status: z.string().optional(),
+  extra: z.unknown().optional(),
+})
+export type RunOverview = z.infer<typeof RunOverviewSchema>
+
+export const RunAgentFieldSchema = z.object({
+  overview: RunOverviewSchema,
+  agentfield_url: z.string(),
+  details_url: z.string(),
+  actions_available: z.array(z.string()),
+})
+export type RunAgentField = z.infer<typeof RunAgentFieldSchema>
+
+export const RunActionResultSchema = z.object({
+  run_id: z.string(),
+  execution_id: z.string(),
+  action: z.string(),
+  status: z.string(),
+})
+export type RunActionResult = z.infer<typeof RunActionResultSchema>
 
 export const CostPointSchema = z.object({
   date: z.string(),
@@ -636,25 +691,25 @@ export type SendWebhookInput = z.infer<typeof SendWebhookInputSchema>
 
 // ─── Billing (Phase 10.4) ────────────────────────────────────────────────
 //
-// Stripe-first billing. The runtime mirrors customers/subscriptions
+// Adapter-backed billing. The runtime mirrors customers/subscriptions
 // locally so we don't make an API call per page load, and aggregates
 // usage events into a meter table. The dashboard shows per-tenant
-// usage + a Stripe portal link.
+// usage + a provider portal link.
 
 export const BillingCustomerSchema = z.object({
   tenant_id: z.string(),
-  // Stripe customer id. nullable when MT is on but the tenant hasn't
-  // been provisioned in Stripe yet.
+  // External provider customer id. Kept as stripe_customer_id for
+  // backwards-compatible DB/wire shape.
   stripe_customer_id: z.string().nullable(),
   email: z.string().nullable(),
   // Active subscription plan ("free", "pro", "enterprise"). Free is the
-  // implicit default and is NOT stored in Stripe.
+  // implicit default and is NOT stored in the provider.
   plan: z.string(),
   // ISO 8601 trial expiry. nullable when no trial.
   trial_ends_at: z.string().nullable(),
   // When the next invoice is expected (subscription period end).
   current_period_end: z.string().nullable(),
-  // Stripe subscription status as Stripe sends it ("active", "past_due",
+  // Provider subscription status ("active", "past_due",
   // "canceled", "trialing", etc).
   subscription_status: z.string().nullable(),
   created_at: z.string(),
@@ -664,6 +719,7 @@ export type BillingCustomer = z.infer<typeof BillingCustomerSchema>
 
 export const BillingCustomerListSchema = z.object({
   customers: z.array(BillingCustomerSchema),
+  adapter: z.string().default("none"),
 })
 export type BillingCustomerList = z.infer<typeof BillingCustomerListSchema>
 
@@ -701,6 +757,131 @@ export const PortalLinkSchema = z.object({
   expires_at: z.string(),
 })
 export type PortalLink = z.infer<typeof PortalLinkSchema>
+
+// ─── Built-in tool adapters (Phase 2 AI completeness) ─────────────────────
+//
+// These are AF Stack's built-in adapters: browser-use, SearXNG, fs, exec,
+// HTTP, SQL. They are distinct from MCP servers. The runtime owns
+// per-tenant enablement/config; AgentField owns agent tool-call state,
+// spans, and traces.
+
+export const ToolAdapterIdSchema = z.enum([
+  "browser-use",
+  "searxng",
+  "fs",
+  "exec",
+  "http",
+  "sql",
+])
+export type ToolAdapterId = z.infer<typeof ToolAdapterIdSchema>
+
+export const BuiltinToolDefinitionSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  input_schema: z.record(z.string(), z.unknown()),
+})
+export type BuiltinToolDefinition = z.infer<typeof BuiltinToolDefinitionSchema>
+
+export const ToolAdapterSchema = z.object({
+  id: ToolAdapterIdSchema,
+  label: z.string(),
+  description: z.string(),
+  enabled: z.boolean(),
+  configured: z.boolean(),
+  default_enabled: z.boolean(),
+  config: z.record(z.string(), z.unknown()),
+  updated_at: z.string().nullable(),
+  tools: z.array(BuiltinToolDefinitionSchema),
+})
+export type ToolAdapter = z.infer<typeof ToolAdapterSchema>
+
+export const ToolAdapterListSchema = z.object({
+  adapters: z.array(ToolAdapterSchema),
+})
+export type ToolAdapterList = z.infer<typeof ToolAdapterListSchema>
+
+export const SetToolAdapterEnabledInputSchema = z.object({
+  enabled: z.boolean(),
+  config: z.record(z.string(), z.unknown()).optional(),
+})
+export type SetToolAdapterEnabledInput = z.infer<typeof SetToolAdapterEnabledInputSchema>
+
+export const CallToolAdapterInputSchema = z.object({
+  adapter: ToolAdapterIdSchema,
+  tool: z.string(),
+  arguments: z.record(z.string(), z.unknown()).optional(),
+})
+export type CallToolAdapterInput = z.infer<typeof CallToolAdapterInputSchema>
+
+export const ToolAdapterCallResultSchema = z.object({
+  adapter: ToolAdapterIdSchema,
+  tool: z.string(),
+  status: z.string(),
+  result: z.unknown().optional(),
+  duration_ms: z.number(),
+})
+export type ToolAdapterCallResult = z.infer<typeof ToolAdapterCallResultSchema>
+
+// ─── Native tools (#16 — internal/tools strict-interface) ────────────────
+//
+// Distinct from the legacy ToolAdapter surface above. Native tools have
+// a fixed set of six canonical names (browser / search / fs / exec /
+// http / sql) and the active adapter for each is chosen via env vars.
+// Per-tenant enable lives in `suite_tenant_tools`.
+
+export const NativeToolNameSchema = z.enum([
+  "browser",
+  "search",
+  "fs",
+  "exec",
+  "http",
+  "sql",
+])
+export type NativeToolName = z.infer<typeof NativeToolNameSchema>
+
+export const NativeToolVerbSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  input_schema: z.record(z.string(), z.unknown()),
+  output_schema: z.record(z.string(), z.unknown()).optional(),
+})
+export type NativeToolVerb = z.infer<typeof NativeToolVerbSchema>
+
+export const NativeToolStatusSchema = z.object({
+  tool: NativeToolNameSchema,
+  description: z.string(),
+  adapter_id: z.string(),
+  configured: z.boolean(),
+  enabled: z.boolean(),
+  verbs: z.array(NativeToolVerbSchema),
+  config: z.record(z.string(), z.unknown()),
+  updated_at: z.string().nullable(),
+})
+export type NativeToolStatus = z.infer<typeof NativeToolStatusSchema>
+
+export const NativeToolListSchema = z.object({
+  tools: z.array(NativeToolStatusSchema),
+})
+export type NativeToolList = z.infer<typeof NativeToolListSchema>
+
+export const SetNativeToolEnabledInputSchema = z.object({
+  enabled: z.boolean(),
+  config: z.record(z.string(), z.unknown()).optional(),
+})
+export type SetNativeToolEnabledInput = z.infer<typeof SetNativeToolEnabledInputSchema>
+
+export const InvokeNativeToolInputSchema = z.object({
+  verb: z.string(),
+  args: z.record(z.string(), z.unknown()).optional(),
+})
+export type InvokeNativeToolInput = z.infer<typeof InvokeNativeToolInputSchema>
+
+export const InvokeNativeToolResultSchema = z.object({
+  tool: NativeToolNameSchema,
+  verb: z.string(),
+  result: z.unknown(),
+})
+export type InvokeNativeToolResult = z.infer<typeof InvokeNativeToolResultSchema>
 
 // ─── MCP (Phase 11.1) ────────────────────────────────────────────────────
 //
@@ -1157,6 +1338,25 @@ export const UserListSchema = z.object({
 })
 export type UserList = z.infer<typeof UserListSchema>
 
+export const GDPRRowSchema = z.record(z.string(), z.unknown())
+
+export const GDPRExportSchema = z.object({
+  exported_at: z.string(),
+  user_id: z.string(),
+  agentfield_notice: z.string(),
+  redaction_contract: z.string(),
+  data: z.record(z.string(), z.array(GDPRRowSchema)),
+})
+export type GDPRExport = z.infer<typeof GDPRExportSchema>
+
+export const GDPREraseSchema = z.object({
+  user_id: z.string(),
+  erased_at: z.string(),
+  counts: z.record(z.string(), z.number()),
+  agentfield_notice: z.string(),
+})
+export type GDPRErase = z.infer<typeof GDPREraseSchema>
+
 export const MembershipSchema = z.object({
   tenant_id: z.string(),
   user_id: z.string(),
@@ -1182,6 +1382,16 @@ export const APIKeySchema = z.object({
   last_used_at: z.string().nullable(),
   expires_at: z.string().nullable(),
   revoked_at: z.string().nullable(),
+  // LiteLLM virtual-key fields (item #22). Nullable because legacy
+  // keys (issued before #22) carry no LiteLLM mapping; the LLM gateway
+  // falls back to LITELLM_MASTER_KEY for them.
+  litellm_key_alias: z.string().nullable().optional(),
+  budget_max_usd: z.number().nullable().optional(),
+  rate_limit_rpm: z.number().nullable().optional(),
+  rate_limit_tpm: z.number().nullable().optional(),
+  // live_spend_usd is populated by the list handler when LiteLLM is
+  // reachable. null = "no live data" (the dashboard renders "—").
+  live_spend_usd: z.number().nullable().optional(),
 })
 export type APIKey = z.infer<typeof APIKeySchema>
 
@@ -1201,8 +1411,24 @@ export const IssueAPIKeyInputSchema = z.object({
   name: z.string().optional(),
   scopes: z.array(z.string()).default([]),
   expires_at: z.string().optional(),
+  // Per-key budget cap (USD, lifetime). Forwarded to LiteLLM as
+  // max_budget — LiteLLM enforces upstream. Omit / null = unlimited.
+  budget_max_usd: z.number().positive().nullable().optional(),
+  // Per-key RPM/TPM caps. Forwarded to LiteLLM rpm_limit / tpm_limit.
+  rate_limit_rpm: z.number().int().positive().nullable().optional(),
+  rate_limit_tpm: z.number().int().positive().nullable().optional(),
 })
 export type IssueAPIKeyInput = z.infer<typeof IssueAPIKeyInputSchema>
+
+// GET /api/v1/admin/keys/{id}/spend — live spend snapshot from LiteLLM.
+export const APIKeySpendSchema = z.object({
+  api_key_id: z.string(),
+  litellm_key_alias: z.string().nullable(),
+  spend_usd: z.number(),
+  max_budget_usd: z.number().nullable(),
+  remaining_usd: z.number().nullable(),
+})
+export type APIKeySpend = z.infer<typeof APIKeySpendSchema>
 
 export const TenantDetailSchema = z.object({
   tenant: TenantSchema,
@@ -1410,7 +1636,7 @@ export const AuditListSchema = z.object({
 export type AuditList = z.infer<typeof AuditListSchema>
 
 export const ModulesStateSchema = z.object({
-  modules: z.array(
+	modules: z.array(
     z.object({
       id: z.string(),
       name: z.string(),
@@ -1423,6 +1649,90 @@ export const ModulesStateSchema = z.object({
   multi_tenancy_enabled: z.boolean(),
 })
 export type ModulesState = z.infer<typeof ModulesStateSchema>
+
+// ─── Approvals (Phase 3 Tier 1) ───────────────────────────────────────────
+//
+// General AF Stack workflow approvals. AgentField run approvals stay in
+// AgentField and are only proxied by the run detail controls.
+
+export const ApprovalStatusSchema = z.enum(["pending", "approved", "denied", "cancelled"])
+export type ApprovalStatus = z.infer<typeof ApprovalStatusSchema>
+
+export const ApprovalSchema = z.object({
+  id: z.string(),
+  tenant_id: z.string(),
+  requested_by: z.string().nullable(),
+  kind: z.string(),
+  payload: z.record(z.string(), z.unknown()),
+  status: ApprovalStatusSchema,
+  decided_by: z.string().nullable(),
+  decided_at: z.string().nullable(),
+  decision_note: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+})
+export type Approval = z.infer<typeof ApprovalSchema>
+
+export const ApprovalListSchema = z.object({
+  approvals: z.array(ApprovalSchema),
+  total: z.number(),
+  has_more: z.boolean(),
+})
+export type ApprovalList = z.infer<typeof ApprovalListSchema>
+
+// ─── Shipwright task factory (Phase 3 Tier 1) ─────────────────────────────
+//
+// AF Stack stores task + patch metadata only. AgentField owns the
+// AI-stateful execution graph, harness calls, live logs, spans, traces, and
+// memory. `run_id` links to AgentField's execution detail surface.
+
+export const ShipwrightStatusSchema = z.enum([
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+  "cancelled",
+])
+export type ShipwrightStatus = z.infer<typeof ShipwrightStatusSchema>
+
+export const ShipwrightTaskSchema = z.object({
+  id: z.string(),
+  tenant_id: z.string(),
+  user_id: z.string().nullable(),
+  title: z.string(),
+  description: z.string(),
+  repo_url: z.string(),
+  status: ShipwrightStatusSchema,
+  run_id: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+})
+export type ShipwrightTask = z.infer<typeof ShipwrightTaskSchema>
+
+export const ShipwrightPatchSchema = z.object({
+  task_id: z.string(),
+  ref: z.string(),
+  summary: z.string(),
+  diff_url: z.string().nullable(),
+  created_at: z.string(),
+})
+export type ShipwrightPatch = z.infer<typeof ShipwrightPatchSchema>
+
+export const ShipwrightTaskResponseSchema = z.object({
+  task: ShipwrightTaskSchema,
+  patches: z.array(ShipwrightPatchSchema).optional(),
+  agent_call: z.string().optional(),
+  agentfield_url: z.string().optional(),
+  details_url: z.string().optional(),
+})
+export type ShipwrightTaskResponse = z.infer<typeof ShipwrightTaskResponseSchema>
+
+export const ShipwrightTaskListSchema = z.object({
+  tasks: z.array(ShipwrightTaskSchema),
+  total: z.number(),
+  has_more: z.boolean(),
+})
+export type ShipwrightTaskList = z.infer<typeof ShipwrightTaskListSchema>
 
 // ─── Client ───────────────────────────────────────────────────────────────
 
@@ -1445,6 +1755,42 @@ export const api = {
     const q = qs.toString()
     return request(`/api/v1/runs${q ? "?" + q : ""}`, undefined, RunListSchema)
   },
+  // #25 — per-run AgentField summary + control actions. The runtime
+  // proxies to AgentField's agent-api surface and returns the summary
+  // payload + a customer-facing deep-link URL. The dashboard's run
+  // detail page renders a summary card + button row using these.
+  runAgentField: (runId: string) =>
+    request(
+      `/api/v1/runs/${encodeURIComponent(runId)}/agentfield`,
+      undefined,
+      RunAgentFieldSchema,
+    ),
+  runActions: {
+    cancel: (runId: string) =>
+      request(
+        `/api/v1/runs/${encodeURIComponent(runId)}/cancel`,
+        { method: "POST" },
+        RunActionResultSchema,
+      ),
+    pause: (runId: string) =>
+      request(
+        `/api/v1/runs/${encodeURIComponent(runId)}/pause`,
+        { method: "POST" },
+        RunActionResultSchema,
+      ),
+    resume: (runId: string) =>
+      request(
+        `/api/v1/runs/${encodeURIComponent(runId)}/resume`,
+        { method: "POST" },
+        RunActionResultSchema,
+      ),
+    requestApproval: (runId: string) =>
+      request(
+        `/api/v1/runs/${encodeURIComponent(runId)}/request-approval`,
+        { method: "POST" },
+        RunActionResultSchema,
+      ),
+  },
   cost: (params?: { from?: string; to?: string }) => {
     const qs = new URLSearchParams()
     if (params?.from) qs.set("from", params.from)
@@ -1457,7 +1803,7 @@ export const api = {
   queue: () => request("/api/v1/queues/summary", undefined, QueueSummarySchema),
 
   // ─── Jobs ───
-  jobs: {
+	  jobs: {
     list: (params?: {
       name?: string
       state?: string
@@ -1696,6 +2042,45 @@ export const api = {
         `/api/v1/billing/customers/${encodeURIComponent(tenantId)}/portal`,
         { method: "POST" },
         PortalLinkSchema,
+      ),
+  },
+
+  // ─── Built-in tool adapters (Phase 2 AI completeness) ───
+  tools: {
+    adapters: () =>
+      request("/api/v1/tools/adapters", undefined, ToolAdapterListSchema),
+    enableAdapter: (id: ToolAdapterId, input: SetToolAdapterEnabledInput) =>
+      request(
+        `/api/v1/tools/adapters/${encodeURIComponent(id)}/enabled`,
+        { method: "PUT", json: input },
+        ToolAdapterSchema,
+      ),
+    call: (input: CallToolAdapterInput) =>
+      request(
+        "/api/v1/tools/call",
+        { method: "POST", json: input },
+        ToolAdapterCallResultSchema,
+      ),
+    // Native tools (#16 — strict-interface internal/tools surface).
+    listNative: () =>
+      request("/api/v1/tools/native", undefined, NativeToolListSchema),
+    enableNative: (
+      tool: NativeToolName,
+      input: SetNativeToolEnabledInput,
+    ) =>
+      request(
+        `/api/v1/tools/native/${encodeURIComponent(tool)}/enable`,
+        { method: "POST", json: input },
+        NativeToolStatusSchema,
+      ),
+    invokeNative: (
+      tool: NativeToolName,
+      input: InvokeNativeToolInput,
+    ) =>
+      request(
+        `/api/v1/tools/native/${encodeURIComponent(tool)}/invoke`,
+        { method: "POST", json: input },
+        InvokeNativeToolResultSchema,
       ),
   },
 
@@ -1986,6 +2371,18 @@ export const api = {
           UserListSchema,
         )
       },
+      exportData: (id: string) =>
+        request(
+          `/api/v1/admin/users/${encodeURIComponent(id)}/export`,
+          undefined,
+          GDPRExportSchema,
+        ),
+      eraseData: (id: string) =>
+        request(
+          `/api/v1/admin/users/${encodeURIComponent(id)}/erase`,
+          { method: "POST" },
+          GDPREraseSchema,
+        ),
     },
     memberships: {
       list: (params?: { tenant?: string; user?: string }) => {
@@ -2035,6 +2432,12 @@ export const api = {
           { method: "DELETE" },
           z.object({ revoked: z.boolean() }),
         ),
+      spend: (id: string) =>
+        request(
+          `/api/v1/admin/keys/${id}/spend`,
+          undefined,
+          APIKeySpendSchema,
+        ),
     },
     audit: {
       list: (params?: {
@@ -2059,6 +2462,114 @@ export const api = {
           AuditListSchema,
         )
       },
+    },
+	  },
+
+  // ─── Approvals ───
+  approvals: {
+    request: (input: {
+      kind: string
+      payload?: Record<string, unknown>
+    }) =>
+      request(
+        "/api/v1/approvals",
+        { method: "POST", json: input },
+        ApprovalSchema,
+      ),
+    list: (params?: {
+      status?: string
+      kind?: string
+      limit?: number
+      offset?: number
+    }) => {
+      const qs = new URLSearchParams()
+      if (params?.status) qs.set("status", params.status)
+      if (params?.kind) qs.set("kind", params.kind)
+      if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+      if (params?.offset !== undefined) qs.set("offset", String(params.offset))
+      const q = qs.toString()
+      return request(
+        `/api/v1/approvals${q ? "?" + q : ""}`,
+        undefined,
+        ApprovalListSchema,
+      )
+    },
+    get: (id: string) =>
+      request(
+        `/api/v1/approvals/${encodeURIComponent(id)}`,
+        undefined,
+        ApprovalSchema,
+      ),
+    decide: (id: string, input: {
+      status: "approved" | "denied" | "cancelled"
+      decision_note?: string
+    }) =>
+      request(
+        `/api/v1/approvals/${encodeURIComponent(id)}/decide`,
+        { method: "POST", json: input },
+        ApprovalSchema,
+      ),
+  },
+
+  // ─── Shipwright ───
+  shipwright: {
+    create: (input: {
+      title: string
+      description: string
+      repo_url: string
+      harness_provider?: string
+      model?: string
+    }) =>
+      request(
+        "/api/v1/shipwright/tasks",
+        { method: "POST", json: input },
+        ShipwrightTaskResponseSchema,
+      ),
+    list: (params?: {
+      status?: string
+      limit?: number
+      offset?: number
+    }) => {
+      const qs = new URLSearchParams()
+      if (params?.status) qs.set("status", params.status)
+      if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+      if (params?.offset !== undefined) qs.set("offset", String(params.offset))
+      const q = qs.toString()
+      return request(
+        `/api/v1/shipwright/tasks${q ? "?" + q : ""}`,
+        undefined,
+        ShipwrightTaskListSchema,
+      )
+    },
+    get: (id: string) =>
+      request(
+        `/api/v1/shipwright/tasks/${encodeURIComponent(id)}`,
+        undefined,
+        ShipwrightTaskResponseSchema,
+      ),
+    complete: (id: string, input: {
+      status?: string
+      ref?: string
+      summary?: string
+      diff_url?: string
+    }) =>
+      request(
+        `/api/v1/shipwright/tasks/${encodeURIComponent(id)}/complete`,
+        { method: "POST", json: input },
+        ShipwrightTaskResponseSchema,
+      ),
+  },
+
+	  // ─── Storage ───
+  config: {
+    flags: {
+      list: () => request("/api/v1/config/flags", undefined, FeatureFlagListSchema),
+      set: (key: string, input: { enabled: boolean }) =>
+        request(
+          `/api/v1/config/flags/${encodeURIComponent(key)}`,
+          { method: "PUT", json: input },
+          FeatureFlagSchema,
+        ),
     },
   },
 
