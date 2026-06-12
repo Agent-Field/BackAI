@@ -52,12 +52,12 @@ Cal.com or Plane than to a hosted BaaS: the repo is the product.
 
 ## What You Edit
 
-| Surface | Path | What belongs there |
-| --- | --- | --- |
-| Customer product | `apps/customer-app/` | Your end-user UI, flows, pages, and brand-specific app logic. |
-| Agents | `apps/backend/agents/<name>/` | Python AgentField agents, reasoners, MCP config, and harness setup. |
-| Workload modules | `workload-modules/<id>/` | Domain backend routes, migrations, jobs, and crons. |
-| Dashboard plugins | `apps/dashboard/plugins/<id>/` | Operator-console tabs for your domain metrics and controls. |
+| Surface           | Path                           | What belongs there                                                  |
+| ----------------- | ------------------------------ | ------------------------------------------------------------------- |
+| Customer product  | `apps/customer-app/`           | Your end-user UI, flows, pages, and brand-specific app logic.       |
+| Agents            | `apps/backend/agents/<name>/`  | Python AgentField agents, reasoners, MCP config, and harness setup. |
+| Workload modules  | `workload-modules/<id>/`       | Domain backend routes, migrations, jobs, and crons.                 |
+| Dashboard plugins | `apps/dashboard/plugins/<id>/` | Operator-console tabs for your domain metrics and controls.         |
 
 Start with the bundled SupportDesk AI customer app when you want a
 polished product-shaped baseline. Use [`examples/starter/`](examples/starter/)
@@ -72,15 +72,15 @@ is historical design material. See [`docs/repo-map.md`](docs/repo-map.md).
 
 ## Pre-Wired vs Configurable
 
-| Area | Pre-wired default | Configurable by you |
-| --- | --- | --- |
-| Data | Postgres 16 + pgvector | External Postgres, RLS policy shape, workload tables. |
-| Storage | MinIO in dev, S3 contract in prod | S3, R2, GCS, Azure Blob via adapter/env. |
-| Identity | better-auth, first-operator bootstrap | OAuth providers, trusted origins, operator creation CLI. |
-| LLM routing | OpenAI-compatible gateway + LiteLLM sidecar | Provider keys, model map, budgets, virtual-key strategy. |
-| Sandboxes | Docker in dev, e2b/gVisor/Firecracker options | Adapter choice, limits, provider credentials. |
-| Delivery | Svix for outbound webhooks, log notifications | Resend/Postmark/etc. notifications, billing adapter. |
-| Deploy | Docker Compose, Helm, Fly, Railway, Render | Your domains, secrets, scaling, managed services. |
+| Area        | Pre-wired default                             | Configurable by you                                      |
+| ----------- | --------------------------------------------- | -------------------------------------------------------- |
+| Data        | Postgres 16 + pgvector                        | External Postgres, RLS policy shape, workload tables.    |
+| Storage     | MinIO in dev, S3 contract in prod             | S3, R2, GCS, Azure Blob via adapter/env.                 |
+| Identity    | better-auth, first-operator bootstrap         | OAuth providers, trusted origins, operator creation CLI. |
+| LLM routing | OpenAI-compatible gateway + LiteLLM sidecar   | Provider keys, model map, budgets, virtual-key strategy. |
+| Sandboxes   | Docker in dev, e2b/gVisor/Firecracker options | Adapter choice, limits, provider credentials.            |
+| Delivery    | Svix for outbound webhooks, log notifications | Resend/Postmark/etc. notifications, billing adapter.     |
+| Deploy      | Docker Compose, Helm, Fly, Railway, Render    | Your domains, secrets, scaling, managed services.        |
 
 For the layered architecture and OSS placement, read
 [`docs/stack.md`](docs/stack.md). For repo ownership and integration
@@ -174,12 +174,22 @@ AF_STACK_DASHBOARD_PORT=33001 docker compose up
 ```
 
 Sign up in SupportDesk AI. BackAI provisions a tenant, membership,
-billing record, and API key. Then use Support Desk to draft a reply and
-open the admin dashboard to inspect usage and cost.
+billing record, and API key. The first-run product tour then walks you
+through one support action:
+
+1. Open the customer dashboard and follow the guided tour into Support Desk.
+2. Draft a reply. The action calls the SupportDesk AgentField graph, then
+   routes the final model call through the BackAI LLM gateway.
+3. Open the admin dashboard from the product link. The admin tour points to
+   the cost event, the registered AgentField agent, and the local/open-source
+   service UIs that back the action.
 
 No provider key is required for the first run. BackAI starts in demo mode
 when no key is present, and switches to LiteLLM when you add
-`OPENROUTER_API_KEY` or another provider key. See
+`OPENROUTER_API_KEY` or another provider key. The same flow works in both
+modes: demo mode proves the wiring without external credentials, while live
+provider mode records provider, model, token, and cost evidence in
+Operate -> Cost. See
 [`docs/demo-mode.md`](docs/demo-mode.md).
 
 ## Deploy
@@ -194,7 +204,9 @@ railway up
 The Railway template deploys customer app, admin dashboard, runtime, LiteLLM,
 AgentField, and Postgres. Leave provider keys blank for no-key SupportDesk
 demo mode, or set `OPENROUTER_API_KEY` on the `litellm` service for real
-model calls. See [`deploy/railway/README.md`](deploy/railway/README.md).
+model calls. It keeps the same first-run path as local compose: customer app
+first, guided SupportDesk action second, admin evidence third. See
+[`deploy/railway/README.md`](deploy/railway/README.md).
 
 You can also call the LLM gateway directly with the official OpenAI SDK
 by changing only the base URL:
@@ -221,10 +233,27 @@ mobile app, web app, or backend API and attach BackAI as the AI backend
 through the OpenAI-compatible gateway plus tenant API keys. See
 [`docs/attach-existing-app.md`](docs/attach-existing-app.md).
 
-## AgentField-backed support plan
+## AgentField-backed SupportDesk graph
 
-The default first run also registers a SupportDesk AgentField agent. You
-can call the same reasoner path the customer app uses. It classifies the
+The default first run also registers a SupportDesk AgentField agent. It is
+subtle in the product UI, but explicit in the architecture and admin evidence:
+SupportDesk uses AgentField as the AI substrate, not as a separate destination
+product.
+
+The graph currently registers 10 reasoners:
+
+- `reply_plan`
+- `classify_issue`
+- `extract_customer_facts`
+- `billing_policy_review`
+- `support_policy_review`
+- `refund_guardrail`
+- `billing_evidence_check`
+- `resolution_guardrail`
+- `response_risk_check`
+- `compose_reply_brief`
+
+The customer app calls the same path you can call directly. It classifies the
 ticket and extracts facts in parallel, chooses a policy branch, then runs
 nested guardrail/evidence reasoners before the final BackAI gateway call:
 
@@ -233,6 +262,12 @@ curl -X POST http://localhost:8080/api/v1/agents/supportdesk.reply_plan \
   -H "Content-Type: application/json" \
   -d '{"input":{"ticket":"A customer says their invoice is wrong and wants a refund.","tenant_id":"demo"}}'
 ```
+
+The response includes graph depth and reasoner-path metadata so the admin UI
+can show what actually ran. In local compose, the admin Agents view links out
+to the AgentField control plane at `http://localhost:8081/` for the registered
+SupportDesk agent, and other admin surfaces link to service UIs when a backing
+component has one.
 
 The heavier sample agent remains available for agent/harness development
 under the `advanced` compose profile.
