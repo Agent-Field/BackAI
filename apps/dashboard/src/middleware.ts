@@ -27,7 +27,7 @@ const PUBLIC_PREFIXES = [
 ]
 
 export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl
+  const { pathname, search } = request.nextUrl
 
   // Static assets and auth API always pass.
   if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) {
@@ -38,7 +38,7 @@ export function middleware(request: NextRequest) {
   if (!sessionCookie) {
     const url = request.nextUrl.clone()
     url.pathname = "/login"
-    url.searchParams.set("next", pathname)
+    url.searchParams.set("next", `${pathname}${search}`)
     return NextResponse.redirect(url)
   }
   return NextResponse.next()
