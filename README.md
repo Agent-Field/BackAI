@@ -163,9 +163,15 @@ Open the customer app first:
 - AgentField control plane: `http://localhost:8081/`
 - MinIO console: `http://localhost:9001/`
 
-If a local port is already in use, the preflight prints the exact override to
-use, for example `AF_STACK_PORT=38080 docker compose up`. BackAI does not stop
-other local services automatically.
+If a local port is already in use, or if two BackAI services are configured to
+publish the same host port, the preflight fails before Docker starts and prints
+the exact override to use. Keep unrelated local services running and pick an
+unused port instead:
+
+```bash
+AF_STACK_PORT=38080 docker compose up
+AF_STACK_DASHBOARD_PORT=33001 docker compose up
+```
 
 Sign up in SupportDesk AI. BackAI provisions a tenant, membership,
 billing record, and API key. Then use Support Desk to draft a reply and

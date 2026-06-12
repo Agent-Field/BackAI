@@ -34,6 +34,9 @@ while the shareable product is the BackAI app template.
 - Every example must use the same deploy model and declare extra capabilities.
 - Every milestone needs a verification command or runtime evidence before it
   can be marked complete.
+- Local testing must not stop containers or services that this repo did not
+  start. If a port conflicts, use a documented env override and keep the
+  existing service alive.
 
 ## Development Files
 
@@ -45,6 +48,7 @@ while the shareable product is the BackAI app template.
 | `merge-plan.md` | Branch naming, sequencing, review strategy, and conflict zones. |
 | `verification.md` | End-to-end local, Railway, SDK, docs, and public-readiness checks. |
 | `decisions.md` | Product decisions, consequences, and open questions. |
+| `public-ready-audit.md` | Requirement-by-requirement evidence for current launch readiness. |
 
 ## Milestone Summary
 
@@ -58,6 +62,9 @@ while the shareable product is the BackAI app template.
 | M5 | Railway deploy | One-click deploy includes customer app, admin, runtime, Postgres. |
 | M6 | Docs and examples | Public docs explain quickstart, deploy, attach mode, and examples. |
 | M7 | Verification sweep | Local and production-like checks prove public readiness. |
+| M8 | Root repo hygiene | Public root contains durable, standard repo files only. |
+| M9 | Local first-experience launch | Demo and real-provider paths are exercised locally. |
+| M10 | Local port conflict DX | Preflight catches occupied and duplicate host ports without stopping services. |
 
 ## Definition Of Public Ready
 

@@ -33,7 +33,8 @@ explicitly changes.
 | M7 | Verification sweep | Complete | Codex | Runtime Go suite, app typechecks/builds, compose config, deploy validation, Railway JSON, manifest parsing, and public text scan pass. |
 | M8 | Root repo hygiene | Complete | Codex | Root now keeps operational/public files only; planning docs moved to `development/`, durable docs/assets moved to `docs/`, `brand.yaml` is canonical, and the tracked root binary is removed/ignored. |
 | M9 | Local first-experience launch | Complete | Codex | Demo mode and real-provider mode both launched locally; customer signup, onboarding key, SupportDesk request, admin cost ledger, and request-id deep link verified. |
-| M10 | Local port conflict DX | Complete | Codex | `scripts/preflight.mjs` detects occupied local ports, prints override env vars, and does not stop unrelated services; compose defaults now bind runtime on `8080`. |
+| M10 | Local port conflict DX | Complete | Codex | `scripts/preflight.mjs` detects occupied local ports and duplicate BackAI host-port assignments, prints override env vars, and does not stop unrelated services; compose defaults now bind runtime on `8080`. |
+| M11 | Public-ready completion audit | Complete | Codex | `development/public-ready-audit.md` maps original requirements to current evidence, remaining proof gaps, local URLs, and local credentials. |
 
 ## Merge Log
 
@@ -55,19 +56,23 @@ explicitly changes.
 | 2026-06-12 | `677da9d` | Admin deep-link query fix | During local first-experience testing, unauthenticated admin cost links preserved `request_id` at `/login` but dropped it from `next`; middleware now redirects to `/login?next=/operate/cost?request_id=...`. Verified with `curl -I`. |
 | 2026-06-12 | `a49003f` | M9 local first-experience launch | Demo mode: `AF_STACK_DEMO_MODE=true` with blank provider keys, customer signup `demo-1781283223@example.com`, request `codex-demo-1781283223`, provider `demo`, cost event `0.000113`. Real mode: OpenRouter key from zsh, runtime logs `llm gateway: litellm sidecar`, request `codex-real-1781283477`, provider `litellm`, cost event `0.000048`. |
 | 2026-06-12 | `9b496d0` | M10 local port conflict DX | `node scripts/preflight.mjs` passes when the current BackAI compose stack owns ports; intentional conflict `AF_STACK_PORT=33000 node scripts/preflight.mjs` fails with a clear override message; `docker compose config --quiet` passes. |
+| 2026-06-12 | `38dee6b` | Hide advanced Shipwright from first run | `AF_STACK_SHOW_SHIPWRIGHT=false` by default; dashboard/customer typechecks pass; Shipwright compose overlay config passes; rebuilt local apps; runtime `/ready` and customer `/sign-up` return 200; admin render includes `showShipwright:false`. |
+| 2026-06-12 | Current change | M11 public-ready audit and conflict DX cleanup | Markdown link checker over 83 repo-facing files passes; public stale-reference scan reviewed; examples capabilities parse; preflight current-stack, occupied-port, and duplicate host-port checks behave correctly; app typechecks and compose config pass. |
 
 ## Current Risks
 
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
-| Customer app still feels like a SWE-AF demo. | Users misunderstand the repo as a coding-agent product. | Rebrand and restructure around SupportDesk first. |
+| Advanced Shipwright code still exists as an example and route. | Users could mistake advanced coding-agent paths for the default product if they enable it too early. | Hidden from default first-run nav with `AF_STACK_SHOW_SHIPWRIGHT=false`; public docs frame it as an advanced example. |
 | No-key demo mode could feel fake. | Loss of trust. | Label demo mode explicitly and write real platform records. |
-| Railway template omits customer app. | Hosted deploy does not match local promise. | Add customer app service and demo-mode defaults. |
-| Dashboard exposes too many advanced modules. | First-run feels heavy. | Hide disabled modules and focus walkthrough on live evidence. |
+| Railway live deploy has not been run after the final docs/nav cleanup. | Hosted launch proof is static, not live. | Run a live Railway deploy check before public announcement if hosted proof is required. |
+| CI/CD follow-up is paused by user request. | PR merge readiness is not fully observed from GitHub checks. | Resume PR checks only when explicitly allowed. |
+| Dashboard still contains advanced modules behind flags. | First-run can feel heavy if flags are changed without intent. | Keep disabled modules hidden by default and focus walkthrough on live evidence. |
 | AgentField becomes too loud or invisible. | Brand confusion or lost second-order adoption. | Subtle UI presence, stronger architecture docs. |
 
 ## Next Concrete Work
 
-1. Decide whether to keep or move the advanced Shipwright customer routes before public launch.
-2. Run one final public-repo text/link scan before merge.
+1. Re-run real-provider SupportDesk E2E once more after final audit cleanup.
+2. Run a live Railway deploy check if launch requires hosted proof.
 3. Monitor PR #118 checks only after CI/CD work resumes.
+4. Decide whether archived screenshot logs with old `af-stack` issue URLs should remain historical or be regenerated.

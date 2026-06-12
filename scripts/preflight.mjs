@@ -103,6 +103,22 @@ if (invalid.length > 0) {
   process.exit(1)
 }
 
+const duplicatePorts = findDuplicatePorts(checks)
+if (duplicatePorts.length > 0) {
+  console.error("BackAI preflight failed: multiple BackAI services are configured to publish the same host port.")
+  console.error("")
+  for (const group of duplicatePorts) {
+    console.error(`- localhost:${group.port}`)
+    for (const check of group.checks) {
+      console.error(`  ${check.label}: ${check.env}=${check.value}`)
+    }
+    console.error(`  Choose a different port, for example: ${group.checks[0].example} docker compose up`)
+  }
+  console.error("")
+  console.error("BackAI does not stop other local services automatically. Pick unused host ports with env overrides.")
+  process.exit(1)
+}
+
 const conflicts = []
 for (const check of checks) {
   if (await canBind(check.port)) {
@@ -155,6 +171,18 @@ function canBind(port) {
     })
     server.listen({ host: "0.0.0.0", port, exclusive: true })
   })
+}
+
+function findDuplicatePorts(items) {
+  const byPort = new Map()
+  for (const item of items) {
+    const existing = byPort.get(item.port) ?? []
+    existing.push(item)
+    byPort.set(item.port, existing)
+  }
+  return Array.from(byPort.entries())
+    .filter(([, matches]) => matches.length > 1)
+    .map(([port, matches]) => ({ port, checks: matches }))
 }
 
 function isCurrentComposePort(check) {

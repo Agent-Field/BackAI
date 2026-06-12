@@ -186,7 +186,7 @@ adapter doesn't support (e.g., Lambda's 15-min timeout).
 Single Next.js app, operator-only in v1 (customer-facing scaffold lands in
 Phase 13). Three mental-mode groups + Home + Settings.
 
-See [`docs/dashboard-ia.md`](docs/dashboard-ia.md) for the full IA.
+See [`docs/dashboard-ia.md`](../dashboard-ia.md) for the full IA.
 
 ### Top-level navigation
 

@@ -319,8 +319,8 @@ already exists so you can build the thing you actually want to build.
 
 ## Where to go next
 
-- [Get Started → Quickstart](/get-started/quickstart) — the 60-second walkthrough
-- [Architecture → Overview](/architecture/overview) — how it's built
-- [Reference → API](/reference/api) — interactive Scalar browser
+- [Get Started → Quickstart](../README.md#quickstart-under-60-seconds) — the 60-second walkthrough
+- [Architecture → Overview](architecture.md) — how it's built
+- Runtime API reference — open `/api/v1/openapi.json` on a running runtime
 - [Examples](https://github.com/Agent-Field/backai/tree/main/examples) — three ready-to-run apps
-- [`docs/archive/PRD-v0.md`](docs/archive/PRD-v0.md) — original product requirements doc with all 120 mapped to code
+- [`docs/archive/PRD-v0.md`](archive/PRD-v0.md) — original product requirements doc with all 120 mapped to code

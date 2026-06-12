@@ -13,7 +13,7 @@ message is not "look at our agent runtime." The front-door message is
 "ship the backend and AI infrastructure without assembling ten vendors."
 AgentField becomes the intelligence layer inside that complete backend.
 
-For the layered stack diagram and OSS placement, see [`docs/stack.md`](docs/stack.md).
+For the layered stack diagram and OSS placement, see [`docs/stack.md`](../docs/stack.md).
 
 ## Ownership Boundary
 
@@ -63,14 +63,14 @@ them as an optional workload module.
 ## Cleanup Decisions
 
 The Phase 0-16 planning docs are historical and live under
-[`docs/archive/`](docs/archive/). Current root docs should stay focused:
+[`docs/archive/`](../docs/archive/). Current root docs should stay focused:
 
-- [`README.md`](README.md) — entry point and quickstart
-- [`docs/stack.md`](docs/stack.md) — layered architecture and OSS stack
-- [`docs/product.md`](docs/product.md) — product pitch and DX
-- [`docs/architecture.md`](docs/architecture.md) — extension points and adapter contracts
-- [`docs/oss-audit.md`](docs/oss-audit.md) — OSS choices and remaining swaps
-- [`development/operator-console-inventory.md`](development/operator-console-inventory.md) — operator-console inventory
+- [`README.md`](../README.md) — entry point and quickstart
+- [`docs/stack.md`](../docs/stack.md) — layered architecture and OSS stack
+- [`docs/product.md`](../docs/product.md) — product pitch and DX
+- [`docs/architecture.md`](../docs/architecture.md) — extension points and adapter contracts
+- [`docs/oss-audit.md`](../docs/oss-audit.md) — OSS choices and remaining swaps
+- [`development/operator-console-inventory.md`](operator-console-inventory.md) — operator-console inventory
 - `development/strategy.md` — this file
 
 The cleanup pass deliberately does not rewrite `services/runtime/internal/memory`
@@ -83,7 +83,7 @@ separate audits. (`services/runtime/internal/ratelimit` was removed by item
 ## Execution Plan — Four Phases
 
 The full task graph (with checkboxes, sub-tasks, file paths, and
-acceptance criteria) lives in [`development/positioning.md`](development/positioning.md) Part 4.
+acceptance criteria) lives in [`development/positioning.md`](positioning.md) Part 4.
 **That is the canonical execution doc.** This section gives the
 phase-level summary; the executing agent works from development/positioning.md.
 
