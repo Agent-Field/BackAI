@@ -352,6 +352,17 @@ func estimatePromptChars(messages []llmgateway.ChatMessage) int {
 	return total
 }
 
+func estimatedTokensFromChars(chars int) int {
+	if chars <= 0 {
+		return 0
+	}
+	tokens := chars / 4
+	if tokens == 0 {
+		return 1
+	}
+	return tokens
+}
+
 // ─── chat/completions ─────────────────────────────────────────────────────
 
 func (s *Server) handleLLMChatCompletions(w http.ResponseWriter, r *http.Request) {
@@ -472,6 +483,7 @@ func (s *Server) streamChatCompletion(
 	// (OpenAI emits usage on the last chunk when stream_options
 	// {"include_usage": true} is set; we record what we get).
 	var lastUsage *llmgateway.Usage
+	completionChars := 0
 	streamErr := error(nil)
 
 streamLoop:
@@ -484,6 +496,11 @@ streamLoop:
 			if chunk.Usage != nil {
 				u := *chunk.Usage
 				lastUsage = &u
+			}
+			for _, choice := range chunk.Choices {
+				if text, ok := choice.Delta.Content.(string); ok {
+					completionChars += len(text)
+				}
 			}
 			if s.guardrails != nil {
 				next, _, err := s.guardrails.ProcessChatStreamChunk(r.Context(), chunk)
@@ -535,6 +552,17 @@ streamLoop:
 	}
 
 	_ = sse.End()
+	if lastUsage == nil || lastUsage.TotalTokens == 0 {
+		promptTokens := estimatedTokensFromChars(pre.PromptCharsHint)
+		completionTokens := estimatedTokensFromChars(completionChars)
+		if promptTokens > 0 || completionTokens > 0 {
+			lastUsage = &llmgateway.Usage{
+				PromptTokens:     promptTokens,
+				CompletionTokens: completionTokens,
+				TotalTokens:      promptTokens + completionTokens,
+			}
+		}
+	}
 	post := s.buildPostPayload(pre, nil, lastUsage, start, http.StatusOK)
 	s.fireLLMPostCallBest(r.Context(), post)
 }
@@ -1217,7 +1245,8 @@ func (s *Server) fireLLMPostCallBest(ctx context.Context, payload LLMPostCallPay
 	if s.hooks == nil {
 		return
 	}
-	if _, err := s.hooks.Fire(ctx, hooks.HookLLMPostCall, payload); err != nil {
+	hookCtx := context.WithoutCancel(ctx)
+	if _, err := s.hooks.Fire(hookCtx, hooks.HookLLMPostCall, payload); err != nil {
 		s.log.Warn("llm post-call hook error",
 			"request_id", payload.RequestID,
 			"model", payload.Model,

@@ -35,7 +35,7 @@ Original objective:
 | Customer walkthrough is guided, not a static card | Customer dashboard and Support Desk use driver.js guided walkthroughs; browser verified dashboard tour `This is the customer product` and Support Desk tour `One action, two backend proofs` | Proven |
 | Admin walkthrough is guided | Admin home and Agents page use driver.js guided walkthroughs; browser verified admin home tour `Start from the customer action` and Agents page tour `AgentField discovery, not mock metadata` | Proven |
 | Admin links to backing local/open-source UIs | Admin Agents page links the catalog button, agent names, and reasoner badges to AgentField discovery; browser verified `billing_evidence_check` opens AgentField discovery and returns the matching reasoner | Proven |
-| Real provider mode works | Local real mode previously verified with OpenRouter key from zsh, request `codex-real-1781283477`, provider `litellm`, nonzero cost event | Proven |
+| Real provider mode works | Local real mode re-verified with OpenRouter key from zsh after the 10-reasoner graph update. Browser flow recorded provider `litellm`, model `qwen/qwen-2.5-72b-instruct`, request `e3e73628-6e1a-46bd-ad2c-e1bc701d83aa`, `980` total tokens, and `$0.000352` | Proven |
 | Customer-to-admin evidence handoff works | Request IDs are carried into cost events; admin deep-link query preservation fixed in `677da9d`; local admin login/setup verified | Proven |
 | Local compose default matches docs | `docker compose config --quiet` passes; current stack exposes runtime `8080`, admin `33000`, customer `34000`; README matches | Proven |
 | Port conflicts are handled without stopping other services | `scripts/preflight.mjs` passes for current BackAI stack, fails clearly for occupied ports, and fails before Docker starts when two BackAI services use the same host port | Proven |
@@ -44,7 +44,7 @@ Original objective:
 | Shipwright example follows current compose model | `docker compose -f docker-compose.yml -f examples/02-shipwright/docker-compose.yml config --quiet` passes; docs no longer reference removed override | Proven |
 | Public docs have valid relative markdown links | Node link checker over README, docs, deploy, examples, customer app, dashboard, and development checked 83 repo-facing markdown files | Proven |
 | Dashboard and customer app typecheck | `pnpm --dir apps/dashboard exec tsc --noEmit --pretty false`; `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false` | Proven |
-| Runtime focused tests pass | `go test ./services/runtime/internal/agentfield`; `go test ./services/runtime/internal/llmgateway` | Proven |
+| Runtime focused tests pass | `go test ./services/runtime/internal/agentfield`; `go test ./services/runtime/internal/llmgateway`; focused LLM server tests for post-call cancellation and streaming usage fallback | Proven |
 | Local rebuilt apps run | `docker compose up -d --build customer-app dashboard`; `docker compose up -d --build runtime`; browser verified customer and admin URLs | Proven |
 | Browser console is clean on first-run surfaces | Customer dashboard, Support Desk completed state, admin home, and admin Agents page all verified with zero console errors after the 10-reasoner graph update | Proven |
 | Railway template exists and validates statically | Earlier `python3 scripts/validate-deploy-targets.py` and Railway JSON formatting passed | Proven statically |
@@ -83,9 +83,7 @@ These are the items that should be checked before marking the full objective
 complete:
 
 1. Decide whether to keep the unrelated local Shipwright handler change.
-2. Re-run real-provider SupportDesk E2E once more after all nav/docs changes,
-   using the OpenRouter key from zsh.
-3. If launch requires hosted proof, perform a live Railway deploy check.
-4. Resume CI/CD check only when explicitly allowed.
-5. Decide whether archived screenshot logs that mention the old `af-stack`
+2. If launch requires hosted proof, perform a live Railway deploy check.
+3. Resume CI/CD check only when explicitly allowed.
+4. Decide whether archived screenshot logs that mention the old `af-stack`
    GitHub repo should be regenerated or left as historical artifacts.

@@ -377,6 +377,45 @@ func TestLLMChatStreamingForwardsAndTerminates(t *testing.T) {
 	}
 }
 
+func TestLLMChatStreamingEstimatesUsageWhenUpstreamOmitsUsage(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		f := w.(http.Flusher)
+		fmt.Fprint(w, `data: {"id":"c","object":"chat.completion.chunk","model":"qwen/qwen-2.5-72b-instruct","choices":[{"index":0,"delta":{"content":"Hello customer"}}]}`+"\n\n")
+		f.Flush()
+		fmt.Fprint(w, `data: {"id":"c","object":"chat.completion.chunk","model":"qwen/qwen-2.5-72b-instruct","choices":[{"index":0,"delta":{"content":"."},"finish_reason":"stop"}]}`+"\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+		f.Flush()
+	}))
+	defer upstream.Close()
+
+	var lastPost LLMPostCallPayload
+	eng := hooks.NewEngine(slog.Default())
+	_ = eng.Register(hooks.HookLLMPostCall, func(_ context.Context, p any) (any, error) {
+		lastPost = p.(LLMPostCallPayload)
+		return p, nil
+	})
+	srv := newLLMTestServer(t, Deps{
+		LLMGateway: gatewayFor(upstream.URL, "litellm"),
+		Hooks:      eng,
+	})
+
+	req := httptest.NewRequest("POST", "/api/v1/llm/chat/completions",
+		strings.NewReader(`{"model":"qwen/qwen-2.5-72b-instruct","messages":[{"role":"user","content":"Please draft a refund response for invoice INV-8842."}],"stream":true}`))
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if lastPost.PromptTokens <= 0 || lastPost.CompletionTokens <= 0 || lastPost.TotalTokens <= 0 {
+		t.Fatalf("expected estimated usage, got %+v", lastPost)
+	}
+	if !lastPost.CostKnown || lastPost.CostUSD <= 0 {
+		t.Fatalf("expected estimated cost, got %+v", lastPost)
+	}
+}
+
 // ─── embeddings ───────────────────────────────────────────────────────────
 
 func TestLLMEmbeddingsHappyPath(t *testing.T) {
@@ -653,6 +692,36 @@ func TestLLMPreAndPostHooksFire(t *testing.T) {
 	}
 	if lastPost.RequestID != lastPre.RequestID {
 		t.Errorf("expected matching request_id, got pre=%q post=%q", lastPre.RequestID, lastPost.RequestID)
+	}
+}
+
+func TestLLMPostHookIgnoresRequestCancellation(t *testing.T) {
+	eng := hooks.NewEngine(slog.Default())
+	var sawTenant string
+	var sawCanceled bool
+	_ = eng.Register(hooks.HookLLMPostCall, func(ctx context.Context, p any) (any, error) {
+		sawTenant = tenantctx.TenantID(ctx)
+		sawCanceled = ctx.Err() != nil
+		return p, nil
+	})
+
+	srv := newLLMTestServer(t, Deps{Hooks: eng})
+	ctx, cancel := context.WithCancel(tenantctx.WithTenant(context.Background(), "tenant-post", "key-post"))
+	cancel()
+
+	srv.fireLLMPostCallBest(ctx, LLMPostCallPayload{
+		TenantID:  "tenant-post",
+		Model:     "m",
+		Provider:  "litellm",
+		RequestID: "req-post",
+		Operation: "chat",
+	})
+
+	if sawCanceled {
+		t.Fatal("post-call hook saw canceled context")
+	}
+	if sawTenant != "tenant-post" {
+		t.Fatalf("tenant context = %q, want tenant-post", sawTenant)
 	}
 }
 

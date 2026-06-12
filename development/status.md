@@ -61,6 +61,7 @@ explicitly changes.
 | 2026-06-12 | Current change | M11 public-ready audit and conflict DX cleanup | Markdown link checker over 83 repo-facing files passes; public stale-reference scan reviewed; examples capabilities parse; preflight current-stack, occupied-port, and duplicate host-port checks behave correctly; app typechecks and compose config pass. |
 | 2026-06-12 | Current change | First-time wow path | Fresh browser customer flow: `Use demo details` -> API key reveal -> workspace first-run panel -> Support Desk draft -> `$0.000134` / `268 tok` result -> exact admin cost deep link. Admin login verified locally after resetting `operator@backai.local` to `backai-admin-pwd`. |
 | 2026-06-12 | Current change | M12 guided AgentField first run | Runtime execution `exec_20260612_183959_l8bkscyw` succeeded through `supportdesk.reply_plan` with `graph_depth: 3`, `billing_policy_review`, `refund_guardrail`, and `billing_evidence_check`. AgentField discovery returns `supportdesk` with 10 reasoners; runtime `/api/v1/agents` projects the same reasoners for admin. Browser verification passed: customer tour `This is the customer product`, Support Desk tour `One action, two backend proofs`, admin tour `Start from the customer action`, Agents tour `AgentField discovery, not mock metadata`, nested graph visible, AgentField discovery link for `billing_evidence_check` opened, console errors `0`. |
+| 2026-06-12 | Current change | Real-provider cost evidence fix | OpenRouter-backed SupportDesk browser flow passed after the streaming ledger fix: provider `litellm`, model `qwen/qwen-2.5-72b-instruct`, request `e3e73628-6e1a-46bd-ad2c-e1bc701d83aa`, `804` prompt tokens, `176` completion tokens, `980` total tokens, `$0.000352`, nested AgentField graph visible, console errors `0`. |
 
 ## Current Risks
 
@@ -73,10 +74,10 @@ explicitly changes.
 | Dashboard still contains advanced modules behind flags. | First-run can feel heavy if flags are changed without intent. | Keep disabled modules hidden by default and focus walkthrough on live evidence. |
 | AgentField becomes too loud or invisible. | Brand confusion or lost second-order adoption. | Subtle UI presence, stronger architecture docs. |
 | No-key demo response can leak prompt internals. | First-run feels fake or noisy. | Demo provider now strips AgentField plan context from the visible reply; the plan remains in the dedicated evidence panel. |
+| Streaming providers can omit usage. | Admin cost evidence can show a real provider call with zero tokens/cost. | Runtime now estimates streaming usage/cost from prompt and completion characters when upstream usage is absent, while preserving provider-reported usage when present. |
 
 ## Next Concrete Work
 
-1. Re-run real-provider SupportDesk E2E once more after final audit cleanup.
-2. Run a live Railway deploy check if launch requires hosted proof.
-3. Monitor PR #118 checks only after CI/CD work resumes.
-4. Decide whether archived screenshot logs with old `af-stack` issue URLs should remain historical or be regenerated.
+1. Run a live Railway deploy check if launch requires hosted proof.
+2. Monitor PR #118 checks only after CI/CD work resumes.
+3. Decide whether archived screenshot logs with old `af-stack` issue URLs should remain historical or be regenerated.
