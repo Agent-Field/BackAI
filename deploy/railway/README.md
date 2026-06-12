@@ -2,10 +2,13 @@
 
 What this gets you:
 
-- Runtime + dashboard + Postgres (with pgvector) on Railway's managed
-  infra, wired together over the private network.
-- External S3 (Tigris/R2/AWS) — Railway's built-in storage is small;
-  point at a real S3 for production.
+- Customer app, admin dashboard, runtime, LiteLLM, AgentField control
+  plane, and Postgres (with pgvector) on Railway's managed infra, wired
+  together over the private network.
+- No-key SupportDesk demo mode by default. Add a provider key later and
+  the same customer app switches to real model calls through LiteLLM.
+- External S3 (Tigris/R2/AWS) for production storage. The SupportDesk
+  first run does not require S3, but production workloads should set it.
 - One-click deploy via the template manifest in `railway.json`.
 
 ## Walkthrough (CLI)
@@ -21,15 +24,18 @@ git clone https://github.com/<you>/af-stack && cd af-stack
 # 3. Create a project and push the template.
 railway init --template ./deploy/railway/railway.json
 
-# 4. Set the secrets that DON'T have generators (S3 + LLM key).
+# 4. Optional: set secrets for production mode.
 railway variables \
   --service runtime \
   --set AF_STACK_S3_ENDPOINT="https://fly.storage.tigris.dev" \
   --set AF_STACK_S3_BUCKET="af-stack-prod" \
   --set AF_STACK_S3_ACCESS_KEY="..." \
   --set AF_STACK_S3_SECRET_KEY="..." \
-  --set OPENROUTER_API_KEY="..." \
   --set E2B_API_KEY="..."
+
+railway variables \
+  --service litellm \
+  --set OPENROUTER_API_KEY="..."
 
 # 5. Deploy.
 railway up
@@ -39,18 +45,27 @@ railway up
 
 1. Click "Deploy on Railway" (button in the repo README).
 2. Pick a project name + region.
-3. Fill in the S3 + LLM + E2B fields in the form Railway renders from
-   `railway.json`.
-4. Hit Deploy. Railway provisions Postgres, builds both images, and
-   wires `RUNTIME_URL` + `DATABASE_URL` between services.
+3. Leave provider keys blank for the no-key SupportDesk demo, or set
+   `OPENROUTER_API_KEY` on `litellm` for real model calls.
+4. Hit Deploy. Railway provisions Postgres, builds customer/admin/runtime
+   images, starts LiteLLM and AgentField, and wires private `RUNTIME_URL`
+   + `DATABASE_URL` between services.
 
 ## Validation
 
 ```bash
 railway status
-railway open                                                 # dashboard
+railway open --service customer                              # customer app
+railway open --service dashboard                             # admin dashboard
 curl https://<your-project>.up.railway.app/health            # runtime
 ```
+
+First-run path:
+
+1. Open the customer service.
+2. Sign up.
+3. Draft one SupportDesk reply.
+4. Use the admin link from the customer app to inspect the exact cost event.
 
 ## Common pitfalls
 
@@ -60,11 +75,15 @@ curl https://<your-project>.up.railway.app/health            # runtime
 - `RUNTIME_URL` defaults to Railway's private domain — works only from
   inside Railway. Browser-side calls use `NEXT_PUBLIC_RUNTIME_URL`
   (public domain).
+- `AF_STACK_DEMO_MODE=auto` is intentional. With no provider key, runtime
+  uses the deterministic SupportDesk demo provider. When you set
+  `OPENROUTER_API_KEY` or another provider key on `litellm`, runtime
+  detects it and routes through LiteLLM.
 - `AF_STACK_AUTH_SECRET` is generated ONCE for the runtime and reused by
-  the dashboard via `${{ runtime.AF_STACK_AUTH_SECRET }}`. Don't override
-  one without the other or sessions break.
+  the dashboard and customer app via `${{ runtime.AF_STACK_AUTH_SECRET }}`.
+  Don't override one without the others or sessions break.
 - Sandbox: defaults to `e2b`. Switching to `docker` will not work on
-  Railway — there's no docker socket inside the container. Use `e2b` or
-  `gvisor` (when 9.2 lands).
+  Railway — there's no docker socket inside the container. The SupportDesk
+  first run does not need sandbox credentials.
 - Default `numReplicas = 1`. Scale via Railway's autoscaler or bump
   manually; the runtime is stateless once Postgres + S3 are external.

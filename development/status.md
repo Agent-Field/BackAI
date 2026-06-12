@@ -28,7 +28,7 @@ explicitly changes.
 | M2 | No-key demo loop | Complete | Codex | Demo chat provider implemented in `7fe011b`; runtime Go suite and compose config pass. |
 | M3 | Customer-to-admin walkthrough | Complete | Codex | Customer action carries `X-Request-ID`, cost ledger stores/filter by request id, admin cost page accepts `request_id`, and customer workspace shows first-run steps. |
 | M4 | Compose first-run | Complete | Codex | Compose builds and boots customer app, admin, runtime, demo provider, and request-id cost ledger path. |
-| M5 | Railway deploy | Not started | TBD | Railway template includes customer app and can deploy in demo mode. |
+| M5 | Railway deploy | Complete | Codex | Railway template now includes customer, admin, runtime, LiteLLM, AgentField, Postgres, demo mode, and private service wiring. |
 | M6 | Docs and examples | Not started | TBD | Docs flow and capability manifests landed. |
 | M7 | Verification sweep | Not started | TBD | Local E2E, SDK checks, docs/build/deploy checks pass. |
 
@@ -44,6 +44,7 @@ explicitly changes.
 | 2026-06-12 | `cd6b50c` | M3 first-run panel | `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`. |
 | 2026-06-12 | `b17f442` | M4 no-key E2E | `docker compose up -d --build postgres litellm agentfield runtime dashboard customer-app`; customer signup via `http://localhost:34000/api/auth/sign-up/email`; onboarding key minted; customer LLM proxy returned `demo-supportdesk`; `GET /api/v1/cost/events?tenant=...&request_id=...` returned exactly one event. |
 | 2026-06-12 | Pending | M4 OpenRouter E2E | Runtime restarted with `AF_STACK_DEMO_MODE=false` and OpenRouter key from zsh; logs showed `llm gateway: litellm sidecar`; customer LLM proxy returned real provider text; cost event for `codex-openrouter-1781281222` recorded provider `litellm` and nonzero cost. |
+| 2026-06-12 | Pending | M5 Railway template | `python3 -m json.tool deploy/railway/railway.json`; `python3 scripts/validate-deploy-targets.py`. |
 
 ## Current Risks
 
@@ -57,7 +58,7 @@ explicitly changes.
 
 ## Next Concrete Work
 
-1. Commit and push the runtime provider-key compose fix.
-2. Start M5 Railway deploy template.
-3. Add public docs for no-key mode vs real-key mode.
+1. Commit and push the Railway template update.
+2. Add public docs for no-key mode vs real-key mode.
+3. Start M6 docs/examples cleanup.
 4. Keep the first vertical slice small enough to verify locally.
