@@ -11,19 +11,13 @@ import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism"
 
 import { Button } from "@/components/ui/button"
 import { GuidedTour } from "@/components/guided-tour"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 
 const MODEL = "qwen/qwen-2.5-72b-instruct"
 const SYSTEM_PROMPT =
-  "You are SupportDesk AI, a concise customer support assistant. Draft helpful, accurate replies for support teams. Keep the tone clear, calm, and practical. Follow the AgentField support plan when provided. If the customer asks for something policy-specific, mention what the support team should verify before sending."
+  "You are SupportDesk AI, a concise customer support assistant. Draft helpful, accurate replies for support teams. Keep the tone clear, calm, and practical. Follow the support decision plan when provided. If the customer asks for something policy-specific, mention what the support team should verify before sending."
 const ONBOARDING_KEY_STORAGE = "backai:onboarding-api-key"
 
 type Props = {
@@ -75,9 +69,7 @@ function operatorDashboardUrl(tenantId: string, requestId?: string): string {
   const base =
     process.env.NEXT_PUBLIC_OPERATOR_URL ??
     (typeof window !== "undefined"
-      ? window.location.origin
-          .replace(/:34000$/, ":33000")
-          .replace(/:34001$/, ":33000")
+      ? window.location.origin.replace(/:34000$/, ":33000").replace(/:34001$/, ":33000")
       : "http://localhost:33000")
   const qs = new URLSearchParams({ tenant: tenantId })
   if (requestId) qs.set("request_id", requestId)
@@ -88,9 +80,7 @@ function agentFieldBaseUrl(): string {
   return (
     process.env.NEXT_PUBLIC_RUNTIME_UI_URL ??
     (typeof window !== "undefined"
-      ? window.location.origin
-          .replace(/:34000$/, ":8081")
-          .replace(/:34001$/, ":8081")
+      ? window.location.origin.replace(/:34000$/, ":8081").replace(/:34001$/, ":8081")
       : "http://localhost:8081")
   )
 }
@@ -156,9 +146,9 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
     {
       element: "[data-tour='supportdesk-heading']",
       popover: {
-        title: "One action, two backend proofs",
+        title: "Run a real product workflow",
         description:
-          "This page first asks AgentField for a support plan, then sends the final draft through BackAI's gateway so both reasoners and cost are inspectable.",
+          "This page feels like a small customer app, but it is exercising the full backend: policy planning, model routing, tenant metering, and admin evidence.",
         side: "bottom" as const,
         align: "start" as const,
       },
@@ -168,7 +158,7 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
       popover: {
         title: "Run the SupportDesk action",
         description:
-          "Enter a customer issue and draft a reply. Billing/refund questions take a different AgentField branch than access or technical issues.",
+          "Enter a customer issue and draft a reply. Billing, refund, access, and technical issues each produce a different decision path.",
         side: "bottom" as const,
         align: "start" as const,
       },
@@ -176,11 +166,11 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
     ...(agentPlan
       ? [
           {
-            element: "[data-tour='agentfield-plan']",
+            element: "[data-tour='decision-plan']",
             popover: {
-              title: "Inspect the reasoner path",
+              title: "Inspect the decision path",
               description:
-                "This panel shows the registered agent, reasoners, dynamic branch, and guardrail that shaped the final response.",
+                "This panel shows the category, branch, checks, and guardrail that shaped the final response before the model call.",
               side: "top" as const,
               align: "start" as const,
             },
@@ -194,7 +184,7 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
             popover: {
               title: "Open the admin evidence",
               description:
-                "This link carries the exact request into the admin dashboard, where operators see tenant, model, tokens, cost, and agent surfaces.",
+                "This link carries the exact request into the admin dashboard, where operators see tenant, model, tokens, cost, and related backend records.",
               side: "top" as const,
               align: "start" as const,
             },
@@ -245,7 +235,7 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
               content: [
                 `Customer ticket:\n${question}`,
                 "",
-                "AgentField support plan:",
+                "Support decision plan:",
                 JSON.stringify(plan.plan, null, 2),
               ].join("\n"),
             },
@@ -286,8 +276,7 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
           try {
             const json = JSON.parse(data)
             const delta: string | undefined =
-              json.choices?.[0]?.delta?.content ??
-              json.choices?.[0]?.message?.content
+              json.choices?.[0]?.delta?.content ?? json.choices?.[0]?.message?.content
             if (typeof delta === "string" && delta.length > 0) {
               fullText += delta
               setAnswer(fullText)
@@ -319,9 +308,8 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
         <div data-tour="supportdesk-heading">
           <h1 className="text-2xl font-semibold tracking-tight">Support Desk</h1>
           <p className="text-muted-foreground text-sm">
-            Draft customer replies through an AgentField support plan and the
-            BackAI LLM gateway. Cost is billed to your tenant and visible in
-            admin. Model: <code className="font-mono">{MODEL}</code>
+            Draft customer replies through the BackAI backend. Cost is billed to your tenant and
+            visible in admin. Model: <code className="font-mono">{MODEL}</code>
             {apiKeyPrefix ? (
               <>
                 {" · key "}
@@ -330,11 +318,7 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
             ) : null}
           </p>
         </div>
-        <GuidedTour
-          id="customer-supportdesk-v1"
-          autoStart
-          steps={tourSteps}
-        />
+        <GuidedTour id="customer-supportdesk-v1" autoStart steps={tourSteps} />
       </div>
 
       <Card data-tour="supportdesk-composer">
@@ -409,10 +393,7 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
                       )
                     }
                     return (
-                      <code
-                        className="rounded bg-muted px-1 py-0.5 font-mono text-xs"
-                        {...props}
-                      >
+                      <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs" {...props}>
                         {children}
                       </code>
                     )
@@ -427,15 +408,15 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
       ) : null}
 
       {agentPlan ? (
-        <Card data-tour="agentfield-plan">
+        <Card data-tour="decision-plan">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <GitBranch className="size-4" />
-              AgentField plan
+              Decision plan
             </CardTitle>
             <CardDescription>
-              SupportDesk first classifies the issue, extracts facts, chooses a
-              policy branch, and then sends a brief to the BackAI gateway.
+              SupportDesk first classifies the issue, extracts facts, chooses a policy branch, and
+              then sends a brief to the BackAI gateway.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-[1fr_1.2fr]">
@@ -445,16 +426,12 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
                   <Bot className="size-3" />
                   {agentPlan.agent ?? "supportdesk"}
                 </Badge>
-                <Badge variant="outline">
-                  {agentPlan.dynamic_branch ?? "general"} branch
-                </Badge>
-                <Badge variant="outline">
-                  {agentPlan.confidence ?? "medium"} confidence
-                </Badge>
+                <Badge variant="outline">{agentPlan.dynamic_branch ?? "general"} branch</Badge>
+                <Badge variant="outline">{agentPlan.confidence ?? "medium"} confidence</Badge>
               </div>
               {agentExecutionId ? (
                 <p className="text-muted-foreground text-xs">
-                  AgentField execution{" "}
+                  Execution trace{" "}
                   <Link
                     href={agentFieldExecutionUrl(agentExecutionId)}
                     target="_blank"
@@ -467,13 +444,9 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
               ) : null}
               <p className="text-muted-foreground text-sm">
                 Category:{" "}
-                <span className="text-foreground">
-                  {agentPlan.issue?.category ?? "general"}
-                </span>
+                <span className="text-foreground">{agentPlan.issue?.category ?? "general"}</span>
                 {" · "}Urgency:{" "}
-                <span className="text-foreground">
-                  {agentPlan.issue?.urgency ?? "normal"}
-                </span>
+                <span className="text-foreground">{agentPlan.issue?.urgency ?? "normal"}</span>
               </p>
             </div>
             <div className="space-y-3">
@@ -491,7 +464,7 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
                           href={agentFieldCatalogUrl(agentPlan.agent ?? "supportdesk", reasoner)}
                           target="_blank"
                           rel="noreferrer"
-                          title={`Open ${agentPlan.agent ?? "supportdesk"}.${reasoner} in AgentField discovery`}
+                          title={`Open ${agentPlan.agent ?? "supportdesk"}.${reasoner} in the runtime catalog`}
                         >
                           {reasoner}
                         </Link>
@@ -556,7 +529,7 @@ async function fetchAgentPlan(
     } catch {
       // ignore
     }
-    throw new Error(`AgentField support plan failed: ${detail}`)
+    throw new Error(`Support decision plan failed: ${detail}`)
   }
 
   const body = await res.json()

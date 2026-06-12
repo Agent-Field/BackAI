@@ -9,9 +9,13 @@
 // alerts panel hides itself entirely when there is nothing to show.
 
 import { Activity, AlertTriangle, Boxes, CircleDollarSign, ServerCrash } from "lucide-react"
+import Link from "next/link"
 
 import { PageHeader } from "@/components/layout/page-header"
 import { GuidedTour } from "@/components/guided-tour"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { api, type HomeOverview } from "@/lib/api"
 
@@ -44,6 +48,81 @@ function formatCompact(n: number): string {
     notation: "compact",
     maximumFractionDigits: 1,
   }).format(n)
+}
+
+function runtimeCatalogUrl(): string {
+  const base = process.env.NEXT_PUBLIC_RUNTIME_UI_URL ?? "http://localhost:8081"
+  return `${base.replace(/\/$/, "")}/api/v1/discovery/capabilities`
+}
+
+function liteLLMUrl(): string {
+  return process.env.NEXT_PUBLIC_LITELLM_UI_URL ?? "http://localhost:4000/ui"
+}
+
+function StackProofPanel() {
+  const services = [
+    { label: "Postgres", detail: "tenant data + usage ledger", href: "/build/database" },
+    { label: "better-auth", detail: "sessions + operator login", href: "/build/auth" },
+    {
+      label: "LLM gateway",
+      detail: "provider routing + token cost",
+      href: liteLLMUrl(),
+      external: true,
+    },
+    {
+      label: "agent runtime",
+      detail: "workflow catalog + traces",
+      href: runtimeCatalogUrl(),
+      external: true,
+    },
+    { label: "billing", detail: "plans, budgets, cost events", href: "/operate/cost" },
+    { label: "webhooks", detail: "delivery plumbing", href: "/build/webhooks" },
+  ]
+
+  return (
+    <Card data-tour="admin-stack-services">
+      <CardHeader className="pb-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <CardTitle className="text-base">Backend stack in this demo</CardTitle>
+            <CardDescription>
+              The first SupportDesk action is backed by these bundled services.
+            </CardDescription>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            nativeButton={false}
+            render={<Link href="/build/database">Open database</Link>}
+          />
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-wrap gap-2">
+          {services.map((service) => (
+            <Badge
+              key={service.label}
+              variant="outline"
+              className="gap-1.5 px-2.5 py-1.5"
+              render={
+                service.external ? (
+                  <a href={service.href} target="_blank" rel="noreferrer">
+                    <span className="font-medium">{service.label}</span>
+                    <span className="text-muted-foreground">{service.detail}</span>
+                  </a>
+                ) : (
+                  <Link href={service.href}>
+                    <span className="font-medium">{service.label}</span>
+                    <span className="text-muted-foreground">{service.detail}</span>
+                  </Link>
+                )
+              }
+            />
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  )
 }
 
 async function loadHome(): Promise<HomeOverview | null> {
@@ -107,7 +186,17 @@ export default async function HomePage() {
                 popover: {
                   title: "Start from the customer action",
                   description:
-                    "This is the operator side of the same demo. Open the customer app, draft one reply, then come back here to inspect what the backend recorded.",
+                    "Open the customer app, draft one reply, then come back here. The admin is meant to prove what the backend did, not be the first thing a user has to understand.",
+                  side: "bottom",
+                  align: "start",
+                },
+              },
+              {
+                element: "[data-tour='admin-stack-services']",
+                popover: {
+                  title: "Notice what is already wired",
+                  description:
+                    "The tags expose the important pieces behind the app: Postgres, auth, provider routing, billing, webhooks, and the agent runtime. Services with a UI open directly.",
                   side: "bottom",
                   align: "start",
                 },
@@ -125,19 +214,19 @@ export default async function HomePage() {
               {
                 element: "[data-tour='admin-runs']",
                 popover: {
-                  title: "Agent and API executions land here",
+                  title: "Requests and workflows land here",
                   description:
-                    "BackAI stores app-facing request records and links AgentField execution IDs instead of copying AgentField's trace store.",
+                    "BackAI keeps the app-facing record: request, tenant, timing, cost, and links to deeper traces when the workflow has them.",
                   side: "top",
                   align: "start",
                 },
               },
               {
-                element: "[data-tour='admin-agentfield-nav']",
+                element: "[data-tour='admin-agent-nav']",
                 popover: {
-                  title: "Inspect the AgentField substrate",
+                  title: "Follow the evidence trail",
                   description:
-                    "Open Build -> Agents to see the registered SupportDesk agent and its reasoners. Open Operate -> Cost to inspect model spend for the same action.",
+                    "Build shows what capabilities are registered. Operate shows runs, cost, queues, logs, and delivery state for the same product action.",
                   side: "right",
                   align: "center",
                 },
@@ -154,12 +243,11 @@ export default async function HomePage() {
         />
       </div>
 
+      <StackProofPanel />
+
       <AlertsList alerts={data.alerts} />
 
-      <div
-        className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4"
-        data-tour="admin-kpis"
-      >
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4" data-tour="admin-kpis">
         <KpiCard
           label="Requests / min"
           value={formatCompact(data.requests_per_minute)}

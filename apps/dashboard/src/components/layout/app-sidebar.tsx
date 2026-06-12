@@ -37,7 +37,7 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
           href={item.href}
           data-tour={
             item.id === "agents"
-              ? "admin-agentfield-nav"
+              ? "admin-agent-nav"
               : item.id === "cost"
                 ? "admin-cost-nav"
                 : undefined

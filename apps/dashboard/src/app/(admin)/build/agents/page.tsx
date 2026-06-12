@@ -1,4 +1,4 @@
-// Agents tab — agents registered with AgentField via the runtime.
+// Agents tab — agents registered with the bundled agent runtime.
 
 import { ArrowRight, Boxes, ExternalLink, Tag, TerminalSquare } from "lucide-react"
 import Link from "next/link"
@@ -59,7 +59,7 @@ export default async function Page() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Agents"
-        description="Agents registered with the AgentField control plane via this runtime."
+        description="Live agent capabilities registered with the runtime."
         actions={
           <>
             <Button
@@ -68,7 +68,7 @@ export default async function Page() {
               nativeButton={false}
               render={
                 <Link href={agentFieldCatalogUrl()} target="_blank">
-                  AgentField catalog
+                  Runtime catalog
                   <ExternalLink data-icon="inline-end" />
                 </Link>
               }
@@ -80,9 +80,9 @@ export default async function Page() {
                 {
                   element: "[data-tour='agents-counts']",
                   popover: {
-                    title: "AgentField discovery, not mock metadata",
+                    title: "Live capability discovery",
                     description:
-                      "These counts come from the runtime asking AgentField what agents and reasoners are registered right now.",
+                      "These counts come from the running stack, so a fork can tell whether its support workflow is actually registered.",
                     side: "bottom",
                     align: "start",
                   },
@@ -90,9 +90,9 @@ export default async function Page() {
                 {
                   element: "[data-tour='agent-harnesses']",
                   popover: {
-                    title: "Harnesses stay behind the substrate boundary",
+                    title: "Tool readiness is part of the backend",
                     description:
-                      "BackAI reports tool and harness readiness from agents. It does not duplicate AgentField execution state in the admin database.",
+                      "The admin shows whether coding tools and harnesses are available without making the customer app own that infrastructure.",
                     side: "bottom",
                     align: "start",
                   },
@@ -102,7 +102,7 @@ export default async function Page() {
                   popover: {
                     title: "SupportDesk should appear here",
                     description:
-                      "The default stack registers a supportdesk agent with reply-planning reasoners. Agent and reasoner badges link out to AgentField's own catalog.",
+                      "The default stack registers a supportdesk workflow with reply-planning checks. Badges link out to the runtime catalog for the deeper view.",
                     side: "top",
                     align: "start",
                   },
@@ -159,8 +159,8 @@ export default async function Page() {
               <CardTitle className="text-base">Agent container harnesses</CardTitle>
               <CardDescription>
                 Claude Code, Codex, Gemini, and OpenCode are detected from the
-                agent container. The runtime only reports what AgentField agents
-                declare.
+                agent container. The runtime only reports what registered
+                agents declare.
               </CardDescription>
             </div>
             <Button
@@ -214,7 +214,7 @@ export default async function Page() {
             <EmptyDescription>
               {error
                 ? `The runtime returned: ${error}.`
-                : "Agents register themselves with AgentField at startup. Drop one in apps/backend/agents/ and `docker compose up` will register it."}
+                : "Agents register themselves at startup. Drop one in apps/backend/agents/ and `docker compose up` will register it."}
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -262,7 +262,7 @@ export default async function Page() {
                               <Link
                                 href={agentFieldCatalogUrl(a.node_id, r)}
                                 target="_blank"
-                                title={`Open ${a.node_id}.${r} in AgentField discovery`}
+                                title={`Open ${a.node_id}.${r} in the runtime catalog`}
                               >
                                 {r}
                                 <ExternalLink className="ml-1 size-3" />

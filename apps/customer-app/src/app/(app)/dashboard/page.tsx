@@ -1,19 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  ActivityIcon,
-  CoinsIcon,
-  CreditCardIcon,
-  WalletIcon,
-} from "lucide-react"
+import { ActivityIcon, CoinsIcon, CreditCardIcon, WalletIcon } from "lucide-react"
 
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import {
   Table,
@@ -104,9 +93,7 @@ export default async function DashboardPage() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div data-tour="customer-workspace">
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Support workspace
-          </h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Support workspace</h1>
           <p className="text-muted-foreground text-sm">
             {ctx.tenantName} · {session.user.email}
           </p>
@@ -118,9 +105,9 @@ export default async function DashboardPage() {
             {
               element: "[data-tour='customer-workspace']",
               popover: {
-                title: "This is the customer product",
+                title: "Start in the customer app",
                 description:
-                  "A fork starts with a real SupportDesk app, not an empty admin console. Your user signs up here and creates the first AI action.",
+                  "A fork starts with a real SupportDesk workflow, not an empty console. This is the app surface your own customers would use first.",
                 side: "bottom",
                 align: "start",
               },
@@ -130,8 +117,18 @@ export default async function DashboardPage() {
               popover: {
                 title: "One action proves the backend",
                 description:
-                  "The first reply provisions tenant context, uses an AgentField reasoner plan, records model cost, and creates an admin evidence trail.",
+                  "The first reply exercises tenant auth, an API key, policy planning, model routing, usage metering, and the admin evidence trail.",
                 side: "bottom",
+                align: "start",
+              },
+            },
+            {
+              element: "[data-tour='customer-stack-tags']",
+              popover: {
+                title: "The bundled backend is visible",
+                description:
+                  "These tags show the services touched by the same workflow: Postgres-backed tenancy, the LLM gateway, billing records, and the agent runtime.",
+                side: "top",
                 align: "start",
               },
             },
@@ -140,7 +137,7 @@ export default async function DashboardPage() {
               popover: {
                 title: "Start here",
                 description:
-                  "Draft one reply. The next screen shows the AgentField plan, the generated response, and the exact admin link for cost evidence.",
+                  "Draft one reply. The next screen shows the decision plan, generated response, and exact admin link for the cost record.",
                 side: "right",
                 align: "center",
               },
@@ -159,24 +156,16 @@ export default async function DashboardPage() {
         />
       </div>
 
-      <FirstRunPanel
-        tenantId={ctx.tenantId}
-        hasCalls={data.recentCalls.length > 0}
-      />
+      <FirstRunPanel tenantId={ctx.tenantId} hasCalls={data.recentCalls.length > 0} />
 
-      <div
-        className="grid gap-4 md:grid-cols-2 lg:grid-cols-4"
-        data-tour="customer-metrics"
-      >
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4" data-tour="customer-metrics">
         <Card>
           <CardHeader>
             <CardDescription className="flex items-center gap-2">
               <ActivityIcon className="size-4" />
               AI actions today
             </CardDescription>
-            <CardTitle className="text-3xl font-semibold tabular-nums">
-              {data.callsToday}
-            </CardTitle>
+            <CardTitle className="text-3xl font-semibold tabular-nums">{data.callsToday}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
@@ -197,9 +186,7 @@ export default async function DashboardPage() {
               Balance remaining
             </CardDescription>
             <CardTitle className="text-3xl font-semibold tabular-nums">
-              {data.balanceRemaining === null
-                ? "No budget"
-                : formatUSD(data.balanceRemaining)}
+              {data.balanceRemaining === null ? "No budget" : formatUSD(data.balanceRemaining)}
             </CardTitle>
           </CardHeader>
         </Card>
@@ -209,9 +196,7 @@ export default async function DashboardPage() {
               <CreditCardIcon className="size-4" />
               Plan
             </CardDescription>
-            <CardTitle className="text-3xl font-semibold capitalize">
-              {data.plan}
-            </CardTitle>
+            <CardTitle className="text-3xl font-semibold capitalize">{data.plan}</CardTitle>
           </CardHeader>
         </Card>
       </div>
@@ -224,9 +209,7 @@ export default async function DashboardPage() {
       <Card>
         <CardHeader>
           <CardTitle>Recent calls</CardTitle>
-          <CardDescription>
-            Last 10 model calls billed to your tenant.
-          </CardDescription>
+          <CardDescription>Last 10 model calls billed to your tenant.</CardDescription>
         </CardHeader>
         <CardContent>
           {data.recentCalls.length === 0 ? (
@@ -255,12 +238,8 @@ export default async function DashboardPage() {
                         </Badge>
                       ) : null}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {e.prompt_tokens}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {e.completion_tokens}
-                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{e.prompt_tokens}</TableCell>
+                    <TableCell className="text-right tabular-nums">{e.completion_tokens}</TableCell>
                     <TableCell className="text-right tabular-nums">
                       {formatUSD(e.cost_usd)}
                     </TableCell>

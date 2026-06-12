@@ -4,13 +4,7 @@ import Link from "next/link"
 import { CheckCircle2, Circle, ExternalLink, Send } from "lucide-react"
 
 import { buttonVariants } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 
 type Props = {
   tenantId: string
@@ -45,6 +39,14 @@ export function FirstRunPanel({ tenantId, hasCalls }: Props) {
     },
   ]
 
+  const stackTags = [
+    "Postgres tenancy",
+    "better-auth session",
+    "LLM gateway",
+    "usage ledger",
+    "agent runtime",
+  ]
+
   return (
     <Card data-tour="customer-first-run">
       <CardHeader>
@@ -69,20 +71,28 @@ export function FirstRunPanel({ tenantId, hasCalls }: Props) {
                 />
                 <div>
                   <div className="text-sm font-medium">{step.label}</div>
-                  <p className="text-muted-foreground text-sm">
-                    {step.detail}
-                  </p>
+                  <p className="text-muted-foreground text-sm">{step.detail}</p>
                 </div>
               </li>
             )
           })}
         </ol>
+        <div
+          className="flex flex-wrap gap-1.5 pt-1"
+          data-tour="customer-stack-tags"
+          aria-label="Backend services used by the first run"
+        >
+          {stackTags.map((tag) => (
+            <span
+              key={tag}
+              className="rounded-md border bg-muted/40 px-2 py-1 text-xs text-muted-foreground"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
         <div className="flex flex-wrap gap-2">
-          <Link
-            href="/code-helper"
-            className={buttonVariants()}
-            data-tour="customer-draft-action"
-          >
+          <Link href="/code-helper" className={buttonVariants()} data-tour="customer-draft-action">
             <Send data-icon="inline-start" />
             Draft reply
           </Link>
