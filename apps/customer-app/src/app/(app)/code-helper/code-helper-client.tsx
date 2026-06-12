@@ -5,6 +5,7 @@
 import { useMemo, useState } from "react"
 import {
   CheckCircle2,
+  Circle,
   Loader2,
   MessageSquareText,
   Route,
@@ -102,6 +103,15 @@ type AgentPlan = {
 
 type ChatStatus = "planning" | "drafting" | "complete" | "error"
 
+type TraceStepStatus = "complete" | "active" | "pending" | "error"
+
+type TraceStep = {
+  id: string
+  title: string
+  detail: string
+  status: TraceStepStatus
+}
+
 type ChatMessage = {
   id: string
   role: "user" | "assistant"
@@ -167,8 +177,120 @@ function planChips(plan?: AgentPlan): string[] {
   return chips.filter(Boolean) as string[]
 }
 
-function activeChecks(plan?: AgentPlan): string[] {
-  return (plan?.reasoners ?? []).slice(0, 5).map(formatLabel)
+const STEP_COPY: Record<string, { title: string; detail: string }> = {
+  reply_plan: {
+    title: "Choose the response route",
+    detail: "Decide which checks are needed before drafting.",
+  },
+  classify_issue: {
+    title: "Classify the customer issue",
+    detail: "Identify the request type, urgency, and review needs.",
+  },
+  extract_customer_facts: {
+    title: "Extract key facts",
+    detail: "Pull out account, invoice, access, and evidence signals.",
+  },
+  billing_policy_review: {
+    title: "Review billing policy",
+    detail: "Check what support can say about invoices, renewals, and refunds.",
+  },
+  support_policy_review: {
+    title: "Review support policy",
+    detail: "Check the right support path and escalation boundary.",
+  },
+  refund_guardrail: {
+    title: "Check refund guardrails",
+    detail: "Avoid promising a refund before evidence is verified.",
+  },
+  billing_evidence_check: {
+    title: "Check billing evidence",
+    detail: "Look for the proof needed before changing account state.",
+  },
+  resolution_guardrail: {
+    title: "Check resolution limits",
+    detail: "Keep the reply helpful without over-committing.",
+  },
+  response_risk_check: {
+    title: "Scan for risky promises",
+    detail: "Catch claims that should stay conditional or need handoff.",
+  },
+  compose_reply_brief: {
+    title: "Prepare the reply brief",
+    detail: "Turn the checks into guidance for the final answer.",
+  },
+}
+
+function uniqueReasoners(reasoners: string[] | undefined): string[] {
+  const seen = new Set<string>()
+  return (reasoners ?? []).filter((reasoner) => {
+    if (seen.has(reasoner)) return false
+    seen.add(reasoner)
+    return true
+  })
+}
+
+function stepCopy(reasoner: string): { title: string; detail: string } {
+  return (
+    STEP_COPY[reasoner] ?? {
+      title: formatLabel(reasoner),
+      detail: "Run the next check before composing the customer reply.",
+    }
+  )
+}
+
+function workflowTrace(plan: AgentPlan | undefined, status: ChatStatus | undefined): TraceStep[] {
+  if (!plan) {
+    return [
+      {
+        id: "read_request",
+        title: "Read the customer request",
+        detail: "Understand the situation before picking a path.",
+        status: status === "error" ? "error" : "active",
+      },
+      {
+        id: "choose_route",
+        title: "Choose the response route",
+        detail: "Decide which checks the reply needs.",
+        status: "pending",
+      },
+      {
+        id: "compose_reply",
+        title: "Compose the reply",
+        detail: "Draft a clear answer after the checks finish.",
+        status: "pending",
+      },
+    ]
+  }
+
+  const reasoners = uniqueReasoners(plan.reasoners)
+  const source = reasoners.length > 0 ? reasoners : ["classify_issue", "compose_reply_brief"]
+  const steps: TraceStep[] = source.map((reasoner) => {
+    const copy = stepCopy(reasoner)
+    return {
+      id: reasoner,
+      title: copy.title,
+      detail: copy.detail,
+      status: status === "planning" ? "active" : "complete",
+    }
+  })
+
+  const finalStep: TraceStep = {
+    id: "compose_customer_reply",
+    title: "Compose the customer reply",
+    detail: plan.dynamic_branch
+      ? `Use the ${formatLabel(plan.dynamic_branch).toLowerCase()} route in a calm support tone.`
+      : "Use the completed checks in a calm support tone.",
+    status:
+      status === "complete"
+        ? "complete"
+        : status === "error"
+          ? "error"
+          : status === "drafting"
+            ? "active"
+            : "pending",
+  }
+
+  return [...steps, finalStep]
 }
 
 function renderPlanGuidance(plan: AgentPlan): string {
@@ -404,8 +526,8 @@ export function CodeHelperClient({ tenantId }: Props) {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="mx-auto flex h-full min-h-0 w-full max-w-5xl flex-col gap-4">
+      <div className="flex shrink-0 flex-wrap items-start justify-between gap-3">
         <div data-tour="support-chat-heading">
           <h1 className="text-2xl font-semibold tracking-tight">Support Chat</h1>
           <p className="text-muted-foreground max-w-2xl text-sm">
@@ -416,7 +538,7 @@ export function CodeHelperClient({ tenantId }: Props) {
         <GuidedTour id="customer-support-chat-v1" autoStart steps={tourSteps} />
       </div>
 
-      <Card className="overflow-hidden" data-tour="chat-thread">
+      <Card className="flex min-h-0 flex-1 flex-col overflow-hidden" data-tour="chat-thread">
         <CardHeader className="border-b">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -441,8 +563,8 @@ export function CodeHelperClient({ tenantId }: Props) {
             ) : null}
           </div>
         </CardHeader>
-        <CardContent className="p-0">
-          <ScrollArea className="h-[min(58vh,620px)]">
+        <CardContent className="flex min-h-0 flex-1 flex-col p-0">
+          <ScrollArea className="min-h-0 flex-1 basis-0 overflow-hidden">
             <div className="flex flex-col gap-5 p-4 md:p-6">
               {messages.length === 0 ? (
                 <EmptyChatState onSelect={handleAsk} disabled={streaming} />
@@ -452,9 +574,9 @@ export function CodeHelperClient({ tenantId }: Props) {
             </div>
           </ScrollArea>
           <Separator />
-          <div className="space-y-4 p-4 md:p-6">
+          <div className="shrink-0 space-y-4 p-4 md:p-6">
             {messages.length > 0 ? (
-              <PromptSuggestions onSelect={handleAsk} disabled={streaming} />
+              <PromptSuggestions onSelect={handleAsk} disabled={streaming} compact />
             ) : null}
             <div className="flex flex-col gap-3" data-tour="chat-composer">
               <Textarea
@@ -495,13 +617,15 @@ function EmptyChatState({
   disabled: boolean
 }) {
   return (
-    <div className="grid gap-5 py-8">
+    <div className="grid gap-4 py-4 sm:py-8">
       <div className="mx-auto flex max-w-lg flex-col items-center text-center">
-        <div className="bg-primary/10 text-primary mb-4 flex size-11 items-center justify-center rounded-md">
+        <div className="bg-primary/10 text-primary mb-3 flex size-10 items-center justify-center rounded-md sm:mb-4 sm:size-11">
           <Sparkles className="size-5" />
         </div>
-        <h2 className="text-xl font-semibold tracking-tight">What should support send?</h2>
-        <p className="text-muted-foreground mt-2 text-sm">
+        <h2 className="text-lg font-semibold tracking-tight sm:text-xl">
+          What should support send?
+        </h2>
+        <p className="text-muted-foreground mt-1 text-sm sm:mt-2">
           Pick a realistic customer message or type your own. The assistant will show the route it
           is taking only when there is something useful to show.
         </p>
@@ -514,27 +638,42 @@ function EmptyChatState({
 function PromptSuggestions({
   onSelect,
   disabled,
+  compact = false,
 }: {
   onSelect: (prompt: string) => void
   disabled: boolean
+  compact?: boolean
 }) {
   return (
-    <div className="grid gap-2 sm:grid-cols-2" data-tour="prompt-suggestions">
+    <div
+      className={compact ? "flex gap-2 overflow-x-auto pb-1" : "grid grid-cols-2 gap-2"}
+      data-tour="prompt-suggestions"
+    >
       {SUGGESTED_PROMPTS.map((suggestion) => (
         <Button
           key={suggestion.title}
           type="button"
           variant="outline"
-          className="h-auto justify-start whitespace-normal p-3 text-left"
+          className={
+            compact
+              ? "h-10 min-w-36 shrink-0 justify-start overflow-hidden px-3 text-left"
+              : "h-11 min-w-0 justify-start overflow-hidden px-3 text-left sm:h-auto sm:whitespace-normal sm:p-3"
+          }
           disabled={disabled}
           onClick={() => onSelect(suggestion.prompt)}
         >
-          <span className="flex min-w-0 flex-col gap-1">
-            <span className="flex items-center gap-2 text-sm font-medium">
+          <span
+            className={compact ? "flex min-w-0 items-center gap-2" : "flex min-w-0 flex-col gap-1"}
+          >
+            <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
               <Route className="size-3.5 shrink-0" />
-              {suggestion.title}
+              <span className="truncate">{suggestion.title}</span>
             </span>
-            <span className="text-muted-foreground text-xs font-normal">{suggestion.intent}</span>
+            {!compact ? (
+              <span className="text-muted-foreground hidden text-xs font-normal sm:block">
+                {suggestion.intent}
+              </span>
+            ) : null}
           </span>
         </Button>
       ))}
@@ -573,11 +712,11 @@ function ChatBubble({ message }: { message: ChatMessage }) {
 
 function AssistantMessage({ message }: { message: ChatMessage }) {
   const chips = planChips(message.plan)
-  const checks = activeChecks(message.plan)
+  const trace = workflowTrace(message.plan, message.status)
   return (
     <>
       <div className="rounded-lg border bg-muted/35 px-4 py-3">
-        <PlanningState status={message.status} chips={chips} checks={checks} />
+        <PlanningState status={message.status} chips={chips} trace={trace} />
         {message.error ? (
           <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
             {message.error}
@@ -627,15 +766,15 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
 function PlanningState({
   status,
   chips,
-  checks,
+  trace,
 }: {
   status?: ChatStatus
   chips: string[]
-  checks: string[]
+  trace: TraceStep[]
 }) {
   const isWorking = status === "planning" || status === "drafting"
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant={isWorking ? "outline" : "secondary"} className="gap-1.5">
           {isWorking ? (
@@ -657,19 +796,76 @@ function PlanningState({
           </Badge>
         ))}
       </div>
-      {checks.length > 0 ? (
-        <div className="flex flex-wrap gap-1.5">
-          {checks.map((check) => (
-            <span
-              key={check}
-              className="rounded-md border bg-background px-2 py-1 text-xs text-muted-foreground"
-            >
-              {check}
-            </span>
-          ))}
-        </div>
-      ) : null}
+      <ReasoningTrace steps={trace} />
     </div>
+  )
+}
+
+function ReasoningTrace({ steps }: { steps: TraceStep[] }) {
+  return (
+    <div className="rounded-md border bg-background/80 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Decision path
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Structured checks before the reply is sent.
+          </p>
+        </div>
+        <Badge variant="outline" className="shrink-0 text-[10px]">
+          {steps.length} steps
+        </Badge>
+      </div>
+      <ol className="mt-4">
+        {steps.map((step, index) => (
+          <ReasoningTraceStep key={step.id} step={step} isLast={index === steps.length - 1} />
+        ))}
+      </ol>
+    </div>
+  )
+}
+
+function ReasoningTraceStep({ step, isLast }: { step: TraceStep; isLast: boolean }) {
+  const isActive = step.status === "active"
+  const isComplete = step.status === "complete"
+  const isError = step.status === "error"
+
+  return (
+    <li className="relative grid grid-cols-[1.25rem_1fr] gap-3 pb-4 last:pb-0">
+      {!isLast ? (
+        <span className="absolute left-[0.6rem] top-6 bottom-0 w-px bg-border" aria-hidden />
+      ) : null}
+      <span
+        className={[
+          "relative z-10 mt-0.5 flex size-5 items-center justify-center rounded-full border bg-background",
+          isActive ? "border-primary text-primary shadow-[0_0_0_4px_var(--accent)]" : "",
+          isComplete ? "border-primary bg-primary text-primary-foreground" : "",
+          isError ? "border-destructive text-destructive" : "",
+          step.status === "pending" ? "border-border text-muted-foreground" : "",
+        ].join(" ")}
+        aria-current={isActive ? "step" : undefined}
+      >
+        {isActive ? (
+          <Loader2 className="size-3 animate-spin" />
+        ) : isComplete ? (
+          <CheckCircle2 className="size-3" />
+        ) : (
+          <Circle className="size-2.5" />
+        )}
+      </span>
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-sm font-medium leading-5">{step.title}</p>
+          {isActive ? (
+            <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+              running
+            </span>
+          ) : null}
+        </div>
+        <p className="mt-0.5 text-xs leading-5 text-muted-foreground">{step.detail}</p>
+      </div>
+    </li>
   )
 }
 

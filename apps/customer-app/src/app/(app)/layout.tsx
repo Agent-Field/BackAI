@@ -16,15 +16,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const { session, ctx } = await requireCustomerContext()
 
   return (
-    <SidebarProvider>
+    <SidebarProvider className="h-svh min-h-svh overflow-hidden">
       <CustomerSidebar billingDisabled={billingDisabled()} />
-      <SidebarInset>
+      <SidebarInset className="min-h-0 min-w-0 overflow-hidden">
         <CustomerTopbar
           user={{ name: session.user.name, email: session.user.email }}
           tenantName={ctx.tenantName}
         />
         {/* Edit freely: logged-in product pages render inside this shell. */}
-        <div className="flex-1 p-6">{children}</div>
+        <div className="min-h-0 flex-1 overflow-auto p-6">{children}</div>
       </SidebarInset>
     </SidebarProvider>
   )
