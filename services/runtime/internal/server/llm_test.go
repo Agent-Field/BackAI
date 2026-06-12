@@ -15,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
 	"github.com/Agent-Field/backai/services/runtime/internal/guardrails"
@@ -122,6 +123,40 @@ func TestAttachLiteLLMKeyUsesTenantVirtualKey(t *testing.T) {
 	}
 	if seenAuth != "Bearer sk-litellm-tenant-virtual" {
 		t.Fatalf("Authorization = %q, want tenant virtual key", seenAuth)
+	}
+}
+
+func TestBuildPostPayloadPrefersProviderResponseCost(t *testing.T) {
+	srv := newLLMTestServer(t, Deps{
+		LLMGateway: llmgateway.New(llmgateway.NewDemoProvider()),
+	})
+	providerCost := 0.00123
+	post := srv.buildPostPayload(
+		LLMPreCallPayload{
+			TenantID:  "tenant-1",
+			APIKeyID:  "key-1",
+			Model:     "demo/supportdesk",
+			Provider:  "demo",
+			RequestID: "req-demo",
+			Operation: "chat",
+		},
+		&llmgateway.ChatResponse{
+			Usage: &llmgateway.Usage{
+				PromptTokens:     10,
+				CompletionTokens: 20,
+				TotalTokens:      30,
+				ResponseCostUSD:  &providerCost,
+			},
+		},
+		nil,
+		time.Now(),
+		http.StatusOK,
+	)
+	if !post.CostKnown {
+		t.Fatalf("expected provider response cost to mark cost known")
+	}
+	if post.CostUSD != providerCost {
+		t.Fatalf("cost = %v, want %v", post.CostUSD, providerCost)
 	}
 }
 

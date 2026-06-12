@@ -25,7 +25,7 @@ explicitly changes.
 | --- | --- | --- | --- | --- |
 | M0 | Planning baseline | In progress | Codex | `development/*` committed and pushed. |
 | M1 | Product shell | In progress | Codex | README and customer app shell updated; customer/dashboard typechecks pass. |
-| M2 | No-key demo loop | Not started | TBD | Fresh clone supports first SupportDesk action without provider key. |
+| M2 | No-key demo loop | In progress | Codex | Demo chat provider implemented; full runtime Go suite and compose config pass. |
 | M3 | Customer-to-admin walkthrough | Not started | TBD | Customer action deep-links to matching admin evidence. |
 | M4 | Compose first-run | Not started | TBD | `docker compose up` boots full first experience. |
 | M5 | Railway deploy | Not started | TBD | Railway template includes customer app and can deploy in demo mode. |
@@ -38,6 +38,7 @@ explicitly changes.
 | --- | --- | --- | --- |
 | 2026-06-12 | `f4208f7` | Planning baseline | Docs review only. |
 | 2026-06-12 | Pending | M1 product shell | `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`; `pnpm --dir apps/dashboard exec tsc --noEmit --pretty false`. |
+| 2026-06-12 | Pending | M2 demo provider | `GOCACHE=/tmp/backai-go-build go test ./services/runtime/...`; `docker compose config --quiet`. |
 
 ## Current Risks
 

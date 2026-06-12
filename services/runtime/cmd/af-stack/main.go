@@ -1238,6 +1238,14 @@ func splitEnvList(raw string) []string {
 func buildLLMGateway(log *slog.Logger, afClient *agentfield.Client) *llmgateway.Gateway {
 	_ = afClient // reserved for forward-compat
 
+	demoMode := strings.ToLower(strings.TrimSpace(os.Getenv("AF_STACK_DEMO_MODE")))
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("AF_STACK_LLM_PROVIDER")), "demo") ||
+		demoMode == "true" ||
+		(demoMode == "auto" && !hasLLMProviderKey()) {
+		log.Info("llm gateway: demo provider enabled")
+		return llmgateway.New(llmgateway.NewDemoProvider())
+	}
+
 	url, masterKey := litellmEnv()
 
 	log.Info("llm gateway: litellm sidecar", "url", url)
@@ -1252,6 +1260,24 @@ func buildLLMGateway(log *slog.Logger, afClient *agentfield.Client) *llmgateway.
 		gateway = gateway.WithMultimodal(multimodal)
 	}
 	return gateway
+}
+
+func hasLLMProviderKey() bool {
+	keys := []string{
+		"OPENROUTER_API_KEY",
+		"OPENAI_API_KEY",
+		"ANTHROPIC_API_KEY",
+		"GEMINI_API_KEY",
+		"MISTRAL_API_KEY",
+		"DEEPSEEK_API_KEY",
+		"GROQ_API_KEY",
+	}
+	for _, key := range keys {
+		if strings.TrimSpace(os.Getenv(key)) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // buildMultimodal assembles the first-party multimodal adapter registry

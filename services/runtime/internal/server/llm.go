@@ -119,13 +119,13 @@ type LLMPreCallPayload struct {
 // Modality constants — written verbatim into suite_cost_events.modality
 // and surfaced in the dashboard's "cost by modality" breakdown.
 const (
-	ModalityText                = "text"
-	ModalityEmbedding           = "embedding"
-	ModalityAudioSpeech         = "audio_speech"
-	ModalityAudioTranscription  = "audio_transcription"
-	ModalityAudioTranslation    = "audio_translation"
-	ModalityImage               = "image"
-	ModalityVideo               = "video"
+	ModalityText               = "text"
+	ModalityEmbedding          = "embedding"
+	ModalityAudioSpeech        = "audio_speech"
+	ModalityAudioTranscription = "audio_transcription"
+	ModalityAudioTranslation   = "audio_translation"
+	ModalityImage              = "image"
+	ModalityVideo              = "video"
 )
 
 // LLMPostCallPayload is the payload passed to HookLLMPostCall handlers.
@@ -1418,7 +1418,10 @@ func (s *Server) buildPostPayload(
 		post.PromptTokens = u.PromptTokens
 		post.CompletionTokens = u.CompletionTokens
 		post.TotalTokens = u.TotalTokens
-		if cost, ok := s.llmGateway.EstimateCostUSD(pre.Model, u.PromptTokens, u.CompletionTokens); ok {
+		if u.ResponseCostUSD != nil {
+			post.CostUSD = *u.ResponseCostUSD
+			post.CostKnown = true
+		} else if cost, ok := s.llmGateway.EstimateCostUSD(pre.Model, u.PromptTokens, u.CompletionTokens); ok {
 			post.CostUSD = cost
 			post.CostKnown = true
 		}
@@ -1449,7 +1452,10 @@ func (s *Server) buildPostPayloadEmbeddings(
 		post.PromptTokens = resp.Usage.PromptTokens
 		post.CompletionTokens = resp.Usage.CompletionTokens
 		post.TotalTokens = resp.Usage.TotalTokens
-		if cost, ok := s.llmGateway.EstimateCostUSD(pre.Model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens); ok {
+		if resp.Usage.ResponseCostUSD != nil {
+			post.CostUSD = *resp.Usage.ResponseCostUSD
+			post.CostKnown = true
+		} else if cost, ok := s.llmGateway.EstimateCostUSD(pre.Model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens); ok {
 			post.CostUSD = cost
 			post.CostKnown = true
 		}

@@ -126,6 +126,10 @@ services:
       # sidecar auth; customers never see it.
       AF_STACK_LITELLM_URL: ${AF_STACK_LITELLM_URL:-http://litellm:4000}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-litellm-dev}
+      # First-run demo mode: "auto" uses the deterministic demo provider only
+      # when no real provider key is present. Adding OPENROUTER_API_KEY /
+      # OPENAI_API_KEY / etc. switches the same endpoint to LiteLLM.
+      AF_STACK_DEMO_MODE: ${AF_STACK_DEMO_MODE:-auto}
       # Gateway guardrails: regex PII redaction is on by default.
       # Set AF_STACK_PII_PROVIDER=presidio and Presidio URLs to use
       # a Presidio analyzer/anonymizer sidecar.
