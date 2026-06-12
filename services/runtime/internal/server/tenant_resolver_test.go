@@ -75,10 +75,10 @@ func TestResolverMultiTenancyOff(t *testing.T) {
 	}
 }
 
-// TestResolverPublicPaths confirms /health, /ready, /metrics, and the
-// dashboard read prefixes skip resolution even when MT is on. Without
-// this, the dashboard's first load would 401 before the operator logs
-// in.
+// TestResolverPublicPaths confirms /health, /ready, /metrics, exact
+// agent discovery, and the dashboard read prefixes skip resolution
+// even when MT is on. Without this, the dashboard's first load would
+// 401 before the operator logs in.
 func TestResolverPublicPaths(t *testing.T) {
 	s := newResolverTestServer(t, true)
 	cases := []string{
@@ -154,15 +154,15 @@ func TestResolverIsPublicPath(t *testing.T) {
 		{"/metrics", true},
 		{"/openapi.json", true},
 		{"/api/v1/agents", true},
-		{"/api/v1/agents/foo", true}, // sub-path matches via prefix
+		{"/api/v1/agents/foo", false},
 		{"/api/v1/runs", true},
 		{"/api/v1/home/overview", true},
 		{"/api/v1/cost", true},
 		{"/api/v1/modules", true},
 		{"/api/v1/queues", true},
-		{"/api/v1/admin/tenants", true},   // admin gates itself
-		{"/api/v1/db/tables", true},       // DB studio is dashboard-gated
-		{"/api/v1/db/sql", true},          // DB studio is dashboard-gated
+		{"/api/v1/admin/tenants", true}, // admin gates itself
+		{"/api/v1/db/tables", true},     // DB studio is dashboard-gated
+		{"/api/v1/db/sql", true},        // DB studio is dashboard-gated
 		{"/api/v1/secrets", false},
 		{"/api/v1/storage", false},
 		{"/api/v1/jobs", false},
