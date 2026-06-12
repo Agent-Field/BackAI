@@ -160,6 +160,25 @@ Sign up in SupportDesk AI. BackAI provisions a tenant, membership,
 billing record, and API key. Then use Support Desk to draft a reply and
 open the admin dashboard to inspect usage and cost.
 
+No provider key is required for the first run. BackAI starts in demo mode
+when no key is present, and switches to LiteLLM when you add
+`OPENROUTER_API_KEY` or another provider key. See
+[`docs/demo-mode.md`](docs/demo-mode.md).
+
+## Deploy
+
+Railway is the fastest hosted first run:
+
+```bash
+railway init --template ./deploy/railway/railway.json
+railway up
+```
+
+The Railway template deploys customer app, admin dashboard, runtime, LiteLLM,
+AgentField, and Postgres. Leave provider keys blank for no-key SupportDesk
+demo mode, or set `OPENROUTER_API_KEY` on the `litellm` service for real
+model calls. See [`deploy/railway/README.md`](deploy/railway/README.md).
+
 You can also call the LLM gateway directly with the official OpenAI SDK
 by changing only the base URL:
 

@@ -1,4 +1,4 @@
-# Deploy AF Stack
+# Deploy BackAI
 
 Five officially-supported deploy targets. Pick the one matching your ops
 posture and skip the rest.
@@ -7,7 +7,7 @@ posture and skip the rest.
 | ------------------- | ---------------------------------- | ---------------------------------------- |
 | Helm (Kubernetes)   | `deploy/helm/af-stack/`            | You have a cluster, run multi-tenant SaaS |
 | Fly.io              | `deploy/fly/`                      | Solo founders, fast global rollout       |
-| Railway             | `deploy/railway/`                  | One-click PaaS, want bundled Postgres    |
+| Railway             | `deploy/railway/`                  | One-click SupportDesk demo, bundled Postgres |
 | Render              | `deploy/render/`                   | Blueprint deploys, GitHub-driven autodeploy |
 | Docker Compose (prod) | `docker-compose.prod.yml` (root) | Single VPS, external Postgres + S3       |
 
@@ -23,7 +23,8 @@ You want…                                          | Use this
 
 ## Required env vars (cheat sheet)
 
-Every prod target needs all of these, regardless of platform:
+Every production target eventually needs these. The Railway SupportDesk first
+run can start without provider keys, S3, or sandbox credentials:
 
 | Var                          | What                                          |
 | ---------------------------- | --------------------------------------------- |
@@ -40,6 +41,9 @@ Every prod target needs all of these, regardless of platform:
 | `E2B_API_KEY`                | Required when adapter=e2b                     |
 | `OPENROUTER_API_KEY`         | LLM provider (or `OPENAI_API_KEY` /           |
 |                              | `ANTHROPIC_API_KEY`)                          |
+
+See [Demo Mode And Real Provider Mode](demo-mode.md) for the no-key
+SupportDesk path and the LiteLLM-backed provider path.
 
 Compose target also needs:
 

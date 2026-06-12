@@ -29,7 +29,7 @@ explicitly changes.
 | M3 | Customer-to-admin walkthrough | Complete | Codex | Customer action carries `X-Request-ID`, cost ledger stores/filter by request id, admin cost page accepts `request_id`, and customer workspace shows first-run steps. |
 | M4 | Compose first-run | Complete | Codex | Compose builds and boots customer app, admin, runtime, demo provider, and request-id cost ledger path. |
 | M5 | Railway deploy | Complete | Codex | Railway template now includes customer, admin, runtime, LiteLLM, AgentField, Postgres, demo mode, and private service wiring. |
-| M6 | Docs and examples | Not started | TBD | Docs flow and capability manifests landed. |
+| M6 | Docs and examples | In progress | Codex | Public docs now cover demo mode vs real provider mode and link Railway first run. |
 | M7 | Verification sweep | Not started | TBD | Local E2E, SDK checks, docs/build/deploy checks pass. |
 
 ## Merge Log
@@ -45,6 +45,7 @@ explicitly changes.
 | 2026-06-12 | `b17f442` | M4 no-key E2E | `docker compose up -d --build postgres litellm agentfield runtime dashboard customer-app`; customer signup via `http://localhost:34000/api/auth/sign-up/email`; onboarding key minted; customer LLM proxy returned `demo-supportdesk`; `GET /api/v1/cost/events?tenant=...&request_id=...` returned exactly one event. |
 | 2026-06-12 | Pending | M4 OpenRouter E2E | Runtime restarted with `AF_STACK_DEMO_MODE=false` and OpenRouter key from zsh; logs showed `llm gateway: litellm sidecar`; customer LLM proxy returned real provider text; cost event for `codex-openrouter-1781281222` recorded provider `litellm` and nonzero cost. |
 | 2026-06-12 | Pending | M5 Railway template | `python3 -m json.tool deploy/railway/railway.json`; `python3 scripts/validate-deploy-targets.py`. |
+| 2026-06-12 | Pending | M6 demo mode docs | `rg -n "github.com/<you>/af-stack|AF_STACK_DEMO_MODE|demo-supportdesk|Railway|no-key|BackAI|SupportDesk" README.md docs/demo-mode.md deploy/railway/README.md deploy/README.md docs/deploy.md`; `python3 scripts/validate-deploy-targets.py`. |
 
 ## Current Risks
 
@@ -58,7 +59,7 @@ explicitly changes.
 
 ## Next Concrete Work
 
-1. Commit and push the Railway template update.
-2. Add public docs for no-key mode vs real-key mode.
-3. Start M6 docs/examples cleanup.
+1. Commit and push demo mode docs.
+2. Continue M6 docs/examples cleanup.
+3. Start final public-readiness verification sweep.
 4. Keep the first vertical slice small enough to verify locally.

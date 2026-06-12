@@ -19,7 +19,7 @@ npm i -g @railway/cli
 railway login
 
 # 2. From a clone of the repo:
-git clone https://github.com/<you>/af-stack && cd af-stack
+git clone https://github.com/<you>/backai && cd backai
 
 # 3. Create a project and push the template.
 railway init --template ./deploy/railway/railway.json
@@ -66,6 +66,9 @@ First-run path:
 2. Sign up.
 3. Draft one SupportDesk reply.
 4. Use the admin link from the customer app to inspect the exact cost event.
+
+For more detail on no-key mode and real-provider mode, see
+[`../../docs/demo-mode.md`](../../docs/demo-mode.md).
 
 ## Common pitfalls
 

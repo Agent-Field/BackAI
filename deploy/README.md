@@ -1,13 +1,13 @@
 # Deployment recipes
 
-This directory ships ready-to-use deployment artifacts for AF Stack
-across several runtimes. Pick the one that matches your target.
+This directory ships ready-to-use deployment artifacts for BackAI across
+several runtimes. Pick the one that matches your target.
 
 | Target | Path | Best for |
 | --- | --- | --- |
 | **Kubernetes (Helm)** | [`helm/af-stack/`](./helm/af-stack/) | Self-hosted clusters, EKS / GKE / AKS, k3d, kind. Production-ready: HPA, PDB, NetworkPolicy, optional ServiceMonitor. |
 | Fly.io | [`fly/`](./fly/) | Single-region demos. `fly.toml` per app. |
-| Railway | [`railway/`](./railway/) | One-click hosted deploy. |
+| Railway | [`railway/`](./railway/) | One-click hosted SupportDesk demo and production starter. |
 | Render | [`render/`](./render/) | Hosted PaaS with managed Postgres. |
 | Caddy | [`caddy/`](./caddy/) | Reverse-proxy / TLS sidecar for bring-your-own VM installs. |
 | Nomad | [`nomad/`](./nomad/) | (placeholder — Nomad job specs forthcoming) |
@@ -25,6 +25,10 @@ scripts/validate-deploy-targets.py
 
 That validates Helm lint/template output, Fly config structure, Railway
 template JSON, Render Blueprint structure, and production compose syntax.
+
+For the no-key hosted first run, start with [Railway](./railway/). For the
+mode switch between deterministic demo replies and real provider calls, see
+[`../docs/demo-mode.md`](../docs/demo-mode.md).
 
 For the real Kubernetes smoke test, run:
 
