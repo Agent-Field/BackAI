@@ -1,6 +1,6 @@
 # Embeddings API
 
-AF Stack exposes OpenAI-compatible embeddings at:
+BackAI exposes OpenAI-compatible embeddings at:
 
 ```text
 POST /api/v1/embeddings

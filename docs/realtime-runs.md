@@ -7,7 +7,7 @@ tenant-scoped by default.
 
 ```text
 AgentField execution event bus
-        -> AF Stack runtime WebSocket /api/v1/realtime/runs
+        -> BackAI runtime WebSocket /api/v1/realtime/runs
         -> suite.runs.subscribe({ tenant_id, user_id, agent, run_id, execution_id })
 ```
 
@@ -19,7 +19,7 @@ inserted, row updated.
 
 ## How it works
 
-The runtime bridges AgentField's event bus into a WebSocket on AF Stack:
+The runtime bridges AgentField's event bus into a WebSocket on BackAI:
 
 1. Caller opens `WS /api/v1/realtime/runs?[filter]`.
 2. The runtime upgrades and chooses a source:
@@ -171,7 +171,7 @@ deep inspector.
 | Live "agent is doing X" UI in a customer-app    | `suite.runs.subscribe`       |
 | Notify on app data mutating (chat, todos, etc.) | `suite.realtime.subscribe`   |
 | One-off final state after a run finished        | `suite.agents.status(id)`    |
-| Server-side webhook on run completion           | AgentField webhooks (Phase 8)|
+| Server-side webhook on run completion           | AgentField webhooks |
 
 ## Reconnection & backoff
 

@@ -1,7 +1,7 @@
 # GDPR Data Rights
 
-AF Stack exposes operator-only endpoints for exporting and erasing data
-held by the AF Stack backend:
+BackAI exposes operator-only endpoints for exporting and erasing data
+held by the BackAI backend:
 
 - `GET /api/v1/admin/users/{id}/export`
 - `POST /api/v1/admin/users/{id}/erase`
@@ -13,7 +13,7 @@ operation.
 
 ## Scope
 
-These endpoints cover AF Stack-owned app/backend records:
+These endpoints cover BackAI-owned app/backend records:
 
 - `suite_users`
 - better-auth users, accounts, and sessions
@@ -28,8 +28,8 @@ These endpoints cover AF Stack-owned app/backend records:
 
 They do not export, erase, or mutate AgentField-owned execution state.
 AgentField runs, spans, traces, sessions, and memory remain in
-AgentField. AF Stack only exports references such as execution IDs when
-those IDs are stored in AF Stack tables.
+AgentField. BackAI only exports references such as execution IDs when
+those IDs are stored in BackAI tables.
 
 ## Export Contract
 
@@ -43,7 +43,7 @@ Response shape:
 {
   "exported_at": "2026-06-07T00:00:00Z",
   "user_id": "00000000-0000-0000-0000-000000000000",
-  "agentfield_notice": "AF Stack export includes AF Stack app-auth/backend records only...",
+  "agentfield_notice": "BackAI export includes BackAI app-auth/backend records only...",
   "redaction_contract": "Secret values and OAuth token plaintext are never exported...",
   "data": {
     "suite_user": [],

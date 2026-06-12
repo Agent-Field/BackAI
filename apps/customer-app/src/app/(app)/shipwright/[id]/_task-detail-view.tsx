@@ -257,7 +257,7 @@ export function TaskDetailView({ taskId }: { taskId: string }) {
               ) : (
                 <>
                   <Loader2 className="mx-auto mb-2 size-5 animate-spin" />
-                  Agent is working — first step coming soon.
+                  Agent is working. Waiting for the first step.
                 </>
               )}
             </div>

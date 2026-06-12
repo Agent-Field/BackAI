@@ -19,7 +19,7 @@ export default async function Page() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Approvals"
-        description="Human decision gates for AF Stack workflows. These rows are tenant-scoped business state, separate from AgentField run approvals."
+        description="Human decision gates for BackAI workflows. These rows are tenant-scoped business state, separate from AgentField run approvals."
       />
       <ApprovalsView initial={initial} />
     </div>

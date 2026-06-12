@@ -121,9 +121,8 @@ export default async function Page() {
               .
             </p>
             <p>
-              This usually means the queues endpoint hasn&apos;t shipped — it
-              lands in Phase 5. The view will populate once the endpoint is
-              live.
+              Check that the runtime is reachable and that the queues API is
+              enabled for this deployment.
             </p>
           </div>
         ) : (

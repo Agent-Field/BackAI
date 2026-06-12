@@ -19,7 +19,7 @@ export default async function Page() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Shipwright"
-        description="Coding-agent tasks. AF Stack stores task and patch metadata; AgentField owns the live execution graph, logs, spans, traces, and memory."
+        description="Coding-agent tasks. BackAI stores task and patch metadata; AgentField owns the live execution graph, logs, spans, traces, and memory."
       />
       <ShipwrightView initial={initial} />
     </div>

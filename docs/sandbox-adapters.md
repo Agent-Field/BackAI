@@ -1,7 +1,7 @@
 # Sandbox adapters
 
-AF Stack runs untrusted workloads through a `sandbox.Sandbox` interface
-(see `services/runtime/internal/sandbox/interface.go`). Phase 9 ships four
+BackAI runs untrusted workloads through a `sandbox.Sandbox` interface
+(see `services/runtime/internal/sandbox/interface.go`). BackAI ships four
 adapters; pick the one whose isolation / cost / latency profile fits your
 deployment.
 
@@ -84,7 +84,7 @@ Firecracker runs each workload in its own KVM micro-VM. Stronger
 isolation than gVisor, but Firecracker on its own does not orchestrate
 VM lifecycle, networking, or pool warm-up across a fleet.
 
-**The Phase 9.2 firecracker adapter is a scaffold.** Calling `Run` /
+**The Firecracker adapter is a scaffold.** Calling `Run` /
 `Stream` / `Stop` returns `ErrFirecrackerRequiresFlintlock`. The
 production v2 deployment will pair this adapter with
 [Flintlock](https://github.com/liquidmetal-dev/flintlock) (or an
@@ -123,14 +123,14 @@ this on `GET /api/v1/sandbox/pool` so the operator UI can render the
 adapter card, and so the runtime can reject runs whose `timeout_s`
 exceeds the adapter's `max_timeout_s` before any work is queued.
 
-## Phase 9 status
+## Adapter Status
 
 | Adapter       | Status                                                                |
 | ------------- | --------------------------------------------------------------------- |
-| `docker`      | Phase 9.1 (interface + main implementation)                           |
-| `gvisor`      | Phase 9.2 (thin docker wrapper)                                       |
-| `firecracker` | Phase 9.2 scaffold; production v2 via Flintlock                       |
-| `e2b`         | Phase 9.2 (sync Run); Stream uses buffered fallback until 9.3          |
+| `docker`      | Local development implementation. |
+| `gvisor`      | Thin Docker wrapper for stronger local isolation. |
+| `firecracker` | Scaffold; production v2 should use Flintlock or a managed equivalent. |
+| `e2b`         | Managed adapter; streaming uses buffered fallback until native stream support. |
 
 ## See also
 
@@ -138,4 +138,4 @@ exceeds the adapter's `max_timeout_s` before any work is queued.
   interface and `RunSpec` / `RunResult` / `Capabilities` types.
 - `apps/dashboard/src/lib/api.ts` — `SandboxCapabilitiesSchema` and
   `SandboxRunInputSchema` (the wire contract).
-- `PLAN.md` Phase 9 — overall sandbox roadmap.
+- Historical sandbox roadmap docs in `docs/archive/`.

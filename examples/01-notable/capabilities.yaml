@@ -1,0 +1,27 @@
+id: notable
+name: Notable
+profile: production-shaped-saas-example
+default_path: false
+summary: Multi-tenant notes SaaS with agents, memory, billing meter, and dashboard plugin.
+requires:
+  provider_key: recommended
+  auth: true
+  multi_tenancy: true
+  billing: stubbed
+  storage: false
+  sandbox: false
+  github: false
+demonstrates:
+  - tenant_isolation
+  - llm_gateway
+  - cost_events
+  - memory
+  - billing_meter
+  - dashboard_plugin
+  - custom_handler_sidecar
+deploy:
+  compose: true
+  railway: not_packaged
+notes:
+  - Ships server, agents, and operator plugin, not a full notes UI.
+  - Use this after the SupportDesk first run when you want a broader SaaS reference.

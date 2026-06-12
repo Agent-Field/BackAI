@@ -363,8 +363,7 @@ export function RunsView() {
             <EmptyTitle>Couldn&apos;t load runs</EmptyTitle>
             <EmptyDescription>
               The runtime returned: <code className="font-mono">{error}</code>.
-              If the runs endpoint isn&apos;t live yet this is expected — it
-              lands as part of Phase 5.
+              Check that the runtime is reachable and migrations have run.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -552,7 +551,7 @@ function RunDetailBody({ run }: { run: Run }) {
           <section className="flex flex-col gap-1.5">
             <SectionLabel>Logs</SectionLabel>
             <div className="bg-muted/40 text-muted-foreground rounded-md p-3 text-xs">
-              Logs will appear here once execution logging lands in Phase 5.
+              No execution logs are attached to this run.
             </div>
           </section>
         </div>

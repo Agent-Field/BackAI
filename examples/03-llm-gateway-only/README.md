@@ -5,7 +5,7 @@ Run an OpenAI-compatible gateway in 60 seconds. Multi-provider routing
 cache. No multi-tenancy, no auth complexity, no sandbox — just the
 gateway.
 
-This is the smallest possible AF Stack deployment. Point any OpenAI SDK
+This is the smallest possible BackAI deployment. Point any OpenAI SDK
 at `http://localhost:8080/api/v1/llm` and every call is logged, costed,
 and cacheable.
 
@@ -152,7 +152,7 @@ surface that data:
 2. **`GET /api/v1/cost/events?limit=20`** — raw event list.
 3. **Dashboard at `/operate/cost`** — live cost panel.
 
-Cached calls (Phase 7.3 in-memory cache) are recorded with
+Cached calls are recorded with
 `cost_usd=0` and `cached=true`, so you can see your hit rate.
 
 ---

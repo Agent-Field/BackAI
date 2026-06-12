@@ -1,4 +1,4 @@
-# Dashboard plugins (Phase 12.3)
+# Dashboard Plugins
 
 The dashboard ships a tiny plugin system so first-party features and
 operator-authored extensions can drop into the sidebar without touching

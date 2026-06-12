@@ -1,6 +1,6 @@
 # Dashboard Information Architecture
 
-The dashboard is the operator console for an AF Stack deployment — what a
+The dashboard is the operator console for an BackAI deployment — what a
 dev or platform team uses to build and operate an AI-native backend.
 
 ## Principle
@@ -192,5 +192,5 @@ something needs more than 2 clicks, the IA is wrong.
 ## End-user (customer-facing) dashboard
 
 Not part of v1. The "scaffold for your customers' dashboard" lives in
-Phase 13 (Examples + workload modules) when we ship the Notable / Shipwright
+the examples and workload-module path when we ship the Notable / Shipwright
 templates. The v1 dashboard is operator-only.

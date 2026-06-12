@@ -1,0 +1,25 @@
+id: deep-research
+name: Deep Research
+profile: long-running-agent-pattern
+default_path: false
+summary: Parallel research agent with memory accumulation and cost visibility.
+requires:
+  provider_key: recommended
+  auth: false
+  multi_tenancy: optional
+  billing: optional
+  storage: false
+  sandbox: optional_harness_path
+  github: false
+demonstrates:
+  - composite_reasoning
+  - fan_out_agent_work
+  - memory
+  - cost_events
+  - harness_fallback
+deploy:
+  compose: true
+  railway: not_packaged
+notes:
+  - Mock harness fallback keeps the shape runnable when local harness CLIs are missing.
+  - Use this as a pattern reference, not as the first SupportDesk quickstart.

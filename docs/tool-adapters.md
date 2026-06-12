@@ -1,6 +1,6 @@
 # Built-in Tool Adapters
 
-AF Stack ships a tenant-scoped catalogue of built-in tool adapters:
+BackAI ships a tenant-scoped catalogue of built-in tool adapters:
 
 | Adapter | Backend | Status when configured |
 | --- | --- | --- |

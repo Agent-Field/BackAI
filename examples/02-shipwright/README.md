@@ -3,7 +3,7 @@
 > Customer pastes a GitHub issue → an agent reads the repo, plans the
 > change, edits code, runs tests, opens a PR. Iteration UI built on
 > standard shadcn components. Real flow today uses a stub agent so you
-> can iterate on the UX; swap in the actual SWE-AF library and the
+> can iterate on the UX; swap in a real coding-agent library and the
 > wiring stays identical.
 
 ## What's here
@@ -77,11 +77,11 @@ handler.py persists the result:
 Customer-app polls every ~1s and renders the live state
 ```
 
-## Swapping in the real SWE-AF
+## Swapping In A Real Coding Agent
 
 The contract is just the AgentField reasoner. To swap:
 
-1. Replace `agents/shipwright/main.py` with the real SWE-AF agent.
+1. Replace `agents/shipwright/main.py` with the real coding agent.
 2. Keep `Agent(node_id="shipwright-v2")` and reasoner name
    `execute_task`. (Or bump the node_id to `shipwright-v3` and update
    `SHIPWRIGHT_AGENT` env var in `docker-compose.yml`.)

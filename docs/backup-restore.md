@@ -25,7 +25,7 @@ Three layers of priority:
 
 MinIO (or external S3) holds:
 
-- Sandbox run stdout/stderr (Phase 9). Mostly ephemeral; the dashboard
+- Sandbox run stdout/stderr. Mostly ephemeral; the dashboard
   references it via signed URLs.
 - Webhook delivery payloads (large bodies stored out-of-row).
 - Notable note attachments (if you enable the example).

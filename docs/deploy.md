@@ -124,7 +124,7 @@ their own collectors — no extra wiring needed.
 
 ## Links
 
-- Architecture: [PRD.md](../PRD.md), [TECH-SPEC.md](../TECH-SPEC.md)
+- Architecture: [STACK.md](../STACK.md), [PRODUCT.md](../PRODUCT.md), [ARCHITECTURE.md](../ARCHITECTURE.md)
 - Sandbox adapters trade-offs: [docs/sandbox-adapters.md](sandbox-adapters.md)
 - Multi-tenancy model: [docs/multi-tenancy.md](multi-tenancy.md)
 - Backup + restore: [docs/backup-restore.md](backup-restore.md)

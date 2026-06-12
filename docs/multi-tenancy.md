@@ -137,11 +137,11 @@ one, swap the credential in the customer's deployment.
 
 With MT on, two cross-cutting middlewares are wired in:
 
-- **Rate limiter** (Phase 6.2): a token-bucket per `tenant_id`. Defaults
+- **Rate limiter**: a token-bucket per `tenant_id`. Defaults
   to `60 req/min` per tenant; override per tenant via the
   `quota.rate_limit` field on `PATCH /admin/tenants/{id}`. Burst beyond
   the bucket returns `429 RATE_LIMITED` with a `Retry-After` header.
-- **Audit middleware** (Phase 6.2): every request that mutates state, or
+- **Audit middleware**: every request that mutates state, or
   hits an admin endpoint, appends a row to `audit_log` with `tenant_id`,
   `user_id`, `api_key_id`, `action`, and freeform `metadata`. Query via
   `GET /admin/audit?tenant=…&action=…&from=…&to=…`.
@@ -173,7 +173,7 @@ What it checks:
 8. Cleanup: keys revoked, tenants soft-deleted.
 
 The script is **safe to run against any environment**: if MT isn't
-enabled (or the in-flight Phase 6 work isn't merged yet), it prints
+enabled, it prints
 `SKIP` with the reason and exits 0 instead of failing.
 
 ## Turning it back off

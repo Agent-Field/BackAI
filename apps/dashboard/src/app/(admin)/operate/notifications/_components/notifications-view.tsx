@@ -700,7 +700,7 @@ function SendNotificationDialog({
                 <FieldLabel htmlFor="send-subject">Subject</FieldLabel>
                 <Input
                   id="send-subject"
-                  placeholder="Welcome to AF Stack"
+                  placeholder="Welcome to BackAI"
                   {...form.register("subject")}
                 />
               </Field>

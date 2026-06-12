@@ -285,6 +285,6 @@ Each is half a day of focused design.
 ## Versioning
 
 - AF SDK versions per AF release
-- Suite SDK versions per AF Stack release
-- AF Stack release pins a compatible AF version
+- Suite SDK versions per BackAI release
+- BackAI release pins a compatible AF version
 - OpenAPI spec is the contract — additive changes only between minor versions

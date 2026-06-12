@@ -1,6 +1,6 @@
 # Workload Modules
 
-Workload modules are the way AF Stack pulls in domain-specific features
+Workload modules are the way BackAI pulls in domain-specific features
 (notes, podcast jobs, reactive enrichments, etc.) without forking the
 runtime. Each module is a directory you drop under
 `workload-modules/<id>/`; the runtime scans `config.yaml` at boot,
@@ -94,7 +94,7 @@ For each enabled entry:
    tenant resolver + auth middleware. Handlers receive the resolved
    tenant from the request context like any other route.
 4. **Seed crons** declared in `crons/seed.yaml` into `suite_crons` so
-   they appear in the dashboard's Crons tab and the Phase 12.2
+   they appear in the dashboard's Crons tab and the runtime
    scheduler dispatches them on schedule.
 
 ## Authoring a Go handler
@@ -195,7 +195,7 @@ to the calling tenant.
     template: daily-digest
 ```
 
-The runtime's existing cron scheduler (Phase 12.2) handles dispatch.
+The runtime's existing cron scheduler handles dispatch.
 
 ## Removing a module
 
@@ -206,7 +206,7 @@ manually drop the data via your normal migration tooling.
 
 ## Built-in modules in the repo
 
-AF Stack does not currently ship a ready workload module in this
+BackAI does not currently ship a ready workload module in this
 directory. Shipwright's first slice is implemented as a core runtime
 metadata API plus an AgentField-backed example under
 `examples/02-shipwright/`; a future `workload-modules/git-workload/`
@@ -224,4 +224,4 @@ into your own deploy to vendor it.
   handlers (they CAN call each other's routes via internal HTTP).
 - Python handlers run in the agent process pool, not a dedicated
   sandbox, so they share the same fate domain. Use a sandbox adapter
-  (Phase 9) for arbitrary code execution.
+  for arbitrary code execution.

@@ -1,12 +1,13 @@
 # apps/backend
 
-Your application code for an AF Stack deployment. Forks edit this folder.
+Your application backend code for a BackAI deployment. Forks edit this
+folder before they change shared platform code.
 
 ## Layout
 
 | Folder | What lives here | Discovered as |
 |---|---|---|
-| `agents/` | AgentField agent processes (Python/Go/TS) | Each subfolder runs as its own container; registers with AF on startup |
+| `agents/` | AgentField agent processes (Python/Go/TS) | Each subfolder runs as its own container; registers with AgentField on startup |
 | `handlers/` | HTTP request handlers (plain code, not agents) | Loaded by the suite runtime on boot |
 | `jobs/` | Background jobs (River-backed) | Registered with the job runner |
 | `crons/` | Scheduled jobs | Registered with the scheduler |
@@ -16,5 +17,10 @@ Your application code for an AF Stack deployment. Forks edit this folder.
 
 ## Status
 
-This is scaffold-only in the early build. Real handlers / jobs / agents land
-in Phase 2+ examples.
+The root stack ships one sample agent for smoke tests. Product-specific
+agents, handlers, jobs, crons, migrations, and templates belong here or
+in `workload-modules/<id>/`.
+
+For a tiny copyable example, start with
+[`examples/starter/`](../../examples/starter/). For the repo ownership
+model, see [`docs/repo-map.md`](../../docs/repo-map.md).
