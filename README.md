@@ -150,7 +150,7 @@ docker compose up
 Open the customer app first:
 
 - Customer app: `http://localhost:34000`
-- Admin dashboard: `http://localhost:3000`
+- Admin dashboard: `http://localhost:33000`
 - API runtime: `http://localhost:8080/api/v1/`
 - Health + metrics: `http://localhost:8080/health` · `/ready` · `/metrics`
 - AgentField control plane: `http://localhost:8081/`

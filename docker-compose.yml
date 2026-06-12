@@ -1,11 +1,11 @@
 # AF Stack local development stack
 #
-# Brings up: Postgres, MinIO, AgentField control plane, suite runtime.
-# Other services (Svix, OTel, dashboard) added as their phases land.
+# Brings up: customer app, admin dashboard, runtime, Postgres, MinIO,
+# AgentField control plane, LiteLLM, and webhook sidecars.
 #
 # Quickstart:
 #   cp .env.example .env
-#   # edit .env: set OPENROUTER_API_KEY
+#   # optional: set OPENROUTER_API_KEY for live model calls
 #   docker compose up
 
 services:
@@ -213,13 +213,15 @@ services:
       DATABASE_URL: postgres://afstack:afstack@postgres:5432/afstack?sslmode=disable
       AF_STACK_AUTH_SECRET: ${AF_STACK_AUTH_SECRET:-dev-secret-change-me-in-prod}
       # Tell better-auth which URL the operator hits the dashboard at.
-      BETTER_AUTH_URL: http://localhost:${AF_STACK_DASHBOARD_PORT:-3000}
-      BETTER_AUTH_TRUSTED_ORIGINS: ${BETTER_AUTH_TRUSTED_ORIGINS:-}
+      BETTER_AUTH_URL: http://localhost:${AF_STACK_DASHBOARD_PORT:-33000}
+      BETTER_AUTH_TRUSTED_ORIGINS: ${BETTER_AUTH_TRUSTED_ORIGINS:-http://localhost:${AF_STACK_CUSTOMER_APP_PORT:-34000},http://localhost:${AF_STACK_DASHBOARD_PORT:-33000}}
       # Server-side fetches use Docker DNS.
       RUNTIME_URL: http://runtime:8080
       # Client-side fetches use the host-mapped runtime port.
       NEXT_PUBLIC_RUNTIME_URL: http://localhost:${AF_STACK_PORT:-8080}
       NEXT_PUBLIC_RUNTIME_UI_URL: http://localhost:8081
+      NEXT_PUBLIC_DASHBOARD_URL: http://localhost:${AF_STACK_DASHBOARD_PORT:-33000}
+      CUSTOMER_APP_URL: http://localhost:${AF_STACK_CUSTOMER_APP_PORT:-34000}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       AF_STACK_SSO_LABEL: ${AF_STACK_SSO_LABEL:-}
@@ -229,7 +231,41 @@ services:
       AF_STACK_SSO_CLIENT_SECRET: ${AF_STACK_SSO_CLIENT_SECRET:-}
       AF_STACK_SSO_SCOPES: ${AF_STACK_SSO_SCOPES:-}
     ports:
-      - "${AF_STACK_DASHBOARD_PORT:-3000}:3000"
+      - "${AF_STACK_DASHBOARD_PORT:-33000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      runtime:
+        condition: service_started
+    restart: unless-stopped
+
+  # Next.js customer product. This is the first browser target for the
+  # template: sign up, draft a SupportDesk reply, then deep-link to the
+  # matching admin cost event.
+  customer-app:
+    build:
+      context: .
+      dockerfile: apps/customer-app/Dockerfile
+    environment:
+      DATABASE_URL: postgres://afstack:afstack@postgres:5432/afstack?sslmode=disable
+      AF_STACK_AUTH_SECRET: ${AF_STACK_AUTH_SECRET:-dev-secret-change-me-in-prod}
+      BETTER_AUTH_URL: http://localhost:${AF_STACK_CUSTOMER_APP_PORT:-34000}
+      BETTER_AUTH_TRUSTED_ORIGINS: ${BETTER_AUTH_TRUSTED_ORIGINS:-http://localhost:${AF_STACK_CUSTOMER_APP_PORT:-34000},http://localhost:${AF_STACK_DASHBOARD_PORT:-33000}}
+      # Server-side proxy calls use Docker DNS.
+      RUNTIME_URL: http://runtime:8080
+      # Browser-visible URLs used in copyable snippets and admin link-outs.
+      NEXT_PUBLIC_RUNTIME_URL: http://localhost:${AF_STACK_PORT:-8080}
+      NEXT_PUBLIC_OPERATOR_URL: http://localhost:${AF_STACK_DASHBOARD_PORT:-33000}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      AF_STACK_SSO_LABEL: ${AF_STACK_SSO_LABEL:-}
+      AF_STACK_SSO_ISSUER: ${AF_STACK_SSO_ISSUER:-}
+      AF_STACK_SSO_DISCOVERY_URL: ${AF_STACK_SSO_DISCOVERY_URL:-}
+      AF_STACK_SSO_CLIENT_ID: ${AF_STACK_SSO_CLIENT_ID:-}
+      AF_STACK_SSO_CLIENT_SECRET: ${AF_STACK_SSO_CLIENT_SECRET:-}
+      AF_STACK_SSO_SCOPES: ${AF_STACK_SSO_SCOPES:-}
+    ports:
+      - "${AF_STACK_CUSTOMER_APP_PORT:-34000}:3000"
     depends_on:
       postgres:
         condition: service_healthy

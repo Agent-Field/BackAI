@@ -27,7 +27,7 @@ explicitly changes.
 | M1 | Product shell | Complete | Codex | README and customer app shell updated in `7601ebb`; customer/dashboard typechecks pass. |
 | M2 | No-key demo loop | Complete | Codex | Demo chat provider implemented in `7fe011b`; runtime Go suite and compose config pass. |
 | M3 | Customer-to-admin walkthrough | In progress | Codex | Customer action now carries `X-Request-ID`; cost ledger stores/filter by request id; admin cost page accepts `request_id`. |
-| M4 | Compose first-run | Not started | TBD | `docker compose up` boots full first experience. |
+| M4 | Compose first-run | In progress | Codex | Compose now includes customer app, admin, runtime, demo defaults, and matching first-run ports. |
 | M5 | Railway deploy | Not started | TBD | Railway template includes customer app and can deploy in demo mode. |
 | M6 | Docs and examples | Not started | TBD | Docs flow and capability manifests landed. |
 | M7 | Verification sweep | Not started | TBD | Local E2E, SDK checks, docs/build/deploy checks pass. |
@@ -40,6 +40,7 @@ explicitly changes.
 | 2026-06-12 | `7601ebb` | M1 product shell | `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`; `pnpm --dir apps/dashboard exec tsc --noEmit --pretty false`. |
 | 2026-06-12 | `7fe011b` | M2 demo provider | `GOCACHE=/tmp/backai-go-build go test ./services/runtime/...`; `docker compose config --quiet`. |
 | 2026-06-12 | Pending | M3 customer-to-admin walkthrough | `GOCACHE=/tmp/backai-go-build go test ./services/runtime/internal/cost ./services/runtime/internal/server ./services/runtime/cmd/af-stack`; `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`; `pnpm --dir apps/dashboard exec tsc --noEmit --pretty false`. |
+| 2026-06-12 | Pending | M4 compose first-run ports | `docker compose config --quiet`; `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`; `pnpm --dir apps/dashboard exec tsc --noEmit --pretty false`. |
 
 ## Current Risks
 
@@ -53,9 +54,8 @@ explicitly changes.
 
 ## Next Concrete Work
 
-1. Commit and push M3 request-id walkthrough.
+1. Commit and push M4 compose first-run ports.
 2. Add a guided walkthrough entry point that tells users when to jump from the
    customer app to admin.
-3. Start M4 compose first-run: make `docker compose up` boot the complete
-   SupportDesk demo path.
+3. Build and boot the compose stack, then run the browser-first demo path.
 4. Keep the first vertical slice small enough to verify locally.
