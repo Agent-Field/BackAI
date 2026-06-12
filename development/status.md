@@ -46,7 +46,7 @@ explicitly changes.
 | 2026-06-12 | `741d66e` | M4 OpenRouter E2E | Runtime restarted with `AF_STACK_DEMO_MODE=false` and OpenRouter key from zsh; logs showed `llm gateway: litellm sidecar`; customer LLM proxy returned real provider text; cost event for `codex-openrouter-1781281222` recorded provider `litellm` and nonzero cost. |
 | 2026-06-12 | `ea210cd` | M5 Railway template | `python3 -m json.tool deploy/railway/railway.json`; `python3 scripts/validate-deploy-targets.py`. |
 | 2026-06-12 | `3976fd1` | M6 demo mode docs | `rg -n "github.com/<you>/af-stack|AF_STACK_DEMO_MODE|demo-supportdesk|Railway|no-key|BackAI|SupportDesk" README.md docs/demo-mode.md deploy/railway/README.md deploy/README.md docs/deploy.md`; `python3 scripts/validate-deploy-targets.py`. |
-| 2026-06-12 | `pending` | M6 repo and examples DX | `ruby -e 'require "yaml"; ...' examples/*/capabilities.yaml`; `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`; `pnpm --dir apps/dashboard exec tsc --noEmit --pretty false`; public text scan has no `AF Stack`, `SWE-AF`, or `coming soon` hits outside code comments/archive. |
+| 2026-06-12 | `a1de6b5` | M6 repo and examples DX | `ruby -e 'require "yaml"; ...' examples/*/capabilities.yaml`; `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`; `pnpm --dir apps/dashboard exec tsc --noEmit --pretty false`; public text scan has no `AF Stack`, `SWE-AF`, or `coming soon` hits outside code comments/archive. |
 
 ## Current Risks
 
