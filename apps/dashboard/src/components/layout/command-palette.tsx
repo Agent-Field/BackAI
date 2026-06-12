@@ -21,16 +21,18 @@ type CommandPaletteProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   billingDisabled?: boolean
+  showShipwright?: boolean
 }
 
 export function CommandPalette({
   open,
   onOpenChange,
   billingDisabled = false,
+  showShipwright = false,
 }: CommandPaletteProps) {
   const router = useRouter()
   const [value, setValue] = useState("")
-  const navGroups = getNavGroupsWithPlugins({ billingDisabled })
+  const navGroups = getNavGroupsWithPlugins({ billingDisabled, showShipwright })
 
   useEffect(() => {
     if (!open) setValue("")

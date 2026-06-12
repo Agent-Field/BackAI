@@ -123,7 +123,6 @@ Make local first-run match the public promise.
 ### Inputs
 
 - `docker-compose.yml`
-- `docker-compose.override.yml`
 - `.env.example`
 - `apps/customer-app/Dockerfile`
 - `apps/dashboard/Dockerfile`
@@ -147,8 +146,8 @@ Make local first-run match the public promise.
 docker compose config --quiet
 docker compose up -d --build
 curl -fsS http://localhost:8080/health
-curl -fsS http://localhost:3000
-curl -fsS http://localhost:3001
+curl -fsS http://localhost:34000
+curl -fsS http://localhost:33000
 ```
 
 ## Worker E: Railway And Deploy Templates

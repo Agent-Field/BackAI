@@ -29,9 +29,10 @@ type TopbarProps = {
     email?: string | null
   } | null
   billingDisabled?: boolean
+  showShipwright?: boolean
 }
 
-export function Topbar({ user, billingDisabled = false }: TopbarProps) {
+export function Topbar({ user, billingDisabled = false, showShipwright = false }: TopbarProps) {
   const router = useRouter()
   const { theme, setTheme } = useTheme()
   const palette = useCommandPalette()
@@ -137,6 +138,7 @@ export function Topbar({ user, billingDisabled = false }: TopbarProps) {
         open={palette.open}
         onOpenChange={palette.setOpen}
         billingDisabled={billingDisabled}
+        showShipwright={showShipwright}
       />
     </>
   )

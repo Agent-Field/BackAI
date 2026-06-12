@@ -1,9 +1,8 @@
-# Shipwright example — extends the base AF Stack compose.
+# Shipwright example — extends the base BackAI compose.
 #
 # Usage (from repo root):
 #   docker compose \
 #     -f docker-compose.yml \
-#     -f docker-compose.override.yml \
 #     -f examples/02-shipwright/docker-compose.yml \
 #     up
 #
@@ -84,7 +83,7 @@ services:
       SHIPWRIGHT_AGENT: ${SHIPWRIGHT_AGENT:-swe-planner.build}
       SHIPWRIGHT_MODE: ${SHIPWRIGHT_MODE:-async}
     ports:
-      - "${SHIPWRIGHT_PORT:-8201}:8000"
+      - "${SHIPWRIGHT_PORT:-38201}:8000"
     depends_on:
       postgres:
         condition: service_healthy

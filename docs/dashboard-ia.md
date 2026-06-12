@@ -78,7 +78,7 @@ Live data. Where you go when something's happening or broken.
 | Tab | What it shows |
 |---|---|
 | **Runs** | Agent executions list with filters (tenant, agent, status, cost, time). Click → summary card with logs inline. "View full trace →" links to the runtime's existing trace UI for the deep graph. |
-| **Shipwright** | Coding-agent tasks with status, repo, AgentField execution link, and patch / PR pointer. |
+| **Shipwright** | Advanced coding-agent tasks with status, repo, AgentField execution link, and patch / PR pointer. Hidden from first-run navigation unless `AF_STACK_SHOW_SHIPWRIGHT=true`. |
 | **Approvals** | Human approval requests with payload JSON, status filters, and approve / deny / cancel actions. |
 | **Logs** | Live tail across all services. Search by tenant, agent, request ID. |
 | **Queues** | Live job queue state — pending/running/failed counts, recent jobs, retry button. Distinct from "Jobs" in Build (definitions vs runtime). |
@@ -189,8 +189,10 @@ something needs more than 2 clicks, the IA is wrong.
 | Helicone's eval features | Means different things. Don't pick a definition. |
 | PostHog's feature creep | They admit it. Stay focused. |
 
-## End-user (customer-facing) dashboard
+## End-user (customer-facing) app
 
-Not part of v1. The "scaffold for your customers' dashboard" lives in
-the examples and workload-module path when we ship the Notable / Shipwright
-templates. The v1 dashboard is operator-only.
+Part of the first-run path. `apps/customer-app/` ships as SupportDesk AI:
+customer sign-up, tenant provisioning, one-time API key reveal, Support Desk
+action, customer billing, and an admin deep link to the exact cost/request
+evidence. Heavier examples such as Notable and Shipwright remain examples,
+not the default product path.

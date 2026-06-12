@@ -47,9 +47,15 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
   )
 }
 
-export function AppSidebar({ billingDisabled = false }: { billingDisabled?: boolean }) {
+export function AppSidebar({
+  billingDisabled = false,
+  showShipwright = false,
+}: {
+  billingDisabled?: boolean
+  showShipwright?: boolean
+}) {
   const pathname = usePathname()
-  const navGroups = getNavGroupsWithPlugins({ billingDisabled })
+  const navGroups = getNavGroupsWithPlugins({ billingDisabled, showShipwright })
 
   return (
     <Sidebar collapsible="icon" variant="inset">

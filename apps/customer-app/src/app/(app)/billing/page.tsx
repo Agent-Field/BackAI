@@ -60,7 +60,7 @@ export default async function BillingPage() {
               variant="outline"
               render={
                 <Link
-                  href="https://github.com/Agent-Field/af-stack/blob/main/docs/adapters/billing.md"
+                  href="https://github.com/Agent-Field/backai/blob/main/docs/adapters/billing.md"
                   target="_blank"
                 >
                   Enable billing

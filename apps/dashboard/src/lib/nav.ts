@@ -66,6 +66,7 @@ export type NavGroup = {
 
 export type NavOptions = {
   billingDisabled?: boolean
+  showShipwright?: boolean
 }
 
 export const NAV_HOME: NavItem = {
@@ -327,15 +328,16 @@ export const ALL_NAV_ITEMS: NavItem[] = [
 ]
 
 function applyNavOptions(groups: NavGroup[], options: NavOptions): NavGroup[] {
-  if (!options.billingDisabled) return groups
-  return groups.map((group) =>
-    group.id === "customers"
-      ? {
-          ...group,
-          items: group.items.filter((item) => item.id !== "customer-billing"),
-        }
-      : group,
-  )
+  return groups.map((group) => {
+    let items = group.items
+    if (group.id === "operate" && !options.showShipwright) {
+      items = items.filter((item) => item.id !== "shipwright")
+    }
+    if (group.id === "customers" && options.billingDisabled) {
+      items = items.filter((item) => item.id !== "customer-billing")
+    }
+    return items === group.items ? group : { ...group, items }
+  })
 }
 
 /**

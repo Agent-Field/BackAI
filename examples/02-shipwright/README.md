@@ -36,13 +36,12 @@ Customer-app pages (live in the main `apps/customer-app/`):
 # From repo root, with .env already populated (cp .env.example .env)
 docker compose \
   -f docker-compose.yml \
-  -f docker-compose.override.yml \
   -f examples/02-shipwright/docker-compose.yml \
   up -d
 
 # Customer-app:    http://localhost:34000
 # Operator:        http://localhost:33000
-# Runtime API:     http://localhost:38080
+# Runtime API:     http://localhost:8080
 # Shipwright API:  http://localhost:38201
 ```
 

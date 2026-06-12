@@ -15,6 +15,10 @@ function billingDisabled(): boolean {
   return process.env.AF_STACK_BILLING_ADAPTER?.trim().toLowerCase() === "none"
 }
 
+function showShipwright(): boolean {
+  return process.env.AF_STACK_SHOW_SHIPWRIGHT?.trim().toLowerCase() === "true"
+}
+
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   // First-run: if no operator exists, divert to setup wizard.
   const count = await operatorCount()
@@ -23,13 +27,16 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   }
 
   const session = await requireOperator()
+  const isBillingDisabled = billingDisabled()
+  const isShipwrightVisible = showShipwright()
 
   return (
     <SidebarProvider>
-      <AppSidebar billingDisabled={billingDisabled()} />
+      <AppSidebar billingDisabled={isBillingDisabled} showShipwright={isShipwrightVisible} />
       <SidebarInset>
         <Topbar
-          billingDisabled={billingDisabled()}
+          billingDisabled={isBillingDisabled}
+          showShipwright={isShipwrightVisible}
           user={{
             name: session.user.name,
             email: session.user.email,
