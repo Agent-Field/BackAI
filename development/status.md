@@ -32,6 +32,7 @@ explicitly changes.
 | M6 | Docs and examples | Complete | Codex | Public docs now cover demo mode, attach-existing-app mode, repo ownership, example capabilities, Railway first run, and cleaned BackAI naming. |
 | M7 | Verification sweep | Complete | Codex | Runtime Go suite, app typechecks/builds, compose config, deploy validation, Railway JSON, manifest parsing, and public text scan pass. |
 | M8 | Root repo hygiene | Complete | Codex | Root now keeps operational/public files only; planning docs moved to `development/`, durable docs/assets moved to `docs/`, `brand.yaml` is canonical, and the tracked root binary is removed/ignored. |
+| M9 | Local first-experience launch | Complete | Codex | Demo mode and real-provider mode both launched locally; customer signup, onboarding key, SupportDesk request, admin cost ledger, and request-id deep link verified. |
 
 ## Merge Log
 
@@ -50,6 +51,8 @@ explicitly changes.
 | 2026-06-12 | `a1de6b5` | M6 repo and examples DX | `ruby -e 'require "yaml"; ...' examples/*/capabilities.yaml`; `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`; `pnpm --dir apps/dashboard exec tsc --noEmit --pretty false`; public text scan has no `AF Stack`, `SWE-AF`, or `coming soon` hits outside code comments/archive. |
 | 2026-06-12 | `6ab9cce` | M7 final verification | `ruby -e 'require "yaml"; ...' examples/*/capabilities.yaml`; `rg -n "coming soon|SWE-AF|AF Stack" ...`; `docker compose config --quiet`; `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`; `pnpm --dir apps/dashboard exec tsc --noEmit --pretty false`; `python3 -m json.tool deploy/railway/railway.json`; `python3 scripts/validate-deploy-targets.py`; `GOCACHE=/tmp/backai-go-build go test ./services/runtime/...`; `pnpm --dir apps/customer-app build`; `pnpm --dir apps/dashboard build`. |
 | 2026-06-12 | `b8d9ff5` | M8 root repo hygiene | Root listing audited; root binary removed and ignored; `BRAND.yaml` renamed to `brand.yaml`; planning files moved under `development/`; public docs and screenshots moved under `docs/`; stale root doc and old repo URL references scanned and corrected. |
+| 2026-06-12 | `677da9d` | Admin deep-link query fix | During local first-experience testing, unauthenticated admin cost links preserved `request_id` at `/login` but dropped it from `next`; middleware now redirects to `/login?next=/operate/cost?request_id=...`. Verified with `curl -I`. |
+| 2026-06-12 | `pending` | M9 local first-experience launch | Demo mode: `AF_STACK_DEMO_MODE=true` with blank provider keys, customer signup `demo-1781283223@example.com`, request `codex-demo-1781283223`, provider `demo`, cost event `0.000113`. Real mode: OpenRouter key from zsh, runtime logs `llm gateway: litellm sidecar`, request `codex-real-1781283477`, provider `litellm`, cost event `0.000048`. |
 
 ## Current Risks
 
@@ -64,5 +67,5 @@ explicitly changes.
 ## Next Concrete Work
 
 1. Commit and push status-board commit-id cleanup.
-2. Push the root hygiene cleanup to PR #118.
+2. Monitor PR #118 checks after the latest pushes.
 3. Decide whether to keep or move the advanced Shipwright customer routes before public launch.
