@@ -24,17 +24,17 @@ export function FirstRunPanel({ tenantId, hasCalls }: Props) {
       done: true,
     },
     {
-      label: "Support reply",
+      label: "Support chat",
       detail: hasCalls
-        ? "A model call has been billed to this tenant."
-        : "Draft one reply to create a cost event.",
+        ? "A chat response has been recorded for this tenant."
+        : "Send one chat message to create the first activity record.",
       done: hasCalls,
     },
     {
       label: "Admin evidence",
       detail: hasCalls
         ? "Usage is ready to inspect in the operator console."
-        : "The exact request link appears after a reply is drafted.",
+        : "The activity link appears after a chat response is created.",
       done: hasCalls,
     },
   ]
@@ -94,7 +94,7 @@ export function FirstRunPanel({ tenantId, hasCalls }: Props) {
         <div className="flex flex-wrap gap-2">
           <Link href="/code-helper" className={buttonVariants()} data-tour="customer-draft-action">
             <Send data-icon="inline-start" />
-            Draft reply
+            Start chat
           </Link>
           <Link
             href={operatorCostUrl(tenantId)}

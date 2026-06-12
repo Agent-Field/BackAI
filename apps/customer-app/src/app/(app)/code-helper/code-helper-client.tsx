@@ -2,23 +2,60 @@
 
 "use client"
 
-import { useState } from "react"
-import Link from "next/link"
-import { Bot, ExternalLink, GitBranch, Send, Sparkles } from "lucide-react"
+import { useMemo, useState } from "react"
+import {
+  CheckCircle2,
+  Loader2,
+  MessageSquareText,
+  Route,
+  Send,
+  Sparkles,
+  UserRound,
+} from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter"
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism"
 
-import { Button } from "@/components/ui/button"
 import { GuidedTour } from "@/components/guided-tour"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Textarea } from "@/components/ui/textarea"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Separator } from "@/components/ui/separator"
+import { Textarea } from "@/components/ui/textarea"
 
-const MODEL = "qwen/qwen-2.5-72b-instruct"
+const MODEL = process.env.NEXT_PUBLIC_DEFAULT_MODEL ?? "qwen/qwen-2.5-72b-instruct"
 const SYSTEM_PROMPT =
   "You are SupportDesk AI, a concise customer support assistant. Draft helpful, accurate replies for support teams. Keep the tone clear, calm, and practical. Follow the support decision plan when provided. If the customer asks for something policy-specific, mention what the support team should verify before sending."
 const ONBOARDING_KEY_STORAGE = "backai:onboarding-api-key"
+
+const SUGGESTED_PROMPTS = [
+  {
+    title: "Refund request",
+    intent: "Billing policy",
+    prompt:
+      "A customer says their invoice is wrong, asks for a refund, and wants the team to confirm whether they were double charged.",
+  },
+  {
+    title: "Login blocked",
+    intent: "Access help",
+    prompt:
+      "A customer cannot sign in after changing phones. They need a calm reply with identity verification steps and an escalation path.",
+  },
+  {
+    title: "Angry renewal",
+    intent: "Retention",
+    prompt:
+      "A customer is upset about an auto-renewal and is threatening to cancel unless support explains the policy and next steps clearly.",
+  },
+  {
+    title: "Technical issue",
+    intent: "Troubleshooting",
+    prompt:
+      "A customer reports that exports fail only for large CSV files. Draft a reply that asks for the right diagnostics without over-promising.",
+  },
+]
 
 type Props = {
   tenantId: string
@@ -63,39 +100,17 @@ type AgentPlan = {
   }
 }
 
-function operatorDashboardUrl(tenantId: string, requestId?: string): string {
-  // Best-effort: the operator runs the admin dashboard on :33000 (env
-  // AF_STACK_DASHBOARD_PORT). NEXT_PUBLIC_OPERATOR_URL overrides this.
-  const base =
-    process.env.NEXT_PUBLIC_OPERATOR_URL ??
-    (typeof window !== "undefined"
-      ? window.location.origin.replace(/:34000$/, ":33000").replace(/:34001$/, ":33000")
-      : "http://localhost:33000")
-  const qs = new URLSearchParams({ tenant: tenantId })
-  if (requestId) qs.set("request_id", requestId)
-  return `${base}/operate/cost?${qs.toString()}`
-}
+type ChatStatus = "planning" | "drafting" | "complete" | "error"
 
-function agentFieldBaseUrl(): string {
-  return (
-    process.env.NEXT_PUBLIC_RUNTIME_UI_URL ??
-    (typeof window !== "undefined"
-      ? window.location.origin.replace(/:34000$/, ":8081").replace(/:34001$/, ":8081")
-      : "http://localhost:8081")
-  )
-}
-
-function agentFieldCatalogUrl(agentId = "supportdesk", reasonerId?: string): string {
-  const url = new URL("/api/v1/discovery/capabilities", agentFieldBaseUrl())
-  url.searchParams.set("agent_id", agentId)
-  if (reasonerId) url.searchParams.set("reasoner", reasonerId)
-  return url.toString()
-}
-
-function agentFieldExecutionUrl(executionId: string): string {
-  return `${agentFieldBaseUrl().replace(/\/$/, "")}/agent-api/executions/${encodeURIComponent(
-    executionId,
-  )}/details`
+type ChatMessage = {
+  id: string
+  role: "user" | "assistant"
+  content: string
+  status?: ChatStatus
+  plan?: AgentPlan
+  usage?: Usage
+  requestId?: string
+  error?: string
 }
 
 function createRequestId(): string {
@@ -133,81 +148,150 @@ async function ensureOnboardingAPIKey(): Promise<string | null> {
   return data.api_key_token
 }
 
-export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
-  const [question, setQuestion] = useState("")
-  const [answer, setAnswer] = useState("")
-  const [usage, setUsage] = useState<Usage | null>(null)
-  const [agentPlan, setAgentPlan] = useState<AgentPlan | null>(null)
-  const [agentExecutionId, setAgentExecutionId] = useState<string | null>(null)
-  const [lastRequestId, setLastRequestId] = useState<string | null>(null)
+function formatLabel(value: string): string {
+  return value
+    .replace(/^support_/, "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
+function planChips(plan?: AgentPlan): string[] {
+  if (!plan) return []
+  const chips = [
+    plan.issue?.category ? formatLabel(plan.issue.category) : null,
+    plan.dynamic_branch ? `${formatLabel(plan.dynamic_branch)} route` : null,
+    plan.issue?.urgency ? `${formatLabel(plan.issue.urgency)} urgency` : null,
+    plan.guardrail?.handoff || plan.issue?.needs_human_review ? "Human review" : null,
+    plan.confidence ? `${formatLabel(plan.confidence)} confidence` : null,
+  ]
+  return chips.filter(Boolean) as string[]
+}
+
+function activeChecks(plan?: AgentPlan): string[] {
+  return (plan?.reasoners ?? []).slice(0, 5).map(formatLabel)
+}
+
+function renderPlanGuidance(plan: AgentPlan): string {
+  const guidance = [
+    plan.issue?.summary ? `Customer issue: ${plan.issue.summary}` : null,
+    plan.issue?.category ? `Category: ${formatLabel(plan.issue.category)}` : null,
+    plan.issue?.urgency ? `Urgency: ${formatLabel(plan.issue.urgency)}` : null,
+    plan.dynamic_branch ? `Response route: ${formatLabel(plan.dynamic_branch)}` : null,
+    plan.guardrail?.allowed_commitment
+      ? `Allowed commitment: ${plan.guardrail.allowed_commitment}`
+      : null,
+    plan.guardrail?.must_verify?.length
+      ? `Verify before promising: ${plan.guardrail.must_verify.join("; ")}`
+      : null,
+    plan.guardrail?.do_not_promise?.length
+      ? `Do not promise: ${plan.guardrail.do_not_promise.join("; ")}`
+      : null,
+    plan.brief?.next_steps?.length
+      ? `Suggested next steps: ${plan.brief.next_steps.join("; ")}`
+      : null,
+  ].filter(Boolean)
+
+  return guidance.join("\n")
+}
+
+function sanitizeAssistantContent(content: string): string {
+  return content
+    .replace(/Internal response guidance:[\s\S]*$/i, "")
+    .replace(/Private response guidance:[\s\S]*$/i, "")
+    .replace(/\n?Customer issue:[\s\S]*$/i, "")
+    .replace(/^Customer ticket:\s*/i, "")
+    .trim()
+}
+
+export function CodeHelperClient({ tenantId }: Props) {
+  const [draft, setDraft] = useState("")
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [streaming, setStreaming] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+
+  const latestAssistant = useMemo(
+    () =>
+      messages
+        .slice()
+        .reverse()
+        .find((message) => message.role === "assistant"),
+    [messages],
+  )
+
   const tourSteps = [
     {
-      element: "[data-tour='supportdesk-heading']",
+      element: "[data-tour='support-chat-heading']",
       popover: {
-        title: "Run a real product workflow",
+        title: "A customer-facing chat",
         description:
-          "This page feels like a small customer app, but it is exercising the full backend: policy planning, model routing, tenant metering, and admin evidence.",
+          "The product surface stays simple: sign in, ask for help, and get a useful response.",
         side: "bottom" as const,
         align: "start" as const,
       },
     },
     {
-      element: "[data-tour='supportdesk-composer']",
+      element: "[data-tour='prompt-suggestions']",
       popover: {
-        title: "Run the SupportDesk action",
+        title: "Start with realistic cases",
         description:
-          "Enter a customer issue and draft a reply. Billing, refund, access, and technical issues each produce a different decision path.",
+          "These examples are just customer messages. The app decides how much planning and checking the response needs.",
         side: "bottom" as const,
         align: "start" as const,
       },
     },
-    ...(agentPlan
-      ? [
-          {
-            element: "[data-tour='decision-plan']",
-            popover: {
-              title: "Inspect the decision path",
-              description:
-                "This panel shows the category, branch, checks, and guardrail that shaped the final response before the model call.",
-              side: "top" as const,
-              align: "start" as const,
-            },
-          },
-        ]
-      : []),
-    ...(answer
-      ? [
-          {
-            element: "[data-tour='admin-evidence-link']",
-            popover: {
-              title: "Open the admin evidence",
-              description:
-                "This link carries the exact request into the admin dashboard, where operators see tenant, model, tokens, cost, and related backend records.",
-              side: "top" as const,
-              align: "start" as const,
-            },
-          },
-        ]
-      : []),
+    {
+      element: "[data-tour='chat-thread']",
+      popover: {
+        title: "Planning stays visible, not technical",
+        description:
+          "While the assistant works, customers see a natural route and check status without needing technical terminology.",
+        side: "top" as const,
+        align: "start" as const,
+      },
+    },
+    {
+      element: "[data-tour='chat-composer']",
+      popover: {
+        title: "Type normally",
+        description:
+          "Free-form chat still works. The same route chips appear only when the response actually has planning data.",
+        side: "top" as const,
+        align: "start" as const,
+      },
+    },
   ]
 
-  const handleAsk = async () => {
-    if (!question.trim()) return
+  const patchAssistant = (id: string, updater: (message: ChatMessage) => ChatMessage) => {
+    setMessages((current) =>
+      current.map((message) =>
+        message.id === id && message.role === "assistant" ? updater(message) : message,
+      ),
+    )
+  }
+
+  const handleAsk = async (prompt = draft) => {
+    const text = prompt.trim()
+    if (!text || streaming) return
+
     setStreaming(true)
-    setError(null)
-    setAnswer("")
-    setUsage(null)
-    setAgentPlan(null)
-    setAgentExecutionId(null)
+    setDraft("")
+
     const requestId = createRequestId()
-    setLastRequestId(requestId)
+    const userId = `user-${requestId}`
+    const assistantId = `assistant-${requestId}`
+
+    setMessages((current) => [
+      ...current,
+      { id: userId, role: "user", content: text },
+      {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        status: "planning",
+        requestId,
+      },
+    ])
 
     try {
-      // Same-origin proxy forwards our session cookie. The runtime
-      // resolves tenant by API key when the just-issued onboarding key is
-      // still available, and falls back to session auth for returning users.
       const headers = new Headers({
         "content-type": "application/json",
         "x-request-id": requestId,
@@ -216,9 +300,13 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
       if (apiKey) {
         headers.set("authorization", `Bearer ${apiKey}`)
       }
-      const plan = await fetchAgentPlan(headers, question, tenantId)
-      setAgentPlan(plan.plan)
-      setAgentExecutionId(plan.executionId)
+
+      const plan = await fetchAgentPlan(headers, text, tenantId)
+      patchAssistant(assistantId, (message) => ({
+        ...message,
+        plan: plan.plan,
+        status: "drafting",
+      }))
 
       const res = await fetch("/api/v1/llm/chat/completions", {
         method: "POST",
@@ -231,14 +319,10 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
           messages: [
             { role: "system", content: SYSTEM_PROMPT },
             {
-              role: "user",
-              content: [
-                `Customer ticket:\n${question}`,
-                "",
-                "Support decision plan:",
-                JSON.stringify(plan.plan, null, 2),
-              ].join("\n"),
+              role: "system",
+              content: `Private response guidance:\n${renderPlanGuidance(plan.plan)}`,
             },
+            { role: "user", content: text },
           ],
         }),
       })
@@ -246,18 +330,19 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
       if (!res.ok || !res.body) {
         let detail = `HTTP ${res.status}`
         try {
-          const text = await res.text()
-          detail += ` — ${text.slice(0, 200)}`
+          const body = await res.text()
+          detail += ` - ${body.slice(0, 200)}`
         } catch {
           // ignore
         }
-        setError(detail)
+        patchAssistant(assistantId, (message) => ({
+          ...message,
+          status: "error",
+          error: detail,
+        }))
         return
       }
 
-      // OpenAI-style server-sent events: lines of "data: {...}\n\n",
-      // terminated by "data: [DONE]\n\n". Last data line carries usage
-      // when the gateway is configured to emit it.
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ""
@@ -279,227 +364,311 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
               json.choices?.[0]?.delta?.content ?? json.choices?.[0]?.message?.content
             if (typeof delta === "string" && delta.length > 0) {
               fullText += delta
-              setAnswer(fullText)
+              patchAssistant(assistantId, (message) => ({
+                ...message,
+                content: sanitizeAssistantContent(fullText),
+              }))
             }
             if (json.usage) {
-              setUsage({
-                prompt_tokens: json.usage.prompt_tokens,
-                completion_tokens: json.usage.completion_tokens,
-                total_tokens: json.usage.total_tokens,
-                cost_usd: json.usage.cost_usd ?? json.usage.response_cost,
-                response_cost: json.usage.response_cost,
-              })
+              patchAssistant(assistantId, (message) => ({
+                ...message,
+                usage: {
+                  prompt_tokens: json.usage.prompt_tokens,
+                  completion_tokens: json.usage.completion_tokens,
+                  total_tokens: json.usage.total_tokens,
+                  cost_usd: json.usage.cost_usd ?? json.usage.response_cost,
+                  response_cost: json.usage.response_cost,
+                },
+              }))
             }
           } catch {
             // partial chunk; skip
           }
         }
       }
+
+      patchAssistant(assistantId, (message) => ({
+        ...message,
+        content: sanitizeAssistantContent(fullText) || message.content,
+        status: "complete",
+      }))
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      patchAssistant(assistantId, (message) => ({
+        ...message,
+        status: "error",
+        error: err instanceof Error ? err.message : String(err),
+      }))
     } finally {
       setStreaming(false)
     }
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div data-tour="supportdesk-heading">
-          <h1 className="text-2xl font-semibold tracking-tight">Support Desk</h1>
-          <p className="text-muted-foreground text-sm">
-            Draft customer replies through the BackAI backend. Cost is billed to your tenant and
-            visible in admin. Model: <code className="font-mono">{MODEL}</code>
-            {apiKeyPrefix ? (
-              <>
-                {" · key "}
-                <code className="font-mono">af_{apiKeyPrefix}_…</code>
-              </>
-            ) : null}
+        <div data-tour="support-chat-heading">
+          <h1 className="text-2xl font-semibold tracking-tight">Support Chat</h1>
+          <p className="text-muted-foreground max-w-2xl text-sm">
+            Ask about refunds, access issues, renewals, or technical problems. The assistant chooses
+            the right checks while keeping the conversation simple.
           </p>
         </div>
-        <GuidedTour id="customer-supportdesk-v1" autoStart steps={tourSteps} />
+        <GuidedTour id="customer-support-chat-v1" autoStart steps={tourSteps} />
       </div>
 
-      <Card data-tour="supportdesk-composer">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Sparkles className="size-4" />
-            Draft a support reply
-          </CardTitle>
-          <CardDescription>
-            Example: &quot;A customer says their invoice is wrong and wants a refund.&quot;
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <Textarea
-            placeholder="A customer says their invoice is wrong and wants a refund."
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            rows={4}
-            disabled={streaming}
-          />
-          <div className="flex items-center gap-2">
-            <Button onClick={handleAsk} disabled={streaming || !question.trim()}>
-              <Send data-icon="inline-start" />
-              {streaming ? "Drafting..." : "Draft reply"}
-            </Button>
-            {usage?.cost_usd !== undefined ? (
-              <Badge variant="outline" className="font-mono text-xs">
-                ${usage.cost_usd.toFixed(6)} this call
+      <Card className="overflow-hidden" data-tour="chat-thread">
+        <CardHeader className="border-b">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <MessageSquareText className="size-4" />
+                Conversation
+              </CardTitle>
+              <CardDescription>
+                Route and check chips appear when the assistant needs them.
+              </CardDescription>
+            </div>
+            {latestAssistant?.status === "complete" ? (
+              <Badge variant="secondary" className="gap-1.5">
+                <CheckCircle2 className="size-3" />
+                Ready
               </Badge>
-            ) : null}
-            {usage?.total_tokens !== undefined ? (
-              <Badge variant="outline" className="font-mono text-xs">
-                {usage.total_tokens} tok
+            ) : streaming ? (
+              <Badge variant="outline" className="gap-1.5">
+                <Loader2 className="size-3 animate-spin" />
+                Working
               </Badge>
             ) : null}
           </div>
-          {error ? (
-            <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-              {error}
+        </CardHeader>
+        <CardContent className="p-0">
+          <ScrollArea className="h-[min(58vh,620px)]">
+            <div className="flex flex-col gap-5 p-4 md:p-6">
+              {messages.length === 0 ? (
+                <EmptyChatState onSelect={handleAsk} disabled={streaming} />
+              ) : (
+                messages.map((message) => <ChatBubble key={message.id} message={message} />)
+              )}
             </div>
-          ) : null}
+          </ScrollArea>
+          <Separator />
+          <div className="space-y-4 p-4 md:p-6">
+            {messages.length > 0 ? (
+              <PromptSuggestions onSelect={handleAsk} disabled={streaming} />
+            ) : null}
+            <div className="flex flex-col gap-3" data-tour="chat-composer">
+              <Textarea
+                placeholder="Ask the support assistant what to send back..."
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                rows={3}
+                disabled={streaming}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                    event.preventDefault()
+                    void handleAsk()
+                  }
+                }}
+              />
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-muted-foreground text-xs">
+                  Press Cmd+Enter to send. Click a suggestion to run it immediately.
+                </p>
+                <Button onClick={() => handleAsk()} disabled={streaming || !draft.trim()}>
+                  <Send data-icon="inline-start" />
+                  {streaming ? "Sending..." : "Send"}
+                </Button>
+              </div>
+            </div>
+          </div>
         </CardContent>
       </Card>
+    </div>
+  )
+}
 
-      {answer ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Draft reply</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="prose prose-sm dark:prose-invert max-w-none">
-              <ReactMarkdown
-                components={{
-                  code({ className, children, ...props }) {
-                    const match = /language-(\w+)/.exec(className ?? "")
-                    const lang = match ? match[1] : ""
-                    const text = String(children).replace(/\n$/, "")
-                    const isBlock = text.includes("\n") || lang.length > 0
-                    if (isBlock) {
-                      return (
-                        <SyntaxHighlighter
-                          language={lang || "text"}
-                          style={vscDarkPlus}
-                          customStyle={{
-                            borderRadius: "var(--radius-md)",
-                            fontSize: "0.8rem",
-                          }}
-                          PreTag="div"
-                        >
-                          {text}
-                        </SyntaxHighlighter>
-                      )
-                    }
-                    return (
-                      <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs" {...props}>
-                        {children}
-                      </code>
-                    )
-                  },
-                }}
-              >
-                {answer}
-              </ReactMarkdown>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {agentPlan ? (
-        <Card data-tour="decision-plan">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <GitBranch className="size-4" />
-              Decision plan
-            </CardTitle>
-            <CardDescription>
-              SupportDesk first classifies the issue, extracts facts, chooses a policy branch, and
-              then sends a brief to the BackAI gateway.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4 md:grid-cols-[1fr_1.2fr]">
-            <div className="space-y-2">
-              <div className="flex flex-wrap gap-2">
-                <Badge variant="secondary" className="gap-1.5">
-                  <Bot className="size-3" />
-                  {agentPlan.agent ?? "supportdesk"}
-                </Badge>
-                <Badge variant="outline">{agentPlan.dynamic_branch ?? "general"} branch</Badge>
-                <Badge variant="outline">{agentPlan.confidence ?? "medium"} confidence</Badge>
-              </div>
-              {agentExecutionId ? (
-                <p className="text-muted-foreground text-xs">
-                  Execution trace{" "}
-                  <Link
-                    href={agentFieldExecutionUrl(agentExecutionId)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-mono underline-offset-4 hover:underline"
-                  >
-                    {agentExecutionId}
-                  </Link>
-                </p>
-              ) : null}
-              <p className="text-muted-foreground text-sm">
-                Category:{" "}
-                <span className="text-foreground">{agentPlan.issue?.category ?? "general"}</span>
-                {" · "}Urgency:{" "}
-                <span className="text-foreground">{agentPlan.issue?.urgency ?? "normal"}</span>
-              </p>
-            </div>
-            <div className="space-y-3">
-              <div>
-                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Reasoner path
-                </div>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {(agentPlan.reasoners ?? []).map((reasoner) => (
-                    <Badge
-                      key={reasoner}
-                      variant="outline"
-                      render={
-                        <Link
-                          href={agentFieldCatalogUrl(agentPlan.agent ?? "supportdesk", reasoner)}
-                          target="_blank"
-                          rel="noreferrer"
-                          title={`Open ${agentPlan.agent ?? "supportdesk"}.${reasoner} in the runtime catalog`}
-                        >
-                          {reasoner}
-                        </Link>
-                      }
-                    />
-                  ))}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Guardrail
-                </div>
-                <p className="mt-1 text-sm">
-                  {agentPlan.guardrail?.allowed_commitment ??
-                    "Share next steps and request missing details."}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {(usage || answer) && (
-        <div className="text-muted-foreground text-xs" data-tour="admin-evidence-link">
-          <Link
-            href={operatorDashboardUrl(tenantId, lastRequestId ?? undefined)}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 underline-offset-4 hover:underline"
-          >
-            View this call in the admin dashboard
-            <ExternalLink className="size-3" />
-          </Link>
+function EmptyChatState({
+  onSelect,
+  disabled,
+}: {
+  onSelect: (prompt: string) => void
+  disabled: boolean
+}) {
+  return (
+    <div className="grid gap-5 py-8">
+      <div className="mx-auto flex max-w-lg flex-col items-center text-center">
+        <div className="bg-primary/10 text-primary mb-4 flex size-11 items-center justify-center rounded-md">
+          <Sparkles className="size-5" />
         </div>
-      )}
+        <h2 className="text-xl font-semibold tracking-tight">What should support send?</h2>
+        <p className="text-muted-foreground mt-2 text-sm">
+          Pick a realistic customer message or type your own. The assistant will show the route it
+          is taking only when there is something useful to show.
+        </p>
+      </div>
+      <PromptSuggestions onSelect={onSelect} disabled={disabled} />
+    </div>
+  )
+}
+
+function PromptSuggestions({
+  onSelect,
+  disabled,
+}: {
+  onSelect: (prompt: string) => void
+  disabled: boolean
+}) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-2" data-tour="prompt-suggestions">
+      {SUGGESTED_PROMPTS.map((suggestion) => (
+        <Button
+          key={suggestion.title}
+          type="button"
+          variant="outline"
+          className="h-auto justify-start whitespace-normal p-3 text-left"
+          disabled={disabled}
+          onClick={() => onSelect(suggestion.prompt)}
+        >
+          <span className="flex min-w-0 flex-col gap-1">
+            <span className="flex items-center gap-2 text-sm font-medium">
+              <Route className="size-3.5 shrink-0" />
+              {suggestion.title}
+            </span>
+            <span className="text-muted-foreground text-xs font-normal">{suggestion.intent}</span>
+          </span>
+        </Button>
+      ))}
+    </div>
+  )
+}
+
+function ChatBubble({ message }: { message: ChatMessage }) {
+  const isAssistant = message.role === "assistant"
+  return (
+    <div className={isAssistant ? "flex gap-3" : "flex justify-end gap-3"}>
+      {isAssistant ? (
+        <Avatar className="mt-1">
+          <AvatarFallback>AI</AvatarFallback>
+        </Avatar>
+      ) : null}
+      <div
+        className={
+          isAssistant
+            ? "max-w-[82%] space-y-3"
+            : "bg-primary text-primary-foreground max-w-[82%] rounded-lg px-4 py-3 text-sm"
+        }
+      >
+        {isAssistant ? <AssistantMessage message={message} /> : message.content}
+      </div>
+      {!isAssistant ? (
+        <Avatar className="mt-1">
+          <AvatarFallback>
+            <UserRound className="size-4" />
+          </AvatarFallback>
+        </Avatar>
+      ) : null}
+    </div>
+  )
+}
+
+function AssistantMessage({ message }: { message: ChatMessage }) {
+  const chips = planChips(message.plan)
+  const checks = activeChecks(message.plan)
+  return (
+    <>
+      <div className="rounded-lg border bg-muted/35 px-4 py-3">
+        <PlanningState status={message.status} chips={chips} checks={checks} />
+        {message.error ? (
+          <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+            {message.error}
+          </div>
+        ) : null}
+        {message.content ? (
+          <div className="prose prose-sm dark:prose-invert mt-4 max-w-none">
+            <ReactMarkdown
+              components={{
+                code({ className, children, ...props }) {
+                  const match = /language-(\w+)/.exec(className ?? "")
+                  const lang = match ? match[1] : ""
+                  const text = String(children).replace(/\n$/, "")
+                  const isBlock = text.includes("\n") || lang.length > 0
+                  if (isBlock) {
+                    return (
+                      <SyntaxHighlighter
+                        language={lang || "text"}
+                        style={vscDarkPlus}
+                        customStyle={{
+                          borderRadius: "var(--radius-md)",
+                          fontSize: "0.8rem",
+                        }}
+                        PreTag="div"
+                      >
+                        {text}
+                      </SyntaxHighlighter>
+                    )
+                  }
+                  return (
+                    <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs" {...props}>
+                      {children}
+                    </code>
+                  )
+                },
+              }}
+            >
+              {message.content}
+            </ReactMarkdown>
+          </div>
+        ) : null}
+      </div>
+    </>
+  )
+}
+
+function PlanningState({
+  status,
+  chips,
+  checks,
+}: {
+  status?: ChatStatus
+  chips: string[]
+  checks: string[]
+}) {
+  const isWorking = status === "planning" || status === "drafting"
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant={isWorking ? "outline" : "secondary"} className="gap-1.5">
+          {isWorking ? (
+            <Loader2 className="size-3 animate-spin" />
+          ) : (
+            <CheckCircle2 className="size-3" />
+          )}
+          {status === "planning"
+            ? "Planning response"
+            : status === "drafting"
+              ? "Composing reply"
+              : status === "error"
+                ? "Needs attention"
+                : "Response ready"}
+        </Badge>
+        {chips.map((chip) => (
+          <Badge key={chip} variant="outline">
+            {chip}
+          </Badge>
+        ))}
+      </div>
+      {checks.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {checks.map((check) => (
+            <span
+              key={check}
+              className="rounded-md border bg-background px-2 py-1 text-xs text-muted-foreground"
+            >
+              {check}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -525,7 +694,7 @@ async function fetchAgentPlan(
     let detail = `HTTP ${res.status}`
     try {
       const text = await res.text()
-      detail += ` — ${text.slice(0, 200)}`
+      detail += ` - ${text.slice(0, 200)}`
     } catch {
       // ignore
     }

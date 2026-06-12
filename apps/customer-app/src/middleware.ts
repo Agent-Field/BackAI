@@ -17,7 +17,7 @@ export function middleware(request: NextRequest) {
     return NextResponse.next()
   }
 
-  // Root: send to dashboard if signed in, sign-in otherwise.
+  // Root: send to the customer chat if signed in, sign-in otherwise.
   const sessionCookie = getSessionCookie(request)
   if (!sessionCookie) {
     const url = request.nextUrl.clone()
@@ -29,7 +29,7 @@ export function middleware(request: NextRequest) {
   }
   if (pathname === "/") {
     const url = request.nextUrl.clone()
-    url.pathname = "/dashboard"
+    url.pathname = "/code-helper"
     return NextResponse.redirect(url)
   }
   return NextResponse.next()

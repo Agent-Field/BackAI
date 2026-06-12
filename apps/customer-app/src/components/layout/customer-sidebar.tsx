@@ -36,7 +36,7 @@ type NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Workspace", icon: LayoutDashboard },
-  { href: "/code-helper", label: "Support Desk", icon: MessageSquareText },
+  { href: "/code-helper", label: "Support Chat", icon: MessageSquareText },
   { href: "/integrations", label: "Integrations", icon: Plug },
   { href: "/billing", label: "Billing", icon: CreditCard },
   { href: "/api-key", label: "API Key", icon: KeyRound },
@@ -61,7 +61,7 @@ export function CustomerSidebar({ billingDisabled = false }: { billingDisabled?:
             <SidebarMenuButton
               size="lg"
               render={
-                <Link href="/dashboard" className="flex items-center gap-2">
+                <Link href="/code-helper" className="flex items-center gap-2">
                   <div className="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-md">
                     {brand.logos.light ? (
                       <img src={brand.logos.light} alt="" className="size-5 object-contain" />

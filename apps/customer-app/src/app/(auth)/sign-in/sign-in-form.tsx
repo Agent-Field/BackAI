@@ -36,7 +36,7 @@ type SignInFormProps = {
 function SignInInner({ sso }: SignInFormProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const next = searchParams.get("next") ?? "/dashboard"
+  const next = searchParams.get("next") ?? "/code-helper"
   const [submitting, setSubmitting] = useState(false)
 
   const form = useForm<SignInValues>({
@@ -144,7 +144,7 @@ export function SignInForm({ sso }: SignInFormProps) {
       <CardHeader>
         <CardTitle>Sign in to {brand.displayName}</CardTitle>
         <CardDescription>
-          Draft support replies and inspect the backend evidence in admin.
+          Chat through support cases, account issues, and billing questions.
         </CardDescription>
       </CardHeader>
       <Suspense fallback={null}>

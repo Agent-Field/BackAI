@@ -72,10 +72,10 @@ export default function SignUpPage() {
         credentials: "include",
       })
       if (!res.ok) {
-        // Still let them in — they can reveal the prefix from /dashboard
+        // Still let them in. They can issue another key later from API Key.
         // and issue another key later from /api-key.
         toast.error("Signed up, but could not generate your API key. Retry from API Key page.")
-        router.push("/dashboard")
+        router.push("/code-helper")
         return
       }
       const data: OnboardingKey = await res.json()
@@ -110,7 +110,7 @@ export default function SignUpPage() {
   }
 
   const handleContinue = () => {
-    router.push("/dashboard")
+    router.push("/code-helper")
     router.refresh()
   }
 
@@ -120,8 +120,8 @@ export default function SignUpPage() {
         <CardHeader>
           <CardTitle>Create your {brand.displayName} account</CardTitle>
           <CardDescription>
-            No LLM key needed. This creates a tenant, billing record, and API key so you
-            can draft one support reply and inspect the backend evidence.
+            No LLM key needed. Create your account and start chatting through realistic support
+            cases.
           </CardDescription>
         </CardHeader>
         <form onSubmit={form.handleSubmit(handleSubmit)} className="contents">
@@ -216,7 +216,7 @@ export default function SignUpPage() {
                 Copy
               </Button>
               <Button onClick={handleContinue} className="flex-1">
-                Continue to workspace
+                Continue to chat
               </Button>
             </div>
           </div>

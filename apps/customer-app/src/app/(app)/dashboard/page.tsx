@@ -107,7 +107,7 @@ export default async function DashboardPage() {
               popover: {
                 title: "Start in the customer app",
                 description:
-                  "A fork starts with a real SupportDesk workflow, not an empty console. This is the app surface your own customers would use first.",
+                  "A fork starts with a real chat workflow, not an empty console. This is the app surface your own customers would use first.",
                 side: "bottom",
                 align: "start",
               },
@@ -115,9 +115,9 @@ export default async function DashboardPage() {
             {
               element: "[data-tour='customer-first-run']",
               popover: {
-                title: "One action proves the backend",
+                title: "One chat starts the workspace",
                 description:
-                  "The first reply exercises tenant auth, an API key, policy planning, model routing, usage metering, and the admin evidence trail.",
+                  "The first chat response creates the account activity, usage, and conversation record a real workspace needs.",
                 side: "bottom",
                 align: "start",
               },
@@ -125,9 +125,9 @@ export default async function DashboardPage() {
             {
               element: "[data-tour='customer-stack-tags']",
               popover: {
-                title: "The bundled backend is visible",
+                title: "The workspace is ready",
                 description:
-                  "These tags show the services touched by the same workflow: Postgres-backed tenancy, the LLM gateway, billing records, and the agent runtime.",
+                  "These tags show what is already set up for the account: tenancy, sign-in, usage, billing, and chat activity.",
                 side: "top",
                 align: "start",
               },
@@ -137,7 +137,7 @@ export default async function DashboardPage() {
               popover: {
                 title: "Start here",
                 description:
-                  "Draft one reply. The next screen shows the decision plan, generated response, and exact admin link for the cost record.",
+                  "Send one chat message. The next screen shows the response, route chips, and exact activity link for the request.",
                 side: "right",
                 align: "center",
               },
@@ -147,7 +147,7 @@ export default async function DashboardPage() {
               popover: {
                 title: "Usage appears immediately",
                 description:
-                  "After the first action, these cards and the recent-calls table update from the same backend ledger the admin dashboard uses.",
+                  "After the first chat, these cards and the recent-calls table update from your account activity.",
                 side: "top",
                 align: "start",
               },
@@ -214,7 +214,7 @@ export default async function DashboardPage() {
         <CardContent>
           {data.recentCalls.length === 0 ? (
             <p className="text-muted-foreground py-6 text-center text-sm">
-              No calls yet. Open Support Desk to draft a reply and see one land here.
+              No calls yet. Open Support Chat to send one message and see one land here.
             </p>
           ) : (
             <Table>
