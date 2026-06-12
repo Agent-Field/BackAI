@@ -43,9 +43,9 @@ explicitly changes.
 | 2026-06-12 | `c71efc0` | M4 compose first-run ports | `docker compose config --quiet`; `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`; `pnpm --dir apps/dashboard exec tsc --noEmit --pretty false`. |
 | 2026-06-12 | `cd6b50c` | M3 first-run panel | `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`. |
 | 2026-06-12 | `b17f442` | M4 no-key E2E | `docker compose up -d --build postgres litellm agentfield runtime dashboard customer-app`; customer signup via `http://localhost:34000/api/auth/sign-up/email`; onboarding key minted; customer LLM proxy returned `demo-supportdesk`; `GET /api/v1/cost/events?tenant=...&request_id=...` returned exactly one event. |
-| 2026-06-12 | Pending | M4 OpenRouter E2E | Runtime restarted with `AF_STACK_DEMO_MODE=false` and OpenRouter key from zsh; logs showed `llm gateway: litellm sidecar`; customer LLM proxy returned real provider text; cost event for `codex-openrouter-1781281222` recorded provider `litellm` and nonzero cost. |
-| 2026-06-12 | Pending | M5 Railway template | `python3 -m json.tool deploy/railway/railway.json`; `python3 scripts/validate-deploy-targets.py`. |
-| 2026-06-12 | Pending | M6 demo mode docs | `rg -n "github.com/<you>/af-stack|AF_STACK_DEMO_MODE|demo-supportdesk|Railway|no-key|BackAI|SupportDesk" README.md docs/demo-mode.md deploy/railway/README.md deploy/README.md docs/deploy.md`; `python3 scripts/validate-deploy-targets.py`. |
+| 2026-06-12 | `741d66e` | M4 OpenRouter E2E | Runtime restarted with `AF_STACK_DEMO_MODE=false` and OpenRouter key from zsh; logs showed `llm gateway: litellm sidecar`; customer LLM proxy returned real provider text; cost event for `codex-openrouter-1781281222` recorded provider `litellm` and nonzero cost. |
+| 2026-06-12 | `ea210cd` | M5 Railway template | `python3 -m json.tool deploy/railway/railway.json`; `python3 scripts/validate-deploy-targets.py`. |
+| 2026-06-12 | `3976fd1` | M6 demo mode docs | `rg -n "github.com/<you>/af-stack|AF_STACK_DEMO_MODE|demo-supportdesk|Railway|no-key|BackAI|SupportDesk" README.md docs/demo-mode.md deploy/railway/README.md deploy/README.md docs/deploy.md`; `python3 scripts/validate-deploy-targets.py`. |
 
 ## Current Risks
 
@@ -59,7 +59,7 @@ explicitly changes.
 
 ## Next Concrete Work
 
-1. Commit and push demo mode docs.
+1. Commit and push status-board commit-id cleanup.
 2. Continue M6 docs/examples cleanup.
 3. Start final public-readiness verification sweep.
 4. Keep the first vertical slice small enough to verify locally.
