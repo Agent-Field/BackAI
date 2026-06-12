@@ -9,6 +9,7 @@
 // not reimplement runtime auth or tenant forwarding.
 
 import type { NextRequest } from "next/server"
+import { cookies } from "next/headers"
 
 const RUNTIME_DEFAULT = "http://localhost:8080"
 
@@ -25,6 +26,13 @@ async function proxy(req: NextRequest, { params }: { params: Promise<{ path: str
     if (key.toLowerCase() === "host") return
     upstreamHeaders.set(key, value)
   })
+  const cookieHeader = (await cookies())
+    .getAll()
+    .map((cookie) => `${cookie.name}=${cookie.value}`)
+    .join("; ")
+  if (cookieHeader) {
+    upstreamHeaders.set("cookie", cookieHeader)
+  }
 
   let upstream: Response
   try {

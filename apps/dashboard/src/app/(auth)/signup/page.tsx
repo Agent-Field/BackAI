@@ -9,6 +9,7 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
+import { Sparkles } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -57,12 +58,29 @@ export default function SignupPage() {
     }
   }
 
+  const handleUseDemoDetails = () => {
+    const suffix = Date.now().toString(36)
+    form.setValue("name", "BackAI Operator", {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
+    form.setValue("email", `operator+${suffix}@backai.local`, {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
+    form.setValue("password", "backai-admin-pwd", {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
+  }
+
   return (
     <Card className="w-full max-w-sm">
       <CardHeader>
-        <CardTitle>Create an account</CardTitle>
+        <CardTitle>Create operator account</CardTitle>
         <CardDescription>
-          Operators sign in here. Customers and end-users live in your product.
+          Fresh local stacks create the first operator here. Later operators should be invited by
+          an owner.
         </CardDescription>
       </CardHeader>
       <form onSubmit={form.handleSubmit(handleSubmit)} className="contents">
@@ -118,6 +136,16 @@ export default function SignupPage() {
             </Field>
             <Button type="submit" disabled={submitting} className="w-full">
               {submitting ? "Creating account…" : "Create account"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleUseDemoDetails}
+              disabled={submitting}
+              className="w-full"
+            >
+              <Sparkles data-icon="inline-start" />
+              Use demo details
             </Button>
             <FieldDescription className="text-center">
               Already have an account?{" "}

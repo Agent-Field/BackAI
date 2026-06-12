@@ -9,7 +9,7 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
-import { Building2Icon, MailIcon } from "lucide-react"
+import { AlertCircle, Building2Icon, MailIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -42,6 +42,7 @@ function LoginFormInner({ sso }: LoginFormProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const next = searchParams.get("next") ?? "/"
+  const error = searchParams.get("error")
   const [submitting, setSubmitting] = useState(false)
 
   const form = useForm<LoginValues>({
@@ -111,6 +112,15 @@ function LoginFormInner({ sso }: LoginFormProps) {
     <form onSubmit={form.handleSubmit(handleSubmit)} className="contents">
       <CardContent>
         <FieldGroup>
+          {error === "operator_required" ? (
+            <div className="border-destructive/30 bg-destructive/5 text-destructive flex gap-2 rounded-md border p-3 text-sm">
+              <AlertCircle className="mt-0.5 size-4 shrink-0" />
+              <p>
+                This account is not an operator. Sign in with the first operator account
+                created during setup.
+              </p>
+            </div>
+          ) : null}
           <Field data-invalid={form.formState.errors.email ? true : undefined}>
             <FieldLabel htmlFor="email">Email</FieldLabel>
             <Input
@@ -184,7 +194,10 @@ export function LoginForm({ sso }: LoginFormProps) {
     <Card className="w-full max-w-sm">
       <CardHeader>
         <CardTitle>Sign in</CardTitle>
-        <CardDescription>Welcome back to your stack.</CardDescription>
+        <CardDescription>
+          Use the operator account created during first setup. On a fresh stack, this page
+          automatically sends you to setup first.
+        </CardDescription>
       </CardHeader>
       <Suspense fallback={null}>
         <LoginFormInner sso={sso} />

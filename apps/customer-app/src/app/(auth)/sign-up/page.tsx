@@ -9,7 +9,7 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
-import { Copy, KeyRound } from "lucide-react"
+import { Copy, KeyRound, Sparkles } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -38,6 +38,8 @@ type OnboardingKey = {
   api_key_prefix: string
   tenant_name: string
 }
+
+const ONBOARDING_KEY_STORAGE = "backai:onboarding-api-key"
 
 export default function SignUpPage() {
   const router = useRouter()
@@ -77,10 +79,28 @@ export default function SignUpPage() {
         return
       }
       const data: OnboardingKey = await res.json()
+      try {
+        window.sessionStorage.setItem(ONBOARDING_KEY_STORAGE, data.api_key_token)
+      } catch {
+        // Clipboard/manual copy still works when storage is unavailable.
+      }
       setKeyDialog(data)
     } finally {
       setSubmitting(false)
     }
+  }
+
+  const handleUseDemoDetails = () => {
+    const suffix = Date.now().toString(36)
+    form.setValue("name", "Demo Customer", { shouldDirty: true, shouldValidate: true })
+    form.setValue("email", `demo+${suffix}@backai.local`, {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
+    form.setValue("password", "backai-demo-pwd", {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
   }
 
   const handleCopy = async () => {
@@ -100,7 +120,8 @@ export default function SignUpPage() {
         <CardHeader>
           <CardTitle>Create your {brand.displayName} account</CardTitle>
           <CardDescription>
-            Create a support workspace with a tenant, billing record, and API key.
+            No LLM key needed. This creates a tenant, billing record, and API key so you
+            can draft one support reply and inspect the backend evidence.
           </CardDescription>
         </CardHeader>
         <form onSubmit={form.handleSubmit(handleSubmit)} className="contents">
@@ -146,6 +167,16 @@ export default function SignUpPage() {
               </Field>
               <Button type="submit" disabled={submitting} className="w-full">
                 {submitting ? "Provisioning..." : "Create account"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleUseDemoDetails}
+                disabled={submitting}
+                className="w-full"
+              >
+                <Sparkles data-icon="inline-start" />
+                Use demo details
               </Button>
               <FieldDescription className="text-center">
                 Have an account?{" "}

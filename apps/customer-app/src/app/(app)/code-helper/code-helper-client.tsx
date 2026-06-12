@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/badge"
 const MODEL = "qwen/qwen-2.5-72b-instruct"
 const SYSTEM_PROMPT =
   "You are SupportDesk AI, a concise customer support assistant. Draft helpful, accurate replies for support teams. Keep the tone clear, calm, and practical. If the customer asks for something policy-specific, mention what the support team should verify before sending."
+const ONBOARDING_KEY_STORAGE = "backai:onboarding-api-key"
 
 type Props = {
   tenantId: string
@@ -59,6 +60,14 @@ function createRequestId(): string {
   return `supportdesk-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
+function onboardingAPIKey(): string | null {
+  try {
+    return window.sessionStorage.getItem(ONBOARDING_KEY_STORAGE)
+  } catch {
+    return null
+  }
+}
+
 export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
   const [question, setQuestion] = useState("")
   const [answer, setAnswer] = useState("")
@@ -78,13 +87,19 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
 
     try {
       // Same-origin proxy forwards our session cookie. The runtime
-      // resolves tenant by session; cost events bill to this tenant.
+      // resolves tenant by API key when the just-issued onboarding key is
+      // still available, and falls back to session auth for returning users.
+      const headers = new Headers({
+        "content-type": "application/json",
+        "x-request-id": requestId,
+      })
+      const apiKey = onboardingAPIKey()
+      if (apiKey) {
+        headers.set("authorization", `Bearer ${apiKey}`)
+      }
       const res = await fetch("/api/v1/llm/chat/completions", {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-request-id": requestId,
-        },
+        headers,
         credentials: "include",
         body: JSON.stringify({
           model: MODEL,

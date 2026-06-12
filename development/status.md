@@ -58,6 +58,7 @@ explicitly changes.
 | 2026-06-12 | `9b496d0` | M10 local port conflict DX | `node scripts/preflight.mjs` passes when the current BackAI compose stack owns ports; intentional conflict `AF_STACK_PORT=33000 node scripts/preflight.mjs` fails with a clear override message; `docker compose config --quiet` passes. |
 | 2026-06-12 | `38dee6b` | Hide advanced Shipwright from first run | `AF_STACK_SHOW_SHIPWRIGHT=false` by default; dashboard/customer typechecks pass; Shipwright compose overlay config passes; rebuilt local apps; runtime `/ready` and customer `/sign-up` return 200; admin render includes `showShipwright:false`. |
 | 2026-06-12 | Current change | M11 public-ready audit and conflict DX cleanup | Markdown link checker over 83 repo-facing files passes; public stale-reference scan reviewed; examples capabilities parse; preflight current-stack, occupied-port, and duplicate host-port checks behave correctly; app typechecks and compose config pass. |
+| 2026-06-12 | Current change | First-time wow path | Fresh browser customer flow: `Use demo details` -> API key reveal -> workspace first-run panel -> Support Desk draft -> `$0.000134` / `268 tok` result -> exact admin cost deep link. Admin login verified locally after resetting `operator@backai.local` to `backai-admin-pwd`. |
 
 ## Current Risks
 
