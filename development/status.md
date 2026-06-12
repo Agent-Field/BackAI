@@ -42,7 +42,8 @@ explicitly changes.
 | 2026-06-12 | `e666364` | M3 customer-to-admin walkthrough | `GOCACHE=/tmp/backai-go-build go test ./services/runtime/internal/cost ./services/runtime/internal/server ./services/runtime/cmd/af-stack`; `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`; `pnpm --dir apps/dashboard exec tsc --noEmit --pretty false`. |
 | 2026-06-12 | `c71efc0` | M4 compose first-run ports | `docker compose config --quiet`; `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`; `pnpm --dir apps/dashboard exec tsc --noEmit --pretty false`. |
 | 2026-06-12 | `cd6b50c` | M3 first-run panel | `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`. |
-| 2026-06-12 | Pending | M4 no-key E2E | `docker compose up -d --build postgres litellm agentfield runtime dashboard customer-app`; customer signup via `http://localhost:34000/api/auth/sign-up/email`; onboarding key minted; customer LLM proxy returned `demo-supportdesk`; `GET /api/v1/cost/events?tenant=...&request_id=...` returned exactly one event. |
+| 2026-06-12 | `b17f442` | M4 no-key E2E | `docker compose up -d --build postgres litellm agentfield runtime dashboard customer-app`; customer signup via `http://localhost:34000/api/auth/sign-up/email`; onboarding key minted; customer LLM proxy returned `demo-supportdesk`; `GET /api/v1/cost/events?tenant=...&request_id=...` returned exactly one event. |
+| 2026-06-12 | Pending | M4 OpenRouter E2E | Runtime restarted with `AF_STACK_DEMO_MODE=false` and OpenRouter key from zsh; logs showed `llm gateway: litellm sidecar`; customer LLM proxy returned real provider text; cost event for `codex-openrouter-1781281222` recorded provider `litellm` and nonzero cost. |
 
 ## Current Risks
 
@@ -56,7 +57,7 @@ explicitly changes.
 
 ## Next Concrete Work
 
-1. Commit and push the Support Desk usage cost badge fix.
-2. Exercise OpenRouter-backed mode.
-3. Start M5 Railway deploy template.
+1. Commit and push the runtime provider-key compose fix.
+2. Start M5 Railway deploy template.
+3. Add public docs for no-key mode vs real-key mode.
 4. Keep the first vertical slice small enough to verify locally.

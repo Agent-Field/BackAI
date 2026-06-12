@@ -126,6 +126,16 @@ services:
       # sidecar auth; customers never see it.
       AF_STACK_LITELLM_URL: ${AF_STACK_LITELLM_URL:-http://litellm:4000}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-litellm-dev}
+      # Runtime sees provider-key presence so AF_STACK_DEMO_MODE=auto can
+      # switch from deterministic demo mode to the LiteLLM-backed provider.
+      # LiteLLM still owns the actual upstream provider calls.
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
       # First-run demo mode: "auto" uses the deterministic demo provider only
       # when no real provider key is present. Adding OPENROUTER_API_KEY /
       # OPENAI_API_KEY / etc. switches the same endpoint to LiteLLM.
