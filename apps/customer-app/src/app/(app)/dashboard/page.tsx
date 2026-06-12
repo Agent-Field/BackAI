@@ -26,6 +26,7 @@ import {
 import { api, type CostEvent } from "@/lib/api"
 import { requireCustomerContext } from "@/lib/session"
 import { ApiKeyPanel } from "./api-key-panel"
+import { FirstRunPanel } from "./first-run-panel"
 import { QuickstartPanel } from "./quickstart-panel"
 
 function formatUSD(n: number): string {
@@ -108,6 +109,11 @@ export default async function DashboardPage() {
           {ctx.tenantName} · {session.user.email}
         </p>
       </div>
+
+      <FirstRunPanel
+        tenantId={ctx.tenantId}
+        hasCalls={data.recentCalls.length > 0}
+      />
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
