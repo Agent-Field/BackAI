@@ -58,6 +58,7 @@ export function GettingStartedPanel({
         <Button
           size="sm"
           variant="outline"
+          nativeButton={false}
           render={<Link href="/customers/tenants">Tenants</Link>}
         />
       ),
@@ -72,6 +73,7 @@ export function GettingStartedPanel({
         <Button
           size="sm"
           variant="outline"
+          nativeButton={false}
           render={<Link href="/customers/api-keys">API keys</Link>}
         />
       ),
@@ -83,7 +85,12 @@ export function GettingStartedPanel({
       done: state.hasBudget,
       icon: WalletCards,
       action: (
-        <Button size="sm" variant="outline" render={<Link href="/operate/cost">Cost</Link>} />
+        <Button
+          size="sm"
+          variant="outline"
+          nativeButton={false}
+          render={<Link href="/operate/cost">Cost</Link>}
+        />
       ),
     },
     {
@@ -96,6 +103,7 @@ export function GettingStartedPanel({
         <Button
           size="sm"
           variant="outline"
+          nativeButton={false}
           render={
             <a
               href={customerAppUrl}

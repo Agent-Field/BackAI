@@ -21,13 +21,7 @@ type Props = {
 }
 
 function getGatewayUrl(): string {
-  if (typeof window !== "undefined") {
-    return (
-      process.env.NEXT_PUBLIC_RUNTIME_URL ??
-      window.location.origin.replace(/:34000$/, ":8080").replace(/:34001$/, ":8080")
-    )
-  }
-  return "http://localhost:8080"
+  return process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:8080"
 }
 
 export function QuickstartPanel({ prefix }: Props) {

@@ -24,6 +24,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { api, type CostEvent } from "@/lib/api"
+import { GuidedTour } from "@/components/guided-tour"
 import { requireCustomerContext } from "@/lib/session"
 import { ApiKeyPanel } from "./api-key-panel"
 import { FirstRunPanel } from "./first-run-panel"
@@ -101,13 +102,61 @@ export default async function DashboardPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Support workspace
-        </h1>
-        <p className="text-muted-foreground text-sm">
-          {ctx.tenantName} · {session.user.email}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div data-tour="customer-workspace">
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Support workspace
+          </h1>
+          <p className="text-muted-foreground text-sm">
+            {ctx.tenantName} · {session.user.email}
+          </p>
+        </div>
+        <GuidedTour
+          id="customer-workspace-v1"
+          autoStart={data.recentCalls.length === 0}
+          steps={[
+            {
+              element: "[data-tour='customer-workspace']",
+              popover: {
+                title: "This is the customer product",
+                description:
+                  "A fork starts with a real SupportDesk app, not an empty admin console. Your user signs up here and creates the first AI action.",
+                side: "bottom",
+                align: "start",
+              },
+            },
+            {
+              element: "[data-tour='customer-first-run']",
+              popover: {
+                title: "One action proves the backend",
+                description:
+                  "The first reply provisions tenant context, uses an AgentField reasoner plan, records model cost, and creates an admin evidence trail.",
+                side: "bottom",
+                align: "start",
+              },
+            },
+            {
+              element: "[data-tour='customer-draft-action']",
+              popover: {
+                title: "Start here",
+                description:
+                  "Draft one reply. The next screen shows the AgentField plan, the generated response, and the exact admin link for cost evidence.",
+                side: "right",
+                align: "center",
+              },
+            },
+            {
+              element: "[data-tour='customer-metrics']",
+              popover: {
+                title: "Usage appears immediately",
+                description:
+                  "After the first action, these cards and the recent-calls table update from the same backend ledger the admin dashboard uses.",
+                side: "top",
+                align: "start",
+              },
+            },
+          ]}
+        />
       </div>
 
       <FirstRunPanel
@@ -115,7 +164,10 @@ export default async function DashboardPage() {
         hasCalls={data.recentCalls.length > 0}
       />
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div
+        className="grid gap-4 md:grid-cols-2 lg:grid-cols-4"
+        data-tour="customer-metrics"
+      >
         <Card>
           <CardHeader>
             <CardDescription className="flex items-center gap-2">

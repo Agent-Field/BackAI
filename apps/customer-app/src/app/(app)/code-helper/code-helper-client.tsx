@@ -4,12 +4,13 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { ExternalLink, Send, Sparkles } from "lucide-react"
+import { Bot, ExternalLink, GitBranch, Send, Sparkles } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter"
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism"
 
 import { Button } from "@/components/ui/button"
+import { GuidedTour } from "@/components/guided-tour"
 import {
   Card,
   CardContent,
@@ -22,7 +23,7 @@ import { Badge } from "@/components/ui/badge"
 
 const MODEL = "qwen/qwen-2.5-72b-instruct"
 const SYSTEM_PROMPT =
-  "You are SupportDesk AI, a concise customer support assistant. Draft helpful, accurate replies for support teams. Keep the tone clear, calm, and practical. If the customer asks for something policy-specific, mention what the support team should verify before sending."
+  "You are SupportDesk AI, a concise customer support assistant. Draft helpful, accurate replies for support teams. Keep the tone clear, calm, and practical. Follow the AgentField support plan when provided. If the customer asks for something policy-specific, mention what the support team should verify before sending."
 const ONBOARDING_KEY_STORAGE = "backai:onboarding-api-key"
 
 type Props = {
@@ -36,6 +37,36 @@ type Usage = {
   total_tokens?: number
   cost_usd?: number
   response_cost?: number
+}
+
+type AgentPlan = {
+  agent?: string
+  entry_reasoner?: string
+  reasoners?: string[]
+  dynamic_branch?: string
+  confidence?: string
+  issue?: {
+    category?: string
+    urgency?: string
+    needs_human_review?: boolean
+    summary?: string
+  }
+  guardrail?: {
+    reasoner?: string
+    must_verify?: string[]
+    do_not_promise?: string[]
+    allowed_commitment?: string
+    handoff?: boolean
+  }
+  brief?: {
+    tone?: string
+    next_steps?: string[]
+    constraints?: {
+      must_verify?: string[]
+      do_not_promise?: string[]
+      allowed_commitment?: string
+    }
+  }
 }
 
 function operatorDashboardUrl(tenantId: string, requestId?: string): string {
@@ -53,6 +84,30 @@ function operatorDashboardUrl(tenantId: string, requestId?: string): string {
   return `${base}/operate/cost?${qs.toString()}`
 }
 
+function agentFieldBaseUrl(): string {
+  return (
+    process.env.NEXT_PUBLIC_RUNTIME_UI_URL ??
+    (typeof window !== "undefined"
+      ? window.location.origin
+          .replace(/:34000$/, ":8081")
+          .replace(/:34001$/, ":8081")
+      : "http://localhost:8081")
+  )
+}
+
+function agentFieldCatalogUrl(agentId = "supportdesk", reasonerId?: string): string {
+  const url = new URL("/api/v1/discovery/capabilities", agentFieldBaseUrl())
+  url.searchParams.set("agent_id", agentId)
+  if (reasonerId) url.searchParams.set("reasoner", reasonerId)
+  return url.toString()
+}
+
+function agentFieldExecutionUrl(executionId: string): string {
+  return `${agentFieldBaseUrl().replace(/\/$/, "")}/agent-api/executions/${encodeURIComponent(
+    executionId,
+  )}/details`
+}
+
 function createRequestId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID()
@@ -68,13 +123,85 @@ function onboardingAPIKey(): string | null {
   }
 }
 
+async function ensureOnboardingAPIKey(): Promise<string | null> {
+  const existing = onboardingAPIKey()
+  if (existing) return existing
+
+  const res = await fetch("/api/customer/onboarding-key", {
+    method: "POST",
+    credentials: "include",
+  })
+  if (!res.ok) return null
+
+  const data = (await res.json()) as { api_key_token?: string }
+  if (!data.api_key_token) return null
+  try {
+    window.sessionStorage.setItem(ONBOARDING_KEY_STORAGE, data.api_key_token)
+  } catch {
+    // The request can still use the freshly-minted key for this turn.
+  }
+  return data.api_key_token
+}
+
 export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
   const [question, setQuestion] = useState("")
   const [answer, setAnswer] = useState("")
   const [usage, setUsage] = useState<Usage | null>(null)
+  const [agentPlan, setAgentPlan] = useState<AgentPlan | null>(null)
+  const [agentExecutionId, setAgentExecutionId] = useState<string | null>(null)
   const [lastRequestId, setLastRequestId] = useState<string | null>(null)
   const [streaming, setStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const tourSteps = [
+    {
+      element: "[data-tour='supportdesk-heading']",
+      popover: {
+        title: "One action, two backend proofs",
+        description:
+          "This page first asks AgentField for a support plan, then sends the final draft through BackAI's gateway so both reasoners and cost are inspectable.",
+        side: "bottom" as const,
+        align: "start" as const,
+      },
+    },
+    {
+      element: "[data-tour='supportdesk-composer']",
+      popover: {
+        title: "Run the SupportDesk action",
+        description:
+          "Enter a customer issue and draft a reply. Billing/refund questions take a different AgentField branch than access or technical issues.",
+        side: "bottom" as const,
+        align: "start" as const,
+      },
+    },
+    ...(agentPlan
+      ? [
+          {
+            element: "[data-tour='agentfield-plan']",
+            popover: {
+              title: "Inspect the reasoner path",
+              description:
+                "This panel shows the registered agent, reasoners, dynamic branch, and guardrail that shaped the final response.",
+              side: "top" as const,
+              align: "start" as const,
+            },
+          },
+        ]
+      : []),
+    ...(answer
+      ? [
+          {
+            element: "[data-tour='admin-evidence-link']",
+            popover: {
+              title: "Open the admin evidence",
+              description:
+                "This link carries the exact request into the admin dashboard, where operators see tenant, model, tokens, cost, and agent surfaces.",
+              side: "top" as const,
+              align: "start" as const,
+            },
+          },
+        ]
+      : []),
+  ]
 
   const handleAsk = async () => {
     if (!question.trim()) return
@@ -82,6 +209,8 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
     setError(null)
     setAnswer("")
     setUsage(null)
+    setAgentPlan(null)
+    setAgentExecutionId(null)
     const requestId = createRequestId()
     setLastRequestId(requestId)
 
@@ -93,10 +222,14 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
         "content-type": "application/json",
         "x-request-id": requestId,
       })
-      const apiKey = onboardingAPIKey()
+      const apiKey = await ensureOnboardingAPIKey()
       if (apiKey) {
         headers.set("authorization", `Bearer ${apiKey}`)
       }
+      const plan = await fetchAgentPlan(headers, question, tenantId)
+      setAgentPlan(plan.plan)
+      setAgentExecutionId(plan.executionId)
+
       const res = await fetch("/api/v1/llm/chat/completions", {
         method: "POST",
         headers,
@@ -107,7 +240,15 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
           stream: true,
           messages: [
             { role: "system", content: SYSTEM_PROMPT },
-            { role: "user", content: question },
+            {
+              role: "user",
+              content: [
+                `Customer ticket:\n${question}`,
+                "",
+                "AgentField support plan:",
+                JSON.stringify(plan.plan, null, 2),
+              ].join("\n"),
+            },
           ],
         }),
       })
@@ -174,22 +315,29 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Support Desk</h1>
-        <p className="text-muted-foreground text-sm">
-          Draft customer replies through the BackAI LLM gateway. Cost is billed
-          to your tenant and visible in admin. Model:{" "}
-          <code className="font-mono">{MODEL}</code>
-          {apiKeyPrefix ? (
-            <>
-              {" · key "}
-              <code className="font-mono">af_{apiKeyPrefix}_…</code>
-            </>
-          ) : null}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div data-tour="supportdesk-heading">
+          <h1 className="text-2xl font-semibold tracking-tight">Support Desk</h1>
+          <p className="text-muted-foreground text-sm">
+            Draft customer replies through an AgentField support plan and the
+            BackAI LLM gateway. Cost is billed to your tenant and visible in
+            admin. Model: <code className="font-mono">{MODEL}</code>
+            {apiKeyPrefix ? (
+              <>
+                {" · key "}
+                <code className="font-mono">af_{apiKeyPrefix}_…</code>
+              </>
+            ) : null}
+          </p>
+        </div>
+        <GuidedTour
+          id="customer-supportdesk-v1"
+          autoStart
+          steps={tourSteps}
+        />
       </div>
 
-      <Card>
+      <Card data-tour="supportdesk-composer">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Sparkles className="size-4" />
@@ -278,8 +426,96 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
         </Card>
       ) : null}
 
+      {agentPlan ? (
+        <Card data-tour="agentfield-plan">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <GitBranch className="size-4" />
+              AgentField plan
+            </CardTitle>
+            <CardDescription>
+              SupportDesk first classifies the issue, extracts facts, chooses a
+              policy branch, and then sends a brief to the BackAI gateway.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-[1fr_1.2fr]">
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="secondary" className="gap-1.5">
+                  <Bot className="size-3" />
+                  {agentPlan.agent ?? "supportdesk"}
+                </Badge>
+                <Badge variant="outline">
+                  {agentPlan.dynamic_branch ?? "general"} branch
+                </Badge>
+                <Badge variant="outline">
+                  {agentPlan.confidence ?? "medium"} confidence
+                </Badge>
+              </div>
+              {agentExecutionId ? (
+                <p className="text-muted-foreground text-xs">
+                  AgentField execution{" "}
+                  <Link
+                    href={agentFieldExecutionUrl(agentExecutionId)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-mono underline-offset-4 hover:underline"
+                  >
+                    {agentExecutionId}
+                  </Link>
+                </p>
+              ) : null}
+              <p className="text-muted-foreground text-sm">
+                Category:{" "}
+                <span className="text-foreground">
+                  {agentPlan.issue?.category ?? "general"}
+                </span>
+                {" · "}Urgency:{" "}
+                <span className="text-foreground">
+                  {agentPlan.issue?.urgency ?? "normal"}
+                </span>
+              </p>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Reasoner path
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {(agentPlan.reasoners ?? []).map((reasoner) => (
+                    <Badge
+                      key={reasoner}
+                      variant="outline"
+                      render={
+                        <Link
+                          href={agentFieldCatalogUrl(agentPlan.agent ?? "supportdesk", reasoner)}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={`Open ${agentPlan.agent ?? "supportdesk"}.${reasoner} in AgentField discovery`}
+                        >
+                          {reasoner}
+                        </Link>
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Guardrail
+                </div>
+                <p className="mt-1 text-sm">
+                  {agentPlan.guardrail?.allowed_commitment ??
+                    "Share next steps and request missing details."}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
       {(usage || answer) && (
-        <div className="text-muted-foreground text-xs">
+        <div className="text-muted-foreground text-xs" data-tour="admin-evidence-link">
           <Link
             href={operatorDashboardUrl(tenantId, lastRequestId ?? undefined)}
             target="_blank"
@@ -293,4 +529,38 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
       )}
     </div>
   )
+}
+
+async function fetchAgentPlan(
+  headers: Headers,
+  ticket: string,
+  tenantId: string,
+): Promise<{ plan: AgentPlan; executionId: string | null }> {
+  const res = await fetch("/api/v1/agents/supportdesk.reply_plan", {
+    method: "POST",
+    headers,
+    credentials: "include",
+    body: JSON.stringify({
+      input: {
+        ticket,
+        tenant_id: tenantId,
+      },
+    }),
+  })
+
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`
+    try {
+      const text = await res.text()
+      detail += ` — ${text.slice(0, 200)}`
+    } catch {
+      // ignore
+    }
+    throw new Error(`AgentField support plan failed: ${detail}`)
+  }
+
+  const body = await res.json()
+  const executionId = res.headers.get("x-execution-id") ?? body.execution_id ?? null
+  const plan = (body.output ?? body.result ?? body) as AgentPlan
+  return { plan, executionId }
 }

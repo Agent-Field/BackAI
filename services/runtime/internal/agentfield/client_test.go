@@ -66,6 +66,53 @@ func TestDiscoverReturnsEmptyOn404(t *testing.T) {
 	}
 }
 
+func TestDiscoverParsesCapabilitiesShape(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/discovery/capabilities" {
+			t.Errorf("expected discovery path, got %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"total_agents": 1,
+			"capabilities": [
+				{
+					"agent_id": "supportdesk",
+					"version": "0.1.0",
+					"reasoners": [
+						{"id": "reply_plan", "tags": ["entry", "support", "plan"]},
+						{"id": "refund_guardrail", "tags": ["support", "policy"]}
+					]
+				}
+			]
+		}`))
+	}))
+	defer srv.Close()
+
+	c := New(Config{URL: srv.URL})
+	agents, err := c.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(agents))
+	}
+	if agents[0].NodeID != "supportdesk" {
+		t.Fatalf("node_id: %q", agents[0].NodeID)
+	}
+	if got := agents[0].Reasoners; len(got) != 2 || got[0] != "reply_plan" || got[1] != "refund_guardrail" {
+		t.Fatalf("reasoners: %#v", got)
+	}
+	wantTags := []string{"entry", "plan", "policy", "support"}
+	if len(agents[0].Tags) != len(wantTags) {
+		t.Fatalf("tags: %#v", agents[0].Tags)
+	}
+	for i, want := range wantTags {
+		if agents[0].Tags[i] != want {
+			t.Fatalf("tags[%d]: got %q want %q; all=%#v", i, agents[0].Tags[i], want, agents[0].Tags)
+		}
+	}
+}
+
 func TestNewURLNormalisation(t *testing.T) {
 	c := New(Config{URL: "http://example.com/"})
 	if c.BaseURL() != "http://example.com" {

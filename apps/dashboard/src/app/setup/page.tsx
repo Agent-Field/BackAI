@@ -33,7 +33,10 @@ export default async function SetupPage() {
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-3">
-            <Button render={<Link href="/signup">Create operator account</Link>} />
+            <Button
+              nativeButton={false}
+              render={<Link href="/signup">Create operator account</Link>}
+            />
             <p className="text-muted-foreground text-center text-xs">
               Already configured?{" "}
               <Link className="underline-offset-4 hover:underline" href="/login">

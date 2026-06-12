@@ -46,7 +46,7 @@ export function FirstRunPanel({ tenantId, hasCalls }: Props) {
   ]
 
   return (
-    <Card>
+    <Card data-tour="customer-first-run">
       <CardHeader>
         <CardTitle>First run</CardTitle>
         <CardDescription>
@@ -78,7 +78,11 @@ export function FirstRunPanel({ tenantId, hasCalls }: Props) {
           })}
         </ol>
         <div className="flex flex-wrap gap-2">
-          <Link href="/code-helper" className={buttonVariants()}>
+          <Link
+            href="/code-helper"
+            className={buttonVariants()}
+            data-tour="customer-draft-action"
+          >
             <Send data-icon="inline-start" />
             Draft reply
           </Link>

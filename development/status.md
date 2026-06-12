@@ -35,6 +35,7 @@ explicitly changes.
 | M9 | Local first-experience launch | Complete | Codex | Demo mode and real-provider mode both launched locally; customer signup, onboarding key, SupportDesk request, admin cost ledger, and request-id deep link verified. |
 | M10 | Local port conflict DX | Complete | Codex | `scripts/preflight.mjs` detects occupied local ports and duplicate BackAI host-port assignments, prints override env vars, and does not stop unrelated services; compose defaults now bind runtime on `8080`. |
 | M11 | Public-ready completion audit | Complete | Codex | `development/public-ready-audit.md` maps original requirements to current evidence, remaining proof gaps, local URLs, and local credentials. |
+| M12 | Guided AgentField first run | Complete | Codex | SupportDesk now registers as an AgentField agent with six reasoners; customer/admin driver.js tours are live; customer SupportDesk action shows billing branch, reasoner path, execution link, cost/tokens, and admin evidence link; admin Agents links agent/reasoner badges to AgentField discovery. |
 
 ## Merge Log
 
@@ -59,6 +60,7 @@ explicitly changes.
 | 2026-06-12 | `38dee6b` | Hide advanced Shipwright from first run | `AF_STACK_SHOW_SHIPWRIGHT=false` by default; dashboard/customer typechecks pass; Shipwright compose overlay config passes; rebuilt local apps; runtime `/ready` and customer `/sign-up` return 200; admin render includes `showShipwright:false`. |
 | 2026-06-12 | Current change | M11 public-ready audit and conflict DX cleanup | Markdown link checker over 83 repo-facing files passes; public stale-reference scan reviewed; examples capabilities parse; preflight current-stack, occupied-port, and duplicate host-port checks behave correctly; app typechecks and compose config pass. |
 | 2026-06-12 | Current change | First-time wow path | Fresh browser customer flow: `Use demo details` -> API key reveal -> workspace first-run panel -> Support Desk draft -> `$0.000134` / `268 tok` result -> exact admin cost deep link. Admin login verified locally after resetting `operator@backai.local` to `backai-admin-pwd`. |
+| 2026-06-12 | Current change | M12 guided AgentField first run | Browser-verified customer flow at `http://localhost:34000`: SupportDesk draft completed with polished no-key reply, `$0.000363` / `726 tok`, AgentField execution `exec_20260612_182935_x2qair79`, `billing branch`, `refund_guardrail`, reasoner links to AgentField, and admin cost deep link. Browser console errors: 0. Admin Agents page at `http://localhost:33000/build/agents` shows `supportdesk` with 6 reasoners and opens AgentField filtered discovery for `refund_guardrail`. Browser console errors: 0. |
 
 ## Current Risks
 
@@ -70,6 +72,7 @@ explicitly changes.
 | CI/CD follow-up is paused by user request. | PR merge readiness is not fully observed from GitHub checks. | Resume PR checks only when explicitly allowed. |
 | Dashboard still contains advanced modules behind flags. | First-run can feel heavy if flags are changed without intent. | Keep disabled modules hidden by default and focus walkthrough on live evidence. |
 | AgentField becomes too loud or invisible. | Brand confusion or lost second-order adoption. | Subtle UI presence, stronger architecture docs. |
+| No-key demo response can leak prompt internals. | First-run feels fake or noisy. | Demo provider now strips AgentField plan context from the visible reply; the plan remains in the dedicated evidence panel. |
 
 ## Next Concrete Work
 

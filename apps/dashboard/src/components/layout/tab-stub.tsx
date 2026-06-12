@@ -78,6 +78,7 @@ export function ComingSoon({
               <Button
                 variant="outline"
                 size="sm"
+                nativeButton={false}
                 render={<Link href={docHref}>Read the docs →</Link>}
               />
             </div>

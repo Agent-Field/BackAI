@@ -134,21 +134,30 @@ func demoSupportDeskReply(req ChatRequest) string {
 	if user == "" {
 		user = "The customer needs help with their support request."
 	}
+	ticket := demoCustomerTicket(user)
 	return fmt.Sprintf(`Hi there,
 
-Thanks for reaching out. I understand the concern and I can help investigate it.
+Thanks for flagging this. I understand the concern and I can help investigate it.
 
-Here is what I would send:
+I will review the account and invoice details, verify whether the charge was duplicated, and confirm the refund policy before making any changes. If the charge is incorrect, we will correct it and follow up with the next step.
 
-1. Acknowledge the issue clearly.
-2. Confirm the account or invoice details before making changes.
-3. Explain the next step and when the customer should expect an update.
+For now, I am routing this to billing review so we do not promise a refund before the invoice and account are verified.
 
-Draft reply:
+Customer issue: %s`, ticket)
+}
 
-"Thanks for flagging this. I can see why this is frustrating. I am going to review the account details and verify the relevant policy before making any changes. If the charge or invoice is incorrect, we will correct it and follow up with the next step. I will update you as soon as the review is complete."
-
-Demo context: %s`, user)
+func demoCustomerTicket(user string) string {
+	ticket := strings.TrimSpace(user)
+	if after, ok := strings.CutPrefix(ticket, "Customer ticket:"); ok {
+		ticket = strings.TrimSpace(after)
+	}
+	if before, _, ok := strings.Cut(ticket, "\nAgentField support plan:"); ok {
+		ticket = strings.TrimSpace(before)
+	}
+	if ticket == "" {
+		return "The customer needs help with their support request."
+	}
+	return ticket
 }
 
 func lastUserText(messages []ChatMessage) string {

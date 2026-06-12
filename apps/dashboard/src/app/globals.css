@@ -135,3 +135,23 @@
     @apply font-sans;
   }
 }
+
+.backai-driver-popover {
+  max-width: 360px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 18px 50px rgb(0 0 0 / 35%);
+}
+
+.backai-driver-popover .driver-popover-title {
+  font-size: 0.95rem;
+  line-height: 1.35;
+}
+
+.backai-driver-popover .driver-popover-description {
+  color: var(--muted-foreground);
+  font-size: 0.86rem;
+  line-height: 1.5;
+}

@@ -39,6 +39,7 @@ export function ApiKeyPanel({ prefix }: Props) {
           <Button
             variant="outline"
             className="flex-1"
+            nativeButton={false}
             render={
               <Link href="/api-key">
                 <Eye data-icon="inline-start" />

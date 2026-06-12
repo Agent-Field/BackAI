@@ -221,16 +221,19 @@ mobile app, web app, or backend API and attach BackAI as the AI backend
 through the OpenAI-compatible gateway plus tenant API keys. See
 [`docs/attach-existing-app.md`](docs/attach-existing-app.md).
 
-## Advanced: sample agent call
+## AgentField-backed support plan
 
-The repo still includes a bundled sample AgentField agent behind the
-gateway:
+The default first run also registers a SupportDesk AgentField agent. You
+can call the same reasoner path the customer app uses:
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/agents/sample.echo \
+curl -X POST http://localhost:8080/api/v1/agents/supportdesk.reply_plan \
   -H "Content-Type: application/json" \
-  -d '{"input":{"payload":{"message":"hello world"}}}'
+  -d '{"input":{"ticket":"A customer says their invoice is wrong and wants a refund.","tenant_id":"demo"}}'
 ```
+
+The heavier sample agent remains available for agent/harness development
+under the `advanced` compose profile.
 
 ## LLM Gateway
 

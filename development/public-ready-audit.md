@@ -30,7 +30,11 @@ Original objective:
 | Root repo is clean for public readers | Root tracked files are operational/public only: README, license/security/contributing, env, compose, deploy/docs/examples/apps/packages/services | Proven |
 | Planning docs moved away from root | Planning and strategy files live under `development/`; durable docs live under `docs/` | Proven |
 | Customer app is first-run product | README quickstart opens `http://localhost:34000`; app title is SupportDesk AI; local browser opened `/sign-up` successfully | Proven |
-| No-key demo mode works | Local demo mode previously verified with blank provider keys, SupportDesk request `codex-demo-1781283223`, provider `demo`, cost event recorded | Proven |
+| No-key demo mode works | Local demo mode verified with blank provider keys; latest browser flow produced polished SupportDesk reply, cost `$0.000363`, `726 tok`, and no prompt-plan leakage | Proven |
+| First action uses AgentField substrate | `supportdesk-agent` registers with AgentField; runtime `/api/v1/agents` returns `supportdesk` with six reasoners; customer browser flow shows `billing branch`, `refund_guardrail`, and execution `exec_20260612_182935_x2qair79` | Proven |
+| Customer walkthrough is guided, not a static card | Customer dashboard and Support Desk use driver.js guided walkthroughs; browser verified dashboard tour and Support Desk tour overlays | Proven |
+| Admin walkthrough is guided | Admin home and Agents page use driver.js guided walkthroughs; browser verified admin home tour and Agents page tour | Proven |
+| Admin links to backing local/open-source UIs | Admin Agents page links the catalog button, agent names, and reasoner badges to AgentField discovery; browser verified `refund_guardrail` opens `http://localhost:8081/api/v1/discovery/capabilities?agent_id=supportdesk&reasoner=refund_guardrail` and returns exactly one reasoner | Proven |
 | Real provider mode works | Local real mode previously verified with OpenRouter key from zsh, request `codex-real-1781283477`, provider `litellm`, nonzero cost event | Proven |
 | Customer-to-admin evidence handoff works | Request IDs are carried into cost events; admin deep-link query preservation fixed in `677da9d`; local admin login/setup verified | Proven |
 | Local compose default matches docs | `docker compose config --quiet` passes; current stack exposes runtime `8080`, admin `33000`, customer `34000`; README matches | Proven |
@@ -40,11 +44,13 @@ Original objective:
 | Shipwright example follows current compose model | `docker compose -f docker-compose.yml -f examples/02-shipwright/docker-compose.yml config --quiet` passes; docs no longer reference removed override | Proven |
 | Public docs have valid relative markdown links | Node link checker over README, docs, deploy, examples, customer app, dashboard, and development checked 83 repo-facing markdown files | Proven |
 | Dashboard and customer app typecheck | `pnpm --dir apps/dashboard exec tsc --noEmit --pretty false`; `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false` | Proven |
-| Local rebuilt apps run | `docker compose up -d --build dashboard customer-app`; runtime `/ready`; customer `/sign-up`; compose `ps` healthy | Proven |
+| Runtime focused tests pass | `go test ./services/runtime/internal/agentfield`; `go test ./services/runtime/internal/llmgateway` | Proven |
+| Local rebuilt apps run | `docker compose up -d --build customer-app dashboard`; `docker compose up -d --build runtime`; browser verified customer and admin URLs | Proven |
+| Browser console is clean on first-run surfaces | Customer dashboard, Support Desk completed state, admin home, and admin Agents page all verified with zero console errors after fixes | Proven |
 | Railway template exists and validates statically | Earlier `python3 scripts/validate-deploy-targets.py` and Railway JSON formatting passed | Proven statically |
 | Live Railway deploy works | Not run in this session | Not proven |
 | CI/CD green | User asked to stop CI/CD follow-up for now | Deferred |
-| Full repo tests | Runtime/app focused suites were run earlier; no full final all-language test sweep after latest docs/nav cleanup | Partially proven |
+| Full repo tests | Runtime/app focused suites pass; no full final all-language test sweep after latest guided-tour/runtime cleanup | Partially proven |
 
 ## Current Local First Experience
 
@@ -64,6 +70,12 @@ Local accounts after the database reset:
 | --- | --- | --- |
 | Customer app | `demo@backai.local` | `backai-demo-pwd` |
 | Admin operator | `operator@backai.local` | `backai-admin-pwd` |
+
+Latest browser-created customer used for verification:
+
+| Surface | Email | Password |
+| --- | --- | --- |
+| Customer app | `demo+mqb8v33u@backai.local` | `backai-demo-pwd` |
 
 ## Remaining Before Goal Completion
 

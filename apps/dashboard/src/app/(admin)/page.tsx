@@ -11,6 +11,7 @@
 import { Activity, AlertTriangle, Boxes, CircleDollarSign, ServerCrash } from "lucide-react"
 
 import { PageHeader } from "@/components/layout/page-header"
+import { GuidedTour } from "@/components/guided-tour"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { api, type HomeOverview } from "@/lib/api"
 
@@ -93,16 +94,72 @@ export default async function HomePage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="Home" description="What's happening right now across your stack." />
-
-      <GettingStartedPanel
-        state={gettingStarted}
-        customerAppUrl={process.env.CUSTOMER_APP_URL ?? "http://localhost:34000"}
+      <PageHeader
+        title="Home"
+        description="What's happening right now across your stack."
+        actions={
+          <GuidedTour
+            id="admin-home-v1"
+            autoStart
+            steps={[
+              {
+                element: "[data-tour='admin-getting-started']",
+                popover: {
+                  title: "Start from the customer action",
+                  description:
+                    "This is the operator side of the same demo. Open the customer app, draft one reply, then come back here to inspect what the backend recorded.",
+                  side: "bottom",
+                  align: "start",
+                },
+              },
+              {
+                element: "[data-tour='admin-kpis']",
+                popover: {
+                  title: "The backend is already measuring operations",
+                  description:
+                    "Requests, errors, cost, and queue depth are live runtime signals. After the first SupportDesk reply, cost updates from the gateway ledger.",
+                  side: "bottom",
+                  align: "start",
+                },
+              },
+              {
+                element: "[data-tour='admin-runs']",
+                popover: {
+                  title: "Agent and API executions land here",
+                  description:
+                    "BackAI stores app-facing request records and links AgentField execution IDs instead of copying AgentField's trace store.",
+                  side: "top",
+                  align: "start",
+                },
+              },
+              {
+                element: "[data-tour='admin-agentfield-nav']",
+                popover: {
+                  title: "Inspect the AgentField substrate",
+                  description:
+                    "Open Build -> Agents to see the registered SupportDesk agent and its reasoners. Open Operate -> Cost to inspect model spend for the same action.",
+                  side: "right",
+                  align: "center",
+                },
+              },
+            ]}
+          />
+        }
       />
+
+      <div data-tour="admin-getting-started">
+        <GettingStartedPanel
+          state={gettingStarted}
+          customerAppUrl={process.env.CUSTOMER_APP_URL ?? "http://localhost:34000"}
+        />
+      </div>
 
       <AlertsList alerts={data.alerts} />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div
+        className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4"
+        data-tour="admin-kpis"
+      >
         <KpiCard
           label="Requests / min"
           value={formatCompact(data.requests_per_minute)}
@@ -134,7 +191,7 @@ export default async function HomePage() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <div className="xl:col-span-2">
+        <div className="xl:col-span-2" data-tour="admin-runs">
           <RunsTable runs={data.recent_runs} />
         </div>
         <WebhookList deliveries={data.recent_webhook_deliveries} />

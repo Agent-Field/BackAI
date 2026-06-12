@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -153,16 +154,56 @@ func (c *Client) Discover(ctx context.Context) ([]AgentInfo, error) {
 		return nil, fmt.Errorf("agentfield: discover status %d", resp.StatusCode)
 	}
 	var raw struct {
-		Agents []AgentInfo `json:"agents"`
+		Agents       []AgentInfo `json:"agents"`
+		Capabilities []struct {
+			AgentID   string `json:"agent_id"`
+			Version   string `json:"version"`
+			Reasoners []struct {
+				ID   string   `json:"id"`
+				Tags []string `json:"tags"`
+			} `json:"reasoners"`
+		} `json:"capabilities"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
 		// Tolerate AF's evolving schema for now.
 		return []AgentInfo{}, nil
 	}
-	if raw.Agents == nil {
+	if raw.Agents != nil {
+		return raw.Agents, nil
+	}
+	if raw.Capabilities == nil {
 		return []AgentInfo{}, nil
 	}
-	return raw.Agents, nil
+	agents := make([]AgentInfo, 0, len(raw.Capabilities))
+	for _, capability := range raw.Capabilities {
+		if capability.AgentID == "" {
+			continue
+		}
+		reasoners := make([]string, 0, len(capability.Reasoners))
+		tagSet := map[string]struct{}{}
+		for _, reasoner := range capability.Reasoners {
+			if reasoner.ID != "" {
+				reasoners = append(reasoners, reasoner.ID)
+			}
+			for _, tag := range reasoner.Tags {
+				if tag != "" {
+					tagSet[tag] = struct{}{}
+				}
+			}
+		}
+		tags := make([]string, 0, len(tagSet))
+		for tag := range tagSet {
+			tags = append(tags, tag)
+		}
+		sort.Strings(tags)
+		agents = append(agents, AgentInfo{
+			NodeID:    capability.AgentID,
+			Version:   capability.Version,
+			Tags:      tags,
+			Reasoners: reasoners,
+		})
+	}
+	return agents, nil
 }
 
 // BaseURL returns the configured AF URL (for logs and diagnostics).
@@ -285,7 +326,7 @@ func (c *Client) GetExecution(ctx context.Context, id string) (ExecuteResponse, 
 	}, nil
 }
 
-// Capabilities calls every registered agent's ``__capabilities__``
+// Capabilities calls every registered agent's “__capabilities__“
 // reasoner and returns one entry per agent.
 //
 // This is how the runtime learns what CLI harnesses and MCP runners
@@ -294,7 +335,7 @@ func (c *Client) GetExecution(ctx context.Context, id string) (ExecuteResponse, 
 // harnesses / mcp packages aggregate the per-agent answers returned by
 // this method.
 //
-// Agents that do not define ``__capabilities__`` are silently skipped
+// Agents that do not define “__capabilities__“ are silently skipped
 // (we treat them as "has no harnesses, has no runners"). Per-agent
 // network errors are logged but do not fail the aggregate — a slow
 // agent shouldn't take out the dashboard.

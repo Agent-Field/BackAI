@@ -2,6 +2,7 @@
 
 "use client"
 
+import { useEffect, useState } from "react"
 import { useTheme } from "next-themes"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
@@ -36,6 +37,11 @@ export function Topbar({ user, billingDisabled = false, showShipwright = false }
   const router = useRouter()
   const { theme, setTheme } = useTheme()
   const palette = useCommandPalette()
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   const initials =
     user?.name
@@ -76,7 +82,15 @@ export function Topbar({ user, billingDisabled = false, showShipwright = false }
             <DropdownMenuTrigger
               render={
                 <Button variant="ghost" size="icon" aria-label="Toggle theme">
-                  {theme === "light" ? <Sun /> : theme === "dark" ? <Moon /> : <Monitor />}
+                  {!mounted ? (
+                    <Monitor />
+                  ) : theme === "light" ? (
+                    <Sun />
+                  ) : theme === "dark" ? (
+                    <Moon />
+                  ) : (
+                    <Monitor />
+                  )}
                 </Button>
               }
             />

@@ -6,6 +6,7 @@ import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { ThemeProvider } from "@/components/theme-provider"
 import { brand } from "@/lib/brand"
+import "driver.js/dist/driver.css"
 import "./globals.css"
 
 const geistSans = Geist({

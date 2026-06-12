@@ -2,6 +2,7 @@
 
 "use client"
 
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import { LogOut, Monitor, Moon, Sun, UserIcon } from "lucide-react"
@@ -33,6 +34,11 @@ type TopbarProps = {
 export function CustomerTopbar({ user, tenantName }: TopbarProps) {
   const router = useRouter()
   const { theme, setTheme } = useTheme()
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   const initials =
     user.name?.split(" ").map((s) => s[0]).join("").slice(0, 2).toUpperCase() ||
@@ -60,7 +66,9 @@ export function CustomerTopbar({ user, tenantName }: TopbarProps) {
           <DropdownMenuTrigger
             render={
               <Button variant="ghost" size="icon" aria-label="Toggle theme">
-                {theme === "light" ? (
+                {!mounted ? (
+                  <Monitor />
+                ) : theme === "light" ? (
                   <Sun />
                 ) : theme === "dark" ? (
                   <Moon />

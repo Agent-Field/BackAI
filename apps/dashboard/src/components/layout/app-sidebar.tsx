@@ -33,7 +33,16 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
       tooltip={item.label}
       isActive={isActive(pathname, item.href)}
       render={
-        <Link href={item.href}>
+        <Link
+          href={item.href}
+          data-tour={
+            item.id === "agents"
+              ? "admin-agentfield-nav"
+              : item.id === "cost"
+                ? "admin-cost-nav"
+                : undefined
+          }
+        >
           <item.icon />
           <span>{item.label}</span>
           {item.requiresMultiTenancy ? (

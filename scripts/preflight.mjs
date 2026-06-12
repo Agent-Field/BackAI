@@ -61,7 +61,7 @@ const ports = [
     env: "AF_STACK_METRICS_PORT",
     value: env.AF_STACK_METRICS_PORT ?? "9090",
     label: "BackAI metrics",
-    example: "AF_STACK_METRICS_PORT=39090",
+    example: "AF_STACK_METRICS_PORT=39091",
   },
   {
     service: "dashboard",
@@ -85,7 +85,7 @@ const ports = [
     env: "SVIX_PORT",
     value: env.SVIX_PORT ?? "8071",
     label: "Svix webhooks",
-    example: "SVIX_PORT=38071",
+    example: "SVIX_PORT=38072",
   },
 ]
 
@@ -120,6 +120,7 @@ if (duplicatePorts.length > 0) {
 }
 
 const conflicts = []
+const dockerInspectErrors = []
 for (const check of checks) {
   if (await canBind(check.port)) {
     continue
@@ -138,6 +139,11 @@ if (conflicts.length > 0) {
     console.error(`  Try: ${conflict.example} docker compose up`)
   }
   console.error("")
+  if (dockerInspectErrors.length > 0) {
+    console.error("BackAI could not inspect Docker to check whether these ports already belong to this compose project.")
+    console.error("If this stack is already running, run `docker compose ps` or rerun this command from a shell with Docker access.")
+    console.error("")
+  }
   console.error("BackAI does not stop other local services automatically. Change the port override or stop the conflicting service yourself.")
   process.exit(1)
 }
@@ -197,7 +203,8 @@ function isCurrentComposePort(check) {
     return output
       .split(/\r?\n/)
       .some((line) => line.trim().endsWith(`:${check.port}`) || line.trim().endsWith(`]:${check.port}`))
-  } catch {
+  } catch (error) {
+    dockerInspectErrors.push({ check, error })
     return false
   }
 }
