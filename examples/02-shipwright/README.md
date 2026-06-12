@@ -105,7 +105,7 @@ The contract is just the AgentField reasoner. To swap:
 
 ## Screenshots
 
-See `dashboard-screenshots/`:
+See [`../../docs/assets/dashboard-screenshots/`](../../docs/assets/dashboard-screenshots/):
 - `shipwright-with-sidebar.png` — sidebar nav + queue view
 - `shipwright-queue-mixed.png` — list with mixed running / completed
 - `shipwright-detail-completed.png` — task detail with steps + diff

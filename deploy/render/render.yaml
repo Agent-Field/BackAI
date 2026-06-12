@@ -4,7 +4,7 @@
 #   - Env groups for LLM keys + S3 creds so you set them ONCE for both services.
 #
 # Deploy button URL (drop into your repo README):
-#   https://render.com/deploy?repo=https://github.com/<you>/af-stack
+#   https://render.com/deploy?repo=https://github.com/Agent-Field/backai
 
 databases:
   - name: af-stack-postgres

@@ -118,7 +118,7 @@ For MinIO (in-cluster) — back up the bucket with `mc mirror`:
 
 ```bash
 mc alias set af http://minio:9000 minio minio-secret
-mc mirror --overwrite af/af-stack s3://your-prod-backup-bucket/af-stack-$(date +%Y%m%d)/
+mc mirror --overwrite af/af-stack s3://your-prod-backup-bucket/backai-$(date +%Y%m%d)/
 ```
 
 For external S3 — set up cross-bucket replication or use
@@ -131,7 +131,7 @@ lock and you have a tamper-evident archive.
 Mirror back the other way:
 
 ```bash
-mc mirror s3://your-prod-backup-bucket/af-stack-20260607/ af/af-stack
+mc mirror s3://your-prod-backup-bucket/backai-20260607/ af/af-stack
 ```
 
 Sandbox run rows in PostgreSQL reference storage by URL. After a

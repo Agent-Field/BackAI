@@ -1,7 +1,7 @@
 # SupportDesk-First Public Repo Development
 
 This folder is the coordination surface for the SupportDesk-first BackAI
-rewrite. It turns the product direction in `SUPPORTDESK-FIRST-DX-PLAN.md` into
+rewrite. It turns the product direction in `development/supportdesk-first-dx-plan.md` into
 parallelizable milestones, worker briefs, merge gates, and verification
 commands.
 

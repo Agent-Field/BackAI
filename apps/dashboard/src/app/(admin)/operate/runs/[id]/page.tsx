@@ -3,7 +3,7 @@
 // /operate/runs/[id]/page.tsx — #25 per-run detail page.
 //
 // AgentField already ships a rich run / DAG / step inspector at :8081.
-// Per ARCHITECTURE.md's "don't rebuild what's already excellent" rule
+// Per docs/architecture.md's "don't rebuild what's already excellent" rule
 // the af-stack dashboard:
 //
 //   1. Inlines a summary card (status, agent, timing, cost, approval).

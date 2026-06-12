@@ -13,7 +13,6 @@ _Start with SupportDesk AI, then replace the app with your own product._
 </div>
 
 > **Working name**. The brand is configured in [`brand.yaml`](brand.yaml).
-> `BRAND.yaml` is kept as a compatibility copy for existing Docker builds.
 
 ## What this is
 
@@ -84,8 +83,9 @@ is historical design material. See [`docs/repo-map.md`](docs/repo-map.md).
 | Deploy | Docker Compose, Helm, Fly, Railway, Render | Your domains, secrets, scaling, managed services. |
 
 For the layered architecture and OSS placement, read
-[`STACK.md`](STACK.md). For the product strategy, consumption model, and
-execution checklist, read [`POSITIONING.md`](POSITIONING.md).
+[`docs/stack.md`](docs/stack.md). For repo ownership and integration
+paths, read [`docs/repo-map.md`](docs/repo-map.md) and
+[`docs/attach-existing-app.md`](docs/attach-existing-app.md).
 
 ## Why This Exists
 
@@ -123,22 +123,22 @@ Plus a REST + OpenAPI surface so any language works.
 
 <div align="center">
 
-<img src="dashboard-screenshots/home.png" alt="BackAI Home — KPI strip, recent runs, cost" width="900" />
+<img src="docs/assets/dashboard-screenshots/home.png" alt="BackAI Home — KPI strip, recent runs, cost" width="900" />
 
 <sub>Home: requests/min · error rate · cost today · queue depth · live runs</sub>
 
-<img src="dashboard-screenshots/runs.png" alt="BackAI Runs — execution list with link-out trace" width="900" />
+<img src="docs/assets/dashboard-screenshots/runs.png" alt="BackAI Runs — execution list with link-out trace" width="900" />
 
 <sub>Operate → Runs: filter by agent / tenant / status, link out to full trace</sub>
 
-<img src="dashboard-screenshots/cost.png" alt="BackAI Cost dashboard" width="900" />
+<img src="docs/assets/dashboard-screenshots/cost.png" alt="BackAI Cost dashboard" width="900" />
 
 <sub>Operate → Cost: spend by model · agent · tenant · day, with budgets and forecast</sub>
 
-<img src="dashboard-screenshots/customers-tenants.png" alt="BackAI Customers — tenant list with detail drawer" width="900" />
+<img src="docs/assets/dashboard-screenshots/customers-tenants.png" alt="BackAI Customers — tenant list with detail drawer" width="900" />
 <sub>Customers → Tenants: per-customer drilldown with usage, members, audit</sub>
 
-<img src="dashboard-screenshots/customers-api-keys.png" alt="BackAI Customers — API key issuance" width="900" />
+<img src="docs/assets/dashboard-screenshots/customers-api-keys.png" alt="BackAI Customers — API key issuance" width="900" />
 <sub>Customers → API Keys: issue / rotate / revoke with one-time-reveal</sub>
 
 </div>
@@ -228,7 +228,7 @@ The wire shape is OpenAI-compatible, so any OpenAI-shaped client works
 by changing one line: the base URL.
 
 <div align="center">
-<img src="dashboard-screenshots/cost-live.png" alt="BackAI Cost dashboard with live LLM traffic" width="900" />
+<img src="docs/assets/dashboard-screenshots/cost-live.png" alt="BackAI Cost dashboard with live LLM traffic" width="900" />
 <sub>Operate → Cost: live cost events, model mix, per-tenant spend, budget meters</sub>
 </div>
 
@@ -311,7 +311,7 @@ Per-scope KV with vector search out of the box — store agent context
 across runs, search semantically.
 
 <div align="center">
-<img src="dashboard-screenshots/database.png" alt="BackAI Database studio — table browser + SQL runner + RLS policies + memory" width="900" />
+<img src="docs/assets/dashboard-screenshots/database.png" alt="BackAI Database studio — table browser + SQL runner + RLS policies + memory" width="900" />
 <sub>Build → Database: tables sidebar, row browser, structure / policies / SQL / memory tabs</sub>
 </div>
 
@@ -338,7 +338,7 @@ per-tenant alongside LLM spend so a tenant's monthly budget covers both
 inference and compute.
 
 <div align="center">
-<img src="dashboard-screenshots/sandbox-activity.png" alt="BackAI Sandbox Activity — recent runs, pool stats, cost today" width="900" />
+<img src="docs/assets/dashboard-screenshots/sandbox-activity.png" alt="BackAI Sandbox Activity — recent runs, pool stats, cost today" width="900" />
 <sub>Operate → Sandbox Activity: recent runs · adapter pool (warm / active / queued) · CPU-seconds and cost today</sub>
 </div>
 
@@ -391,20 +391,18 @@ dashboard, Docker Compose path, and Railway template are the current
 golden path. Heavier examples are available under [`examples/`](examples/)
 and declare their required capabilities in `capabilities.yaml`.
 
-For the full layered stack diagram, see [`STACK.md`](STACK.md).
+For the full layered stack diagram, see [`docs/stack.md`](docs/stack.md).
 
 ## Documentation
 
 Architecture and product docs live in this repo:
 
-- [`STACK.md`](STACK.md) — Layered architecture (Supabase-shaped, 8 bands)
-- [`STRATEGY.md`](STRATEGY.md) — What's shipping next
-- [`PRODUCT.md`](PRODUCT.md) — What it is, what it isn't, the DX
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) — Extension points + adapter contracts
+- [`docs/stack.md`](docs/stack.md) — Layered architecture (Supabase-shaped, 8 bands)
+- [`docs/product.md`](docs/product.md) — What it is, what it isn't, the DX
+- [`docs/architecture.md`](docs/architecture.md) — Extension points + adapter contracts
 - [`docs/repo-map.md`](docs/repo-map.md) — Where code belongs in a fork
 - [`docs/attach-existing-app.md`](docs/attach-existing-app.md) — Use BackAI behind an existing app
-- [`OSS-AUDIT.md`](OSS-AUDIT.md) — Every OSS we vendor + rationale
-- [`NAVBAR.md`](NAVBAR.md) — Operator-console inventory
+- [`docs/oss-audit.md`](docs/oss-audit.md) — Every OSS we vendor + rationale
 - [`docs/realtime.md`](docs/realtime.md) — Postgres NOTIFY → WebSocket bridge
 - [`docs/search.md`](docs/search.md) — Postgres FTS + pgvector app-data search
 - [`docs/activity.md`](docs/activity.md) — tenant-scoped customer activity log

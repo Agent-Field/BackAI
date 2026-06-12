@@ -1,6 +1,6 @@
 > **Archived 2026-06-07.** This document covers Phase 0-16 (now shipped).
 > Kept for historical context. For current state, see
-> [`STRATEGY.md`](../../STRATEGY.md) and [`STACK.md`](../../STACK.md).
+> [`STRATEGY.md`](../../development/strategy.md) and [`STACK.md`](../stack.md).
 
 # AF Stack: Product Requirements Document
 

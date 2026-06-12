@@ -50,6 +50,7 @@ venv/
 *.out
 vendor/
 bin/
+/af-stack
 
 # Next.js
 .next/

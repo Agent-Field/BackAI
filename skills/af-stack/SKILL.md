@@ -19,13 +19,13 @@ what the platform already gives them.
 
 If unsure of the strategic frame, primitives table, or canonical DX:
 
-- `STACK.md` — the 8-band layered architecture (Client / Edge / API
+- `docs/stack.md` — the 8-band layered architecture (Client / Edge / API
   Gateway / Intelligence / Execution / Delivery / Observability / Data)
-- `POSITIONING.md` — the canonical fork-and-edit DX + vocabulary
+- `development/positioning.md` — the canonical fork-and-edit DX + vocabulary
   (Workload Module · Dashboard Plugin · Adapter)
-- `STRATEGY.md` — the ownership boundary (AgentField vs af-stack vs
+- `development/strategy.md` — the ownership boundary (AgentField vs af-stack vs
   LiteLLM) and the 4-phase plan
-- `PRODUCT.md` — what's REAL vs needs-key vs not-in-v1
+- `docs/product.md` — what's REAL vs needs-key vs not-in-v1
 
 ## The 4 edit surfaces (the most important table)
 
@@ -125,7 +125,7 @@ For the Python SDK, see `packages/sdk-py/af_stack/`. For the TS SDK, see
 
 ## The 8 layered bands
 
-See `STACK.md` for the diagram. Quick summary:
+See `docs/stack.md` for the diagram. Quick summary:
 
 ```
 ① Client         Dashboard · Customer App · Docs · SDKs · CLI
@@ -178,7 +178,7 @@ These are non-negotiable. Each has a detailed rationale in `rules/`.
    [`rules/sdk.md`](rules/sdk.md) → "LLM rate limits — 429 responses".
 10. **The repo IS the product.** No "managed offering" code paths, no
     "free tier" feature gates in OSS. We don't ship code that depends on
-    a SaaS we run. See `POSITIONING.md`.
+    a SaaS we run. See `development/positioning.md`.
 
 ## Canonical workflow — when the user says "build X on AF Stack"
 

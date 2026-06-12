@@ -54,7 +54,7 @@ generic infrastructure project or a SWE-AF demo.
 ### Verification
 
 ```bash
-rg -n "SWE-AF|Shipwright|code-helper|AgentField" README.md apps/customer-app apps/dashboard docs SUPPORTDESK-FIRST-DX-PLAN.md development
+rg -n "SWE-AF|Shipwright|code-helper|AgentField" README.md apps/customer-app apps/dashboard docs development/supportdesk-first-dx-plan.md development
 ```
 
 Review each hit and confirm it is intentional.

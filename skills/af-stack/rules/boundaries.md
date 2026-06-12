@@ -24,7 +24,7 @@ unmaintainable.
 
 **Why**: AgentField IS the AI runtime. Duplicating its primitives in
 af-stack creates two sources of truth, drifts on schema, and confuses
-which one the user should use. The platform boundary in `STRATEGY.md`
+which one the user should use. The platform boundary in `development/strategy.md`
 is the contract.
 
 **The correct primitive**:
@@ -121,10 +121,10 @@ feature flags that toggle between "OSS edition" and "Enterprise edition."
 **Why**: AF Stack is Apache 2.0 and forkable. The repo the user clones
 IS the running product. No hosted version exists to compete with the
 fork. (This is the core differentiator from Supabase / Appwrite / Nhost —
-see `POSITIONING.md`.)
+see `development/positioning.md`.)
 
 **The correct primitive**: every feature is in the repo. Enterprise
-controls like SSO, RBAC, BYOK, and GDPR (planned, tracked in `STRATEGY.md`) ship
+controls like SSO, RBAC, BYOK, and GDPR (planned, tracked in `development/strategy.md`) ship
 in-tree. Operator opts in via env / config.
 
 ## Other rules with similar weight
@@ -143,7 +143,7 @@ inside an audited operator route. See `rules/multi-tenancy.md`.
 ### B7 — Don't write to env from the UI
 
 The dashboard is read-only on tier-1 + tier-2 config (per
-`NAVBAR.md`). If the user wants to change adapters / providers /
+`development/operator-console-inventory.md`). If the user wants to change adapters / providers /
 modules, they edit `.env` or `config.yaml` and restart. The dashboard
 shows what's active; it doesn't change it.
 
@@ -190,6 +190,6 @@ Examples of common requests + the correct response:
 
 ## When in doubt
 
-Read `POSITIONING.md` Part 1 (the strategic frame) and `STRATEGY.md`
+Read `development/positioning.md` Part 1 (the strategic frame) and `development/strategy.md`
 ("Ownership Boundary"). Those two are the source of truth for what
 belongs where.

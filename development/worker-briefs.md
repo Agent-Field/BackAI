@@ -11,7 +11,7 @@ Make the repo read like a SupportDesk-first BackAI app template.
 
 ### Inputs
 
-- `SUPPORTDESK-FIRST-DX-PLAN.md`
+- `development/supportdesk-first-dx-plan.md`
 - `development/decisions.md`
 - Current `README.md`
 - `apps/customer-app`

@@ -109,7 +109,7 @@ to include Shipwright work.
 Use explicit path staging:
 
 ```bash
-git add development SUPPORTDESK-FIRST-DX-PLAN.md
+git add development development/supportdesk-first-dx-plan.md
 ```
 
 Avoid broad `git add .` while unrelated work remains.

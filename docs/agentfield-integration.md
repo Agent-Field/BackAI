@@ -2,7 +2,7 @@
 
 This doc explains how the af-stack operator dashboard surfaces
 AgentField run / span / step data. The implementation (item #25 in
-`MULTI-ITEM-PLAN.md`) deliberately avoids reimplementing AgentField's
+[`development/multi-item-plan.md`](../development/multi-item-plan.md)) deliberately avoids reimplementing AgentField's
 own UI and instead composes against it.
 
 ## Principle: don't rebuild what's already excellent

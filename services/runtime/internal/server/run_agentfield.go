@@ -4,7 +4,7 @@
 // AgentField.
 //
 // AgentField already ships a rich run / DAG / step inspector at :8081.
-// Per ARCHITECTURE.md's "don't rebuild what's already excellent"
+// Per docs/architecture.md's "don't rebuild what's already excellent"
 // principle, we link out for the deep view and inline a summary card +
 // control actions in af-stack's run detail page.
 //

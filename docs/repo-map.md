@@ -40,7 +40,7 @@ piece after the fork, not by framework.
 | `docs/` | Durable user/operator documentation. Keep current claims here. |
 | `docs/archive/` | Historical plans and old phase documents. Useful context, not the current public path. |
 | `development/` | Current branch planning, milestone evidence, worker briefs, and verification notes. This is project-management state, not product docs. |
-| `dashboard-screenshots/` | README/admin screenshots. Refresh when the public UI changes. |
+| `docs/assets/dashboard-screenshots/` | README/admin screenshots. Refresh when the public UI changes. |
 
 ## Examples
 

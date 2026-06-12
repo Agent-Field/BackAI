@@ -31,6 +31,7 @@ explicitly changes.
 | M5 | Railway deploy | Complete | Codex | Railway template now includes customer, admin, runtime, LiteLLM, AgentField, Postgres, demo mode, and private service wiring. |
 | M6 | Docs and examples | Complete | Codex | Public docs now cover demo mode, attach-existing-app mode, repo ownership, example capabilities, Railway first run, and cleaned BackAI naming. |
 | M7 | Verification sweep | Complete | Codex | Runtime Go suite, app typechecks/builds, compose config, deploy validation, Railway JSON, manifest parsing, and public text scan pass. |
+| M8 | Root repo hygiene | Complete | Codex | Root now keeps operational/public files only; planning docs moved to `development/`, durable docs/assets moved to `docs/`, `brand.yaml` is canonical, and the tracked root binary is removed/ignored. |
 
 ## Merge Log
 
@@ -48,6 +49,7 @@ explicitly changes.
 | 2026-06-12 | `3976fd1` | M6 demo mode docs | `rg -n "github.com/<you>/af-stack|AF_STACK_DEMO_MODE|demo-supportdesk|Railway|no-key|BackAI|SupportDesk" README.md docs/demo-mode.md deploy/railway/README.md deploy/README.md docs/deploy.md`; `python3 scripts/validate-deploy-targets.py`. |
 | 2026-06-12 | `a1de6b5` | M6 repo and examples DX | `ruby -e 'require "yaml"; ...' examples/*/capabilities.yaml`; `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`; `pnpm --dir apps/dashboard exec tsc --noEmit --pretty false`; public text scan has no `AF Stack`, `SWE-AF`, or `coming soon` hits outside code comments/archive. |
 | 2026-06-12 | `6ab9cce` | M7 final verification | `ruby -e 'require "yaml"; ...' examples/*/capabilities.yaml`; `rg -n "coming soon|SWE-AF|AF Stack" ...`; `docker compose config --quiet`; `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`; `pnpm --dir apps/dashboard exec tsc --noEmit --pretty false`; `python3 -m json.tool deploy/railway/railway.json`; `python3 scripts/validate-deploy-targets.py`; `GOCACHE=/tmp/backai-go-build go test ./services/runtime/...`; `pnpm --dir apps/customer-app build`; `pnpm --dir apps/dashboard build`. |
+| 2026-06-12 | `pending` | M8 root repo hygiene | Root listing audited; root binary removed and ignored; `BRAND.yaml` renamed to `brand.yaml`; planning files moved under `development/`; public docs and screenshots moved under `docs/`; stale root doc and old repo URL references scanned and corrected. |
 
 ## Current Risks
 
@@ -62,5 +64,5 @@ explicitly changes.
 ## Next Concrete Work
 
 1. Commit and push status-board commit-id cleanup.
-2. Create the pull request or merge path for `supportdesk-first-dx`.
+2. Push the root hygiene cleanup to PR #118.
 3. Decide whether to keep or move the advanced Shipwright customer routes before public launch.
