@@ -125,10 +125,9 @@ runtime.
 
 ## Brand bits — the minimum brand pass
 
-To take a fresh fork from "AF Stack" to "Your Product":
+To take a fresh fork from BackAI to your product:
 
-1. **`brand.yaml`** (planned) or `BRAND.yaml` + `brand.css` today —
-   change name, palette, domain.
+1. **`brand.yaml`** — the source of truth for app name, colors, and logo.
 2. **`apps/customer-app/src/app/page.tsx`** — landing page copy.
 3. **`apps/customer-app/src/components/layout/customer-topbar.tsx`** —
    logo + product name in the topbar.
@@ -136,7 +135,8 @@ To take a fresh fork from "AF Stack" to "Your Product":
 5. **`apps/customer-app/src/app/(app)/dashboard/page.tsx`** — the first
    thing customers see after sign-in.
 
-will eventually ship `af-stack init` which does steps 1, 3, 4 automatically.
+The CLI should eventually ship `af-stack init`, which does steps 1, 3, and 4
+automatically.
 
 ## Adding a page — concrete walkthrough
 
@@ -169,7 +169,7 @@ The user wants `/items` as a customer-facing list:
 | Who logs in? | Your end users (customers) | Operators (you / your support team) |
 | Multi-tenant? | One user = one tenant scope | Cross-tenant operator view |
 | Editable? | Brand + add pages | Mostly platform; plugins extend |
-| Brand | Product name | "AF Stack" (or your brand if you're white-labeling for resellers) |
+| Brand | Product name | "BackAI" (or your brand if you're white-labeling for resellers) |
 | Visible to | Public (after auth) | Operators only |
 
 Don't put operator-only features in customer-app or vice versa.

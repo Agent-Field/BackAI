@@ -1,8 +1,8 @@
-# AF Stack — What it is, what it isn't, what it feels like to use
+# BackAI — What it is, what it isn't, what it feels like to use
 
 ## What it is
 
-AF Stack is the **open backend platform for AI products**. You clone it,
+BackAI is the **open backend platform for AI products**. You clone it,
 `docker compose up`, and 60 seconds later you have everything an
 AI-first SaaS actually needs to ship:
 
@@ -25,10 +25,12 @@ code you fork is the code we run.
 
 **Apache 2.0. No open-core. No paid tier we ship a worse version of.**
 
-## What's REAL in v1 (works end-to-end with one env var)
+## What's REAL in v1
 
-These work the moment you `docker compose up` with just an
-`OPENROUTER_API_KEY` set:
+These work the moment you `docker compose up`. Without a provider key,
+BackAI uses a deterministic demo provider so the first SupportDesk action
+still writes real request and cost records. Add `OPENROUTER_API_KEY` or
+another provider key when you want live model calls through LiteLLM:
 
 | Surface | What runs |
 |---|---|
@@ -46,7 +48,7 @@ These work the moment you `docker compose up` with just an
 | **Skills** | Install bundles, attach to agents, query installed list. |
 | **Harnesses** | Probe-only — detects whether claude-code/codex/gemini/opencode is available in the agent container and what auth it needs. |
 | **Operator dashboard** | Cost charts, run inspector, sandbox activity, memory browser, audit log, tenant drilldown, plugin system, theming via CSS variables. |
-| **Customer-facing app** | Sign-up → tenant + membership + API key minting → code-helper that streams real LLM calls → billing page. Separate brand, same auth DB. |
+| **Customer-facing app** | Sign-up → tenant + membership + API key minting → SupportDesk action through the LLM gateway → billing page. Separate brand, same auth DB. |
 | **OpenAPI 3.1** | Auto-generated at `/openapi.json` with 86+ routes, 21 routes with curl+Python+TS code samples. |
 | **Python + TypeScript SDKs** | `suite.notifications.*`, `suite.webhooks.*`, `suite.billing.*`, `suite.sandbox.*`, `suite.memory.*`, `suite.tools.*` (MCP), `suite.admin.skills.*`, `suite.harnesses.*`. Pydantic + zod parity. |
 | **CLI** | `af-stack mcp list/add/remove/call`, `af-stack harness list/install`. |
@@ -226,7 +228,7 @@ readiness probes, working autoscaler hooks, and a documented backup
 ## What we get RIGHT that's hard
 
 These are the things that take three months when you build from
-scratch. AF Stack ships them ready.
+scratch. BackAI ships them ready.
 
 - **Multi-tenancy at the DB boundary, not in handler code.** Most
   teams reach for SaaS auth (Clerk / WorkOS), then hand-roll tenant
@@ -283,7 +285,7 @@ Honest list. These are the rough edges in v1.
 
 ## Comparison to nearby tools
 
-| Tool | What it solves | What it doesn't | Where AF Stack fits |
+| Tool | What it solves | What it doesn't | Where BackAI fits |
 |---|---|---|---|
 | **Supabase / Firebase** | Auth, DB, storage, real-time | LLM cost attribution, agent sandboxes, per-tenant rate limits, MCP, harnesses | We are these + the AI primitives |
 | **Helicone / Portkey** | LLM proxy with cost + cache | Multi-tenancy, sandboxes, jobs, webhooks, the whole rest of the backend | The gateway is one of our modules. We are the rest. |

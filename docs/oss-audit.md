@@ -45,14 +45,14 @@ holes are listed below in priority order.
 
 ### 1. LLM provider routing → **LiteLLM** — **DONE**
 
-**Landed:** AF Stack runs a LiteLLM Proxy sidecar
+**Landed:** BackAI runs a LiteLLM Proxy sidecar
 (`ghcr.io/berriai/litellm:main-stable`) in docker-compose. The runtime
 gateway forwards every `/api/v1/llm/*` call to it via
 `services/runtime/internal/llmgateway/litellm_provider.go`. LiteLLM
 handles 100+ upstream providers via
 `apps/backend/litellm-config.yaml`.
 
-**Kept on AF Stack's side:** cost ledger, budgets, cache, hooks,
+**Kept on BackAI's side:** cost ledger, budgets, cache, hooks,
 per-tenant API keys, the OpenAI-compatible customer surface.
 
 **Dropped:** 4 hand-rolled provider clients (OpenRouter, OpenAI,
@@ -66,13 +66,13 @@ edit, not a code change. Mistral, DeepSeek, Groq, Cohere, Bedrock,
 plus everything else LiteLLM supports, all work by dropping in an
 `..._API_KEY`.
 
-**Virtual keys + spend (item #22, landed):** AF Stack also uses
+**Virtual keys + spend (item #22, landed):** BackAI also uses
 LiteLLM's master-key-protected admin surface. `IssueAPIKey` mints a
 matching LiteLLM virtual key (`/key/generate`) alongside every
 `suite_api_keys` row, with the operator-supplied `budget_max_usd`,
 `rate_limit_rpm`, and `rate_limit_tpm` forwarded as `max_budget`,
 `rpm_limit`, and `tpm_limit`. The LiteLLM secret is stored encrypted
-in the AF Stack secrets vault under `litellm/key/{api_key_id}`; only
+in the BackAI secrets vault under `litellm/key/{api_key_id}`; only
 an alias + SHA-256 hash live on the row. The LLM gateway reads the
 per-tenant key at request time and uses it for the upstream call so
 LiteLLM enforces budget + rate limit upstream and the dashboard reads

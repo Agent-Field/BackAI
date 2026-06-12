@@ -1,4 +1,4 @@
-# AF Stack local development stack
+# BackAI local development stack
 #
 # Brings up: customer app, admin dashboard, runtime, Postgres, MinIO,
 # AgentField control plane, LiteLLM, and webhook sidecars.
@@ -47,10 +47,10 @@ services:
       retries: 5
 
   # LiteLLM Proxy — handles every upstream LLM provider so the runtime
-  # doesn't ship a hand-rolled client per vendor. AF Stack forwards
+  # doesn't ship a hand-rolled client per vendor. BackAI forwards
   # /api/v1/llm/* to this sidecar; LiteLLM routes to OpenRouter / OpenAI /
   # Anthropic / Google / Mistral / DeepSeek / Groq / Cohere / Bedrock / etc.
-  # based on apps/backend/litellm-config.yaml. AF Stack keeps tenant
+  # based on apps/backend/litellm-config.yaml. BackAI keeps tenant
   # resolution, cost ledger, budgets, cache, and hooks on its side.
   litellm:
     image: ghcr.io/berriai/litellm:main-stable
@@ -100,7 +100,7 @@ services:
     # probe instead.
     restart: unless-stopped
 
-  # AF Stack suite runtime (Go single binary).
+  # BackAI runtime (Go single binary).
   runtime:
     build:
       context: .
@@ -315,7 +315,7 @@ services:
 
   # Svix — outbound webhook delivery (OSS audit item #2).
   #
-  # AF Stack uses Svix as a sidecar for outbound webhook delivery: the
+  # BackAI uses Svix as a sidecar for outbound webhook delivery: the
   # runtime's POST /api/v1/webhooks/send proxies to svix-server, which
   # owns the delivery queue, retries, signing, replay protection, and the
   # message log. We keep the inbound side (/webhooks/in/{slug}) ourselves

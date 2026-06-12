@@ -75,11 +75,12 @@ issue one from `/api-key`).
 
 ## Running locally
 
-The override file at the repo root wires this in. From the af-stack root:
+The root compose file includes this app in the default first-run stack.
+From the repo root:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.override.yml \
-  up -d customer-app
+node scripts/preflight.mjs
+docker compose up -d customer-app
 ```
 
 Verify:

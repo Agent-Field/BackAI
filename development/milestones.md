@@ -156,8 +156,8 @@ Use browser automation or manual local run:
 docker compose config --quiet
 docker compose up -d --build
 curl -fsS http://localhost:8080/health
-curl -fsS http://localhost:3000
-curl -fsS http://localhost:3001
+curl -fsS http://localhost:34000
+curl -fsS http://localhost:33000
 ```
 
 ## M5: Railway Deploy

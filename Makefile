@@ -4,7 +4,7 @@
 
 # Default target
 help:
-	@echo "AF Stack - common development commands"
+	@echo "BackAI - common development commands"
 	@echo ""
 	@echo "  make install-deps   Install all language-level deps (Go, Python, Node)"
 	@echo "  make preflight      Check local port conflicts before Docker starts"

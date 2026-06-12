@@ -1,4 +1,4 @@
-# AF Stack — Technical Layer Stack
+# BackAI — Technical Layer Stack
 
 The same shape Supabase, Firebase, Plane, and Cal.com use: a small number
 of **horizontal bands**, each band labeled by concern. Services that sit
@@ -230,7 +230,7 @@ Paste this into your image generator. The result is a tall, clean
 Supabase-style stack diagram with logos in their natural bands.
 
 > A clean, minimal **technical stack diagram** for a self-hostable AI
-> backend platform called **AF Stack**, in the visual style of Supabase /
+> backend platform called **BackAI**, in the visual style of Supabase /
 > Vercel / Linear marketing material. Light off-white background, single
 > blue accent for the title bar, generous whitespace, rounded-corner
 > slabs with very subtle drop shadows. **Eight horizontal bands stacked
@@ -285,8 +285,8 @@ Supabase-style stack diagram with logos in their natural bands.
 > Logos: PostgreSQL (large, prominent — this is the foundation), pgvector
 > wordmark, MinIO, AWS S3, Redis
 >
-> At the very top, title bar in a single soft-blue rectangle: **"AF
-> Stack"** (bold, white on blue) with a subtitle "The open backend for AI
+> At the very top, title bar in a single soft-blue rectangle: **"BackAI"**
+> (bold, white on blue) with a subtitle "The open backend for AI
 > products" (smaller, slightly transparent white).
 >
 > At the very bottom, a single thin line of small text: "Apache 2.0 ·
@@ -309,7 +309,7 @@ This is the same mental model as every successful backend platform:
 | **Supabase** | Studio → APIs → (Auth · DB · Storage · Realtime · Functions · Vector) → Postgres |
 | **Firebase** | Build → Release → Engage → Analytics |
 | **Plane / Cal.com / Outline** | Frontend → API → Services → Postgres |
-| **AF Stack** | Client → Edge → API → (Intelligence · Execution · Delivery · Observability) → Data |
+| **BackAI** | Client → Edge → API → (Intelligence · Execution · Delivery · Observability) → Data |
 
 Two differences from Supabase that matter:
 

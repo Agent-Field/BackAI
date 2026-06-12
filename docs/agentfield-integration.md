@@ -1,6 +1,6 @@
 # AgentField data in the dashboard
 
-This doc explains how the af-stack operator dashboard surfaces
+This doc explains how the BackAI operator dashboard surfaces
 AgentField run / span / step data. The implementation (item #25 in
 [`development/multi-item-plan.md`](../development/multi-item-plan.md)) deliberately avoids reimplementing AgentField's
 own UI and instead composes against it.
@@ -9,10 +9,10 @@ own UI and instead composes against it.
 
 AgentField already ships a rich run / DAG / step inspector at port
 `:8081` (its control plane UI). The same engineering effort spent
-mirroring it inside af-stack would buy us nothing — AgentField evolves
-its own UI alongside its schema, and any af-stack clone would lag.
+mirroring it inside BackAI would buy us nothing — AgentField evolves
+its own UI alongside its schema, and any BackAI clone would lag.
 
-So af-stack's dashboard takes a two-layer approach:
+So BackAI's dashboard takes a two-layer approach:
 
 1. **Link out** to AgentField's UI for deep inspection — the DAG view,
    step I/O, spans, tool calls.
@@ -20,20 +20,20 @@ So af-stack's dashboard takes a two-layer approach:
    on the run detail page so operators get the at-a-glance numbers
    without leaving the dashboard.
 3. **Proxy control actions** (cancel / pause / resume / request
-   approval) through af-stack routes so operators don't bounce between
-   two UIs for routine ops, and so af-stack can layer audit / tenant
+   approval) through BackAI routes so operators don't bounce between
+   two UIs for routine ops, and so BackAI can layer audit / tenant
    scoping in front of the AgentField call.
 
 ## What's where
 
 | Surface | Lives in | Notes |
 |---|---|---|
-| Run list, filters, paging | af-stack dashboard `/operate/runs` | Reads `suite_gateway_requests` (every gateway call is logged there) |
-| Per-run summary card | af-stack dashboard `/operate/runs/[id]` | Reads `GET /api/v1/runs/{id}/agentfield` |
-| Run controls (cancel / pause / resume / request-approval) | af-stack dashboard `/operate/runs/[id]` | Posts to `POST /api/v1/runs/{id}/{verb}` |
+| Run list, filters, paging | BackAI dashboard `/operate/runs` | Reads `suite_gateway_requests` (every gateway call is logged there) |
+| Per-run summary card | BackAI dashboard `/operate/runs/[id]` | Reads `GET /api/v1/runs/{id}/agentfield` |
+| Run controls (cancel / pause / resume / request-approval) | BackAI dashboard `/operate/runs/[id]` | Posts to `POST /api/v1/runs/{id}/{verb}` |
 | DAG view, step inspector, span tree | **AgentField UI** at `:8081` | Reached via "View in AgentField" link-out |
-| Real-time event stream | af-stack runtime (item #15) | Bridges AgentField's SSE to a WebSocket |
-| Memory tab | af-stack dashboard | Reads `suite_memory` (canonical store per #31 audit) |
+| Real-time event stream | BackAI runtime (item #15) | Bridges AgentField's SSE to a WebSocket |
+| Memory tab | BackAI dashboard | Reads `suite_memory` (canonical store per #31 audit) |
 
 ## Wire shape
 
@@ -60,7 +60,7 @@ So af-stack's dashboard takes a two-layer approach:
 }
 ```
 
-- `overview` is af-stack's projection of AgentField's
+- `overview` is BackAI's projection of AgentField's
   `GET /agentic/run/:run_id` response. We only type the fields the
   dashboard renders; everything else passes through under `extra` so
   schema additions in AgentField don't require a runtime release.
@@ -87,7 +87,7 @@ All four POSTs share the same request shape (empty body) and response:
 }
 ```
 
-| af-stack route | proxied to |
+| BackAI route | proxied to |
 |---|---|
 | `POST /api/v1/runs/{id}/cancel` | `POST /agent-api/executions/{exec_id}/cancel` |
 | `POST /api/v1/runs/{id}/pause` | `POST /agent-api/executions/{exec_id}/pause` |

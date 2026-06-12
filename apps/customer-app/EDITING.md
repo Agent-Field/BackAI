@@ -1,6 +1,6 @@
 # Customer App Editing Contract
 
-The customer app is the product surface in an AF Stack fork. Treat it as
+The customer app is the product surface in a BackAI fork. Treat it as
 mostly yours, with a few platform-owned edges.
 
 ## Edit Freely

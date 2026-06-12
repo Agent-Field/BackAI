@@ -40,7 +40,7 @@ Every other directory is platform code you don't edit.
 | **Dashboard Plugin** | `apps/dashboard/plugins/<id>/` | TypeScript / React | Operator-console read-only tabs (charts, lists, status) |
 
 Plus:
-- `brand.yaml` (planned) — single brand config that drives both apps' CSS
+- `brand.yaml` — single brand config that drives both apps' CSS
 - `.env` — operator config (provider keys, adapter choices)
 
 ## Available primitives (the second-most-important table)
@@ -165,8 +165,8 @@ These are non-negotiable. Each has a detailed rationale in `rules/`.
 7. **Adapters swap via env var.** Don't add runtime-detected switching
    between storage / sandbox / billing / notifications adapters. See
    [`rules/adapters.md`](rules/adapters.md).
-8. **Brand state lives in `brand.yaml` (planned) or the existing
-   `BRAND.yaml` + `brand.css` files until then.** Don't
+8. **Brand state lives in `brand.yaml`; generated `brand.css` files are
+   outputs.** Don't
    hardcode product name, colors, or logos in TS/Go. See
    [`rules/customer-app.md`](rules/customer-app.md).
 9. **No bypass of the LLM gateway.** Every LLM call hits `/api/v1/llm/*`.

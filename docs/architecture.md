@@ -1,8 +1,8 @@
-# AF Stack — Architecture & DX
+# BackAI — Architecture & DX
 
 ## The shape of the product
 
-**AF Stack is a forkable template, not a hosted service.** You clone
+**BackAI is a forkable template, not a hosted service.** You clone
 the repo, customize the layers you care about, and deploy the whole
 stack as one thing. The customer-facing app, the operator console, the
 runtime, and the agents all live in your fork — they're meant to be
@@ -37,7 +37,7 @@ reimplement):
 | **MinIO + AWS SDK** | Storage | One adapter shape covers both |
 | **Scalar API Reference** | API browser | Modern OpenAPI viewer |
 | **Caddy** | Reverse proxy with auto-TLS | Drop-in, no Let's Encrypt scripting |
-| **LiteLLM** | Multi-provider LLM routing (sidecar) | Gives us 100+ providers for the cost of one integration. Runs as a docker-compose sidecar; AF Stack forwards `/api/v1/llm/*` to it and keeps tenant resolution, cost ledger, budgets, cache, and hooks on its side. |
+| **LiteLLM** | Multi-provider LLM routing (sidecar) | Gives us 100+ providers for the cost of one integration. Runs as a docker-compose sidecar; BackAI forwards `/api/v1/llm/*` to it and keeps tenant resolution, cost ledger, budgets, cache, and hooks on its side. |
 
 **Pieces we wrote** (where we add AI-native value):
 
@@ -46,7 +46,7 @@ reimplement):
 - Sandbox adapter interface across docker/gVisor/Firecracker/e2b
 - Workload module loader (drop-in feature packs)
 - Dashboard plugin system (file-discovery + lucide icons)
-- AF Stack CLI
+- BackAI CLI (`af-stack` binary today)
 
 ## The DX flow — how a developer uses this
 
@@ -56,7 +56,7 @@ reimplement):
 git clone https://github.com/Agent-Field/backai my-product
 cd my-product
 cp .env.example .env
-# Edit .env: set OPENROUTER_API_KEY
+# Optional: set OPENROUTER_API_KEY for live model calls
 docker compose up -d
 ```
 
@@ -149,12 +149,12 @@ presents harness readiness where it belongs: next to registered agents.
 ## How LiteLLM is wired
 
 The gateway no longer ships hand-rolled OpenRouter / OpenAI /
-Anthropic / Google clients. AF Stack runs a **LiteLLM Proxy sidecar**
+Anthropic / Google clients. BackAI runs a **LiteLLM Proxy sidecar**
 (image `ghcr.io/berriai/litellm:main-stable`) in docker-compose; the
 runtime forwards every `/api/v1/llm/*` call to it. LiteLLM handles
 100+ upstream providers via `apps/backend/litellm-config.yaml`.
 
-AF Stack keeps on its side (where the AI-native value sits):
+BackAI keeps on its side (where the AI-native value sits):
 
 - Per-tenant API keys, rate limits, cost attribution
 - Cost ledger / budgets / cache layer
