@@ -42,6 +42,7 @@ export const dynamic = "force-dynamic"
 type SearchParams = Promise<{
   range?: string
   tenant?: string
+  request_id?: string
   agent?: string
   model?: string
 }>
@@ -79,7 +80,10 @@ type Snapshot = {
   multiTenancyEnabled: boolean
 }
 
-async function loadSnapshot(range: string): Promise<Snapshot> {
+async function loadSnapshot(
+  range: string,
+  filters: { tenant?: string; requestId?: string; model?: string },
+): Promise<Snapshot> {
   const days = rangeToDays(range)
   const from = isoFromDaysAgo(days)
   const to = new Date().toISOString()
@@ -96,7 +100,14 @@ async function loadSnapshot(range: string): Promise<Snapshot> {
     api.llm.cacheStats(),
     api.budgets.list(),
     api.admin.tenants.list(),
-    api.costEvents({ limit: 50, from, to }),
+    api.costEvents({
+      limit: 50,
+      from,
+      to,
+      tenant: filters.tenant || undefined,
+      request_id: filters.requestId || undefined,
+      model: filters.model || undefined,
+    }),
     api.modulesState(),
   ])
 
@@ -154,10 +165,11 @@ export default async function CostPage({
     ? (params.range as string)
     : DEFAULT_RANGE
   const tenant = params.tenant ?? ""
+  const requestId = params.request_id ?? ""
   const agent = params.agent ?? ""
   const model = params.model ?? ""
 
-  const snapshot = await loadSnapshot(range)
+  const snapshot = await loadSnapshot(range, { tenant, requestId, model })
   const { cost, cache, budgets, tenants, events, multiTenancyEnabled } =
     snapshot
 
@@ -230,6 +242,13 @@ export default async function CostPage({
         initialModel={model}
       />
 
+      {requestId ? (
+        <div className="rounded-md border bg-muted/40 px-4 py-3 text-sm">
+          Showing the cost event for request{" "}
+          <code className="font-mono text-xs">{requestId}</code>.
+        </div>
+      ) : null}
+
       <CostBudgetAlerts budgets={budgets} tenants={tenants} />
 
       <CostHeader data={filtered} cache={cache} budgetUsd={heroBudget} />
@@ -257,6 +276,7 @@ export default async function CostPage({
       <CostEventStream
         initialEvents={events}
         tenant={tenant}
+        requestId={requestId}
         model={model}
       />
     </div>

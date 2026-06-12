@@ -74,7 +74,11 @@ func (r *Recorder) Record(ctx context.Context, ev Event) error {
 	// Empty strings become NULL via *string. tenantPtr / apiKeyPtr go
 	// to the FK columns; both have ON DELETE SET NULL so a deleted
 	// tenant/key doesn't break aggregation of historical events.
-	var tenantPtr, apiKeyPtr, agentPtr *string
+	var requestPtr, tenantPtr, apiKeyPtr, agentPtr *string
+	if ev.RequestID != "" {
+		rid := ev.RequestID
+		requestPtr = &rid
+	}
 	if ev.TenantID != "" {
 		tid := ev.TenantID
 		tenantPtr = &tid
@@ -100,11 +104,12 @@ func (r *Recorder) Record(ctx context.Context, ev Event) error {
 
 	_, err := r.pool.Exec(writeCtx, `
         insert into suite_cost_events
-            (tenant_id, api_key_id, model, provider, agent,
+            (request_id, tenant_id, api_key_id, model, provider, agent,
              prompt_tokens, completion_tokens, total_tokens,
              cost_usd, cached, latency_ms, occurred_at, modality)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
     `,
+		requestPtr,
 		tenantPtr,
 		apiKeyPtr,
 		ev.Model,

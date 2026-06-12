@@ -36,7 +36,7 @@ type Usage = {
   cost_usd?: number
 }
 
-function operatorDashboardUrl(tenantId: string): string {
+function operatorDashboardUrl(tenantId: string, requestId?: string): string {
   // Best-effort: the operator runs the admin dashboard on :33000 (env
   // AF_STACK_DASHBOARD_PORT). NEXT_PUBLIC_OPERATOR_URL overrides this.
   const base =
@@ -46,13 +46,23 @@ function operatorDashboardUrl(tenantId: string): string {
           .replace(/:34000$/, ":33000")
           .replace(/:34001$/, ":33000")
       : "http://localhost:33000")
-  return `${base}/operate/cost?tenant=${encodeURIComponent(tenantId)}`
+  const qs = new URLSearchParams({ tenant: tenantId })
+  if (requestId) qs.set("request_id", requestId)
+  return `${base}/operate/cost?${qs.toString()}`
+}
+
+function createRequestId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID()
+  }
+  return `supportdesk-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
 export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
   const [question, setQuestion] = useState("")
   const [answer, setAnswer] = useState("")
   const [usage, setUsage] = useState<Usage | null>(null)
+  const [lastRequestId, setLastRequestId] = useState<string | null>(null)
   const [streaming, setStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -62,13 +72,18 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
     setError(null)
     setAnswer("")
     setUsage(null)
+    const requestId = createRequestId()
+    setLastRequestId(requestId)
 
     try {
       // Same-origin proxy forwards our session cookie. The runtime
       // resolves tenant by session; cost events bill to this tenant.
       const res = await fetch("/api/v1/llm/chat/completions", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          "x-request-id": requestId,
+        },
         credentials: "include",
         body: JSON.stringify({
           model: MODEL,
@@ -249,7 +264,7 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
       {(usage || answer) && (
         <div className="text-muted-foreground text-xs">
           <Link
-            href={operatorDashboardUrl(tenantId)}
+            href={operatorDashboardUrl(tenantId, lastRequestId ?? undefined)}
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-1 underline-offset-4 hover:underline"

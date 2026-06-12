@@ -55,6 +55,7 @@ type CostEventStreamProps = {
   initialEvents?: CostEvent[]
   /** Optional client-side filters. Forwarded as query params. */
   tenant?: string
+  requestId?: string
   model?: string
 }
 
@@ -70,6 +71,7 @@ function tokenSummary(ev: CostEvent): string {
 export function CostEventStream({
   initialEvents = [],
   tenant,
+  requestId,
   model,
 }: CostEventStreamProps) {
   const [events, setEvents] = React.useState<CostEvent[]>(initialEvents)
@@ -92,6 +94,7 @@ export function CostEventStream({
       const data = await api.costEvents({
         limit: LIMIT,
         tenant: tenant || undefined,
+        request_id: requestId || undefined,
         model: model || undefined,
       })
       if (controller.signal.aborted) return
@@ -110,7 +113,7 @@ export function CostEventStream({
     } finally {
       inFlight.current = false
     }
-  }, [tenant, model])
+  }, [tenant, requestId, model])
 
   // Fire once on mount (only if we don't already have server-rendered
   // events) and then poll on an interval. Tabs in the background pause
@@ -138,10 +141,24 @@ export function CostEventStream({
   // Refetch when filters change.
   React.useEffect(() => {
     void fetchOnce()
-  }, [tenant, model, fetchOnce])
+  }, [tenant, requestId, model, fetchOnce])
 
   const columns = React.useMemo<ColumnDef<CostEvent>[]>(
     () => [
+      {
+        id: "request",
+        header: "Request",
+        cell: ({ row }) => (
+          <span
+            className="font-mono text-[11px]"
+            title={row.original.request_id ?? ""}
+          >
+            {row.original.request_id
+              ? truncate(row.original.request_id, 12)
+              : "—"}
+          </span>
+        ),
+      },
       {
         id: "occurred_at",
         header: "When",
@@ -239,9 +256,11 @@ export function CostEventStream({
               ) : null}
             </CardTitle>
             <CardDescription>
-              {paused
-                ? "Paused. Resume to keep the table fresh every 5s."
-                : "Auto-refreshing every 5s. Latest 50 model invocations."}
+              {requestId
+                ? "Filtered to one customer action."
+                : paused
+                  ? "Paused. Resume to keep the table fresh every 5s."
+                  : "Auto-refreshing every 5s. Latest 50 model invocations."}
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">

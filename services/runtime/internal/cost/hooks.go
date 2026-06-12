@@ -95,12 +95,13 @@ func PostCallHandler(r *Recorder) hooks.Handler {
 			return payload, nil
 		}
 		ev := Event{
-			TenantID: stringFromMap(m, "tenant_id"),
-			APIKeyID: stringFromMap(m, "api_key_id"),
-			Model:    stringFromMap(m, "model"),
-			Provider: stringFromMap(m, "provider"),
-			Agent:    stringFromMap(m, "agent"),
-			Modality: stringFromMap(m, "modality"),
+			RequestID: stringFromMap(m, "request_id"),
+			TenantID:  stringFromMap(m, "tenant_id"),
+			APIKeyID:  stringFromMap(m, "api_key_id"),
+			Model:     stringFromMap(m, "model"),
+			Provider:  stringFromMap(m, "provider"),
+			Agent:     stringFromMap(m, "agent"),
+			Modality:  stringFromMap(m, "modality"),
 
 			PromptTokens:     intFromMap(m, "prompt_tokens"),
 			CompletionTokens: intFromMap(m, "completion_tokens"),

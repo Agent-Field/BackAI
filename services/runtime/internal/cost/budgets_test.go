@@ -101,6 +101,7 @@ func testSetup(t *testing.T) (*pgxpool.Pool, *Recorder, *Budgets, *Aggregate, fu
 	mustExec(ctx, t, pool, `
         create table suite_cost_events (
             id uuid primary key default gen_random_uuid(),
+            request_id text,
             tenant_id uuid references suite_tenants(id) on delete set null,
             api_key_id uuid references suite_api_keys(id) on delete set null,
             model text not null,
@@ -112,7 +113,8 @@ func testSetup(t *testing.T) (*pgxpool.Pool, *Recorder, *Budgets, *Aggregate, fu
             cost_usd numeric(12,6) not null default 0,
             cached boolean not null default false,
             latency_ms int not null default 0,
-            occurred_at timestamptz not null default now()
+            occurred_at timestamptz not null default now(),
+            modality text not null default 'text'
         )`)
 	mustExec(ctx, t, pool, `
         create table suite_budgets (
@@ -175,6 +177,7 @@ func TestRecordEventAndAggregateSeesIt(t *testing.T) {
 	occurredAt := time.Now().UTC()
 
 	err := rec.Record(ctx, Event{
+		RequestID:        "req-supportdesk-1",
 		TenantID:         tenant,
 		Model:            "openai/gpt-4o-mini",
 		Provider:         "openai",
@@ -219,8 +222,27 @@ func TestRecordEventAndAggregateSeesIt(t *testing.T) {
 	if got.Model != "openai/gpt-4o-mini" || got.Provider != "openai" {
 		t.Errorf("unexpected event: %+v", got)
 	}
+	if got.RequestID == nil || *got.RequestID != "req-supportdesk-1" {
+		t.Errorf("expected request id to round-trip, got %+v", got.RequestID)
+	}
 	if got.CostUSD < 0.0009 || got.CostUSD > 0.0011 {
 		t.Errorf("expected cost≈0.001, got %v", got.CostUSD)
+	}
+
+	byRequest, err := agg.Events(ctx, EventsOpts{TenantID: tenant, RequestID: "req-supportdesk-1"})
+	if err != nil {
+		t.Fatalf("events by request: %v", err)
+	}
+	if byRequest.Total != 1 || len(byRequest.Events) != 1 {
+		t.Fatalf("expected one event for request id, got total=%d len=%d", byRequest.Total, len(byRequest.Events))
+	}
+
+	missing, err := agg.Events(ctx, EventsOpts{TenantID: tenant, RequestID: "req-missing"})
+	if err != nil {
+		t.Fatalf("events by missing request: %v", err)
+	}
+	if missing.Total != 0 || len(missing.Events) != 0 {
+		t.Fatalf("expected no events for missing request id, got total=%d len=%d", missing.Total, len(missing.Events))
 	}
 }
 

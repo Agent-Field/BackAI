@@ -23,10 +23,10 @@ explicitly changes.
 
 | ID | Milestone | Status | Owner | Completion evidence |
 | --- | --- | --- | --- | --- |
-| M0 | Planning baseline | In progress | Codex | `development/*` committed and pushed. |
-| M1 | Product shell | In progress | Codex | README and customer app shell updated; customer/dashboard typechecks pass. |
-| M2 | No-key demo loop | In progress | Codex | Demo chat provider implemented; full runtime Go suite and compose config pass. |
-| M3 | Customer-to-admin walkthrough | Not started | TBD | Customer action deep-links to matching admin evidence. |
+| M0 | Planning baseline | Complete | Codex | `development/*` committed and pushed in `f4208f7`. |
+| M1 | Product shell | Complete | Codex | README and customer app shell updated in `7601ebb`; customer/dashboard typechecks pass. |
+| M2 | No-key demo loop | Complete | Codex | Demo chat provider implemented in `7fe011b`; runtime Go suite and compose config pass. |
+| M3 | Customer-to-admin walkthrough | In progress | Codex | Customer action now carries `X-Request-ID`; cost ledger stores/filter by request id; admin cost page accepts `request_id`. |
 | M4 | Compose first-run | Not started | TBD | `docker compose up` boots full first experience. |
 | M5 | Railway deploy | Not started | TBD | Railway template includes customer app and can deploy in demo mode. |
 | M6 | Docs and examples | Not started | TBD | Docs flow and capability manifests landed. |
@@ -37,8 +37,9 @@ explicitly changes.
 | Date | Commit | Scope | Verification |
 | --- | --- | --- | --- |
 | 2026-06-12 | `f4208f7` | Planning baseline | Docs review only. |
-| 2026-06-12 | Pending | M1 product shell | `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`; `pnpm --dir apps/dashboard exec tsc --noEmit --pretty false`. |
-| 2026-06-12 | Pending | M2 demo provider | `GOCACHE=/tmp/backai-go-build go test ./services/runtime/...`; `docker compose config --quiet`. |
+| 2026-06-12 | `7601ebb` | M1 product shell | `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`; `pnpm --dir apps/dashboard exec tsc --noEmit --pretty false`. |
+| 2026-06-12 | `7fe011b` | M2 demo provider | `GOCACHE=/tmp/backai-go-build go test ./services/runtime/...`; `docker compose config --quiet`. |
+| 2026-06-12 | Pending | M3 customer-to-admin walkthrough | `GOCACHE=/tmp/backai-go-build go test ./services/runtime/internal/cost ./services/runtime/internal/server ./services/runtime/cmd/af-stack`; `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`; `pnpm --dir apps/dashboard exec tsc --noEmit --pretty false`. |
 
 ## Current Risks
 
@@ -52,8 +53,9 @@ explicitly changes.
 
 ## Next Concrete Work
 
-1. Commit and push M0.
-2. Start M1 with customer app rebrand and README rewrite.
-3. Start M2 design in parallel: runtime demo provider and evidence-writing
-   contract.
+1. Commit and push M3 request-id walkthrough.
+2. Add a guided walkthrough entry point that tells users when to jump from the
+   customer app to admin.
+3. Start M4 compose first-run: make `docker compose up` boot the complete
+   SupportDesk demo path.
 4. Keep the first vertical slice small enough to verify locally.

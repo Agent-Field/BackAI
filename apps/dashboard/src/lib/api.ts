@@ -1215,6 +1215,7 @@ export type MemorySearchResult = z.infer<typeof MemorySearchResultSchema>
 
 export const CostEventSchema = z.object({
   id: z.string(),
+  request_id: z.string().nullable().optional(),
   tenant_id: z.string().nullable(),
   api_key_id: z.string().nullable(),
   model: z.string(),
@@ -2297,6 +2298,7 @@ export const api = {
   },
   costEvents: (params?: {
     tenant?: string
+    request_id?: string
     model?: string
     from?: string
     to?: string
@@ -2305,6 +2307,7 @@ export const api = {
   }) => {
     const qs = new URLSearchParams()
     if (params?.tenant) qs.set("tenant", params.tenant)
+    if (params?.request_id) qs.set("request_id", params.request_id)
     if (params?.model) qs.set("model", params.model)
     if (params?.from) qs.set("from", params.from)
     if (params?.to) qs.set("to", params.to)
