@@ -66,7 +66,8 @@ before copying an example into your product.
   runtime substrate; BackAI should call it through the platform boundary.
 - The default first-run agent is `apps/backend/agents/supportdesk/`. It
   registers `supportdesk.reply_plan` plus support triage, fact extraction,
-  policy guardrail, and reply-brief reasoners with AgentField.
+  nested policy-review, evidence-check, guardrail, risk-check, and
+  reply-brief reasoners with AgentField.
 - Keep `services/runtime/` changes for shared platform capabilities:
   auth, tenants, keys, costs, gateway behavior, jobs, storage, billing,
   and deployment contracts.

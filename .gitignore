@@ -40,7 +40,8 @@ htmlcov/
 .tox/
 .hypothesis/
 dist/
-build/
+**/dist/
+/build/
 .venv/
 .venv-*/
 venv/
@@ -59,8 +60,12 @@ next-env.d.ts
 
 # Build artifacts
 dist/
-build/
+**/dist/
+/build/
 *.tsbuildinfo
+
+# Local verification captures
+development/*.png
 
 # Test artifacts
 coverage/

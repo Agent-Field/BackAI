@@ -224,7 +224,9 @@ through the OpenAI-compatible gateway plus tenant API keys. See
 ## AgentField-backed support plan
 
 The default first run also registers a SupportDesk AgentField agent. You
-can call the same reasoner path the customer app uses:
+can call the same reasoner path the customer app uses. It classifies the
+ticket and extracts facts in parallel, chooses a policy branch, then runs
+nested guardrail/evidence reasoners before the final BackAI gateway call:
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/agents/supportdesk.reply_plan \

@@ -31,10 +31,10 @@ Original objective:
 | Planning docs moved away from root | Planning and strategy files live under `development/`; durable docs live under `docs/` | Proven |
 | Customer app is first-run product | README quickstart opens `http://localhost:34000`; app title is SupportDesk AI; local browser opened `/sign-up` successfully | Proven |
 | No-key demo mode works | Local demo mode verified with blank provider keys; latest browser flow produced polished SupportDesk reply, cost `$0.000363`, `726 tok`, and no prompt-plan leakage | Proven |
-| First action uses AgentField substrate | `supportdesk-agent` registers with AgentField; runtime `/api/v1/agents` returns `supportdesk` with six reasoners; customer browser flow shows `billing branch`, `refund_guardrail`, and execution `exec_20260612_182935_x2qair79` | Proven |
-| Customer walkthrough is guided, not a static card | Customer dashboard and Support Desk use driver.js guided walkthroughs; browser verified dashboard tour and Support Desk tour overlays | Proven |
-| Admin walkthrough is guided | Admin home and Agents page use driver.js guided walkthroughs; browser verified admin home tour and Agents page tour | Proven |
-| Admin links to backing local/open-source UIs | Admin Agents page links the catalog button, agent names, and reasoner badges to AgentField discovery; browser verified `refund_guardrail` opens `http://localhost:8081/api/v1/discovery/capabilities?agent_id=supportdesk&reasoner=refund_guardrail` and returns exactly one reasoner | Proven |
+| First action uses AgentField substrate | `supportdesk-agent` registers with AgentField; runtime `/api/v1/agents` returns `supportdesk` with 10 reasoners; live execution `exec_20260612_183959_l8bkscyw` returned `graph_depth: 3`, `billing_policy_review`, `refund_guardrail`, and `billing_evidence_check` | Proven |
+| Customer walkthrough is guided, not a static card | Customer dashboard and Support Desk use driver.js guided walkthroughs; browser verified dashboard tour `This is the customer product` and Support Desk tour `One action, two backend proofs` | Proven |
+| Admin walkthrough is guided | Admin home and Agents page use driver.js guided walkthroughs; browser verified admin home tour `Start from the customer action` and Agents page tour `AgentField discovery, not mock metadata` | Proven |
+| Admin links to backing local/open-source UIs | Admin Agents page links the catalog button, agent names, and reasoner badges to AgentField discovery; browser verified `billing_evidence_check` opens AgentField discovery and returns the matching reasoner | Proven |
 | Real provider mode works | Local real mode previously verified with OpenRouter key from zsh, request `codex-real-1781283477`, provider `litellm`, nonzero cost event | Proven |
 | Customer-to-admin evidence handoff works | Request IDs are carried into cost events; admin deep-link query preservation fixed in `677da9d`; local admin login/setup verified | Proven |
 | Local compose default matches docs | `docker compose config --quiet` passes; current stack exposes runtime `8080`, admin `33000`, customer `34000`; README matches | Proven |
@@ -46,7 +46,7 @@ Original objective:
 | Dashboard and customer app typecheck | `pnpm --dir apps/dashboard exec tsc --noEmit --pretty false`; `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false` | Proven |
 | Runtime focused tests pass | `go test ./services/runtime/internal/agentfield`; `go test ./services/runtime/internal/llmgateway` | Proven |
 | Local rebuilt apps run | `docker compose up -d --build customer-app dashboard`; `docker compose up -d --build runtime`; browser verified customer and admin URLs | Proven |
-| Browser console is clean on first-run surfaces | Customer dashboard, Support Desk completed state, admin home, and admin Agents page all verified with zero console errors after fixes | Proven |
+| Browser console is clean on first-run surfaces | Customer dashboard, Support Desk completed state, admin home, and admin Agents page all verified with zero console errors after the 10-reasoner graph update | Proven |
 | Railway template exists and validates statically | Earlier `python3 scripts/validate-deploy-targets.py` and Railway JSON formatting passed | Proven statically |
 | Live Railway deploy works | Not run in this session | Not proven |
 | CI/CD green | User asked to stop CI/CD follow-up for now | Deferred |
@@ -82,8 +82,7 @@ Latest browser-created customer used for verification:
 These are the items that should be checked before marking the full objective
 complete:
 
-1. Run one final full verification sweep after deciding whether to keep the
-   unrelated local Shipwright handler change.
+1. Decide whether to keep the unrelated local Shipwright handler change.
 2. Re-run real-provider SupportDesk E2E once more after all nav/docs changes,
    using the OpenRouter key from zsh.
 3. If launch requires hosted proof, perform a live Railway deploy check.
