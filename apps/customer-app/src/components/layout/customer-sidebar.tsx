@@ -6,10 +6,10 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
   CreditCard,
-  Hammer,
   KeyRound,
   LayoutDashboard,
   LogOut,
+  MessageSquareText,
   Plug,
   Settings,
   Terminal,
@@ -35,8 +35,8 @@ type NavItem = {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/shipwright", label: "Shipwright", icon: Hammer },
+  { href: "/dashboard", label: "Workspace", icon: LayoutDashboard },
+  { href: "/code-helper", label: "Support Desk", icon: MessageSquareText },
   { href: "/integrations", label: "Integrations", icon: Plug },
   { href: "/billing", label: "Billing", icon: CreditCard },
   { href: "/api-key", label: "API Key", icon: KeyRound },

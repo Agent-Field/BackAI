@@ -102,7 +102,7 @@ export default async function DashboardPage() {
     <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">
-          Welcome back, {session.user.name ?? session.user.email}
+          Support workspace
         </h1>
         <p className="text-muted-foreground text-sm">
           {ctx.tenantName} · {session.user.email}
@@ -114,7 +114,7 @@ export default async function DashboardPage() {
           <CardHeader>
             <CardDescription className="flex items-center gap-2">
               <ActivityIcon className="size-4" />
-              API calls today
+              AI actions today
             </CardDescription>
             <CardTitle className="text-3xl font-semibold tabular-nums">
               {data.callsToday}
@@ -167,13 +167,13 @@ export default async function DashboardPage() {
         <CardHeader>
           <CardTitle>Recent calls</CardTitle>
           <CardDescription>
-            Last 10 LLM calls billed to your tenant.
+            Last 10 model calls billed to your tenant.
           </CardDescription>
         </CardHeader>
         <CardContent>
           {data.recentCalls.length === 0 ? (
             <p className="text-muted-foreground py-6 text-center text-sm">
-              No calls yet. Try the Code Helper to see one land here.
+              No calls yet. Open Support Desk to draft a reply and see one land here.
             </p>
           ) : (
             <Table>

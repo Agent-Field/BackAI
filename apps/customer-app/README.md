@@ -1,41 +1,40 @@
-# Customer App — SWE-AF
+# Customer App — SupportDesk AI
 
-Customer-facing demo app for AF Stack. Sits at `localhost:34000` next to the
-operator dashboard at `localhost:33000`. Same Postgres, same better-auth
-instance, **different audience**: customers are tenant users; operators are
-not.
+Customer-facing starter app for BackAI. It is the product surface a user edits
+into their own AI SaaS. The operator dashboard is separate: customers use this
+app, while operators inspect tenants, costs, requests, billing, and runs in
+admin.
 
 For fork customization rules, see [`EDITING.md`](EDITING.md).
 
 ## What it is
 
-The dashboard answers the question _"what does the operator who runs AF
-Stack see?"_. This app answers _"what does the END USER on top of AF Stack
-see?"_. Same platform, opposite side of the LLM gateway.
+The dashboard answers the question _"what does the operator who runs BackAI
+see?"_. This app answers _"what does the end user of the AI product see?"_.
+Same platform, opposite side of the LLM gateway.
 
 A customer can:
 
 1. Sign up at `/sign-up`. A tenant, owner membership, billing customer row,
    and an `af_…` API key are auto-provisioned in one transaction.
-2. See their dashboard at `/dashboard` — calls today, cost today, recent
+2. See their workspace at `/dashboard` — AI actions today, cost today, recent
    calls, masked API key, copy-pastable curl + Python quickstart.
-3. Ask code questions on `/code-helper`. The question goes through the real
-   LLM gateway (`/api/v1/llm/chat/completions`) using their tenant context,
-   streams back, and the cost lands in `suite_cost_events` against their
-   tenant.
+3. Draft a support reply on `/code-helper`. The request goes through the LLM
+   gateway (`/api/v1/llm/chat/completions`) using their tenant context, streams
+   back, and the cost lands in `suite_cost_events` against their tenant.
 4. View live usage meters + open the Stripe Customer Portal on `/billing`.
 5. Manage their API keys (issue, revoke) on `/api-key`.
 
 ## How it relates to the dashboard
 
-|                   | Dashboard `:33000`               | Customer-app `:34000`       |
+|                   | Admin dashboard                  | Customer app                |
 | ----------------- | -------------------------------- | --------------------------- |
-| Audience          | Operator (whoever runs AF Stack) | Tenant customer             |
+| Audience          | Operator (whoever runs BackAI)   | Tenant customer             |
 | Better-auth users | Same `user` table                | Same `user` table           |
 | Tenant scope      | All tenants                      | One tenant (customer's own) |
 | API key creation  | `POST /api/v1/admin/keys`        | Auto on signup + `/api-key` |
 | Cost view         | All tenants' calls               | Their own tenant only       |
-| Brand             | "AF Stack", neutral grey         | "SWE-AF", purple            |
+| Brand             | "BackAI Admin"                   | "SupportDesk AI"            |
 
 Both apps share:
 

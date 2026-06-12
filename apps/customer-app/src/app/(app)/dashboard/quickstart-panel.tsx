@@ -43,7 +43,7 @@ export function QuickstartPanel({ prefix }: Props) {
   -d '{
     "model": "qwen/qwen-2.5-72b-instruct",
     "messages": [
-      {"role": "user", "content": "Hello SWE-AF"}
+      {"role": "user", "content": "Draft a helpful reply for a customer asking about a refund."}
     ]
   }'`
 
@@ -56,7 +56,7 @@ client = OpenAI(
 
 resp = client.chat.completions.create(
     model="qwen/qwen-2.5-72b-instruct",
-    messages=[{"role": "user", "content": "Hello SWE-AF"}],
+    messages=[{"role": "user", "content": "Draft a helpful reply for a customer asking about a refund."}],
 )
 print(resp.choices[0].message.content)`
 
@@ -68,10 +68,10 @@ print(resp.choices[0].message.content)`
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Quickstart</CardTitle>
+        <CardTitle>API quickstart</CardTitle>
         <CardDescription>
-          OpenAI-compatible. Drop your key in and the gateway proxies, meters,
-          and bills.
+          OpenAI-compatible. Point your existing client at BackAI and usage
+          shows up in the admin dashboard.
         </CardDescription>
       </CardHeader>
       <CardContent>

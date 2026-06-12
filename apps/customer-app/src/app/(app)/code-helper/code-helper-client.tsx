@@ -22,7 +22,7 @@ import { Badge } from "@/components/ui/badge"
 
 const MODEL = "qwen/qwen-2.5-72b-instruct"
 const SYSTEM_PROMPT =
-  "You are SWE-AF, an expert software engineering assistant. Answer the user's code question with a short explanation and a complete, runnable code snippet. Use markdown code blocks."
+  "You are SupportDesk AI, a concise customer support assistant. Draft helpful, accurate replies for support teams. Keep the tone clear, calm, and practical. If the customer asks for something policy-specific, mention what the support team should verify before sending."
 
 type Props = {
   tenantId: string
@@ -143,10 +143,11 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Code Helper</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Support Desk</h1>
         <p className="text-muted-foreground text-sm">
-          Live demo. Your question goes through the AF Stack LLM gateway. Cost is
-          billed to your tenant. Model: <code className="font-mono">{MODEL}</code>
+          Draft customer replies through the BackAI LLM gateway. Cost is billed
+          to your tenant and visible in admin. Model:{" "}
+          <code className="font-mono">{MODEL}</code>
           {apiKeyPrefix ? (
             <>
               {" · key "}
@@ -160,15 +161,15 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Sparkles className="size-4" />
-            Ask a code question
+            Draft a support reply
           </CardTitle>
           <CardDescription>
-            Example: &quot;how do I parse JSON in Go?&quot;
+            Example: &quot;A customer says their invoice is wrong and wants a refund.&quot;
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <Textarea
-            placeholder="how do I parse JSON in Go?"
+            placeholder="A customer says their invoice is wrong and wants a refund."
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             rows={4}
@@ -177,7 +178,7 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
           <div className="flex items-center gap-2">
             <Button onClick={handleAsk} disabled={streaming || !question.trim()}>
               <Send data-icon="inline-start" />
-              {streaming ? "Asking..." : "Ask"}
+              {streaming ? "Drafting..." : "Draft reply"}
             </Button>
             {usage?.cost_usd !== undefined ? (
               <Badge variant="outline" className="font-mono text-xs">
@@ -201,7 +202,7 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
       {answer ? (
         <Card>
           <CardHeader>
-            <CardTitle>Answer</CardTitle>
+            <CardTitle>Draft reply</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="prose prose-sm dark:prose-invert max-w-none">

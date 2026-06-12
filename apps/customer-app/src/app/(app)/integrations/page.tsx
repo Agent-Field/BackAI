@@ -101,7 +101,7 @@ export default async function IntegrationsPage() {
         <CardHeader>
           <CardTitle>Connected accounts</CardTitle>
           <CardDescription>
-            We never store passwords. Tokens are encrypted in the AF Stack vault.
+            We never store passwords. Tokens are encrypted in the BackAI vault.
           </CardDescription>
         </CardHeader>
         <CardContent>

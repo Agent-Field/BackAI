@@ -1,9 +1,9 @@
 schema_version: 1
 
-name: af-stack
-codename: af-stack
-display_name: AF Stack
-short_description: The open backend platform for the AI era.
+name: backai
+codename: backai
+display_name: BackAI
+short_description: The open-source AI app template with the backend already wired.
 
 palette:
   primary: "#111827"
@@ -22,10 +22,10 @@ domains:
 
 surfaces:
   dashboard:
-    display_name: AF Stack
+    display_name: BackAI Admin
     subtitle: Operator console
-    description: The open backend platform for the AI era.
+    description: Operate tenants, usage, costs, runs, keys, and billing for your AI app.
   customer_app:
-    display_name: AF Stack
+    display_name: SupportDesk AI
     subtitle: Customer app
-    description: Customer app for AF Stack.
+    description: A polished support workflow built on the BackAI backend template.

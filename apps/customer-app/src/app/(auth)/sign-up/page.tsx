@@ -100,7 +100,7 @@ export default function SignUpPage() {
         <CardHeader>
           <CardTitle>Create your {brand.displayName} account</CardTitle>
           <CardDescription>
-            A tenant, billing customer, and API key are provisioned on signup.
+            Create a support workspace with a tenant, billing record, and API key.
           </CardDescription>
         </CardHeader>
         <form onSubmit={form.handleSubmit(handleSubmit)} className="contents">
@@ -185,7 +185,7 @@ export default function SignUpPage() {
                 Copy
               </Button>
               <Button onClick={handleContinue} className="flex-1">
-                Continue to dashboard
+                Continue to workspace
               </Button>
             </div>
           </div>

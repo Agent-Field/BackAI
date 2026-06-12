@@ -1,14 +1,14 @@
 <div align="center">
 
-# AF Stack
+# BackAI
 
-### The open backend platform for the AI era.
+### The open-source AI app template with the backend already wired.
 
-_Self-host AgentField with everything else you need to ship a real product._
+_Start with SupportDesk AI, then replace the app with your own product._
 
 [![Status: planning](https://img.shields.io/badge/status-pre--alpha-orange)](#)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
-[![Built on AgentField](https://img.shields.io/badge/built%20on-AgentField-0A66C2)](https://github.com/Agent-Field/agentfield)
+[![AI substrate: AgentField](https://img.shields.io/badge/AI%20substrate-AgentField-0A66C2)](https://github.com/Agent-Field/agentfield)
 
 </div>
 
@@ -17,22 +17,29 @@ _Self-host AgentField with everything else you need to ship a real product._
 
 ## What this is
 
-AF Stack is a single fork-friendly monorepo that bundles **AgentField**
-with the backend services around it: identity, multi-tenancy, sandboxes,
-storage, queues, public APIs, billing, dashboard, customer app, and
-deploy targets.
+BackAI is a fork-friendly AI app template. You clone one repo and get a
+customer app, admin dashboard, API runtime, auth, tenants, API keys, LLM
+gateway, cost tracking, billing stubs, storage, jobs, agents, and deploy
+targets.
 
-Not a hosted service. Not a closed SDK. Not a framework. **A complete,
-self-hostable backend platform where AI is a native compute primitive.**
+The default app is **SupportDesk AI**: a support workflow that lets a
+customer sign up, draft a support reply, and then inspect the exact usage
+and cost in admin. Replace that customer app with your own product when
+you fork.
+
+The category is the AI backend: the substrate behind AI SaaS apps where
+model calls, cost, tenant isolation, jobs, storage, billing, and agent
+execution all live together.
 
 ## Canonical DX
 
 The default path is **fork and edit**:
 
 ```bash
-git clone https://github.com/Agent-Field/backai docuchat
-cd docuchat
-af-stack init --name "DocuChat" --color "#0A66C2" --logo ./logo.png
+git clone https://github.com/Agent-Field/backai supportdesk-ai
+cd supportdesk-ai
+# Optional once you replace the default app:
+# af-stack init --name "DocuChat" --color "#0A66C2" --logo ./logo.png
 docker compose up
 ```
 
@@ -53,9 +60,10 @@ Cal.com or Plane than to a hosted BaaS: the repo is the product.
 | Workload modules | `workload-modules/<id>/` | Domain backend routes, migrations, jobs, and crons. |
 | Dashboard plugins | `apps/dashboard/plugins/<id>/` | Operator-console tabs for your domain metrics and controls. |
 
-Start from [`examples/starter/`](examples/starter/) when you want the
-smallest complete fork: one agent, one customer-app flow, one workload
-module, and one dashboard plugin.
+Start with the bundled SupportDesk AI customer app when you want a
+polished product-shaped baseline. Use [`examples/starter/`](examples/starter/)
+when you want the smallest neutral fork: one agent, one customer-app
+flow, one workload module, and one dashboard plugin.
 
 ## Pre-Wired vs Configurable
 
@@ -64,7 +72,7 @@ module, and one dashboard plugin.
 | Data | Postgres 16 + pgvector | External Postgres, RLS policy shape, workload tables. |
 | Storage | MinIO in dev, S3 contract in prod | S3, R2, GCS, Azure Blob via adapter/env. |
 | Identity | better-auth, first-operator bootstrap | OAuth providers, trusted origins, operator creation CLI. |
-| LLM routing | AgentField path + LiteLLM sidecar | Provider keys, model map, budgets, virtual-key strategy. |
+| LLM routing | OpenAI-compatible gateway + LiteLLM sidecar | Provider keys, model map, budgets, virtual-key strategy. |
 | Sandboxes | Docker in dev, e2b/gVisor/Firecracker options | Adapter choice, limits, provider credentials. |
 | Delivery | Svix for outbound webhooks, log notifications | Resend/Postmark/etc. notifications, billing adapter. |
 | Deploy | Docker Compose, Helm, Fly, Railway, Render | Your domains, secrets, scaling, managed services. |
@@ -83,14 +91,16 @@ Supabase-shaped backends don't include AI primitives. AI platforms don't
 include backend primitives. Builders rebuild the same plumbing for every
 project.
 
-AF Stack ships both halves. AgentField for agents. Postgres + Next.js +
-the suite runtime for everything else.
+BackAI ships both halves. The app template gives you the product
+surface. The backend gives you the operational substrate for AI calls,
+agents, costs, tenants, jobs, storage, and billing.
 
 ## The invariant
 
-**Every LLM call goes through AgentField.** No bypass. The
-OpenAI-compatible endpoint at `/api/v1/llm/*` is a shim that routes
-through AF so identity, traces, cost, policy, and audit are preserved.
+**Every app-level model call goes through the BackAI gateway.** No
+bypass. The OpenAI-compatible endpoint at `/api/v1/llm/*` preserves
+tenant identity, cost, policy, and audit metadata before routing to the
+configured provider layer.
 
 ## SDK Boundary
 
@@ -130,36 +140,56 @@ Plus a REST + OpenAPI surface so any language works.
 ## Quickstart (under 60 seconds)
 
 ```bash
-git clone https://github.com/Agent-Field/backai my-app
-cd my-app
+git clone https://github.com/Agent-Field/backai supportdesk-ai
+cd supportdesk-ai
 cp .env.example .env
-# (optional) brand your fork
-# af-stack init --name "DocuChat" --color "#0A66C2" --logo ./logo.png
-# (optional) edit .env: set OPENROUTER_API_KEY to enable LLM features
+# Optional: set OPENROUTER_API_KEY for live model calls.
 docker compose up
 ```
 
-Then in another terminal, call the bundled sample agent through the
+Open the customer app first:
+
+- Customer app: `http://localhost:34000`
+- Admin dashboard: `http://localhost:3000`
+- API runtime: `http://localhost:8080/api/v1/`
+- Health + metrics: `http://localhost:8080/health` · `/ready` · `/metrics`
+- AgentField control plane: `http://localhost:8081/`
+- MinIO console: `http://localhost:9001/`
+
+Sign up in SupportDesk AI. BackAI provisions a tenant, membership,
+billing record, and API key. Then use Support Desk to draft a reply and
+open the admin dashboard to inspect usage and cost.
+
+You can also call the LLM gateway directly with the official OpenAI SDK
+by changing only the base URL:
+
+```js
+import OpenAI from "openai"
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/api/v1/llm",
+  apiKey: process.env.BACKAI_API_KEY,
+})
+
+const completion = await client.chat.completions.create({
+  model: "qwen/qwen-2.5-72b-instruct",
+  messages: [{ role: "user", content: "Draft a support reply." }],
+})
+```
+
+For deeper platform integration, use the Suite SDK for agents, memory,
+jobs, costs, tenants, and admin APIs.
+
+## Advanced: sample agent call
+
+The repo still includes a bundled sample AgentField agent behind the
 gateway:
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/agents/sample.echo \
   -H "Content-Type: application/json" \
   -d '{"input":{"payload":{"message":"hello world"}}}'
-# → {"status":"succeeded","result":{"echoed":{"message":"hello world"}}, ...}
 ```
-
-Endpoints once up:
-
-- Suite gateway: `http://localhost:8080/api/v1/`
-- Health + metrics: `http://localhost:8080/health` · `/ready` · `/metrics`
-- AgentField control plane: `http://localhost:8081/`
-- MinIO console: `http://localhost:9001/`
-
-To enable multi-tenancy: set `modules.multi-tenancy.enabled: true` in
-`apps/backend/config.yaml`. See [`docs/multi-tenancy.md`](docs/multi-tenancy.md)
-for the full guide, including how to run the end-to-end isolation test
-(`scripts/test-multi-tenancy.sh`).
 
 ## Phase 7 — LLM Gateway
 
