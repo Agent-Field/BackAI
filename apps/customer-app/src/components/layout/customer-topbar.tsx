@@ -41,7 +41,12 @@ export function CustomerTopbar({ user, tenantName }: TopbarProps) {
   }, [])
 
   const initials =
-    user.name?.split(" ").map((s) => s[0]).join("").slice(0, 2).toUpperCase() ||
+    user.name
+      ?.split(" ")
+      .map((s) => s[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() ||
     user.email?.[0]?.toUpperCase() ||
     "U"
 
@@ -57,7 +62,7 @@ export function CustomerTopbar({ user, tenantName }: TopbarProps) {
       <div className="flex items-center gap-2">
         <span className="text-sm font-medium">{tenantName}</span>
         <Badge variant="outline" className="text-[10px] font-normal">
-          tenant
+          account
         </Badge>
       </div>
 
@@ -98,12 +103,7 @@ export function CustomerTopbar({ user, tenantName }: TopbarProps) {
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
-              <Button
-                variant="ghost"
-                size="icon"
-                className="rounded-full"
-                aria-label="User menu"
-              >
+              <Button variant="ghost" size="icon" className="rounded-full" aria-label="User menu">
                 <Avatar className="size-8">
                   <AvatarFallback>{initials}</AvatarFallback>
                 </Avatar>
@@ -113,19 +113,13 @@ export function CustomerTopbar({ user, tenantName }: TopbarProps) {
           <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuLabel>
               <div className="flex flex-col">
-                <span className="truncate text-sm font-medium">
-                  {user.name ?? "Customer"}
-                </span>
-                <span className="text-muted-foreground truncate text-xs">
-                  {user.email}
-                </span>
+                <span className="truncate text-sm font-medium">{user.name ?? "Customer"}</span>
+                <span className="text-muted-foreground truncate text-xs">{user.email}</span>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-              <DropdownMenuItem
-                onClick={() => router.push("/settings")}
-              >
+              <DropdownMenuItem onClick={() => router.push("/settings")}>
                 <UserIcon /> Account
               </DropdownMenuItem>
             </DropdownMenuGroup>

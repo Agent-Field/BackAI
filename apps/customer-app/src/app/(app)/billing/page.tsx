@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import Link from "next/link"
 import { CalendarIcon, CreditCardIcon, GaugeIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { api, type BillingCustomer, type UsageMeterList } from "@/lib/api"
@@ -15,18 +13,23 @@ function formatUSD(n: number): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-    minimumFractionDigits: n < 1 ? 4 : 2,
-    maximumFractionDigits: n < 1 ? 6 : 2,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(n)
 }
 
 function formatDate(iso: string | null): string {
-  if (!iso) return "—"
+  if (!iso) return "Not scheduled"
   try {
     return new Date(iso).toLocaleDateString()
   } catch {
     return iso
   }
+}
+
+function formatStatus(status: string): string {
+  if (status === "stub") return "Active"
+  return status.replace(/_/g, " ")
 }
 
 export const dynamic = "force-dynamic"
@@ -43,30 +46,23 @@ export default async function BillingPage() {
       <div className="flex flex-col gap-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Billing</h1>
-          <p className="text-muted-foreground text-sm">Billing is disabled for this deployment.</p>
+          <p className="text-muted-foreground text-sm">
+            Your plan, billing status, and subscription options.
+          </p>
         </div>
 
         <Card>
           <CardHeader>
-            <CardTitle>Billing adapter disabled</CardTitle>
+            <CardTitle>Subscription portal unavailable</CardTitle>
             <CardDescription>
-              Set <code className="font-mono">AF_STACK_BILLING_ADAPTER</code> to{" "}
-              <code className="font-mono">stripe</code> or another supported adapter, configure the
-              provider env vars, and restart the stack.
+              This demo account has billing records, but online subscription management is not
+              enabled here.
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <Button
-              variant="outline"
-              render={
-                <Link
-                  href="https://github.com/Agent-Field/backai/blob/main/docs/adapters/billing.md"
-                  target="_blank"
-                >
-                  Enable billing
-                </Link>
-              }
-            />
+          <CardContent className="grid gap-4 sm:grid-cols-3">
+            <BillingFact label="Plan" value="Free" />
+            <BillingFact label="Status" value="Active" />
+            <BillingFact label="Current balance" value="$0.00" />
           </CardContent>
         </Card>
       </div>
@@ -97,7 +93,7 @@ export default async function BillingPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Billing</h1>
         <p className="text-muted-foreground text-sm">
-          Plan, usage, and the customer portal for {ctx.tenantName}.
+          Your plan, usage, and subscription settings.
         </p>
       </div>
 
@@ -112,7 +108,7 @@ export default async function BillingPage() {
           </CardHeader>
           <CardContent>
             <Badge variant="outline" className="font-mono text-[10px]">
-              {status}
+              {formatStatus(status)}
             </Badge>
           </CardContent>
         </Card>
@@ -177,13 +173,22 @@ export default async function BillingPage() {
         <CardHeader>
           <CardTitle>Subscription</CardTitle>
           <CardDescription>
-            Open the Stripe customer portal to change plans, update payment, or view invoices.
+            Open the customer portal to change plans, update payment, or view invoices.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <ManageSubscriptionButton tenantId={ctx.tenantId} />
         </CardContent>
       </Card>
+    </div>
+  )
+}
+
+function BillingFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border p-3">
+      <div className="text-muted-foreground text-xs">{label}</div>
+      <div className="mt-1 font-medium">{value}</div>
     </div>
   )
 }

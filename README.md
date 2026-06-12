@@ -21,10 +21,12 @@ customer app, admin dashboard, API runtime, auth, tenants, API keys, LLM
 gateway, cost tracking, billing stubs, storage, jobs, agents, and deploy
 targets.
 
-The default app is **SupportDesk AI**: a support workflow that lets a
-customer sign up, draft a support reply, and then inspect the exact usage
-and cost in admin. Replace that customer app with your own product when
-you fork.
+The default app is **SupportDesk AI**: a customer-facing support portal
+with sign-up, help center, support chat, request history, billing, and
+account pages. Admin and platform evidence stay in the operator console,
+where builders can inspect usage, cost, runs, and service links after
+using the app. Replace the customer app with your own product when you
+fork.
 
 The category is the AI backend: the substrate behind AI SaaS apps where
 model calls, cost, tenant isolation, jobs, storage, billing, and agent
@@ -173,16 +175,17 @@ AF_STACK_PORT=38080 docker compose up
 AF_STACK_DASHBOARD_PORT=33001 docker compose up
 ```
 
-Sign up in SupportDesk AI. BackAI provisions a tenant, membership,
-billing record, and API key. The first-run product tour then walks you
-through one support action:
+Sign up in SupportDesk AI. BackAI provisions the account, membership,
+billing record, and internal request credentials. The first-run product
+tour then walks you through one normal customer support flow:
 
-1. Open the customer dashboard and follow the guided tour into Support Desk.
-2. Draft a reply. The action calls the SupportDesk AgentField graph, then
-   routes the final model call through the BackAI LLM gateway.
-3. Open the admin dashboard from the product link. The admin tour points to
-   the cost event, the registered AgentField agent, and the local/open-source
-   service UIs that back the action.
+1. Open the Help Center and pick a realistic support topic.
+2. Start Support Chat. The customer sees route/check progress while the
+   app prepares an answer.
+3. Open Requests to see the customer-facing history created by the chat.
+4. Open the admin dashboard separately to inspect the platform evidence:
+   cost event, run metadata, registered agent, and local/open-source service
+   UIs that back the action.
 
 No provider key is required for the first run. BackAI starts in demo mode
 when no key is present, and switches to LiteLLM when you add
@@ -205,7 +208,7 @@ The Railway template deploys customer app, admin dashboard, runtime, LiteLLM,
 AgentField, and Postgres. Leave provider keys blank for no-key SupportDesk
 demo mode, or set `OPENROUTER_API_KEY` on the `litellm` service for real
 model calls. It keeps the same first-run path as local compose: customer app
-first, guided SupportDesk action second, admin evidence third. See
+first, Support Chat and Requests second, admin evidence third. See
 [`deploy/railway/README.md`](deploy/railway/README.md).
 
 You can also call the LLM gateway directly with the official OpenAI SDK
@@ -221,7 +224,7 @@ const client = new OpenAI({
 
 const completion = await client.chat.completions.create({
   model: "qwen/qwen-2.5-72b-instruct",
-  messages: [{ role: "user", content: "Draft a support reply." }],
+  messages: [{ role: "user", content: "Help me understand a billing issue." }],
 })
 ```
 
@@ -235,10 +238,10 @@ through the OpenAI-compatible gateway plus tenant API keys. See
 
 ## AgentField-backed SupportDesk graph
 
-The default first run also registers a SupportDesk AgentField agent. It is
-subtle in the product UI, but explicit in the architecture and admin evidence:
-SupportDesk uses AgentField as the AI substrate, not as a separate destination
-product.
+The default first run also registers a SupportDesk AgentField agent. It stays
+out of the customer-facing guide, but is explicit in the architecture and
+admin evidence: SupportDesk uses AgentField as the AI substrate, not as a
+separate destination product.
 
 The graph currently registers 10 reasoners:
 

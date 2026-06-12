@@ -28,7 +28,7 @@ import { Textarea } from "@/components/ui/textarea"
 
 const MODEL = process.env.NEXT_PUBLIC_DEFAULT_MODEL ?? "qwen/qwen-2.5-72b-instruct"
 const SYSTEM_PROMPT =
-  "You are SupportDesk AI, a concise customer support assistant. Draft helpful, accurate replies for support teams. Keep the tone clear, calm, and practical. Follow the support decision plan when provided. If the customer asks for something policy-specific, mention what the support team should verify before sending."
+  "You are SupportDesk AI, a concise customer support assistant speaking directly to the customer. Help the customer understand the next step, keep the tone clear and calm, and follow the support decision plan when provided. If the customer asks for something policy-specific, explain what the support team may need to verify before taking action."
 const ONBOARDING_KEY_STORAGE = "backai:onboarding-api-key"
 
 const SUGGESTED_PROMPTS = [
@@ -36,31 +36,30 @@ const SUGGESTED_PROMPTS = [
     title: "Refund request",
     intent: "Billing policy",
     prompt:
-      "A customer says their invoice is wrong, asks for a refund, and wants the team to confirm whether they were double charged.",
+      "I think my invoice is wrong and I may have been double charged. Can you help me understand what happens next?",
   },
   {
     title: "Login blocked",
     intent: "Access help",
     prompt:
-      "A customer cannot sign in after changing phones. They need a calm reply with identity verification steps and an escalation path.",
+      "I changed phones and now I cannot sign in. What should I do to recover my account safely?",
   },
   {
     title: "Angry renewal",
     intent: "Retention",
     prompt:
-      "A customer is upset about an auto-renewal and is threatening to cancel unless support explains the policy and next steps clearly.",
+      "My plan renewed automatically and I am frustrated. Can you explain my options before I cancel?",
   },
   {
     title: "Technical issue",
     intent: "Troubleshooting",
     prompt:
-      "A customer reports that exports fail only for large CSV files. Draft a reply that asks for the right diagnostics without over-promising.",
+      "My exports fail when the CSV is large. What information should I send so support can fix it?",
   },
 ]
 
 type Props = {
   tenantId: string
-  apiKeyPrefix: string | null
 }
 
 type Usage = {
@@ -180,7 +179,7 @@ function planChips(plan?: AgentPlan): string[] {
 const STEP_COPY: Record<string, { title: string; detail: string }> = {
   reply_plan: {
     title: "Choose the response route",
-    detail: "Decide which checks are needed before drafting.",
+    detail: "Decide which checks are needed before answering.",
   },
   classify_issue: {
     title: "Classify the customer issue",
@@ -208,14 +207,14 @@ const STEP_COPY: Record<string, { title: string; detail: string }> = {
   },
   resolution_guardrail: {
     title: "Check resolution limits",
-    detail: "Keep the reply helpful without over-committing.",
+    detail: "Keep the answer helpful without over-committing.",
   },
   response_risk_check: {
     title: "Scan for risky promises",
     detail: "Catch claims that should stay conditional or need handoff.",
   },
   compose_reply_brief: {
-    title: "Prepare the reply brief",
+    title: "Prepare answer guidance",
     detail: "Turn the checks into guidance for the final answer.",
   },
 }
@@ -233,7 +232,7 @@ function stepCopy(reasoner: string): { title: string; detail: string } {
   return (
     STEP_COPY[reasoner] ?? {
       title: formatLabel(reasoner),
-      detail: "Run the next check before composing the customer reply.",
+      detail: "Run the next check before answering the customer.",
     }
   )
 }
@@ -250,13 +249,13 @@ function workflowTrace(plan: AgentPlan | undefined, status: ChatStatus | undefin
       {
         id: "choose_route",
         title: "Choose the response route",
-        detail: "Decide which checks the reply needs.",
+        detail: "Decide which checks the answer needs.",
         status: "pending",
       },
       {
         id: "compose_reply",
-        title: "Compose the reply",
-        detail: "Draft a clear answer after the checks finish.",
+        title: "Prepare the answer",
+        detail: "Write a clear answer after the checks finish.",
         status: "pending",
       },
     ]
@@ -276,7 +275,7 @@ function workflowTrace(plan: AgentPlan | undefined, status: ChatStatus | undefin
 
   const finalStep: TraceStep = {
     id: "compose_customer_reply",
-    title: "Compose the customer reply",
+    title: "Answer the customer",
     detail: plan.dynamic_branch
       ? `Use the ${formatLabel(plan.dynamic_branch).toLowerCase()} route in a calm support tone.`
       : "Use the completed checks in a calm support tone.",
@@ -325,7 +324,7 @@ function sanitizeAssistantContent(content: string): string {
     .trim()
 }
 
-export function CodeHelperClient({ tenantId }: Props) {
+export function SupportChatClient({ tenantId }: Props) {
   const [draft, setDraft] = useState("")
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [streaming, setStreaming] = useState(false)
@@ -580,7 +579,7 @@ export function CodeHelperClient({ tenantId }: Props) {
             ) : null}
             <div className="flex flex-col gap-3" data-tour="chat-composer">
               <Textarea
-                placeholder="Ask the support assistant what to send back..."
+                placeholder="Tell us what you need help with..."
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 rows={3}
@@ -617,13 +616,13 @@ function EmptyChatState({
   disabled: boolean
 }) {
   return (
-    <div className="grid gap-4 py-4 sm:py-8">
+    <div className="grid gap-4 py-2 sm:py-8">
       <div className="mx-auto flex max-w-lg flex-col items-center text-center">
         <div className="bg-primary/10 text-primary mb-3 flex size-10 items-center justify-center rounded-md sm:mb-4 sm:size-11">
           <Sparkles className="size-5" />
         </div>
         <h2 className="text-lg font-semibold tracking-tight sm:text-xl">
-          What should support send?
+          What do you need help with?
         </h2>
         <p className="text-muted-foreground mt-1 text-sm sm:mt-2">
           Pick a realistic customer message or type your own. The assistant will show the route it
@@ -646,7 +645,11 @@ function PromptSuggestions({
 }) {
   return (
     <div
-      className={compact ? "flex gap-2 overflow-x-auto pb-1" : "grid grid-cols-2 gap-2"}
+      className={
+        compact
+          ? "flex gap-2 overflow-x-auto pb-1"
+          : "flex gap-2 overflow-x-auto pb-1 sm:grid sm:grid-cols-2 sm:overflow-visible sm:pb-0"
+      }
       data-tour="prompt-suggestions"
     >
       {SUGGESTED_PROMPTS.map((suggestion) => (
@@ -657,7 +660,7 @@ function PromptSuggestions({
           className={
             compact
               ? "h-10 min-w-36 shrink-0 justify-start overflow-hidden px-3 text-left"
-              : "h-11 min-w-0 justify-start overflow-hidden px-3 text-left sm:h-auto sm:whitespace-normal sm:p-3"
+              : "h-10 min-w-36 shrink-0 justify-start overflow-hidden px-3 text-left sm:h-auto sm:min-w-0 sm:shrink sm:whitespace-normal sm:p-3"
           }
           disabled={disabled}
           onClick={() => onSelect(suggestion.prompt)}
@@ -785,7 +788,7 @@ function PlanningState({
           {status === "planning"
             ? "Planning response"
             : status === "drafting"
-              ? "Composing reply"
+              ? "Preparing answer"
               : status === "error"
                 ? "Needs attention"
                 : "Response ready"}
@@ -810,7 +813,7 @@ function ReasoningTrace({ steps }: { steps: TraceStep[] }) {
             Decision path
           </p>
           <p className="text-xs text-muted-foreground">
-            Structured checks before the reply is sent.
+            Structured checks before the answer is shown.
           </p>
         </div>
         <Badge variant="outline" className="shrink-0 text-[10px]">

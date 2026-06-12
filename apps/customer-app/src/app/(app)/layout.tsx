@@ -8,16 +8,12 @@ import { requireCustomerContext } from "@/lib/session"
 // All /(app)/* routes are session-dependent and runtime-data-backed.
 export const dynamic = "force-dynamic"
 
-function billingDisabled(): boolean {
-  return process.env.AF_STACK_BILLING_ADAPTER?.trim().toLowerCase() === "none"
-}
-
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const { session, ctx } = await requireCustomerContext()
 
   return (
     <SidebarProvider className="h-svh min-h-svh overflow-hidden">
-      <CustomerSidebar billingDisabled={billingDisabled()} />
+      <CustomerSidebar />
       <SidebarInset className="min-h-0 min-w-0 overflow-hidden">
         <CustomerTopbar
           user={{ name: session.user.name, email: session.user.email }}

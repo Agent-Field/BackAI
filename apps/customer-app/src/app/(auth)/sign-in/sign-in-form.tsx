@@ -36,7 +36,7 @@ type SignInFormProps = {
 function SignInInner({ sso }: SignInFormProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const next = searchParams.get("next") ?? "/code-helper"
+  const next = searchParams.get("next") ?? "/dashboard"
   const [submitting, setSubmitting] = useState(false)
 
   const form = useForm<SignInValues>({

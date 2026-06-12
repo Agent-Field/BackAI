@@ -49,7 +49,7 @@ railway up
    `OPENROUTER_API_KEY` on `litellm` for real model calls.
 4. Hit Deploy. Railway provisions Postgres, builds customer/admin/runtime
    images, starts LiteLLM and AgentField, and wires private `RUNTIME_URL`
-   + `DATABASE_URL` between services.
+   - `DATABASE_URL` between services.
 
 ## Validation
 
@@ -64,8 +64,9 @@ First-run path:
 
 1. Open the customer service.
 2. Sign up.
-3. Draft one SupportDesk reply.
-4. Use the admin link from the customer app to inspect the exact cost event.
+3. Use Support Chat on a realistic customer request.
+4. Open Requests to see the customer-facing history.
+5. Open the admin service separately to inspect the exact cost event and run evidence.
 
 For more detail on no-key mode and real-provider mode, see
 [`../../docs/demo-mode.md`](../../docs/demo-mode.md).

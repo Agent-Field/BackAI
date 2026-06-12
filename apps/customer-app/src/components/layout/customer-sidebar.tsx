@@ -6,11 +6,10 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
   CreditCard,
-  KeyRound,
   LayoutDashboard,
   LogOut,
   MessageSquareText,
-  Plug,
+  MessagesSquare,
   Settings,
   Terminal,
 } from "lucide-react"
@@ -35,23 +34,19 @@ type NavItem = {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { href: "/dashboard", label: "Workspace", icon: LayoutDashboard },
-  { href: "/code-helper", label: "Support Chat", icon: MessageSquareText },
-  { href: "/integrations", label: "Integrations", icon: Plug },
+  { href: "/dashboard", label: "Help Center", icon: LayoutDashboard },
+  { href: "/support", label: "Support Chat", icon: MessageSquareText },
+  { href: "/requests", label: "Requests", icon: MessagesSquare },
   { href: "/billing", label: "Billing", icon: CreditCard },
-  { href: "/api-key", label: "API Key", icon: KeyRound },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/settings", label: "Account", icon: Settings },
 ]
 
 function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(href + "/")
 }
 
-export function CustomerSidebar({ billingDisabled = false }: { billingDisabled?: boolean }) {
+export function CustomerSidebar() {
   const pathname = usePathname()
-  const navItems = billingDisabled
-    ? NAV_ITEMS.filter((item) => item.href !== "/billing")
-    : NAV_ITEMS
 
   return (
     <Sidebar collapsible="icon">
@@ -61,7 +56,7 @@ export function CustomerSidebar({ billingDisabled = false }: { billingDisabled?:
             <SidebarMenuButton
               size="lg"
               render={
-                <Link href="/code-helper" className="flex items-center gap-2">
+                <Link href="/dashboard" className="flex items-center gap-2">
                   <div className="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-md">
                     {brand.logos.light ? (
                       <img src={brand.logos.light} alt="" className="size-5 object-contain" />
@@ -86,7 +81,7 @@ export function CustomerSidebar({ billingDisabled = false }: { billingDisabled?:
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => (
+              {NAV_ITEMS.map((item) => (
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton
                     tooltip={item.label}

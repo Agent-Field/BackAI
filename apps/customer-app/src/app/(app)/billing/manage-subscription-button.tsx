@@ -18,23 +18,22 @@ export function ManageSubscriptionButton({ tenantId }: Props) {
   const handleClick = async () => {
     setPending(true)
     try {
-      const res = await fetch(
-        `/api/v1/billing/customers/${encodeURIComponent(tenantId)}/portal`,
-        { method: "POST", credentials: "include" },
-      )
+      const res = await fetch(`/api/v1/billing/customers/${encodeURIComponent(tenantId)}/portal`, {
+        method: "POST",
+        credentials: "include",
+      })
       if (!res.ok) {
-        const text = await res.text()
-        toast.error(`Could not open portal: ${text.slice(0, 200)}`)
+        toast.error("Subscription management is not available for this demo account.")
         return
       }
       const data = (await res.json()) as { url?: string }
       if (data.url) {
         window.open(data.url, "_blank", "noopener,noreferrer")
       } else {
-        toast.error("Portal URL missing in response.")
+        toast.error("Subscription management is not available for this demo account.")
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      toast.error("Subscription management is not available right now.")
     } finally {
       setPending(false)
     }

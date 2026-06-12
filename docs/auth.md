@@ -37,9 +37,9 @@ opt into `app.bypass_rls`.
 
 Current built-in roles:
 
-| Role | Allowed |
-| --- | --- |
-| `owner` | Read, write, and delete all admin resources |
+| Role    | Allowed                                                                                                                                                                                    |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `owner` | Read, write, and delete all admin resources                                                                                                                                                |
 | `admin` | Read all admin resources, including privacy exports; create/update tenants, memberships, API keys, and budgets; cannot delete tenants, remove memberships, revoke API keys, or erase users |
 
 Resources covered by the built-in policy:
@@ -84,7 +84,9 @@ sign-up or magic-link flow for credentials.
 Customer sign-up is separate:
 
 - `apps/customer-app/src/lib/auth.ts` provisions a tenant, owner
-  membership, billing customer row, and one-shot API key.
+  membership, and billing customer row. The app mints runtime credentials
+  internally when the chat needs them; customers do not manage API keys in
+  the SupportDesk UI.
 - Customer users are tenant owners in their product tenant.
 - Customer users are not dashboard operators unless their email is also
   present in `suite_operators`.
