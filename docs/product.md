@@ -305,7 +305,7 @@ docker compose up -d
 # 30 seconds later, make a call:
 python -c "
 from openai import OpenAI
-c = OpenAI(base_url='http://localhost:38080/api/v1/llm', api_key='af_…')
+c = OpenAI(base_url='http://localhost:8080/api/v1/llm', api_key='af_...')
 print(c.chat.completions.create(model='qwen/qwen-2.5-72b-instruct',
       messages=[{'role':'user','content':'hello'}]).choices[0].message.content)
 "

@@ -8,7 +8,7 @@
 #
 # Cost:  ~$0.0001 with the default Qwen 2.5 72B model.
 #
-# Usage:  AF_STACK_PORT=38080 ./scripts/test-llm-call.sh
+# Usage:  AF_STACK_PORT=8080 ./scripts/test-llm-call.sh
 
 set -euo pipefail
 

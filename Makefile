@@ -1,4 +1,4 @@
-.PHONY: help dev test test-go test-py test-ts lint lint-go lint-py lint-ts \
+.PHONY: help preflight dev test test-go test-py test-ts lint lint-go lint-py lint-ts \
         build build-go build-dashboard build-images \
         up down logs clean install-deps fmt
 
@@ -7,6 +7,7 @@ help:
 	@echo "AF Stack - common development commands"
 	@echo ""
 	@echo "  make install-deps   Install all language-level deps (Go, Python, Node)"
+	@echo "  make preflight      Check local port conflicts before Docker starts"
 	@echo "  make dev            Start dev environment (docker-compose up + hot reload)"
 	@echo "  make up             docker-compose up -d"
 	@echo "  make down           docker-compose down"
@@ -28,11 +29,14 @@ install-deps:
 	@echo "==> Installing Python deps"
 	@command -v uv >/dev/null && uv sync || echo "uv not found, skipping"
 
-dev:
+preflight:
+	node scripts/preflight.mjs
+
+dev: preflight
 	@echo "==> Starting docker-compose stack"
 	docker compose up
 
-up:
+up: preflight
 	docker compose up -d
 
 down:

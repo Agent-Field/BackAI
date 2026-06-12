@@ -12,7 +12,7 @@
 # Skips cleanly when /api/v1/notifications returns 404 or 503.
 #
 # Env knobs:
-#   AF_STACK_PORT           — runtime port  (default 38080)
+#   AF_STACK_PORT           — runtime port  (default 8080)
 #   AF_STACK_DASHBOARD_PORT — dashboard port (default 33000)
 #   OP_EMAIL                — operator email
 #   OP_PASSWORD             — operator pwd
@@ -36,7 +36,7 @@ need_cmd() { command -v "$1" >/dev/null 2>&1 || fail "required command not found
 need_cmd curl
 need_cmd jq
 
-PORT="${AF_STACK_PORT:-38080}"
+PORT="${AF_STACK_PORT:-8080}"
 DASH_PORT="${AF_STACK_DASHBOARD_PORT:-33000}"
 RUNTIME_URL="http://localhost:${PORT}"
 DASH_URL="http://localhost:${DASH_PORT}"

@@ -23,7 +23,7 @@
  *
  * Usage:
  *   node scripts/test-openai-sdk.mjs
- *   AF_STACK_PORT=38080 OP_EMAIL=... OP_PASSWORD=... node scripts/test-openai-sdk.mjs
+ *   AF_STACK_PORT=8080 OP_EMAIL=... OP_PASSWORD=... node scripts/test-openai-sdk.mjs
  *   AF_STACK_TENANT_KEY=sk_... node scripts/test-openai-sdk.mjs
  */
 
@@ -37,7 +37,7 @@ const REPO_ROOT = resolve(__dirname, "..")
 
 // ─── config ───────────────────────────────────────────────────────────────
 
-const AF_STACK_PORT = process.env.AF_STACK_PORT ?? "38080"
+const AF_STACK_PORT = process.env.AF_STACK_PORT ?? "8080"
 const DASHBOARD_URL = process.env.DASHBOARD_URL ?? "http://localhost:33000"
 const RUNTIME_URL = process.env.RUNTIME_URL ?? `http://localhost:${AF_STACK_PORT}`
 const LLM_BASE_URL = `${RUNTIME_URL}/api/v1/llm`

@@ -28,8 +28,9 @@ TIMEOUT="${QUICKSTART_TIMEOUT_S:-90}"
 step "1/5  Tear down any existing stack"
 docker compose down -v >/dev/null 2>&1 || true
 
-step "2/5  docker compose up"
+step "2/5  Preflight + docker compose up"
 START_TS=$(date +%s)
+node scripts/preflight.mjs
 docker compose up -d --build 2>&1 | tail -10
 
 step "3/5  Wait for runtime to report ready (timeout ${TIMEOUT}s)"

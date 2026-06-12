@@ -6,11 +6,11 @@
 #
 # Usage:
 #   ./scripts/load-test.sh
-#   ./scripts/load-test.sh --target http://localhost:38080 --rates 50,200,500
+#   ./scripts/load-test.sh --target http://localhost:8080 --rates 50,200,500
 
 set -euo pipefail
 
-TARGET="${AF_STACK_LOAD_TEST_TARGET:-http://localhost:38080}"
+TARGET="${AF_STACK_LOAD_TEST_TARGET:-http://localhost:8080}"
 RATES="100,500,1000"
 DURATION="60s"
 

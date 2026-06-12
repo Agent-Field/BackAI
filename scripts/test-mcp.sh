@@ -26,7 +26,7 @@ fail() { red "FAIL: $1"; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || fail "missing $1"; }
 need curl; need jq
 
-PORT="${AF_STACK_PORT:-38080}"
+PORT="${AF_STACK_PORT:-8080}"
 DASH_PORT="${AF_STACK_DASHBOARD_PORT:-33000}"
 DASH_URL="http://localhost:${DASH_PORT}"
 OP_EMAIL="${OP_EMAIL:-operator@example.com}"

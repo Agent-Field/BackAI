@@ -150,6 +150,7 @@ git clone https://github.com/Agent-Field/backai supportdesk-ai
 cd supportdesk-ai
 cp .env.example .env
 # Optional: set OPENROUTER_API_KEY for live model calls.
+node scripts/preflight.mjs
 docker compose up
 ```
 
@@ -161,6 +162,10 @@ Open the customer app first:
 - Health + metrics: `http://localhost:8080/health` · `/ready` · `/metrics`
 - AgentField control plane: `http://localhost:8081/`
 - MinIO console: `http://localhost:9001/`
+
+If a local port is already in use, the preflight prints the exact override to
+use, for example `AF_STACK_PORT=38080 docker compose up`. BackAI does not stop
+other local services automatically.
 
 Sign up in SupportDesk AI. BackAI provisions a tenant, membership,
 billing record, and API key. Then use Support Desk to draft a reply and
