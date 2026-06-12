@@ -34,6 +34,7 @@ type Usage = {
   completion_tokens?: number
   total_tokens?: number
   cost_usd?: number
+  response_cost?: number
 }
 
 function operatorDashboardUrl(tenantId: string, requestId?: string): string {
@@ -140,7 +141,8 @@ export function CodeHelperClient({ tenantId, apiKeyPrefix }: Props) {
                 prompt_tokens: json.usage.prompt_tokens,
                 completion_tokens: json.usage.completion_tokens,
                 total_tokens: json.usage.total_tokens,
-                cost_usd: json.usage.cost_usd,
+                cost_usd: json.usage.cost_usd ?? json.usage.response_cost,
+                response_cost: json.usage.response_cost,
               })
             }
           } catch {

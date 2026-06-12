@@ -27,7 +27,7 @@ explicitly changes.
 | M1 | Product shell | Complete | Codex | README and customer app shell updated in `7601ebb`; customer/dashboard typechecks pass. |
 | M2 | No-key demo loop | Complete | Codex | Demo chat provider implemented in `7fe011b`; runtime Go suite and compose config pass. |
 | M3 | Customer-to-admin walkthrough | Complete | Codex | Customer action carries `X-Request-ID`, cost ledger stores/filter by request id, admin cost page accepts `request_id`, and customer workspace shows first-run steps. |
-| M4 | Compose first-run | In progress | Codex | Compose now includes customer app, admin, runtime, demo defaults, and matching first-run ports. |
+| M4 | Compose first-run | Complete | Codex | Compose builds and boots customer app, admin, runtime, demo provider, and request-id cost ledger path. |
 | M5 | Railway deploy | Not started | TBD | Railway template includes customer app and can deploy in demo mode. |
 | M6 | Docs and examples | Not started | TBD | Docs flow and capability manifests landed. |
 | M7 | Verification sweep | Not started | TBD | Local E2E, SDK checks, docs/build/deploy checks pass. |
@@ -39,9 +39,10 @@ explicitly changes.
 | 2026-06-12 | `f4208f7` | Planning baseline | Docs review only. |
 | 2026-06-12 | `7601ebb` | M1 product shell | `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`; `pnpm --dir apps/dashboard exec tsc --noEmit --pretty false`. |
 | 2026-06-12 | `7fe011b` | M2 demo provider | `GOCACHE=/tmp/backai-go-build go test ./services/runtime/...`; `docker compose config --quiet`. |
-| 2026-06-12 | Pending | M3 customer-to-admin walkthrough | `GOCACHE=/tmp/backai-go-build go test ./services/runtime/internal/cost ./services/runtime/internal/server ./services/runtime/cmd/af-stack`; `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`; `pnpm --dir apps/dashboard exec tsc --noEmit --pretty false`. |
-| 2026-06-12 | Pending | M4 compose first-run ports | `docker compose config --quiet`; `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`; `pnpm --dir apps/dashboard exec tsc --noEmit --pretty false`. |
-| 2026-06-12 | Pending | M3 first-run panel | `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`. |
+| 2026-06-12 | `e666364` | M3 customer-to-admin walkthrough | `GOCACHE=/tmp/backai-go-build go test ./services/runtime/internal/cost ./services/runtime/internal/server ./services/runtime/cmd/af-stack`; `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`; `pnpm --dir apps/dashboard exec tsc --noEmit --pretty false`. |
+| 2026-06-12 | `c71efc0` | M4 compose first-run ports | `docker compose config --quiet`; `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`; `pnpm --dir apps/dashboard exec tsc --noEmit --pretty false`. |
+| 2026-06-12 | `cd6b50c` | M3 first-run panel | `pnpm --dir apps/customer-app exec tsc --noEmit --pretty false`. |
+| 2026-06-12 | Pending | M4 no-key E2E | `docker compose up -d --build postgres litellm agentfield runtime dashboard customer-app`; customer signup via `http://localhost:34000/api/auth/sign-up/email`; onboarding key minted; customer LLM proxy returned `demo-supportdesk`; `GET /api/v1/cost/events?tenant=...&request_id=...` returned exactly one event. |
 
 ## Current Risks
 
@@ -55,7 +56,7 @@ explicitly changes.
 
 ## Next Concrete Work
 
-1. Commit and push M3 first-run panel.
-2. Build and boot the compose stack, then run the browser-first demo path.
-3. Exercise no-key demo and OpenRouter-backed mode.
+1. Commit and push the Support Desk usage cost badge fix.
+2. Exercise OpenRouter-backed mode.
+3. Start M5 Railway deploy template.
 4. Keep the first vertical slice small enough to verify locally.
