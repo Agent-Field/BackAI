@@ -134,8 +134,6 @@ func (c *Client) Discover(ctx context.Context) ([]AgentInfo, error) {
 	if c.baseURL == "" {
 		return nil, errors.New("agentfield: URL not configured")
 	}
-	// AF's actual discovery endpoint may differ; we tolerate either shape and
-	// will refine when we wire end-to-end against a live AF instance.
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		c.baseURL+"/api/v1/discovery/capabilities", nil)
 	if err != nil {
@@ -152,17 +150,50 @@ func (c *Client) Discover(ctx context.Context) ([]AgentInfo, error) {
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("agentfield: discover status %d", resp.StatusCode)
 	}
+	// AgentField's /api/v1/discovery/capabilities returns the registered
+	// agents under a `capabilities` array, each with its reasoners. We also
+	// tolerate an older/alternate `{agents:[...]}` shape for forward-compat.
 	var raw struct {
+		Capabilities []struct {
+			AgentID   string `json:"agent_id"`
+			Version   string `json:"version"`
+			Reasoners []struct {
+				ID   string   `json:"id"`
+				Tags []string `json:"tags"`
+			} `json:"reasoners"`
+		} `json:"capabilities"`
 		Agents []AgentInfo `json:"agents"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
 		// Tolerate AF's evolving schema for now.
 		return []AgentInfo{}, nil
 	}
-	if raw.Agents == nil {
-		return []AgentInfo{}, nil
+	if len(raw.Capabilities) == 0 {
+		if raw.Agents == nil {
+			return []AgentInfo{}, nil
+		}
+		return raw.Agents, nil
 	}
-	return raw.Agents, nil
+	agents := make([]AgentInfo, 0, len(raw.Capabilities))
+	for _, entry := range raw.Capabilities {
+		info := AgentInfo{NodeID: entry.AgentID, Version: entry.Version}
+		seenTag := map[string]bool{}
+		for _, rz := range entry.Reasoners {
+			// Skip AF's internal system reasoners (e.g. __capabilities__).
+			if strings.HasPrefix(rz.ID, "__") {
+				continue
+			}
+			info.Reasoners = append(info.Reasoners, rz.ID)
+			for _, tg := range rz.Tags {
+				if !seenTag[tg] {
+					seenTag[tg] = true
+					info.Tags = append(info.Tags, tg)
+				}
+			}
+		}
+		agents = append(agents, info)
+	}
+	return agents, nil
 }
 
 // BaseURL returns the configured AF URL (for logs and diagnostics).
@@ -285,7 +316,7 @@ func (c *Client) GetExecution(ctx context.Context, id string) (ExecuteResponse, 
 	}, nil
 }
 
-// Capabilities calls every registered agent's ``__capabilities__``
+// Capabilities calls every registered agent's “__capabilities__“
 // reasoner and returns one entry per agent.
 //
 // This is how the runtime learns what CLI harnesses and MCP runners
@@ -294,7 +325,7 @@ func (c *Client) GetExecution(ctx context.Context, id string) (ExecuteResponse, 
 // harnesses / mcp packages aggregate the per-agent answers returned by
 // this method.
 //
-// Agents that do not define ``__capabilities__`` are silently skipped
+// Agents that do not define “__capabilities__“ are silently skipped
 // (we treat them as "has no harnesses, has no runners"). Per-agent
 // network errors are logged but do not fail the aggregate — a slow
 // agent shouldn't take out the dashboard.

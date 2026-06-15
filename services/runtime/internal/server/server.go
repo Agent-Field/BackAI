@@ -1068,11 +1068,18 @@ func (s *Server) logGatewayRequest(
 		execIDPtr = &executionID
 	}
 	tenantID := tenantctx.TenantID(r.Context())
-	apiKeyID := tenantctx.APIKeyID(r.Context())
-	var tenantPtr, keyPtr *string
-	if tenantID != "" {
-		tenantPtr = &tenantID
+	if tenantID == "" {
+		// Untenanted runtime calls — the operator console, or customer-app
+		// agent calls proxied before tenant resolution — record under the
+		// platform's zero-UUID tenant. suite_gateway_requests.tenant_id is
+		// NOT NULL (added by the RLS migration) with this value as its
+		// DEFAULT; passing an explicit NULL violated the constraint and
+		// silently dropped every such run, so /api/v1/runs stayed empty.
+		// Mirrors the audit logger's behaviour (internal/audit/audit.go).
+		tenantID = defaultTenantUUID
 	}
+	apiKeyID := tenantctx.APIKeyID(r.Context())
+	var keyPtr *string
 	if apiKeyID != "" {
 		keyPtr = &apiKeyID
 	}
@@ -1082,7 +1089,7 @@ func (s *Server) logGatewayRequest(
              request_bytes, response_bytes, af_execution_id, user_agent)
         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
     `,
-		tenantPtr,
+		tenantID,
 		keyPtr,
 		endpoint,
 		r.Method,
