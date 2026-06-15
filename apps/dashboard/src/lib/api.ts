@@ -281,6 +281,31 @@ export const LogLineSchema = z.object({
 })
 export type LogLine = z.infer<typeof LogLineSchema>
 
+// GET /api/v1/logs wraps the recent lines in a `lines` envelope. See
+// services/runtime/internal/server/logs.go.
+export const LogListSchema = z.object({
+  lines: z.array(LogLineSchema),
+})
+export type LogList = z.infer<typeof LogListSchema>
+
+// ─── Auth / OAuth-on-behalf-of-user providers ────────────────────────────
+//
+// GET /api/v1/oauth/providers lists the identity providers the runtime can
+// broker OBO tokens for. `configured` is false until the operator sets the
+// OAUTH_<NAME>_CLIENT_ID / _SECRET env pair. See
+// services/runtime/internal/oauth/factory.go (ProviderInfo).
+export const OAuthProviderSchema = z.object({
+  name: z.string(),
+  configured: z.boolean(),
+  default_scopes: z.array(z.string()),
+})
+export type OAuthProvider = z.infer<typeof OAuthProviderSchema>
+
+export const OAuthProviderListSchema = z.object({
+  providers: z.array(OAuthProviderSchema),
+})
+export type OAuthProviderList = z.infer<typeof OAuthProviderListSchema>
+
 export const QueueSummarySchema = z.object({
   pending: z.number(),
   running: z.number(),
@@ -1739,6 +1764,19 @@ export type ShipwrightTaskList = z.infer<typeof ShipwrightTaskListSchema>
 export const api = {
   health: () => request("/health", undefined, HealthSchema),
   agents: () => request("/api/v1/agents", undefined, AgentListSchema),
+  // Recent in-memory log lines from the runtime's logger ring. Single-process
+  // only; multi-process deployments should point at a real aggregator.
+  logs: (params?: { limit?: number }) => {
+    const qs = new URLSearchParams()
+    if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+    const q = qs.toString()
+    return request(`/api/v1/logs${q ? "?" + q : ""}`, undefined, LogListSchema)
+  },
+  // Identity providers the runtime can broker OAuth-on-behalf-of-user tokens
+  // for. Powers Build → Auth.
+  oauth: {
+    providers: () => request("/api/v1/oauth/providers", undefined, OAuthProviderListSchema),
+  },
   runs: (params?: {
     agent?: string
     tenant?: string
