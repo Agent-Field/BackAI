@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { redirect } from "next/navigation"
-
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { AppSidebar } from "@/components/layout/app-sidebar"
 import { Topbar } from "@/components/layout/topbar"
-import { operatorCount, requireOperator } from "@/lib/session"
+import { requireOperator } from "@/lib/session"
 
 // Admin routes are session-dependent and runtime-data-backed. Never
 // prerender — every request needs a fresh session check + live data.
@@ -20,12 +18,9 @@ function showShipwright(): boolean {
 }
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  // First-run: if no operator exists, divert to setup wizard.
-  const count = await operatorCount()
-  if (count === 0) {
-    redirect("/setup")
-  }
-
+  // A default operator is seeded at boot, so there is no operator-less
+  // first-run state to divert to a wizard. requireOperator() sends anyone
+  // without a valid operator session to /login.
   const session = await requireOperator()
   const isBillingDisabled = billingDisabled()
   const isShipwrightVisible = showShipwright()

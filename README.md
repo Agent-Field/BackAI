@@ -74,15 +74,15 @@ is historical design material. See [`docs/repo-map.md`](docs/repo-map.md).
 
 ## Pre-Wired vs Configurable
 
-| Area        | Pre-wired default                             | Configurable by you                                      |
-| ----------- | --------------------------------------------- | -------------------------------------------------------- |
-| Data        | Postgres 16 + pgvector                        | External Postgres, RLS policy shape, workload tables.    |
-| Storage     | MinIO in dev, S3 contract in prod             | S3, R2, GCS, Azure Blob via adapter/env.                 |
-| Identity    | better-auth, first-operator bootstrap         | OAuth providers, trusted origins, operator creation CLI. |
-| LLM routing | OpenAI-compatible gateway + LiteLLM sidecar   | Provider keys, model map, budgets, virtual-key strategy. |
-| Sandboxes   | Docker in dev, e2b/gVisor/Firecracker options | Adapter choice, limits, provider credentials.            |
-| Delivery    | Svix for outbound webhooks, log notifications | Resend/Postmark/etc. notifications, billing adapter.     |
-| Deploy      | Docker Compose, Helm, Fly, Railway, Render    | Your domains, secrets, scaling, managed services.        |
+| Area        | Pre-wired default                             | Configurable by you                                              |
+| ----------- | --------------------------------------------- | ---------------------------------------------------------------- |
+| Data        | Postgres 16 + pgvector                        | External Postgres, RLS policy shape, workload tables.            |
+| Storage     | MinIO in dev, S3 contract in prod             | S3, R2, GCS, Azure Blob via adapter/env.                         |
+| Identity    | better-auth, seeded default operator          | OAuth providers, trusted origins, default operator credentials.  |
+| LLM routing | AgentField path + LiteLLM sidecar             | Provider keys, model map, budgets, virtual-key strategy.         |
+| Sandboxes   | Docker in dev, e2b/gVisor/Firecracker options | Adapter choice, limits, provider credentials.                    |
+| Delivery    | Svix for outbound webhooks, log notifications | Resend/Postmark/etc. notifications, billing adapter.             |
+| Deploy      | Docker Compose, Helm, Fly, Railway, Render    | Your domains, secrets, scaling, managed services.                |
 
 For the layered architecture and OSS placement, read
 [`docs/stack.md`](docs/stack.md). For repo ownership and integration
@@ -159,11 +159,41 @@ docker compose up
 Open the customer app first:
 
 - Customer app: `http://localhost:34000`
-- Admin dashboard: `http://localhost:33000`
+- Admin dashboard: `http://localhost:33000` — sign in with the default operator account
 - API runtime: `http://localhost:8080/api/v1/`
 - Health + metrics: `http://localhost:8080/health` · `/ready` · `/metrics`
 - AgentField control plane: `http://localhost:8081/`
 - MinIO console: `http://localhost:9001/`
+
+As a secondary touchpoint, the API runtime is callable directly with the
+same agent the customer app uses internally:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/agents/sample.echo \
+  -H "Content-Type: application/json" \
+  -d '{"input":{"payload":{"message":"hello world"}}}'
+# → {"status":"succeeded","result":{"echoed":{"message":"hello world"}}, ...}
+```
+
+### Operator login
+
+A default operator account is **seeded on first boot**, so the admin
+dashboard is usable immediately — there is no signup wizard.
+
+| Field    | Default                   |
+| -------- | ------------------------- |
+| Email    | `operator@af-stack.local` |
+| Password | `changeme123`             |
+
+**Change the password from the console after your first login.** Override the
+defaults before the first `docker compose up` with
+`AF_STACK_DEFAULT_OPERATOR_EMAIL` / `AF_STACK_DEFAULT_OPERATOR_PASSWORD` in
+`.env` (see [`.env.example`](.env.example)). Seeding only runs while no
+operator exists yet, so changing those values later — or changing the
+password in the console — is never overwritten on restart. To provision
+operators another way, set `AF_STACK_DEFAULT_OPERATOR_DISABLED=true`.
+
+### Port overrides
 
 If a local port is already in use, or if two BackAI services are configured to
 publish the same host port, the preflight fails before Docker starts and prints
@@ -174,6 +204,11 @@ unused port instead:
 AF_STACK_PORT=38080 docker compose up
 AF_STACK_DASHBOARD_PORT=33001 docker compose up
 ```
+
+To enable multi-tenancy: set `modules.multi-tenancy.enabled: true` in
+`apps/backend/config.yaml`. See [`docs/multi-tenancy.md`](docs/multi-tenancy.md)
+for the full guide, including how to run the end-to-end isolation test
+(`scripts/test-multi-tenancy.sh`).
 
 Sign up in SupportDesk AI. BackAI provisions the account, membership,
 billing record, and internal request credentials. The first-run product

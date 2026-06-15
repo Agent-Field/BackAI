@@ -6,18 +6,14 @@
 // /login (with the original URL as ?next so we can bounce them back after
 // signing in). Auth API routes always pass through.
 //
-// First-run setup: if no operator has signed up yet, every route (except
-// /setup) redirects to /setup. This is handled by the server-side check
-// in `app/(admin)/layout.tsx` rather than here, because Edge middleware
-// can't query Postgres cheaply.
+// There is no first-run setup wizard: the default operator account is seeded
+// at boot (lib/bootstrap-operator.ts), so /login is the only entry point.
 
 import { NextResponse, type NextRequest } from "next/server"
 import { getSessionCookie } from "better-auth/cookies"
 
 const PUBLIC_PREFIXES = [
   "/login",
-  "/signup",
-  "/setup",
   // Allow ALL /api/* through — better-auth has its own session handling,
   // and the rewrites in next.config.ts proxy /api/v1/* to the runtime
   // which has its own auth boundary (Phase 6).

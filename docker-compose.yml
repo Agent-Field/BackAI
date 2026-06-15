@@ -223,6 +223,13 @@ services:
     environment:
       DATABASE_URL: postgres://afstack:afstack@postgres:5432/afstack?sslmode=disable
       AF_STACK_AUTH_SECRET: ${AF_STACK_AUTH_SECRET:-dev-secret-change-me-in-prod}
+      # Default operator account, seeded on first boot so the console is
+      # usable immediately (no signup wizard). CHANGE THE PASSWORD after your
+      # first login. Seeding only runs while suite_operators is empty, so
+      # editing these after first boot has no effect.
+      AF_STACK_DEFAULT_OPERATOR_EMAIL: ${AF_STACK_DEFAULT_OPERATOR_EMAIL:-operator@af-stack.local}
+      AF_STACK_DEFAULT_OPERATOR_PASSWORD: ${AF_STACK_DEFAULT_OPERATOR_PASSWORD:-changeme123}
+      AF_STACK_DEFAULT_OPERATOR_NAME: ${AF_STACK_DEFAULT_OPERATOR_NAME:-Default Operator}
       # Tell better-auth which URL the operator hits the dashboard at.
       BETTER_AUTH_URL: http://localhost:${AF_STACK_DASHBOARD_PORT:-33000}
       BETTER_AUTH_TRUSTED_ORIGINS: ${BETTER_AUTH_TRUSTED_ORIGINS:-http://localhost:${AF_STACK_CUSTOMER_APP_PORT:-34000},http://localhost:${AF_STACK_DASHBOARD_PORT:-33000}}

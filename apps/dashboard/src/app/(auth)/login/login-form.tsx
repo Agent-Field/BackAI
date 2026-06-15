@@ -3,7 +3,6 @@
 "use client"
 
 import { Suspense, useState } from "react"
-import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -13,12 +12,7 @@ import { AlertCircle, Building2Icon, MailIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field"
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { signIn } from "@/lib/auth-client"
@@ -131,14 +125,10 @@ function LoginFormInner({ sso }: LoginFormProps) {
               {...form.register("email")}
             />
             {form.formState.errors.email ? (
-              <FieldDescription>
-                {form.formState.errors.email.message}
-              </FieldDescription>
+              <FieldDescription>{form.formState.errors.email.message}</FieldDescription>
             ) : null}
           </Field>
-          <Field
-            data-invalid={form.formState.errors.password ? true : undefined}
-          >
+          <Field data-invalid={form.formState.errors.password ? true : undefined}>
             <FieldLabel htmlFor="password">Password</FieldLabel>
             <Input
               id="password"
@@ -148,9 +138,7 @@ function LoginFormInner({ sso }: LoginFormProps) {
               {...form.register("password")}
             />
             {form.formState.errors.password ? (
-              <FieldDescription>
-                {form.formState.errors.password.message}
-              </FieldDescription>
+              <FieldDescription>{form.formState.errors.password.message}</FieldDescription>
             ) : null}
           </Field>
           <Button type="submit" disabled={submitting} className="w-full">
@@ -177,12 +165,6 @@ function LoginFormInner({ sso }: LoginFormProps) {
               <Building2Icon data-icon="inline-start" /> Continue with {sso.label}
             </Button>
           ) : null}
-          <FieldDescription className="text-center">
-            Don&apos;t have an account?{" "}
-            <Link className="underline-offset-4 hover:underline" href="/signup">
-              Sign up
-            </Link>
-          </FieldDescription>
         </FieldGroup>
       </CardContent>
     </form>

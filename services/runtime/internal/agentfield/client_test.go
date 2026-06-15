@@ -113,6 +113,61 @@ func TestDiscoverParsesCapabilitiesShape(t *testing.T) {
 	}
 }
 
+// TestDiscoverMapsCapabilities verifies the live AgentField shape — agents
+// under a `capabilities` array, each with reasoners — is mapped onto
+// AgentInfo, with internal `__`-prefixed system reasoners filtered out and
+// reasoner tags deduped onto the agent. Regression guard for the bug where
+// Discover() read a `{agents:[...]}` key AF never sent, so /api/v1/agents
+// always returned empty.
+func TestDiscoverMapsCapabilities(t *testing.T) {
+	const body = `{
+		"total_agents": 2,
+		"capabilities": [
+			{"agent_id": "court-sim", "version": "0.1.0", "reasoners": [
+				{"id": "frame_case", "tags": ["intake", "law"]},
+				{"id": "__capabilities__", "tags": ["system"]},
+				{"id": "deliberate", "tags": ["law"]}
+			]},
+			{"agent_id": "sample", "version": "0.0.1", "reasoners": [
+				{"id": "echo", "tags": ["test"]}
+			]}
+		]
+	}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/discovery/capabilities" {
+			http.Error(w, "unexpected path", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, body)
+	}))
+	defer srv.Close()
+
+	agents, err := New(Config{URL: srv.URL}).Discover(context.Background())
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(agents) != 2 {
+		t.Fatalf("expected 2 agents, got %d: %+v", len(agents), agents)
+	}
+
+	cs := agents[0]
+	if cs.NodeID != "court-sim" || cs.Version != "0.1.0" {
+		t.Errorf("court-sim mapping wrong: %+v", cs)
+	}
+	// __capabilities__ must be filtered out; the other two kept in order.
+	if got := cs.Reasoners; len(got) != 2 || got[0] != "frame_case" || got[1] != "deliberate" {
+		t.Errorf("reasoners wrong (system reasoner not filtered?): %v", got)
+	}
+	// Tags deduped across reasoners: intake, law (law appears twice).
+	if got := cs.Tags; len(got) != 2 || got[0] != "intake" || got[1] != "law" {
+		t.Errorf("tags not deduped/mapped: %v", got)
+	}
+	if agents[1].NodeID != "sample" {
+		t.Errorf("expected second agent sample, got %q", agents[1].NodeID)
+	}
+}
+
 func TestNewURLNormalisation(t *testing.T) {
 	c := New(Config{URL: "http://example.com/"})
 	if c.BaseURL() != "http://example.com" {

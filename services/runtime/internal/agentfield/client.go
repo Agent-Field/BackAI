@@ -135,8 +135,6 @@ func (c *Client) Discover(ctx context.Context) ([]AgentInfo, error) {
 	if c.baseURL == "" {
 		return nil, errors.New("agentfield: URL not configured")
 	}
-	// AF's actual discovery endpoint may differ; we tolerate either shape and
-	// will refine when we wire end-to-end against a live AF instance.
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		c.baseURL+"/api/v1/discovery/capabilities", nil)
 	if err != nil {
@@ -153,8 +151,10 @@ func (c *Client) Discover(ctx context.Context) ([]AgentInfo, error) {
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("agentfield: discover status %d", resp.StatusCode)
 	}
+	// AgentField's /api/v1/discovery/capabilities returns the registered
+	// agents under a `capabilities` array, each with its reasoners. We also
+	// tolerate an older/alternate `{agents:[...]}` shape for forward-compat.
 	var raw struct {
-		Agents       []AgentInfo `json:"agents"`
 		Capabilities []struct {
 			AgentID   string `json:"agent_id"`
 			Version   string `json:"version"`
@@ -163,16 +163,17 @@ func (c *Client) Discover(ctx context.Context) ([]AgentInfo, error) {
 				Tags []string `json:"tags"`
 			} `json:"reasoners"`
 		} `json:"capabilities"`
+		Agents []AgentInfo `json:"agents"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
 		// Tolerate AF's evolving schema for now.
 		return []AgentInfo{}, nil
 	}
-	if raw.Agents != nil {
+	if len(raw.Capabilities) == 0 {
+		if raw.Agents == nil {
+			return []AgentInfo{}, nil
+		}
 		return raw.Agents, nil
-	}
-	if raw.Capabilities == nil {
-		return []AgentInfo{}, nil
 	}
 	agents := make([]AgentInfo, 0, len(raw.Capabilities))
 	for _, capability := range raw.Capabilities {
@@ -182,6 +183,10 @@ func (c *Client) Discover(ctx context.Context) ([]AgentInfo, error) {
 		reasoners := make([]string, 0, len(capability.Reasoners))
 		tagSet := map[string]struct{}{}
 		for _, reasoner := range capability.Reasoners {
+			// Skip AF's internal system reasoners (e.g. __capabilities__).
+			if strings.HasPrefix(reasoner.ID, "__") {
+				continue
+			}
 			if reasoner.ID != "" {
 				reasoners = append(reasoners, reasoner.ID)
 			}
