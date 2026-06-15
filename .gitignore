@@ -15,6 +15,8 @@ logs/
 npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
+# ...but Operate → Logs is a real App Router route segment; keep it tracked.
+!apps/dashboard/src/app/(admin)/operate/logs/
 
 # Env files
 .env
@@ -60,6 +62,10 @@ next-env.d.ts
 dist/
 build/
 *.tsbuildinfo
+# ...but the dashboard's "Build" nav group is a real App Router route segment
+# at apps/dashboard/src/app/(admin)/build/ — the generic build/ rule above
+# would swallow it. Re-include the route dir so its pages stay tracked.
+!apps/dashboard/src/app/(admin)/build/
 
 # Test artifacts
 coverage/
