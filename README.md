@@ -63,7 +63,7 @@ module, and one dashboard plugin.
 | --- | --- | --- |
 | Data | Postgres 16 + pgvector | External Postgres, RLS policy shape, workload tables. |
 | Storage | MinIO in dev, S3 contract in prod | S3, R2, GCS, Azure Blob via adapter/env. |
-| Identity | better-auth, first-operator bootstrap | OAuth providers, trusted origins, operator creation CLI. |
+| Identity | better-auth, seeded default operator | OAuth providers, trusted origins, default operator credentials. |
 | LLM routing | AgentField path + LiteLLM sidecar | Provider keys, model map, budgets, virtual-key strategy. |
 | Sandboxes | Docker in dev, e2b/gVisor/Firecracker options | Adapter choice, limits, provider credentials. |
 | Delivery | Svix for outbound webhooks, log notifications | Resend/Postmark/etc. notifications, billing adapter. |
@@ -151,10 +151,29 @@ curl -X POST http://localhost:8080/api/v1/agents/sample.echo \
 
 Endpoints once up:
 
+- Operator console: `http://localhost:3000/` — sign in with the default operator account
 - Suite gateway: `http://localhost:8080/api/v1/`
 - Health + metrics: `http://localhost:8080/health` · `/ready` · `/metrics`
 - AgentField control plane: `http://localhost:8081/`
 - MinIO console: `http://localhost:9001/`
+
+### Operator login
+
+A default operator account is **seeded on first boot**, so the console is
+usable immediately — there is no signup wizard.
+
+| Field    | Default                   |
+| -------- | ------------------------- |
+| Email    | `operator@af-stack.local` |
+| Password | `changeme123`             |
+
+**Change the password from the console after your first login.** Override the
+defaults before the first `docker compose up` with
+`AF_STACK_DEFAULT_OPERATOR_EMAIL` / `AF_STACK_DEFAULT_OPERATOR_PASSWORD` in
+`.env` (see [`.env.example`](.env.example)). Seeding only runs while no
+operator exists yet, so changing those values later — or changing the
+password in the console — is never overwritten on restart. To provision
+operators another way, set `AF_STACK_DEFAULT_OPERATOR_DISABLED=true`.
 
 To enable multi-tenancy: set `modules.multi-tenancy.enabled: true` in
 `apps/backend/config.yaml`. See [`docs/multi-tenancy.md`](docs/multi-tenancy.md)

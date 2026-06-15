@@ -65,28 +65,42 @@ function makeAuth() {
     trustedOrigins,
     // Mirror every better-auth user into suite_users on create so the
     // runtime's tenant_resolver can join on email and find the canonical
-    // suite user id. Without this hook a freshly-signed-up operator gets
-    // 401 on /api/v1/secrets and friends until someone hand-inserts the
-    // row.
+    // suite user id. Without this hook a freshly-created user (via SSO /
+    // OAuth / magic-link — email/password sign-up is disabled below) gets
+    // 401 on /api/v1/secrets and friends until someone hand-inserts the row.
+    //
+    // Each mirror step runs INDEPENDENTLY and best-effort. The previous
+    // version wrapped all three in one transaction, so a failure in the
+    // membership step (e.g. the default tenant row not existing yet) rolled
+    // back the suite_operators insert too — leaving the deployment with zero
+    // operators and an infinite /setup redirect. The default operator is now
+    // seeded at boot (see lib/bootstrap-operator.ts); this hook must never be
+    // able to undo operator creation.
     databaseHooks: {
       user: {
         create: {
           after: async (user) => {
-            const client = await pool.connect()
-            try {
-              await client.query("begin")
-              await ensureOperatorsTable(pool)
-              await client.query(
+            const step = async (label: string, fn: () => Promise<void>) => {
+              try {
+                await fn()
+              } catch (e) {
+                console.error(`[suite mirror] ${label} failed:`, e)
+              }
+            }
+
+            await step("suite_users", async () => {
+              await pool.query(
                 `INSERT INTO suite_users (email, name)
                  VALUES ($1, $2)
                  ON CONFLICT (email) DO NOTHING`,
                 [user.email, user.name ?? null],
               )
-              // Auto-membership: every freshly-signed-up user becomes
-              // an owner of the default tenant. Once an admin builds
-              // tenant-management flows we can swap this for an
-              // invitation-based join.
-              await client.query(
+            })
+            // Auto-membership: every freshly-created user becomes an owner of
+            // the default tenant. Once an admin builds tenant-management flows
+            // we can swap this for an invitation-based join.
+            await step("suite_memberships", async () => {
+              await pool.query(
                 `INSERT INTO suite_memberships (user_id, tenant_id, role)
                  SELECT u.id, '00000000-0000-0000-0000-000000000000'::uuid, 'owner'
                  FROM suite_users u
@@ -94,10 +108,10 @@ function makeAuth() {
                  ON CONFLICT DO NOTHING`,
                 [user.email],
               )
-              await client.query(
-                "select pg_advisory_xact_lock(hashtext('af_stack_operator_bootstrap'))",
-              )
-              await client.query(
+            })
+            await step("suite_operators", async () => {
+              await ensureOperatorsTable(pool)
+              await pool.query(
                 `INSERT INTO suite_operators (user_id, email, name, role)
                  SELECT $1, $2, $3, 'owner'
                  WHERE NOT EXISTS (SELECT 1 FROM suite_operators)
@@ -106,22 +120,19 @@ function makeAuth() {
                        name = COALESCE(excluded.name, suite_operators.name)`,
                 [user.id, user.email, user.name ?? null],
               )
-              await client.query("commit")
-            } catch (e) {
-              await client.query("rollback").catch(() => {})
-              // Don't block sign-up on the mirror — log and let the
-              // user in. They'll get 401 on protected APIs until the
-              // mirror is repaired, which is loud + recoverable.
-              console.error("[suite_users mirror] failed:", e)
-            } finally {
-              client.release()
-            }
+            })
           },
         },
       },
     },
     emailAndPassword: {
       enabled: true,
+      // The operator console no longer offers public self-signup — the first
+      // operator is seeded at boot (lib/bootstrap-operator.ts), documented in
+      // the README. Disabling sign-up closes the /api/auth/sign-up route so
+      // nobody can self-provision a user against this deployment. Sign-IN,
+      // magic-link, OAuth, and SSO all remain enabled.
+      disableSignUp: true,
       autoSignIn: true,
       minPasswordLength: 8,
     },
