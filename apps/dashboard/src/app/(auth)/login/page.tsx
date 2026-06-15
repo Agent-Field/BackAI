@@ -1,21 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { redirect } from "next/navigation"
-
-import { operatorCount } from "@/lib/session"
 import { getDashboardSSOConfig } from "@/lib/sso"
 import { LoginForm } from "./login-form"
 
-// Server component — checks first-run state before rendering the form.
-// If no operators exist yet, divert to the setup wizard so we don't ask
-// people to "sign in" to an empty deployment.
+// Server component. A default operator account is seeded at boot
+// (lib/bootstrap-operator.ts) and documented in the README, so there is no
+// first-run setup wizard to divert to — we always render the sign-in form.
 export const dynamic = "force-dynamic"
 
 export default async function LoginPage() {
-  const count = await operatorCount()
-  if (count === 0) {
-    redirect("/setup")
-  }
   const sso = getDashboardSSOConfig()
   return <LoginForm sso={{ enabled: sso.enabled, label: sso.label }} />
 }
