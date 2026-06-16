@@ -43,7 +43,7 @@ All existing 8 slots use `AF_STACK_<SLOT>_ADAPTER=<name>` (e.g., `AF_STACK_SANDB
 
 All 8 existing slots route their env via the typed `internal/config` package. The new slots add fields to the `Config` struct and read them in main; do not sprinkle `os.Getenv("AF_STACK_LOGS_ADAPTER")` directly in `cmd/af-stack/main.go`.
 
-### 0.5.3 Frontend pattern is data-driven — no new React components for Blocks 1-6
+### 0.5.3 Frontend pattern is data-driven — no new React components for Blocks 1, 3-7
 
 Confirmed shape (`apps/dashboard/src/app/(admin)/[...slug]/page.tsx:15-21` + `lib/new-admin/data.ts:500-545` + `lib/new-admin/page-model.ts`):
 
@@ -87,7 +87,7 @@ Closes 8 known gaps. Most items are small but several carry hidden cost (Cache A
 - Tests: `admin_adapters_test.go:29, 53, 83`
 - Dashboard client method: `apps/dashboard/src/lib/api.ts:2448` (`api.admin.adapters.list()`)
 
-Action for this PR: tick this item off; do not re-add a duplicate route. Verify the existing endpoint serves a non-empty slot list once Blocks 2-5 register the new slots.
+Action for this PR: tick this item off; do not re-add a duplicate route. Verify the existing endpoint serves a non-empty slot list once Blocks 3-6 register the new slots.
 
 ### 1.2 `GET /api/v1/admin/services` — Connected Services synth
 
@@ -201,11 +201,11 @@ For Block 1, prefer (a). Plan (b) as a follow-up if operators report stale data.
 
 **Endpoint**: `GET /api/v1/admin/llm/provider-health?window=24h` — returns availability % and latency histogram per provider.
 
-**UI surface**: section on the Connected Services page. **Read directly from this endpoint** (Postgres-backed) — do NOT route through Block 4's PromQL metrics adapter. The earlier doc carried both paths; the Postgres path wins because the poller is the system of record.
+**UI surface**: section on the Connected Services page. **Read directly from this endpoint** (Postgres-backed) — do NOT route through Block 5's PromQL metrics adapter. The earlier doc carried both paths; the Postgres path wins because the poller is the system of record.
 
 ### 1.5 Endpoint additions (5 items — audit-corrected scope)
 
-Six endpoints originally listed together; one (`/api/v1/search/indexes`) was a duplicate with Block 6.3 — kept here, dropped from Block 6. Each item below has audit notes about hidden cost.
+Six endpoints originally listed together; one (`/api/v1/search/indexes`) was a duplicate with Block 7.3 — kept here, dropped from Block 7. Each item below has audit notes about hidden cost.
 
 #### 1.5.1 `POST /api/v1/crons/{id}/trigger`
 
@@ -309,7 +309,525 @@ Per the cross-cutting pattern (§0.5.3): per-endpoint cost is 5 edits — schema
 
 ---
 
-## Block 2 — `logs` adapter slot · **~2.5 days** (revised up from 2d)
+## Block 2 — Foundation: config + probes + retention + features API · ~1.5 days
+
+**This is the next block to dispatch.**
+
+**Why this block exists**: Block 1 shipped concrete endpoints, several of which carry ad-hoc instances of patterns that the rest of the roadmap (Blocks 3–9) needs to reuse. Specifically: a LiteLLM virtual-key capability probe (inside `Manager.Rotate`), a retention prune for `suite_provider_health_log`, and the implicit "feature is on" toggles for db_health / provider polling / mute / brand. Each future block has its own probes, retention needs, and feature toggles. Without a foundation, every block reinvents these and we end up with eight slightly-different patterns.
+
+This block generalises four pieces of infrastructure and consolidates Block 1's ad-hoc instances into them. It introduces **no new OSS** and **no new admin nav items** (a small "Setup → Features" read-only tab is added to the existing Setup section). It is intentionally small, sharp, and finishable in ~1.5 days.
+
+### 2.0 Deliverables overview
+
+| # | Deliverable | Why it's in this block |
+|---|---|---|
+| 2.1 | Config schema (`backai.config.yaml`) + Layer 1 + Layer 2 validators | Every downstream block needs a place to declare its feature toggles. Layer 1 = JSON Schema (structural). Layer 2 = dependency graph (catches conflicts before they reach runtime). |
+| 2.2 | Capability-probe machinery (`internal/probe/`) | Generalise Block 1's LiteLLM virtual-keys probe + add probes for `pg_stat_statements` and the role grant. Future blocks use the same registry. |
+| 2.3 | Retention helper (`internal/retention/`) | Generalise Block 1's `suite_provider_health_log` prune. Future blocks (`suite_tool_calls`, `suite_oauth_refresh_log`, `suite_sql_history`) register here. |
+| 2.4 | `GET /api/v1/admin/features` endpoint | Single source of truth for the dashboard: feature-on/off + capability status + validator warnings. |
+| 2.5 | `Setup → Features` read-only tab in the dashboard | Operator sees what's on, what's off, and why, in one place. |
+| 2.6 | Block 1 consolidation | Refactor Block 1's ad-hoc probe call in `Manager.Rotate` and ad-hoc retention in `health_poller.go` into the new packages. No behaviour change. |
+| 2.7 | Docs | `docs/CONFIGURATION.md` (operator-facing) + `docs/CAPABILITY-PROBES.md` (developer-facing). Update `docs/HANDOFF-TO-UI.md`. |
+
+### 2.1 Config schema + validators
+
+**Files (new)**:
+
+| Path | Content |
+|---|---|
+| `backai.config.yaml.example` (repo root) | Operator's starting point. Committed. Documented inline. |
+| `services/runtime/internal/config/features.go` | Go struct definitions, one per top-level feature; YAML tags match the schema. |
+| `services/runtime/internal/config/features_metadata.go` | Per-feature metadata: `requires`, `conflicts`, `mutex_group`, `requires_env`, `requires_pg_grant`, `requires_pg_config`. Hardcoded — not operator-editable. |
+| `services/runtime/internal/config/validator.go` | Layer 2 validator. Walks the dependency graph. Produces a list of `ValidationError{Feature, Level, Message, Remediation}`. |
+| `services/runtime/internal/config/schema.json` | Layer 1 JSON Schema. Generated from the Go structs at build time (one `go generate` line) so they can't drift. |
+| `services/runtime/cmd/backai/main.go` (NEW or extend existing CLI) | Adds `backai config validate` subcommand. Reads `backai.config.yaml`, runs Layer 1 + Layer 2, prints actionable errors, exits non-zero on failure. CI-friendly. |
+| `services/runtime/internal/config/validator_test.go` | One test per dependency rule + happy path + each preset. |
+
+**The schema file** — exactly this shape, committed at repo root:
+
+```yaml
+# backai.config.yaml.example — operator copies to backai.config.yaml and edits.
+# Validate with: backai config validate
+
+preset: lean   # 'lean' (default base) | 'full-observability' | 'production' | 'custom'
+
+# When preset != custom, presets define a baseline feature set; the `features:`
+# block below overrides individual flags. Validator merges preset + overrides.
+# When preset = custom, you must enumerate every feature explicitly.
+
+features:
+  # ─── Block 1 (shipped) features ──────────────────────────────────────────
+  db_health: { enabled: true }
+  provider_health_polling: { enabled: true }
+  notifications_mute: { enabled: true }
+  brand_override: { enabled: true }
+  search_index_stats: { enabled: true }
+  cron_manual_trigger: { enabled: true }
+  cache_flush: { enabled: true }
+  api_key_rotate: { enabled: true }
+
+  llm_gateway:
+    virtual_keys: false       # declares intent; runtime probes LiteLLM to verify
+    spend_tracking: false     # tied to virtual_keys
+
+  # ─── Future-block features (declared, default off) ───────────────────────
+  logs:
+    enabled: false            # Block 3 lights this up
+    backend: ring             # enum: ring | loki | remote
+
+  traces:
+    enabled: false            # Block 4 lights this up
+    backend: empty            # enum: empty | tempo | remote
+
+  metrics:
+    enabled: false            # Block 5 lights this up
+    backend: none             # enum: none | prometheus | remote
+    container_metrics: false  # requires metrics.enabled (validator enforces)
+
+  errors:
+    enabled: false            # Block 6 lights this up
+    backend: logfilter        # enum: logfilter | glitchtip | remote
+```
+
+**Preset definitions** (in `features_metadata.go`):
+
+```go
+var presets = map[string]Features{
+    "lean": {
+        // Block 1 essentials. No observability OSS. No virtual keys.
+        DBHealth:               FeatureBool{Enabled: true},
+        ProviderHealthPolling:  FeatureBool{Enabled: true},
+        NotificationsMute:      FeatureBool{Enabled: true},
+        BrandOverride:          FeatureBool{Enabled: true},
+        SearchIndexStats:       FeatureBool{Enabled: true},
+        CronManualTrigger:      FeatureBool{Enabled: true},
+        CacheFlush:             FeatureBool{Enabled: true},
+        APIKeyRotate:           FeatureBool{Enabled: true},
+        LLMGateway:             LLMGatewayFeature{VirtualKeys: false, SpendTracking: false},
+        Logs:                   LogsFeature{Enabled: false, Backend: "ring"},
+        Traces:                 TracesFeature{Enabled: false, Backend: "empty"},
+        Metrics:                MetricsFeature{Enabled: false, Backend: "none"},
+        Errors:                 ErrorsFeature{Enabled: false, Backend: "logfilter"},
+    },
+    "full-observability": {
+        // lean + all four observability slots set to their first real backend.
+        // ... (extends lean)
+        Logs:    LogsFeature{Enabled: true, Backend: "loki"},
+        Traces:  TracesFeature{Enabled: true, Backend: "tempo"},
+        Metrics: MetricsFeature{Enabled: true, Backend: "prometheus", ContainerMetrics: true},
+        Errors:  ErrorsFeature{Enabled: true, Backend: "glitchtip"},
+    },
+    "production": {
+        // full-observability + virtual keys on. Assumes operator has LiteLLM with DB,
+        // GlitchTip token, SENTRY_DSN configured (validator catches missing env).
+        LLMGateway: LLMGatewayFeature{VirtualKeys: true, SpendTracking: true},
+        // ... (extends full-observability)
+    },
+}
+```
+
+**Dependency rules** (in `features_metadata.go`):
+
+```go
+type FeatureRule struct {
+    Feature         string   // dotted path like "metrics.container_metrics"
+    Requires        []string // dotted paths that must also be enabled
+    Conflicts       []string // dotted paths that must not be enabled
+    MutexGroup      string   // at most one feature in this group can be enabled
+    RequiresEnv     []string // env vars that must be present at boot
+    RequiresPGGrant []string // PG role grants required
+    RequiresPGConf  []string // postgres.conf settings required (probed at boot)
+    BackendOptions  []string // for features with a `backend:` enum, the allowed values
+}
+
+var featureRules = []FeatureRule{
+    {
+        Feature: "metrics.container_metrics",
+        Requires: []string{"metrics.enabled"},
+    },
+    {
+        Feature: "llm_gateway.spend_tracking",
+        Requires: []string{"llm_gateway.virtual_keys"},
+    },
+    {
+        Feature: "llm_gateway.virtual_keys",
+        RequiresEnv: []string{"LITELLM_DATABASE_URL"},  // probe-confirmed at boot
+    },
+    {
+        Feature: "errors.backend=glitchtip",
+        RequiresEnv: []string{"SENTRY_DSN", "AF_STACK_ERRORS_GLITCHTIP_TOKEN"},
+    },
+    {
+        Feature: "db_health",
+        RequiresPGGrant: []string{"pg_read_all_stats"},
+        RequiresPGConf:  []string{"shared_preload_libraries:pg_stat_statements"},
+    },
+    {
+        Feature: "search_index_stats",
+        RequiresPGGrant: []string{"pg_read_all_stats"},
+    },
+    {
+        Feature: "logs.backend",
+        BackendOptions: []string{"ring", "loki", "remote"},
+    },
+    {
+        Feature: "traces.backend",
+        BackendOptions: []string{"empty", "tempo", "remote"},
+    },
+    {
+        Feature: "metrics.backend",
+        BackendOptions: []string{"none", "prometheus", "remote"},
+    },
+    {
+        Feature: "errors.backend",
+        BackendOptions: []string{"logfilter", "glitchtip", "remote"},
+    },
+}
+```
+
+**Validator output example** (what the CLI prints):
+
+```
+$ backai config validate
+✓ Layer 1 (schema)        — backai.config.yaml parses cleanly.
+✓ Layer 2 (dependencies)  — 12 features enabled, 0 conflicts.
+✗ Capability               — features.llm_gateway.virtual_keys=true but env
+                              LITELLM_DATABASE_URL is not set in .env.
+                              Remediation: set LITELLM_DATABASE_URL, or set
+                              features.llm_gateway.virtual_keys=false.
+
+1 issue. Exit 1.
+```
+
+**Acceptance criteria**:
+
+- [ ] `backai config validate` exits 0 on the shipped `backai.config.yaml.example`
+- [ ] `backai config validate` exits 1 with a clear message when `metrics.container_metrics=true` and `metrics.enabled=false`
+- [ ] `backai config validate` exits 1 when `errors.backend=glitchtip` and `SENTRY_DSN` is unset
+- [ ] Renaming `db_health` to `dbHealth` in the YAML fails Layer 1 (unknown field)
+- [ ] Setting `logs.backend: "foo"` fails Layer 1 (enum)
+- [ ] Preset `lean` produces a valid `Features` struct
+- [ ] Preset `full-observability` + override `errors.enabled=false` produces a valid `Features` struct
+- [ ] Preset `custom` requires every feature enumerated; partial = Layer 1 error
+
+### 2.2 Capability-probe machinery
+
+**Files (new)**:
+
+| Path | Content |
+|---|---|
+| `services/runtime/internal/probe/probe.go` | `Probe` interface + `Registry` + `Result` + `Severity` |
+| `services/runtime/internal/probe/probe_test.go` | Mock-probe tests; scheduled-probe tests; result-deduplication tests |
+| `services/runtime/internal/probe/litellm_virtual_keys.go` | Extracted from Block 1's ad-hoc probe in `manager.go` |
+| `services/runtime/internal/probe/pg_stat_statements.go` | Probes whether `pg_stat_statements` returns rows |
+| `services/runtime/internal/probe/pg_role_read_all_stats.go` | Probes whether the runtime's PG role has `pg_read_all_stats` |
+| `services/runtime/internal/probe/litellm_spend_tracking.go` | Probes whether LiteLLM `/spend/keys` returns data |
+
+**Interface**:
+
+```go
+package probe
+
+import (
+    "context"
+    "sync"
+    "time"
+)
+
+// Severity classifies a probe outcome.
+type Severity string
+const (
+    SeverityOK          Severity = "ok"          // capability fully active
+    SeverityDegraded    Severity = "degraded"    // partial; UI should warn
+    SeverityUnavailable Severity = "unavailable" // capability off; UI should hide / disable
+)
+
+// Result is what one probe returns.
+type Result struct {
+    ProbeID    string    // matches Probe.ID()
+    Capability string    // dotted path written into adapter registry capability envelope, e.g. "llm_gateway.virtual_keys_active"
+    Value      any       // typically bool, but other shapes allowed
+    Severity   Severity
+    Detail     string    // human-readable note for the dashboard
+    LastRun    time.Time
+    LastErr    error     // nil on success
+}
+
+// Probe is the contract every capability probe implements.
+type Probe interface {
+    ID() string                                 // unique identifier
+    Slot() string                               // adapter slot this probe informs (e.g., "llm-chat")
+    Schedule() time.Duration                    // how often to re-run; 0 = boot-only
+    Run(ctx context.Context) (Result, error)
+}
+
+// Registry collects probes and exposes their latest results.
+type Registry struct {
+    probes  []Probe
+    results sync.Map // probe.ID() -> Result
+    log     *slog.Logger
+}
+
+func NewRegistry(log *slog.Logger) *Registry
+func (r *Registry) Register(p Probe)
+func (r *Registry) RunAll(ctx context.Context)       // run all probes once (call at boot)
+func (r *Registry) StartScheduled(ctx context.Context) // run probes with Schedule() > 0 on a timer
+func (r *Registry) Get(probeID string) (Result, bool)
+func (r *Registry) Snapshot() map[string]Result      // dashboard reads this via /api/v1/admin/features
+```
+
+**Adapter registry integration**: the existing `services/runtime/internal/adapters/registry/registry.go` `Slot` struct has a `Capabilities` `map[string]any` field. After every probe run, the probe registry writes its `Result.Value` into the adapter registry's slot keyed by `Result.Capability`. Existing code that reads adapter capabilities (Setup → Adapters page) immediately reflects probe results.
+
+**Initial probes shipped in this block**:
+
+| Probe ID | Slot | What it checks | Capability key written |
+|---|---|---|---|
+| `litellm-virtual-keys` | `llm-chat` | `POST /key/info` on LiteLLM with master key — `200` → active, `503 "DB not connected"` → unavailable | `llm_gateway.virtual_keys_active` (bool) |
+| `litellm-spend-tracking` | `llm-chat` | `GET /spend/keys` returns 200 | `llm_gateway.spend_tracking_active` (bool) |
+| `pg-stat-statements-loaded` | `data` | `SELECT 1 FROM pg_stat_statements LIMIT 1` doesn't fail | `db.stat_statements_loaded` (bool) |
+| `pg-role-read-all-stats` | `data` | `SELECT has_role_privilege(current_user, 'pg_read_all_stats', 'USAGE')` returns true | `db.role_has_read_all_stats` (bool) |
+
+**Acceptance criteria**:
+
+- [ ] `probe.Registry` runs each registered probe; results readable via `Snapshot()`
+- [ ] Scheduled probes (`Schedule() > 0`) re-run on the configured interval
+- [ ] Adapter registry `Slot.Capabilities` reflects probe results within one tick of the probe completing
+- [ ] Block 1's `tenancy.Manager.Rotate` no longer calls LiteLLM `/key/info` directly; it reads the probe's cached result from the registry (consolidation work — §2.6)
+
+### 2.3 Retention helper
+
+**Files (new)**:
+
+| Path | Content |
+|---|---|
+| `services/runtime/internal/retention/retention.go` | `Policy` + `Registry` + `Run` |
+| `services/runtime/internal/retention/retention_test.go` | Unit tests against an in-memory `sql.DB` mock |
+
+**Interface**:
+
+```go
+package retention
+
+import (
+    "context"
+    "database/sql"
+    "time"
+)
+
+// Policy describes a retention rule for one table.
+type Policy struct {
+    Table        string        // e.g. "suite_provider_health_log"
+    RetainDays   int           // anything older is eligible for prune
+    OrderColumn  string        // column used to age rows (e.g. "observed_at")
+    BatchSize    int           // delete in chunks (e.g. 1000)
+
+    // Optional: aggregate rows older than RetainDays into a rollup table
+    // before deletion. Useful for chart history that survives retention.
+    Rollover *RolloverSpec
+}
+
+type RolloverSpec struct {
+    Table          string        // rollup destination
+    BucketDuration time.Duration // e.g. 24*time.Hour for daily rollups
+    AggregateSQL   string        // user-provided SQL with placeholders
+}
+
+type Registry struct {
+    policies []Policy
+}
+
+func NewRegistry() *Registry
+func (r *Registry) Register(p Policy)
+func (r *Registry) Run(ctx context.Context, db *sql.DB) (report Report, err error)
+
+type Report struct {
+    Table        string
+    RowsDeleted  int64
+    RowsRolledUp int64
+    Duration     time.Duration
+}
+```
+
+**Initial registration** (in `cmd/af-stack/main.go`, after Block 1's tables are migrated):
+
+```go
+retentionReg := retention.NewRegistry()
+retentionReg.Register(retention.Policy{
+    Table:       "suite_provider_health_log",
+    RetainDays:  30,
+    OrderColumn: "observed_at",
+    BatchSize:   1000,
+})
+// Future blocks register here:
+// retentionReg.Register(...) for suite_tool_calls (Block 7.2)
+// retentionReg.Register(...) for suite_oauth_refresh_log (Block 7.5)
+// retentionReg.Register(...) for suite_sql_history (Block 9.3)
+```
+
+**Cron wiring** (uses the existing crons subsystem):
+
+Register a system cron at boot:
+
+```go
+crons.RegisterSystem("retention.daily", "0 3 * * *", func(ctx context.Context) error {
+    _, err := retentionReg.Run(ctx, db)
+    return err
+})
+```
+
+**Acceptance criteria**:
+
+- [ ] `Registry.Run` deletes rows older than `RetainDays` in batches of `BatchSize`
+- [ ] Run is idempotent — a second call deletes nothing additional if no time has passed
+- [ ] Run honours context cancellation between batches
+- [ ] Block 1's ad-hoc `suite_provider_health_log` prune is removed; replaced by the registry registration (consolidation — §2.6)
+
+### 2.4 `GET /api/v1/admin/features` endpoint
+
+**File (new)**: `services/runtime/internal/server/admin_features.go`
+
+**Response shape**:
+
+```json
+{
+  "preset": "lean",
+  "features": {
+    "db_health": {
+      "enabled": true,
+      "capability_status": "ok",
+      "details": []
+    },
+    "provider_health_polling": {
+      "enabled": true,
+      "capability_status": "ok",
+      "details": []
+    },
+    "llm_gateway": {
+      "virtual_keys": false,
+      "spend_tracking": false,
+      "capability_status": "degraded",
+      "details": [
+        {
+          "key": "virtual_keys_active",
+          "value": false,
+          "severity": "unavailable",
+          "message": "LiteLLM in stateless mode (/key/info returned 503 DB not connected)"
+        }
+      ]
+    },
+    "logs":    { "enabled": false, "backend": "ring",       "capability_status": "not_configured" },
+    "traces":  { "enabled": false, "backend": "empty",      "capability_status": "not_configured" },
+    "metrics": { "enabled": false, "backend": "none",       "capability_status": "not_configured" },
+    "errors":  { "enabled": false, "backend": "logfilter",  "capability_status": "not_configured" }
+  },
+  "validator_warnings": []
+}
+```
+
+`capability_status` is one of `ok | degraded | not_configured | unavailable`. Dashboard branches on this.
+
+**Acceptance criteria**:
+
+- [ ] Endpoint returns `200` with the shape above
+- [ ] When `backai config validate` would emit a warning, the warning appears in `validator_warnings`
+- [ ] Probe results from §2.2 are folded into `details`
+- [ ] Boot-time probe failures don't crash the endpoint; they appear as `severity: unavailable` entries
+- [ ] OpenAPI registered
+
+### 2.5 Dashboard `Setup → Features` read-only tab
+
+**Files modified**:
+
+| Path | Change |
+|---|---|
+| `apps/dashboard/src/lib/api.ts` | New: `api.admin.features.get()` + `FeaturesResponseSchema` (zod) |
+| `apps/dashboard/src/lib/new-admin/data.ts` | Add `settle(() => api.admin.features.get())` to `getOperatorSnapshot()`; map to `snapshot.features` |
+| `apps/dashboard/src/lib/new-admin/page-model.ts` | New page entry: `"/setup/features"` — read-only table rendering `snapshot.features`. Each row: feature name, status pill, details (expandable). Link out: "Edit `backai.config.yaml`" with `cmd+c` to copy the path. |
+| `apps/dashboard/src/lib/new-admin/navigation.ts` | Add nav item under SETUP: `Features` (after `Adapters`) |
+
+**No new React component required** — the page uses the existing table archetype (per `admin-design-patterns-v1.md`).
+
+**Acceptance criteria**:
+
+- [ ] `/setup/features` route renders without errors against a running runtime
+- [ ] Features the runtime reports as `not_configured` are visually distinct (muted) from `ok`
+- [ ] Validator warnings appear in a banner at the top of the page when present
+
+### 2.6 Block 1 consolidation work
+
+**Important**: Block 1 shipped two ad-hoc instances of patterns this block generalises. Refactor them in-place. **No behaviour change to Block 1's user-visible surface** — only internal restructuring.
+
+| Block 1 ad-hoc | Refactor target |
+|---|---|
+| `tenancy.Manager` calls LiteLLM `/key/info` directly inside `Rotate` (or wherever the dual-mode probe lives) | Replace with `probe.Registry.Get("litellm-virtual-keys")`. The probe runs at boot + on a 5-minute schedule. `Rotate` reads the cached result. |
+| `health_poller.go` for `suite_provider_health_log` retention (whatever Block 1 shipped — likely a cron in `internal/llmgateway/health_poller.go` or inline) | Move retention out; register a `retention.Policy` for `suite_provider_health_log` in `cmd/af-stack/main.go`. Delete Block 1's prune code. |
+
+**Tests for consolidation**:
+
+- [ ] `tenancy.Manager.Rotate` test: with `litellm-virtual-keys` probe returning `false`, rotation succeeds locally without attempting LiteLLM mirror; with probe returning `true`, mirror is attempted; with probe returning `unknown` (first boot, not yet run), rotation falls back to a synchronous probe call.
+- [ ] `retention.Registry.Run` test: pre-populate `suite_provider_health_log` with rows older than 30d; run; assert deletion.
+
+### 2.7 Documentation
+
+| File | Content |
+|---|---|
+| `docs/CONFIGURATION.md` (new) | Operator-facing: what `backai.config.yaml` is, how presets work, every feature documented, env-var dependencies, validator usage |
+| `docs/CAPABILITY-PROBES.md` (new) | Developer-facing: how to add a new probe; the `Probe` interface contract; how the registry writes into the adapter registry; how the dashboard reads it |
+| `docs/HANDOFF-TO-UI.md` (update) | Add Block 2 to the read-order. Mark Block 1 done. |
+
+### 2.8 What this block does NOT do
+
+- No compose generator. `backai compose generate` (which would emit `docker-compose.override.yml` from the YAML) is **Phase 2** of the config system and is not in this block. Operators still hand-edit their compose / env vars; the YAML serves as the contract + validator.
+- No dashboard "Features" UI editor — operators edit the YAML in their fork's repo. The Setup → Features tab is read-only.
+- No new adapter slots. Those land in Blocks 3-6.
+- No new OSS dependencies.
+
+### 2.9 Acceptance test (full block)
+
+```bash
+# 1. Build + start runtime against a fresh fork
+docker compose up -d
+
+# 2. Validator passes against the example config
+cp backai.config.yaml.example backai.config.yaml
+backai config validate
+# Expect: exit 0
+
+# 3. Introduce a conflict; validator catches it
+sed -i 's/container_metrics: false/container_metrics: true/' backai.config.yaml
+backai config validate
+# Expect: exit 1, message about metrics.enabled being false
+
+# 4. Probe registry runs
+curl http://localhost:8080/api/v1/admin/features | jq .features.llm_gateway
+# Expect: {"virtual_keys":false,"spend_tracking":false,"capability_status":"degraded",
+#          "details":[{"key":"virtual_keys_active","severity":"unavailable",...}]}
+
+# 5. Dashboard surfaces the feature page
+# Browse to http://localhost:33000/setup/features
+# Expect: features table with status pills; warning banner empty
+
+# 6. Block 1 consolidation verified
+# Re-run Block 1's `Manager.Rotate` E2E test (the one that exercises LiteLLM stateless mode).
+# Expect: same behaviour as before, but `Rotate` now reads the probe result from the registry,
+# not from a direct /key/info call.
+```
+
+### 2.10 What downstream blocks gain from this
+
+When Blocks 3-9 land, each one:
+
+1. **Adds its feature toggle to `features.go`** — one struct field per feature. Validator covers it automatically.
+2. **Adds its probes** — implements the `Probe` interface; registers with `probe.Registry`.
+3. **Adds its retention policy** (if applicable) — one `retention.Register` call.
+4. **Adds its capability key** to the `/api/v1/admin/features` response — no code change needed; the registry surfaces it.
+5. **Reads from `snapshot.features` on the dashboard side** — no new infrastructure.
+
+This is the keystone. Without it, every later block invents its own.
+
+---
+
+## Block 3 — `logs` adapter slot · ~2.5 days
 
 **Why this slot**: today logs are a 2048-line in-memory ring inside the runtime process. We can't see agent-container logs, customer-app logs, LiteLLM logs, or anything past 2048 entries. Operators running real workloads need cross-service log query.
 
@@ -569,7 +1087,7 @@ MODIFIED:
 
 ---
 
-## Block 3 — `traces` adapter slot · **~2.5 days** (revised up from 2d)
+## Block 4 — `traces` adapter slot · ~2.5 days
 
 **Why this slot**: the runtime has the OpenTelemetry SDK wired and **does honor `OTEL_EXPORTER_OTLP_ENDPOINT`** (`internal/config/config.go:208-210`). Nothing receives the spans today. The admin's Traces page is empty. Operators need a span store + query.
 
@@ -774,7 +1292,7 @@ MODIFIED:
 
 ---
 
-## Block 4 — `metrics` adapter slot · ~2 days
+## Block 5 — `metrics` adapter slot · ~2 days
 
 **Why this slot**: KPIs on Home, Cost, and Health are point-in-time. The dashboard has no time-series — operators can't see spend over the last 24h, error rate trends, container resource trajectories. Cost forecasting is client-side regression.
 
@@ -945,7 +1463,7 @@ MODIFIED:
 
 ---
 
-## Block 5 — `errors` adapter slot · **~3 days** (revised up from 2d)
+## Block 6 — `errors` adapter slot · ~3 days
 
 **Why this slot**: today's "errors" page client-side filters logs by level (`apps/dashboard/src/lib/new-admin/data.ts:1158-1166`). There's no server-side deduplication, grouping, resolution state, or alerting. Operators need a Sentry-shaped error tracker.
 
@@ -1135,7 +1653,7 @@ MODIFIED:
 
 ---
 
-## Block 6 — Aggregation endpoints · **~3–4 days** (revised up from 2d)
+## Block 7 — Aggregation endpoints · ~3–4 days
 
 Four aggregation endpoints. Two of them require new DB schema + write-path hooks, not just read-side aggregation. Search-indexes was moved to Block 1.5 (was duplicate).
 
@@ -1208,7 +1726,7 @@ Each of the above is a single new column / panel / drawer-tab on the existing pa
 
 ---
 
-## Block 7 — Polish · **~1 day** (lighter than billed in earlier draft)
+## Block 8 — Polish · ~1 day
 
 Cross-cutting refinements. Audit revealed two of three items are mostly already wired.
 
@@ -1237,9 +1755,9 @@ Example: when `metrics.Store.Capabilities().SupportsRange` is false, the Cost pa
 
 ---
 
-## Block 8 — Remaining unmapped gap indicators · **~1 day** (NEW)
+## Block 9 — Remaining unmapped gap indicators · ~1 day
 
-Audit extracted 24 static `kpi(..., "missing"|"gap"|"deferred", ...)` indicators from `page-model.ts`. Blocks 1-7 cover 21 of them. The remaining 3 land here.
+Audit extracted 24 static `kpi(..., "missing"|"gap"|"deferred", ...)` indicators from `page-model.ts`. Blocks 1, 3-8 cover 21 of them. The remaining 3 land here.
 
 ### 8.1 `/build/harnesses` — "Disable" KPI
 
@@ -1267,21 +1785,22 @@ Persist a per-operator history of SQL queries (currently UI-only local state in 
 
 ---
 
-## Effort summary (audit-corrected)
+## Status + effort summary
 
-| Block | Pre-audit days | **Post-audit days** | Driver of change |
+| Block | Status | Days | Notes |
 |---|---|---|---|
-| 1 — Endpoint additions | 2 | **3–4** | Cache API extension; rotate serialization; notification-mute new table; brand build-time reconciliation; pg_stat_statements postgres config |
-| 2 — `logs` adapter slot | 2 | **2.5** | Ring needs new Subscribe/channel layer; WebSocket dep |
-| 3 — `traces` adapter slot | 2 | **2.5** | Tempo decoder shape variations; tags translator fix |
-| 4 — `metrics` adapter slot | 2 | **2** | Mostly correction (env var, cAdvisor metric names, provider-health source); +0 net days because adding app metrics was implicit |
-| 5 — `errors` adapter slot | 2 | **3** | Sentry SDK wiring in runtime + each Python agent |
-| 6 — Aggregation endpoints | 2 | **3–4** | reasoner column + tools log table + OAuth refresh log are new migrations + write-path hooks |
-| 7 — Polish | 1 | **1** | Lighter than billed but capability hook is real |
-| 8 — Unmapped gap indicators | (new) | **1** | 3 small gaps not covered by Blocks 1-7 |
-| **Total** | **13** | **~18–19** | |
+| 1 — Endpoint additions | ✅ **DONE** | (~4) | Shipped with all audit corrections. Some ad-hoc patterns (LiteLLM virtual-key probe, provider-health retention) need consolidating into Block 2's generalised frameworks. |
+| 2 — **Foundation** (config + probes + retention + features API) | ⏭️ **NEXT** | **~1.5** | NEW. Foundation that every downstream block reuses; also consolidates ad-hoc work from Block 1. Full spec below. |
+| 3 — `logs` adapter slot | queued | ~2.5 | Ring needs new Subscribe/channel layer; WebSocket dep |
+| 4 — `traces` adapter slot | queued | ~2.5 | Tempo decoder shape variations; tags translator fix |
+| 5 — `metrics` adapter slot | queued | ~2 | Env var + cAdvisor metric names; provider-health stays on Postgres path |
+| 6 — `errors` adapter slot | queued | ~3 | Sentry SDK wiring in runtime + each Python agent |
+| 7 — Aggregation endpoints | queued | ~3–4 | reasoner column + tools log table + OAuth refresh log are new migrations + write-path hooks |
+| 8 — Polish | queued | ~1 | Adapter pills + Home strip + capability hook |
+| 9 — Unmapped gap indicators | queued | ~1 | 3 small gaps not covered by Blocks 1, 3-8 |
+| **Remaining** | | **~16–17** | (Block 1 already done) |
 
-Each block is one PR. Blocks 2–5 share the same adapter-slot scaffolding pattern (Go interface + builtin + first concrete adapter + remote shim + protocol doc + admin endpoint + conformance check + dashboard wiring).
+Each block is one PR. Blocks 3–6 share the same adapter-slot scaffolding pattern (Go interface + builtin + first concrete adapter + remote shim + protocol doc + admin endpoint + conformance check + dashboard wiring).
 
 ---
 

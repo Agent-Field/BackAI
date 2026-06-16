@@ -22,23 +22,25 @@
 | Dashboard shell | 47 routes registered with central navigation + catch-all renderer + seeded-fallback data loader pulling 44 live runtime endpoints. |
 | Docs | ARCHITECTURE, PROTOCOL, AUTHORING, CONFORMANCE, per-slot specs, dashboard spec, design patterns, gap registry, contract audit. |
 
-## What's NOT done (the roadmap)
+## What's done and what's next
 
-All outstanding work is consolidated in `development/execution-blocks-v1.md` — 7 ordered execution blocks, each independently shippable. Summary:
+All outstanding work is consolidated in `development/execution-blocks-v1.md` — 9 ordered execution blocks. Block 1 has shipped; Block 2 is the next to dispatch.
 
-| Order | Block | Effort |
-|---|---|---|
-| 1 | Quick wins — no new OSS (adapter-registry mount, /admin/services synth, /admin/db/health, provider-health poller, cron trigger, cache flush, key rotate, brand R/W, SQL Health tab) | ~2 days |
-| 2 | **`logs` adapter slot** — default Loki backend (operator-deployed); ring-buffer fallback | ~2 days |
-| 3 | **`traces` adapter slot** — default Tempo backend (operator-deployed); empty fallback | ~2 days |
-| 4 | **`metrics` adapter slot** — default Prometheus backend (operator-deployed); Cost charts + Container subsection | ~2 days |
-| 5 | **`errors` adapter slot** — default GlitchTip backend (operator-deployed); log-filter fallback | ~2 days |
-| 6 | Aggregation endpoints (reasoners analytics, tools usage, search index stats, notifications channels CRUD, OAuth refresh history) | ~2 days |
-| 7 | Polish (adapter pill on adapter-backed pages, Home Connected Services strip, capability-honest degradation) | ~1 day |
+| Order | Block | Status | Effort |
+|---|---|---|---|
+| 1 | Endpoint additions — adapter registry mount, /admin/services synth, /admin/db/health, provider-health poller, cron trigger, cache flush, key rotate, brand R/W, SQL Health tab, notifications mute | ✅ **DONE** | (~4 days) |
+| 2 | **Foundation** — config schema (`backai.config.yaml`) + Layer 1/2 validators + capability-probe machinery + retention helper + `/api/v1/admin/features` + Block 1 consolidation | ⏭️ **NEXT** | **~1.5 days** |
+| 3 | **`logs` adapter slot** — default Loki backend (operator-deployed); ring-buffer fallback | queued | ~2.5 days |
+| 4 | **`traces` adapter slot** — default Tempo backend (operator-deployed); empty fallback | queued | ~2.5 days |
+| 5 | **`metrics` adapter slot** — default Prometheus backend (operator-deployed); Cost charts + Container subsection | queued | ~2 days |
+| 6 | **`errors` adapter slot** — default GlitchTip backend (operator-deployed); log-filter fallback | queued | ~3 days |
+| 7 | Aggregation endpoints (reasoners analytics, tools usage, notifications channels CRUD, OAuth refresh history) | queued | ~3–4 days |
+| 8 | Polish (adapter pills, Home Connected Services strip, capability-honest degradation) | queued | ~1 day |
+| 9 | Unmapped gap indicators (harnesses Disable, modules Migrations, SQL History) | queued | ~1 day |
 
-**Total: ~13 days.** Each block is independently shippable.
+**Remaining: ~16–17 days.** Each block is independently shippable.
 
-Blocks 2-5 follow the same adapter-slot scaffolding as the existing 8 slots (Go interface + per-slot HTTP protocol + remote-shim + registry row + conformance check). Full design for each in the execution doc.
+Blocks 3-6 follow the same adapter-slot scaffolding as the existing 8 slots (Go interface + per-slot HTTP protocol + remote-shim + registry row + conformance check). Block 2 (Foundation) introduces the shared machinery they all reuse. Full design for each in `development/execution-blocks-v1.md`.
 
 ## Locked decisions baked into the roadmap
 
