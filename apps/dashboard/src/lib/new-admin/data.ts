@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { api } from "@/lib/api"
+import { api, type LogCapabilities } from "@/lib/api"
 
 export type HealthSource = "live" | "seeded"
 
@@ -100,6 +100,7 @@ export type OperatorSnapshot = {
   services: ServiceVital[]
   brand: ConsoleRow[]
   adapters: AdapterSlot[]
+  logCapabilities: LogCapabilities
   features: ConsoleRow[]
   featureWarnings: ConsoleRow[]
   budgets: BudgetRecord[]
@@ -484,6 +485,15 @@ export const seededSnapshot: OperatorSnapshot = {
     { id: "brand-restart", primary: "Apply behavior", secondary: "Customer-app build-time surfaces need restart/redeploy", status: "restart", tone: "warn", metric: "required", timestamp: "policy" },
   ],
   adapters: seededAdapters,
+  logCapabilities: {
+    supports_tail: true,
+    supports_full_text: true,
+    supports_regex_search: false,
+    supports_trace_id: false,
+    native_query_lang: "",
+    retention_days: 0,
+    max_entries_per_page: 1000,
+  },
   features: [
     { id: "feature-db-health", primary: "db_health", secondary: "Database health surface", status: "ok", tone: "ok", metric: "enabled", timestamp: "preset" },
     { id: "feature-logs", primary: "logs", secondary: "Future logs adapter slot", status: "not_configured", tone: "neutral", metric: "ring", timestamp: "preset" },
@@ -554,6 +564,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     brand,
     approvals,
     logs,
+    logCapabilities,
     oauthConnections,
     oauthProviders,
     features,
@@ -606,6 +617,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     settle(() => api.admin.brand.get()),
     settle(() => api.approvals.list({ limit: 20 })),
     settle(() => api.logs({ limit: 120 })),
+    settle(() => api.logsCapabilities()),
     settle(() => api.oauth.connections()),
     settle(() => api.oauth.providers()),
     settle(() => api.admin.features.get()),
@@ -1271,6 +1283,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     ? Object.entries(features.features).map(([name, feature]) => {
         const details = feature.details?.map((detail) => `${detail.key}=${displayValue(detail.value)} · ${detail.severity} · ${detail.message}`).join("; ")
         const metric =
+          feature.adapter ??
           feature.backend ??
           (feature.enabled !== undefined ? (feature.enabled ? "enabled" : "disabled") : undefined) ??
           (feature.virtual_keys ? "virtual keys" : "local")
@@ -1508,6 +1521,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
             slot.slot === "LLM gateway" ? { ...slot, status: "ok" } : slot
           ))
         : seededAdapters,
+    logCapabilities: logCapabilities ?? seededSnapshot.logCapabilities,
     services: serviceRowsLive.length ? serviceRowsLive : seededSnapshot.services,
     brand: brandRows,
     features: featureRows,

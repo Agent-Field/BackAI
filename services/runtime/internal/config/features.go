@@ -68,7 +68,22 @@ type LLMGatewayFeature struct {
 
 type LogsFeature struct {
 	Enabled bool   `yaml:"enabled" json:"enabled"`
-	Backend string `yaml:"backend" json:"backend"`
+	Adapter string `yaml:"adapter" json:"adapter"`
+	// Backend is accepted for Block 2 config-file compatibility. Block 3
+	// standardises this slot on adapter to match the runtime env convention.
+	Backend string            `yaml:"backend,omitempty" json:"-"`
+	Loki    LogsLokiFeature   `yaml:"loki" json:"loki"`
+	Remote  LogsRemoteFeature `yaml:"remote" json:"remote"`
+}
+
+type LogsLokiFeature struct {
+	URL    string `yaml:"url" json:"url"`
+	Tenant string `yaml:"tenant" json:"tenant"`
+}
+
+type LogsRemoteFeature struct {
+	URL   string `yaml:"url" json:"url"`
+	Token string `yaml:"token" json:"token"`
 }
 
 type TracesFeature struct {
@@ -166,6 +181,9 @@ func mergeFeatureOverrides(base Features, raw RawFeatures) Features {
 		base.LLMGateway = *raw.LLMGateway
 	}
 	if raw.Logs != nil {
+		if raw.Logs.Adapter == "" && raw.Logs.Backend != "" {
+			raw.Logs.Adapter = raw.Logs.Backend
+		}
 		base.Logs = *raw.Logs
 	}
 	if raw.Traces != nil {

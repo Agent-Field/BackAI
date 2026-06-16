@@ -31,6 +31,7 @@ type adminFeatureEntry struct {
 	Enabled          *bool                   `json:"enabled,omitempty"`
 	VirtualKeys      *bool                   `json:"virtual_keys,omitempty"`
 	SpendTracking    *bool                   `json:"spend_tracking,omitempty"`
+	Adapter          string                  `json:"adapter,omitempty"`
 	Backend          string                  `json:"backend,omitempty"`
 	ContainerMetrics *bool                   `json:"container_metrics,omitempty"`
 	CapabilityStatus featureCapabilityStatus `json:"capability_status"`
@@ -80,7 +81,7 @@ func (s *Server) handleAdminFeatures(w http.ResponseWriter, r *http.Request) {
 		"cache_flush":         featureBoolEntry(f.CacheFlush.Enabled, featureStatusOK, nil),
 		"api_key_rotate":      featureBoolEntry(f.APIKeyRotate.Enabled, featureStatusOK, nil),
 		"llm_gateway":         llmGatewayFeatureEntry(f.LLMGateway, probes),
-		"logs":                backendFeatureEntry(f.Logs.Enabled, f.Logs.Backend),
+		"logs":                adapterFeatureEntry(f.Logs.Enabled, f.Logs.Adapter),
 		"traces":              backendFeatureEntry(f.Traces.Enabled, f.Traces.Backend),
 		"metrics":             metricsFeatureEntry(f.Metrics),
 		"errors":              backendFeatureEntry(f.Errors.Enabled, f.Errors.Backend),
@@ -109,6 +110,14 @@ func backendFeatureEntry(enabled bool, backend string) adminFeatureEntry {
 		status = featureStatusNotConfigured
 	}
 	return adminFeatureEntry{Enabled: boolPtr(enabled), Backend: backend, CapabilityStatus: status}
+}
+
+func adapterFeatureEntry(enabled bool, adapter string) adminFeatureEntry {
+	status := featureStatusOK
+	if !enabled {
+		status = featureStatusNotConfigured
+	}
+	return adminFeatureEntry{Enabled: boolPtr(enabled), Adapter: adapter, CapabilityStatus: status}
 }
 
 func metricsFeatureEntry(f config.MetricsFeature) adminFeatureEntry {

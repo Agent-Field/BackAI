@@ -26,6 +26,11 @@ import (
 // (well under 1 KiB at p99) so 2k entries fits comfortably in memory.
 const RingSize = 2048
 
+const (
+	defaultSubscriberBuffer = 256
+	maxSubscriberDrops      = 1024
+)
+
 // LineLevel is the dashboard's narrowed level set. We don't expose
 // slog.Level directly because the dashboard schema requires the
 // lowercase strings below — anything outside the set collapses to
@@ -58,11 +63,18 @@ type Line struct {
 // concurrent writes (the structured logger writes from every
 // request goroutine) and concurrent reads from the HTTP handler.
 type Ring struct {
-	mu      sync.Mutex
-	lines   []Line
-	idx     int
-	full    bool
-	service string
+	mu          sync.Mutex
+	lines       []Line
+	idx         int
+	full        bool
+	service     string
+	nextSubID   uint64
+	subscribers map[uint64]*ringSubscriber
+}
+
+type ringSubscriber struct {
+	ch    chan Line
+	drops int
 }
 
 // NewRing constructs a Ring of the given capacity. service is stamped
@@ -97,7 +109,74 @@ func (r *Ring) Append(line Line) {
 	if r.idx == 0 {
 		r.full = true
 	}
+	for id, sub := range r.subscribers {
+		if sub.drops >= maxSubscriberDrops {
+			close(sub.ch)
+			delete(r.subscribers, id)
+			continue
+		}
+		select {
+		case sub.ch <- line:
+			continue
+		default:
+		}
+		select {
+		case <-sub.ch:
+			sub.drops++
+		default:
+		}
+		select {
+		case sub.ch <- line:
+		default:
+			sub.drops++
+		}
+		if sub.drops >= maxSubscriberDrops {
+			close(sub.ch)
+			delete(r.subscribers, id)
+		}
+	}
 	r.mu.Unlock()
+}
+
+// Subscribe returns a live stream of appended lines. The ring never blocks
+// Append on subscribers: if a consumer is slow, its oldest queued line is
+// dropped and the newest line is kept. A subscriber that remains slow past a
+// bounded drop count is closed and removed. Cancelling ctx unsubscribes and
+// closes the channel deterministically.
+func (r *Ring) Subscribe(ctx context.Context) <-chan Line {
+	if r == nil {
+		ch := make(chan Line)
+		close(ch)
+		return ch
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ch := make(chan Line, defaultSubscriberBuffer)
+	r.mu.Lock()
+	if r.subscribers == nil {
+		r.subscribers = make(map[uint64]*ringSubscriber)
+	}
+	r.nextSubID++
+	id := r.nextSubID
+	r.subscribers[id] = &ringSubscriber{ch: ch}
+	r.mu.Unlock()
+	go func() {
+		<-ctx.Done()
+		r.unsubscribe(id)
+	}()
+	return ch
+}
+
+func (r *Ring) unsubscribe(id uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	sub, ok := r.subscribers[id]
+	if !ok {
+		return
+	}
+	delete(r.subscribers, id)
+	close(sub.ch)
 }
 
 // Recent returns up to `limit` of the most-recent lines, ordered

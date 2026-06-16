@@ -12,6 +12,8 @@
 # Logs
 *.log
 logs/
+!services/runtime/internal/observability/logs/
+!services/runtime/internal/observability/logs/**
 npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*

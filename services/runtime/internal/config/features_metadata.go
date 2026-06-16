@@ -32,7 +32,7 @@ var featureRules = []FeatureRule{
 	{Feature: "errors.backend=glitchtip", RequiresEnv: []string{"SENTRY_DSN", "AF_STACK_ERRORS_GLITCHTIP_TOKEN"}},
 	{Feature: "db_health", RequiresPGGrant: []string{"pg_read_all_stats"}, RequiresPGConf: []string{"shared_preload_libraries:pg_stat_statements"}},
 	{Feature: "search_index_stats", RequiresPGGrant: []string{"pg_read_all_stats"}},
-	{Feature: "logs.backend", BackendOptions: []string{"ring", "loki", "remote"}},
+	{Feature: "logs.adapter", BackendOptions: []string{"ring", "loki", "remote"}},
 	{Feature: "traces.backend", BackendOptions: []string{"empty", "tempo", "remote"}},
 	{Feature: "metrics.backend", BackendOptions: []string{"none", "prometheus", "remote"}},
 	{Feature: "errors.backend", BackendOptions: []string{"logfilter", "glitchtip", "remote"}},
@@ -49,7 +49,7 @@ var presets = map[string]Features{
 		CacheFlush:            FeatureBool{Enabled: true},
 		APIKeyRotate:          FeatureBool{Enabled: true},
 		LLMGateway:            LLMGatewayFeature{VirtualKeys: false, SpendTracking: false},
-		Logs:                  LogsFeature{Enabled: false, Backend: "ring"},
+		Logs:                  LogsFeature{Enabled: false, Adapter: "ring"},
 		Traces:                TracesFeature{Enabled: false, Backend: "empty"},
 		Metrics:               MetricsFeature{Enabled: false, Backend: "none", ContainerMetrics: false},
 		Errors:                ErrorsFeature{Enabled: false, Backend: "logfilter"},
@@ -58,7 +58,7 @@ var presets = map[string]Features{
 
 func init() {
 	full := presets[PresetLean]
-	full.Logs = LogsFeature{Enabled: true, Backend: "loki"}
+	full.Logs = LogsFeature{Enabled: true, Adapter: "loki"}
 	full.Traces = TracesFeature{Enabled: true, Backend: "tempo"}
 	full.Metrics = MetricsFeature{Enabled: true, Backend: "prometheus", ContainerMetrics: true}
 	full.Errors = ErrorsFeature{Enabled: true, Backend: "glitchtip"}

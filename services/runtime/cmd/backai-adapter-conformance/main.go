@@ -17,6 +17,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -26,7 +27,7 @@ import (
 
 func main() {
 	var (
-		slot    = flag.String("slot", "", "adapter slot: sandbox | storage | notifications | secrets | billing | multimodal | llm-chat | auth")
+		slot    = flag.String("slot", "", "adapter slot: sandbox | storage | notifications | secrets | billing | multimodal | llm-chat | auth | logs")
 		baseURL = flag.String("url", "", "adapter base URL, e.g. http://localhost:8090")
 		token   = flag.String("token", "", "bearer token (optional)")
 		quiet   = flag.Bool("quiet", false, "suppress per-check output, print only summary")
@@ -73,6 +74,8 @@ func main() {
 		runLLMChatChecks(ctx, r, c)
 	case "auth":
 		runAuthChecks(ctx, r, c)
+	case "logs":
+		runLogsChecks(ctx, r, c)
 	default:
 		r.fail("unknown slot", fmt.Errorf("slot %q has no per-slot suite", *slot))
 	}
@@ -519,10 +522,10 @@ func runAuthChecks(ctx context.Context, r *runner, c *remote.Client) {
 			return err
 		}
 		var typed struct {
-			OAuth       []string `json:"supports_oauth_providers"`
-			Passwordless bool   `json:"supports_passwordless"`
-			MagicLinks  bool   `json:"supports_magic_links"`
-			SSO         bool   `json:"supports_sso"`
+			OAuth        []string `json:"supports_oauth_providers"`
+			Passwordless bool     `json:"supports_passwordless"`
+			MagicLinks   bool     `json:"supports_magic_links"`
+			SSO          bool     `json:"supports_sso"`
 		}
 		if err := json.Unmarshal(caps.Capabilities, &typed); err != nil {
 			return err
@@ -534,6 +537,111 @@ func runAuthChecks(ctx context.Context, r *runner, c *remote.Client) {
 	})
 }
 
+// --- logs ---------------------------------------------------------------
+
+func runLogsChecks(ctx context.Context, r *runner, c *remote.Client) {
+	var caps struct {
+		SupportsTail      bool `json:"supports_tail"`
+		SupportsFullText  bool `json:"supports_full_text"`
+		MaxEntriesPerPage int  `json:"max_entries_per_page"`
+	}
+
+	r.require("GET /v1/capabilities declares logs capabilities", func() error {
+		env, err := c.Capabilities(ctx)
+		if err != nil {
+			return err
+		}
+		if env.Slot != "logs" {
+			return fmt.Errorf("slot=%q; expected logs", env.Slot)
+		}
+		if err := json.Unmarshal(env.Capabilities, &caps); err != nil {
+			return err
+		}
+		if caps.MaxEntriesPerPage < 0 {
+			return fmt.Errorf("max_entries_per_page must be non-negative")
+		}
+		return nil
+	})
+
+	r.require("POST /v1/logs/query returns a page", func() error {
+		resp, err := c.Do(ctx, remote.Request{
+			Method: http.MethodPost,
+			Path:   "/v1/logs/query",
+			Body: map[string]any{
+				"limit": 1,
+			},
+		})
+		if err != nil {
+			return err
+		}
+		var out struct {
+			Entries []map[string]any `json:"entries"`
+			HasMore bool             `json:"has_more"`
+		}
+		if err := resp.DecodeJSON(&out); err != nil {
+			return err
+		}
+		_ = out.HasMore
+		return nil
+	})
+
+	r.require("GET /v1/logs/tail honors declared tail capability", func() error {
+		resp, err := c.Do(ctx, remote.Request{
+			Method: http.MethodGet,
+			Path:   "/v1/logs/tail",
+			Query:  mapValues("limit", "1"),
+			Stream: true,
+		})
+		if !caps.SupportsTail {
+			if err == nil {
+				_ = resp.Body.Close()
+				return fmt.Errorf("supports_tail=false but tail returned success")
+			}
+			p, ok := remote.AsProblem(err)
+			if !ok || p.HTTPStatus != http.StatusUnprocessableEntity || p.Code != "unsupported_capability" {
+				return fmt.Errorf("expected 422 unsupported_capability, got %v", err)
+			}
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		tailCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		events := resp.Events(tailCtx)
+		select {
+		case <-tailCtx.Done():
+			return nil
+		case _, ok := <-events:
+			if !ok {
+				return nil
+			}
+			return nil
+		}
+	})
+
+	r.require("GET /v1/logs/tail terminates on disconnect", func() error {
+		if !caps.SupportsTail {
+			return nil
+		}
+		resp, err := c.Do(ctx, remote.Request{
+			Method: http.MethodGet,
+			Path:   "/v1/logs/tail",
+			Query:  mapValues("limit", "1"),
+			Stream: true,
+		})
+		if err != nil {
+			return err
+		}
+		return resp.Body.Close()
+	})
+}
+
+func mapValues(k, v string) url.Values {
+	return url.Values{k: []string{v}}
+}
+
 // --- multimodal ---------------------------------------------------------
 
 func runMultimodalChecks(ctx context.Context, r *runner, c *remote.Client) {
@@ -543,11 +651,11 @@ func runMultimodalChecks(ctx context.Context, r *runner, c *remote.Client) {
 			return err
 		}
 		var typed struct {
-			TTS    bool `json:"supports_tts"`
-			STT    bool `json:"supports_stt"`
-			Image  bool `json:"supports_image_generation"`
-			Edit   bool `json:"supports_image_edit"`
-			Vary   bool `json:"supports_image_variation"`
+			TTS   bool `json:"supports_tts"`
+			STT   bool `json:"supports_stt"`
+			Image bool `json:"supports_image_generation"`
+			Edit  bool `json:"supports_image_edit"`
+			Vary  bool `json:"supports_image_variation"`
 		}
 		if err := json.Unmarshal(caps.Capabilities, &typed); err != nil {
 			return err

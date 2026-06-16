@@ -115,7 +115,10 @@ func featureEnabled(f Features, name string) bool {
 
 func featureStringValue(f Features, name string) string {
 	switch name {
-	case "logs.backend":
+	case "logs.adapter":
+		if f.Logs.Adapter != "" {
+			return f.Logs.Adapter
+		}
 		return f.Logs.Backend
 	case "traces.backend":
 		return f.Traces.Backend

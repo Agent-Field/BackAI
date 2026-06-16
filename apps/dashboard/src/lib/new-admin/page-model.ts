@@ -155,6 +155,15 @@ function selectedAdapterRows(snapshot: OperatorSnapshot, count = 5): PageCard["r
   }))
 }
 
+function logsAdapterLabel(snapshot: OperatorSnapshot) {
+  const registryRow = snapshot.adapters.find((row) => row.slot.toLowerCase() === "logs")
+  if (registryRow?.adapter) return registryRow.adapter
+  const caps = snapshot.logCapabilities
+  if (caps.native_query_lang === "logql") return "Loki"
+  if (caps.native_query_lang) return caps.native_query_lang
+  return "ring buffer"
+}
+
 const definitions: Record<string, PageDefinition> = {
   "/": {
     primaryAction: "Open command center",
@@ -359,7 +368,16 @@ const definitions: Record<string, PageDefinition> = {
   "/operate/logs": {
     primaryAction: "Export JSONL",
     controls: () => [select("Level", "all", ["all", "debug", "info", "warn", "error"]), select("Service", "all", ["all", "runtime", "worker", "gateway"]), input("Search", "Search message, field, run id, tenant..."), switcher("Tail", "on")],
-    kpis: () => [kpi("Rows", "bounded", "virtualized pattern", "scale", "ok"), kpi("Tail", "toggle", "pause/resume", "live", "running"), kpi("Fields", "expand", "structured JSON", "copy", "ok"), kpi("Export", "JSONL", "filtered rows", "ready", "neutral")],
+    kpis: (snapshot) => {
+      const caps = snapshot.logCapabilities
+      const source = caps.native_query_lang === "logql" ? "Loki" : caps.native_query_lang ? caps.native_query_lang : "ring buffer"
+      return [
+        kpi("Adapter", source, caps.native_query_lang ? "external query" : "process local", "active", caps.native_query_lang ? "running" : "ok"),
+        kpi("Tail", caps.supports_tail ? "supported" : "unsupported", "capability", caps.supports_tail ? "live" : "disabled", caps.supports_tail ? "running" : "warn"),
+        kpi("Search", caps.supports_full_text ? "full text" : "basic", caps.supports_regex_search ? "regex optional" : "literal", "filter", "ok"),
+        kpi("Page cap", caps.max_entries_per_page ? String(caps.max_entries_per_page) : "unknown", caps.retention_days ? `${caps.retention_days}d retention` : "retention unknown", "adapter", "neutral"),
+      ]
+    },
     rows: (snapshot) => snapshot.logs,
     tableTitle: "Log stream",
     tableDescription: "Scale-safe log viewer with severity filters, tail mode, structured fields, and copy/export.",
@@ -782,7 +800,7 @@ export function buildPageModel(pathname: string, snapshot: OperatorSnapshot): Pa
     apiGap: path === "/setup/features" && snapshot.featureWarnings.length
       ? snapshot.featureWarnings.map((row) => `${row.primary}: ${row.secondary}`).join(" ")
       : navItem.apiGap,
-    adapter: navItem.adapter,
+    adapter: path === "/operate/logs" ? logsAdapterLabel(snapshot) : navItem.adapter,
   }
 
   return {
@@ -793,7 +811,7 @@ export function buildPageModel(pathname: string, snapshot: OperatorSnapshot): Pa
     live: Boolean(navItem.live && snapshot.source === "live"),
     source: snapshot.source,
     generatedAt: snapshot.generatedAt,
-    adapter: navItem.adapter,
+    adapter: modelBase.adapter,
     dataTruth: navItem.dataTruth,
     apiGap: modelBase.apiGap,
     archetype: navItem.archetype,

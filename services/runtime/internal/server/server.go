@@ -40,6 +40,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/notifications"
 	"github.com/Agent-Field/backai/services/runtime/internal/oauth"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
+	"github.com/Agent-Field/backai/services/runtime/internal/observability/logs"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
 	"github.com/Agent-Field/backai/services/runtime/internal/probe"
 	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
@@ -188,6 +189,9 @@ type Server struct {
 	// reads from. nil ⇒ the endpoint serves an empty list. main.go
 	// constructs one at boot and tees the structured logger into it.
 	logRing *logger.Ring
+	// logsStore is the active logs adapter slot. It defaults to the ring
+	// adapter and may be Loki or remote when configured.
+	logsStore logs.Store
 	// version is the runtime version label surfaced in
 	// /api/v1/metrics/summary. Defaults to "dev" when empty.
 	version string
@@ -344,6 +348,9 @@ type Deps struct {
 	// LogRing is the in-memory log buffer the /api/v1/logs endpoint
 	// reads from. Constructed in main.go and shared with the logger.
 	LogRing *logger.Ring
+	// LogsStore is the active logs adapter. When nil, New falls back to the
+	// compatibility ring path and the admin endpoint serves an empty page.
+	LogsStore logs.Store
 	// Version is the runtime version string surfaced via
 	// /api/v1/metrics/summary. Defaults to "dev".
 	Version string
@@ -423,6 +430,7 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		approvals:       deps.Approvals,
 		metricsRing:     newMetricsRing(MetricsRingSize),
 		logRing:         deps.LogRing,
+		logsStore:       deps.LogsStore,
 		version:         deps.Version,
 	}
 	if s.rbac == nil {

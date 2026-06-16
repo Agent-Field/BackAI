@@ -41,12 +41,12 @@ The runtime exposes 4 adapter slots (`logs`, `traces`, `metrics`, `errors`) that
 | Backend | Slot it serves | Native UI port | Runtime env vars |
 |---|---|---|---|
 | **Vector** (log shipper) | feeds Loki | none | (write-side; no runtime config needed) |
-| **Loki** (log store) | `logs` slot | `:3100` (HTTP API only) | `AF_STACK_LOGS_BACKEND=loki`, `AF_STACK_LOGS_LOKI_URL` |
+| **Loki** (log store) | `logs` slot | `:3100` (HTTP API only) | `AF_STACK_LOGS_ADAPTER=loki`, `AF_STACK_LOGS_LOKI_URL` |
 | **otel-collector** (trace receiver) | feeds Tempo | none | runtime exports via OTel SDK if `OTEL_EXPORTER_OTLP_ENDPOINT` set |
-| **Tempo** (trace store) | `traces` slot | `:3200` (HTTP API) | `AF_STACK_TRACES_BACKEND=tempo`, `AF_STACK_TRACES_TEMPO_URL` |
-| **Prometheus** (metrics store) | `metrics` slot | `:9090` (UI) | `AF_STACK_METRICS_BACKEND=prometheus`, `AF_STACK_METRICS_PROMETHEUS_URL` |
+| **Tempo** (trace store) | `traces` slot | `:3200` (HTTP API) | `AF_STACK_TRACES_ADAPTER=tempo`, `AF_STACK_TRACES_TEMPO_URL` |
+| **Prometheus** (metrics store) | `metrics` slot | `:9090` (UI) | `AF_STACK_METRICS_ADAPTER=prometheus`, `AF_STACK_METRICS_PROMETHEUS_URL` |
 | **cAdvisor** (container metrics exporter) | feeds Prometheus | `:8080` (UI) | (scraped by Prometheus; no runtime config) |
-| **GlitchTip** (error tracker) | `errors` slot | `:8000` (UI) | `AF_STACK_ERRORS_BACKEND=glitchtip`, `AF_STACK_ERRORS_GLITCHTIP_URL`, `..._ORG`, `..._TOKEN`, `SENTRY_DSN` |
+| **GlitchTip** (error tracker) | `errors` slot | `:8000` (UI) | `AF_STACK_ERRORS_ADAPTER=glitchtip`, `AF_STACK_ERRORS_GLITCHTIP_URL`, `..._ORG`, `..._TOKEN`, `SENTRY_DSN` |
 | **Grafana** (optional charts UI) | none (just link-out) | `:3000` (UI) | `AF_STACK_GRAFANA_URL` (for Connected Services link-out) |
 
 When an env var is unset, the corresponding slot stays on its default builtin (degraded mode); the admin UI gracefully shows zero-state or restricted feature set. See `development/execution-blocks-v1.md` for the full adapter design of each slot.

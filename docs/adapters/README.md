@@ -26,12 +26,14 @@ The HTTP contract every remote adapter speaks, per slot.
 | **multimodal** — TTS/STT/image | [`protocols/multimodal-v1.md`](protocols/multimodal-v1.md) | *(operator config in main env)* |
 | **llm-chat** — OpenAI-compat chat + embeddings | [`protocols/llm-chat-v1.md`](protocols/llm-chat-v1.md) | *(via Setup → LLM providers)* |
 | **auth** — session verification + OAuth | [`protocols/auth-v1.md`](protocols/auth-v1.md) | *(via Setup → Auth providers)* |
+| **logs** — log query + tail | [`protocols/logs-v1.md`](protocols/logs-v1.md) | `AF_STACK_LOGS_ADAPTER` |
 
 ## Reference implementation
 
-[`examples/adapters/sandbox-echo-py/`](../../examples/adapters/sandbox-echo-py/)
-— a minimal, working FastAPI adapter that passes the conformance
-harness. ~300 lines. Read it as a template.
+- [`examples/adapters/sandbox-echo-py/`](../../examples/adapters/sandbox-echo-py/)
+  — a minimal FastAPI sandbox adapter that passes the conformance harness.
+- [`examples/adapters/logs-echo-py/`](../../examples/adapters/logs-echo-py/)
+  — a minimal FastAPI logs adapter with query + SSE tail.
 
 ## The conformance binary
 

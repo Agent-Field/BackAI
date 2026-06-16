@@ -284,9 +284,21 @@ export type LogLine = z.infer<typeof LogLineSchema>
 export const LogListSchema = z.object({
   logs: z.array(LogLineSchema),
   total: z.number().optional(),
+  next_cursor: z.string().optional(),
   has_more: z.boolean().optional(),
 })
 export type LogList = z.infer<typeof LogListSchema>
+
+export const LogCapabilitiesSchema = z.object({
+  supports_tail: z.boolean().default(false),
+  supports_full_text: z.boolean().default(false),
+  supports_regex_search: z.boolean().default(false),
+  supports_trace_id: z.boolean().default(false),
+  native_query_lang: z.string().default(""),
+  retention_days: z.number().default(0),
+  max_entries_per_page: z.number().default(0),
+})
+export type LogCapabilities = z.infer<typeof LogCapabilitiesSchema>
 
 export const QueueSummarySchema = z.object({
   pending: z.number(),
@@ -1887,6 +1899,7 @@ export const FeatureEntrySchema = z.object({
   enabled: z.boolean().optional(),
   virtual_keys: z.boolean().optional(),
   spend_tracking: z.boolean().optional(),
+  adapter: z.string().optional(),
   backend: z.string().optional(),
   container_metrics: z.boolean().optional(),
   capability_status: FeatureCapabilityStatusSchema,
@@ -2075,8 +2088,10 @@ export const api = {
     if (params?.limit !== undefined) qs.set("limit", String(params.limit))
     if (params?.offset !== undefined) qs.set("offset", String(params.offset))
     const q = qs.toString()
-    return request(`/api/v1/logs${q ? "?" + q : ""}`, undefined, LogListSchema)
+    return request(`/api/v1/admin/logs${q ? "?" + q : ""}`, undefined, LogListSchema)
   },
+  logsCapabilities: () =>
+    request("/api/v1/admin/logs/capabilities", undefined, LogCapabilitiesSchema),
 
   // ─── Jobs ───
 	  jobs: {

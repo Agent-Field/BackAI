@@ -17,14 +17,15 @@ import (
 
 // Config is the top-level runtime configuration.
 type Config struct {
-	Server        ServerConfig         `yaml:"server"`
-	Database      DatabaseConfig       `yaml:"database"`
-	AgentField    AgentFieldConfig     `yaml:"agentfield"`
-	Logging       LoggingConfig        `yaml:"logging"`
-	Observability ObservabilityConfig  `yaml:"observability"`
-	Modules       ModulesConfig        `yaml:"modules"`
-	Storage       StorageConfig        `yaml:"storage"`
-	Sandbox       SandboxConfig        `yaml:"sandbox"`
+	Server        ServerConfig        `yaml:"server"`
+	Database      DatabaseConfig      `yaml:"database"`
+	AgentField    AgentFieldConfig    `yaml:"agentfield"`
+	Logging       LoggingConfig       `yaml:"logging"`
+	Observability ObservabilityConfig `yaml:"observability"`
+	Modules       ModulesConfig       `yaml:"modules"`
+	Storage       StorageConfig       `yaml:"storage"`
+	Sandbox       SandboxConfig       `yaml:"sandbox"`
+	Logs          LogsConfig          `yaml:"logs"`
 }
 
 // SandboxConfig holds sandbox-adapter settings. The Adapter field picks
@@ -40,6 +41,25 @@ type SandboxConfig struct {
 	Adapter    string `yaml:"adapter"`
 	E2BAPIKey  string `yaml:"e2b_api_key"`
 	E2BBaseURL string `yaml:"e2b_base_url"`
+}
+
+// LogsConfig selects the runtime log-store adapter. The ring adapter is the
+// zero-config default; Loki and remote adapters are activated only when the
+// operator sets AF_STACK_LOGS_ADAPTER and the corresponding URL.
+type LogsConfig struct {
+	Adapter string           `yaml:"adapter"`
+	Loki    LogsLokiConfig   `yaml:"loki"`
+	Remote  LogsRemoteConfig `yaml:"remote"`
+}
+
+type LogsLokiConfig struct {
+	URL    string `yaml:"url"`
+	Tenant string `yaml:"tenant"`
+}
+
+type LogsRemoteConfig struct {
+	URL   string `yaml:"url"`
+	Token string `yaml:"token"`
 }
 
 // StorageConfig holds object-storage settings. Populated from env vars
@@ -88,16 +108,16 @@ type ServerConfig struct {
 
 // DatabaseConfig holds Postgres connection settings.
 type DatabaseConfig struct {
-	URL             string `yaml:"url"`
-	MaxConnections  int    `yaml:"max_connections"`
-	MaxIdleConns    int    `yaml:"max_idle_connections"`
+	URL             string        `yaml:"url"`
+	MaxConnections  int           `yaml:"max_connections"`
+	MaxIdleConns    int           `yaml:"max_idle_connections"`
 	ConnMaxLifetime time.Duration `yaml:"conn_max_lifetime"`
 }
 
 // AgentFieldConfig holds the AF control plane connection settings.
 type AgentFieldConfig struct {
-	URL           string        `yaml:"url"`
-	HealthTimeout time.Duration `yaml:"health_timeout"`
+	URL            string        `yaml:"url"`
+	HealthTimeout  time.Duration `yaml:"health_timeout"`
 	RequestTimeout time.Duration `yaml:"request_timeout"`
 }
 
@@ -146,6 +166,9 @@ func Default() Config {
 		},
 		Sandbox: SandboxConfig{
 			Adapter: "docker",
+		},
+		Logs: LogsConfig{
+			Adapter: "ring",
 		},
 	}
 }
@@ -269,6 +292,24 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("AF_STACK_E2B_BASE_URL"); v != "" {
 		cfg.Sandbox.E2BBaseURL = v
 	}
+
+	// Logs adapter slot. Keep selection on _ADAPTER to match the rest of
+	// the adapter registry; backend-specific URLs live under the same prefix.
+	if v := os.Getenv("AF_STACK_LOGS_ADAPTER"); v != "" {
+		cfg.Logs.Adapter = strings.ToLower(v)
+	}
+	if v := os.Getenv("AF_STACK_LOGS_LOKI_URL"); v != "" {
+		cfg.Logs.Loki.URL = v
+	}
+	if v := os.Getenv("AF_STACK_LOGS_LOKI_TENANT"); v != "" {
+		cfg.Logs.Loki.Tenant = v
+	}
+	if v := os.Getenv("AF_STACK_LOGS_ADAPTER_URL"); v != "" {
+		cfg.Logs.Remote.URL = v
+	}
+	if v := os.Getenv("AF_STACK_LOGS_ADAPTER_TOKEN"); v != "" {
+		cfg.Logs.Remote.Token = v
+	}
 }
 
 // validate returns an error if the config is in a non-runnable state.
@@ -288,6 +329,19 @@ func validate(cfg Config) error {
 	case "json", "text":
 	default:
 		return fmt.Errorf("logging.format must be json|text, got %q", cfg.Logging.Format)
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Logs.Adapter)) {
+	case "", "ring":
+	case "loki":
+		if strings.TrimSpace(cfg.Logs.Loki.URL) == "" {
+			return fmt.Errorf("logs.loki.url is required when logs.adapter=loki (set AF_STACK_LOGS_LOKI_URL)")
+		}
+	case "remote":
+		if strings.TrimSpace(cfg.Logs.Remote.URL) == "" {
+			return fmt.Errorf("logs.remote.url is required when logs.adapter=remote (set AF_STACK_LOGS_ADAPTER_URL)")
+		}
+	default:
+		return fmt.Errorf("logs.adapter must be ring|loki|remote, got %q", cfg.Logs.Adapter)
 	}
 	return nil
 }

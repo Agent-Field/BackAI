@@ -58,6 +58,8 @@ import (
 	notificationsresend "github.com/Agent-Field/backai/services/runtime/internal/notifications/adapters/resend"
 	"github.com/Agent-Field/backai/services/runtime/internal/oauth"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
+	"github.com/Agent-Field/backai/services/runtime/internal/observability/logs"
+	"github.com/Agent-Field/backai/services/runtime/internal/observability/logs/logselect"
 	"github.com/Agent-Field/backai/services/runtime/internal/probe"
 	"github.com/Agent-Field/backai/services/runtime/internal/retention"
 	"github.com/Agent-Field/backai/services/runtime/internal/sandbox"
@@ -156,6 +158,7 @@ func buildAdapterRegistry(
 	notificationsSvc *notifications.Service,
 	webhooksSvc *webhooks.Service,
 	billingSvc *billing.Service,
+	logsStore logs.Store,
 ) *adapterregistry.Registry {
 	r := adapterregistry.New()
 
@@ -267,6 +270,39 @@ func buildAdapterRegistry(
 			"contract_pending":          true,
 		}),
 		Probe: staticStatus(llmStatus),
+	})
+
+	logsAdapter := logselect.Adapter(cfg)
+	logsKind := adapterregistry.KindBuiltin
+	if logsAdapter == "remote" {
+		logsKind = adapterregistry.KindRemote
+	}
+	logsCaps := map[string]any{"contract_pending": true}
+	logsStatus := adapterregistry.StatusUnhealthy
+	if logsStore != nil {
+		logsStatus = adapterregistry.StatusHealthy
+		c := logsStore.Capabilities()
+		logsCaps = map[string]any{
+			"supports_tail":         c.SupportsTail,
+			"supports_full_text":    c.SupportsFullText,
+			"supports_regex_search": c.SupportsRegexSearch,
+			"supports_trace_id":     c.SupportsTraceID,
+			"native_query_lang":     c.NativeQueryLang,
+			"retention_days":        c.RetentionDays,
+			"max_entries_per_page":  c.MaxEntriesPerPage,
+		}
+	}
+	r.Register(adapterregistry.Slot{
+		ID:               "logs",
+		Tier:             adapterregistry.Tier1,
+		Kind:             logsKind,
+		Name:             logselect.Name(cfg, logsStore),
+		AvailableBuiltin: []string{"ring", "loki"},
+		SwapMethod:       "env_var",
+		SwapEnv:          "AF_STACK_LOGS_ADAPTER",
+		AdminUI:          cfg.Logs.Loki.URL,
+		Capabilities:     caps(logsCaps),
+		Probe:            staticStatus(logsStatus),
 	})
 
 	notificationName := "none"
@@ -524,6 +560,16 @@ func main() {
 	workersCtx, workersCancel := context.WithCancel(context.Background())
 	defer workersCancel()
 	ctx := workersCtx
+
+	logsStore, err := logselect.Select(ctx, cfg, logRing)
+	if err != nil {
+		log.Error("logs adapter init failed", "adapter", logselect.Adapter(cfg), "error", err)
+		os.Exit(1)
+	}
+	log.Info("logs adapter ready",
+		"adapter", logselect.Adapter(cfg),
+		"name", logselect.Name(cfg, logsStore),
+	)
 
 	// Observability: set up OTel + Prometheus. Failures are non-fatal —
 	// the runtime keeps working without traces.
@@ -1309,6 +1355,7 @@ func main() {
 		notificationsSvc,
 		webhooksSvc,
 		billingSvc,
+		logsStore,
 	)
 	probeReg.WithAdapterRegistry(adapterRegistry)
 
@@ -1353,6 +1400,7 @@ func main() {
 		Shipwright:      shipwrightStore,
 		Approvals:       approvalsStore,
 		LogRing:         logRing,
+		LogsStore:       logsStore,
 		Version:         version,
 	})
 

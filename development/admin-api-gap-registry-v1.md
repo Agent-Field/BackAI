@@ -83,10 +83,10 @@ The runtime is fully env-var-configured for each observability slot. How the ope
 
 | Slot | Env var to switch | Backend HTTP endpoint env var |
 |---|---|---|
-| `logs` | `AF_STACK_LOGS_BACKEND=loki` | `AF_STACK_LOGS_LOKI_URL` |
-| `traces` | `AF_STACK_TRACES_BACKEND=tempo` | `AF_STACK_TRACES_TEMPO_URL` |
-| `metrics` | `AF_STACK_METRICS_BACKEND=prometheus` | `AF_STACK_METRICS_PROMETHEUS_URL` |
-| `errors` | `AF_STACK_ERRORS_BACKEND=glitchtip` | `AF_STACK_ERRORS_GLITCHTIP_URL` + `_ORG` + `_TOKEN` |
+| `logs` | `AF_STACK_LOGS_ADAPTER=loki` | `AF_STACK_LOGS_LOKI_URL` |
+| `traces` | `AF_STACK_TRACES_ADAPTER=tempo` | `AF_STACK_TRACES_TEMPO_URL` |
+| `metrics` | `AF_STACK_METRICS_ADAPTER=prometheus` | `AF_STACK_METRICS_PROMETHEUS_URL` |
+| `errors` | `AF_STACK_ERRORS_ADAPTER=glitchtip` | `AF_STACK_ERRORS_GLITCHTIP_URL` + `_ORG` + `_TOKEN` |
 
 When unset, each slot stays on its default builtin (ring buffer for logs, empty for traces, none for metrics, log-filter for errors). The admin UI's adapter pill reflects which backend is active.
 

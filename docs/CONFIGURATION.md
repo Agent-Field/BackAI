@@ -43,7 +43,7 @@ LiteLLM gateway features:
 
 Future slots declared in Block 2:
 
-- `logs.backend`: `ring | loki | remote`
+- `logs.adapter`: `ring | loki | remote`
 - `traces.backend`: `empty | tempo | remote`
 - `metrics.backend`: `none | prometheus | remote`
 - `errors.backend`: `logfilter | glitchtip | remote`
@@ -61,7 +61,7 @@ Backend-specific URLs keep their backend names, for example
 ## Validation
 
 Layer 1 is structural: YAML shape, unknown fields, preset names, custom
-completeness, and backend enums.
+completeness, and adapter/backend enums.
 
 Layer 2 is dependency validation: `metrics.container_metrics` requires
 `metrics.enabled`, spend tracking requires virtual keys, and configured

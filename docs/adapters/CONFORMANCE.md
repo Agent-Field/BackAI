@@ -42,7 +42,7 @@ Flags:
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--slot` | required | One of: `sandbox`, `storage`, `notifications`, `secrets`, `billing`, `multimodal` |
+| `--slot` | required | One of: `sandbox`, `storage`, `notifications`, `secrets`, `billing`, `multimodal`, `llm-chat`, `auth`, `logs` |
 | `--url` | required | The adapter's base URL (e.g. `http://localhost:8090`) |
 | `--token` | empty | Bearer token if the adapter requires one |
 | `--quiet` | `false` | Suppress per-check output; print only summary |
@@ -158,6 +158,17 @@ python3.12 -m venv .venv
 
 You should see 8/8 PASS. If you don't, the harness build is wrong, not
 your adapter.
+
+Logs reference adapter:
+
+```bash
+cd examples/adapters/logs-echo-py
+python3.12 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/uvicorn main:app --port 18091
+
+./backai-adapter-conformance --slot logs --url http://localhost:18091
+```
 
 ## Extending the harness
 

@@ -69,16 +69,32 @@ features:
 	}
 }
 
-func TestFeatureConfigRejectsBadBackend(t *testing.T) {
+func TestFeatureConfigRejectsBadLogsAdapter(t *testing.T) {
 	_, _, err := ParseFeatureConfig([]byte(`
 preset: lean
 features:
   logs:
     enabled: false
-    backend: foo
+    adapter: foo
 `), nil)
-	if err == nil || !strings.Contains(err.Error(), "features.logs.backend") {
-		t.Fatalf("err = %v, want backend enum error", err)
+	if err == nil || !strings.Contains(err.Error(), "features.logs.adapter") {
+		t.Fatalf("err = %v, want adapter enum error", err)
+	}
+}
+
+func TestFeatureConfigAcceptsLegacyLogsBackend(t *testing.T) {
+	cfg, _, err := ParseFeatureConfig([]byte(`
+preset: lean
+features:
+  logs:
+    enabled: false
+    backend: loki
+`), nil)
+	if err != nil {
+		t.Fatalf("ParseFeatureConfig: %v", err)
+	}
+	if cfg.Features.Logs.Adapter != "loki" {
+		t.Fatalf("logs adapter=%q want loki", cfg.Features.Logs.Adapter)
 	}
 }
 

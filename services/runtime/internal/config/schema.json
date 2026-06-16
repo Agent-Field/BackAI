@@ -65,10 +65,27 @@
     "logs": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "backend"],
+      "required": ["enabled"],
       "properties": {
         "enabled": { "type": "boolean" },
-        "backend": { "type": "string", "enum": ["ring", "loki", "remote"] }
+        "adapter": { "type": "string", "enum": ["ring", "loki", "remote"] },
+        "backend": { "type": "string", "enum": ["ring", "loki", "remote"], "deprecated": true },
+        "loki": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "url": { "type": "string" },
+            "tenant": { "type": "string" }
+          }
+        },
+        "remote": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "url": { "type": "string" },
+            "token": { "type": "string" }
+          }
+        }
       }
     },
     "traces": {

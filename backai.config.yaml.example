@@ -24,7 +24,13 @@ features:
   # Future-block features. Declared here now; implemented in later blocks.
   logs:
     enabled: false
-    backend: ring
+    adapter: ring
+    loki:
+      url: ""
+      tenant: ""
+    remote:
+      url: ""
+      token: ""
 
   traces:
     enabled: false

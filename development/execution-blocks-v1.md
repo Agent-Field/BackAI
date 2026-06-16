@@ -375,7 +375,7 @@ features:
   # ─── Future-block features (declared, default off) ───────────────────────
   logs:
     enabled: false            # Block 3 lights this up
-    backend: ring             # enum: ring | loki | remote
+    adapter: ring             # enum: ring | loki | remote
 
   traces:
     enabled: false            # Block 4 lights this up
@@ -406,7 +406,7 @@ var presets = map[string]Features{
         CacheFlush:             FeatureBool{Enabled: true},
         APIKeyRotate:           FeatureBool{Enabled: true},
         LLMGateway:             LLMGatewayFeature{VirtualKeys: false, SpendTracking: false},
-        Logs:                   LogsFeature{Enabled: false, Backend: "ring"},
+        Logs:                   LogsFeature{Enabled: false, Adapter: "ring"},
         Traces:                 TracesFeature{Enabled: false, Backend: "empty"},
         Metrics:                MetricsFeature{Enabled: false, Backend: "none"},
         Errors:                 ErrorsFeature{Enabled: false, Backend: "logfilter"},
@@ -414,7 +414,7 @@ var presets = map[string]Features{
     "full-observability": {
         // lean + all four observability slots set to their first real backend.
         // ... (extends lean)
-        Logs:    LogsFeature{Enabled: true, Backend: "loki"},
+        Logs:    LogsFeature{Enabled: true, Adapter: "loki"},
         Traces:  TracesFeature{Enabled: true, Backend: "tempo"},
         Metrics: MetricsFeature{Enabled: true, Backend: "prometheus", ContainerMetrics: true},
         Errors:  ErrorsFeature{Enabled: true, Backend: "glitchtip"},
@@ -439,7 +439,7 @@ type FeatureRule struct {
     RequiresEnv     []string // env vars that must be present at boot
     RequiresPGGrant []string // PG role grants required
     RequiresPGConf  []string // postgres.conf settings required (probed at boot)
-    BackendOptions  []string // for features with a `backend:` enum, the allowed values
+    BackendOptions  []string // for features with an `adapter:` / `backend:` enum, the allowed values
 }
 
 var featureRules = []FeatureRule{
@@ -469,7 +469,7 @@ var featureRules = []FeatureRule{
         RequiresPGGrant: []string{"pg_read_all_stats"},
     },
     {
-        Feature: "logs.backend",
+        Feature: "logs.adapter",
         BackendOptions: []string{"ring", "loki", "remote"},
     },
     {
@@ -507,7 +507,7 @@ $ backai config validate
 - [x] `backai config validate` exits 1 with a clear message when `metrics.container_metrics=true` and `metrics.enabled=false`
 - [x] `backai config validate` exits 1 when `errors.backend=glitchtip` and `SENTRY_DSN` is unset
 - [x] Renaming `db_health` to `dbHealth` in the YAML fails Layer 1 (unknown field)
-- [x] Setting `logs.backend: "foo"` fails Layer 1 (enum)
+- [x] Setting `logs.adapter: "foo"` fails Layer 1 (enum)
 - [x] Preset `lean` produces a valid `Features` struct
 - [x] Preset `full-observability` + override `errors.enabled=false` produces a valid `Features` struct
 - [x] Preset `custom` requires every feature enumerated; partial = Layer 1 error
@@ -717,7 +717,7 @@ crons.RegisterSystem("retention.daily", "0 3 * * *", func(ctx context.Context) e
         }
       ]
     },
-    "logs":    { "enabled": false, "backend": "ring",       "capability_status": "not_configured" },
+    "logs":    { "enabled": false, "adapter": "ring",       "capability_status": "not_configured" },
     "traces":  { "enabled": false, "backend": "empty",      "capability_status": "not_configured" },
     "metrics": { "enabled": false, "backend": "none",       "capability_status": "not_configured" },
     "errors":  { "enabled": false, "backend": "logfilter",  "capability_status": "not_configured" }
@@ -1023,23 +1023,14 @@ Same universal envelope as the other 8 slots (auth, idempotency, RFC 7807 errors
 
 ### 2.5 Adapter selection
 
-`services/runtime/cmd/af-stack/main.go`:
+Runtime selection flows through `internal/config` and the logs selector;
+`cmd/af-stack/main.go` must not read `AF_STACK_LOGS_*` directly.
 
 ```go
-var logsStore logs.Store
-switch os.Getenv("AF_STACK_LOGS_ADAPTER") {
-case "loki":
-    logsStore = lokilogs.New(os.Getenv("AF_STACK_LOGS_LOKI_URL"), ...)
-case "remote":
-    logsStore = remotelogs.New(remote.Config{
-        BaseURL: os.Getenv("AF_STACK_LOGS_ADAPTER_URL"),
-        Token:   os.Getenv("AF_STACK_LOGS_ADAPTER_TOKEN"),
-    })
-default:
-    logsStore = ringlogs.New(logRing)
-}
+logsStore, err := logselect.Select(ctx, cfg, logRing)
+if err != nil { ... fail startup with a clear config error ... }
 adapterRegistry.Register(registry.Slot{
-    ID: "logs", Tier: 1, Kind: kind, Name: logsStore.Capabilities().NativeQueryLang or "ring",
+    ID: "logs", Tier: 1, Kind: kind, Name: logselect.Name(cfg, logsStore),
     ...
 })
 ```
@@ -1078,7 +1069,7 @@ NEW:
   services/runtime/internal/observability/logs/adapters/loki/loki_test.go
   services/runtime/internal/observability/logs/adapters/remote/remote.go
   services/runtime/internal/observability/logs/adapters/remote/remote_test.go
-  services/runtime/internal/server/admin_logs.go
+  services/runtime/internal/server/logs.go
 MODIFIED:
   services/runtime/cmd/af-stack/main.go
   services/runtime/cmd/backai-adapter-conformance/main.go
@@ -1793,8 +1784,8 @@ Persist a per-operator history of SQL queries (currently UI-only local state in 
 |---|---|---|---|
 | 1 — Endpoint additions | ✅ **DONE** | (~4) | Shipped with all audit corrections. Some ad-hoc patterns (LiteLLM virtual-key probe, provider-health retention) need consolidating into Block 2's generalised frameworks. |
 | 2 — **Foundation** (config + probes + retention + features API) | ✅ **DONE** | **~1.5** | Feature config, probe registry, retention helper, `/admin/features`, and Setup → Features shipped. |
-| 3 — `logs` adapter slot | queued | ~2.5 | Ring needs new Subscribe/channel layer; WebSocket dep |
-| 4 — `traces` adapter slot | queued | ~2.5 | Tempo decoder shape variations; tags translator fix |
+| 3 — `logs` adapter slot | ✅ **DONE** | ~2.5 | Ring Subscribe/channel layer, Loki WebSocket tail, remote SSE shim, admin endpoints, dashboard wiring, conformance, and protocol docs shipped. |
+| 4 — `traces` adapter slot | queued / next | ~2.5 | Tempo decoder shape variations; tags translator fix |
 | 5 — `metrics` adapter slot | queued | ~2 | Env var + cAdvisor metric names; provider-health stays on Postgres path |
 | 6 — `errors` adapter slot | queued | ~3 | Sentry SDK wiring in runtime + each Python agent |
 | 7 — Aggregation endpoints | queued | ~3–4 | reasoner column + tools log table + OAuth refresh log are new migrations + write-path hooks |
@@ -1810,20 +1801,20 @@ Each block is one PR. Blocks 3–6 share the same adapter-slot scaffolding patte
 
 A block isn't done until every box is ticked.
 
-- [ ] Go interface defined in `services/runtime/internal/observability/<slot>/interface.go`
-- [ ] Default builtin implementation in `<slot>/<default-name>/`
-- [ ] First concrete backend adapter in `<slot>/adapters/<backend>/`
-- [ ] Remote-shim implementation in `<slot>/adapters/remote/` using shared `internal/adapters/remote.Client`
-- [ ] Per-slot HTTP protocol doc in `docs/adapters/protocols/<slot>-v1.md` (matching existing 8 slots' shape)
-- [ ] Slot row added to `services/runtime/internal/adapters/registry/` (in `main.go` wiring)
-- [ ] Admin HTTP endpoints in `services/runtime/internal/server/admin_<slot>.go`
-- [ ] OpenAPI registration
-- [ ] Conformance harness extended with per-slot checks in `services/runtime/cmd/backai-adapter-conformance/main.go`
-- [ ] Unit tests for the backend adapter (httptest mocks)
-- [ ] Dashboard `api.ts` switched from old endpoint to new `/admin/<slot>/...`
-- [ ] Adapter pill rendered on the page header
-- [ ] Capability-honest degradation when builtin is active
-- [ ] Slot row in `docs/adapters/README.md` and `docs/adapters/PROTOCOL.md` §14
+- [x] Go interface defined in `services/runtime/internal/observability/<slot>/interface.go`
+- [x] Default builtin implementation in `<slot>/<default-name>/`
+- [x] First concrete backend adapter in `<slot>/adapters/<backend>/`
+- [x] Remote-shim implementation in `<slot>/adapters/remote/` using shared `internal/adapters/remote.Client`
+- [x] Per-slot HTTP protocol doc in `docs/adapters/protocols/<slot>-v1.md` (matching existing 8 slots' shape)
+- [x] Slot row added to `services/runtime/internal/adapters/registry/` (in `main.go` wiring)
+- [x] Admin HTTP endpoints in `services/runtime/internal/server/admin_<slot>.go`
+- [x] OpenAPI registration
+- [x] Conformance harness extended with per-slot checks in `services/runtime/cmd/backai-adapter-conformance/main.go`
+- [x] Unit tests for the backend adapter (httptest mocks)
+- [x] Dashboard `api.ts` switched from old endpoint to new `/admin/<slot>/...`
+- [x] Adapter pill rendered on the page header
+- [x] Capability-honest degradation when builtin is active
+- [x] Slot row in `docs/adapters/README.md` and `docs/adapters/PROTOCOL.md` §14
 
 ---
 
