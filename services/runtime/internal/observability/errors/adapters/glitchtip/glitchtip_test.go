@@ -145,6 +145,7 @@ func TestIssueWireCountAcceptsStringAndNumber(t *testing.T) {
 		{name: "string", body: `{"id":"1","title":"boom","status":"unresolved","count":"7","firstSeen":"` + ts + `","lastSeen":"` + ts + `"}`, want: 7},
 		{name: "number", body: `{"id":"1","title":"boom","status":"unresolved","count":8,"firstSeen":"` + ts + `","lastSeen":"` + ts + `"}`, want: 8},
 		{name: "empty", body: `{"id":"1","title":"boom","status":"unresolved","count":"","firstSeen":"` + ts + `","lastSeen":"` + ts + `"}`, want: 1},
+		{name: "null", body: `{"id":"1","title":"boom","status":"unresolved","count":null,"firstSeen":"` + ts + `","lastSeen":"` + ts + `"}`, want: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

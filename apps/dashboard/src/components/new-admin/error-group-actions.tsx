@@ -5,6 +5,7 @@
 import { useRouter } from "next/navigation"
 import { useTransition } from "react"
 import { CheckCircle2, RotateCcw, VolumeX } from "lucide-react"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
@@ -15,10 +16,17 @@ export function ErrorGroupActions({ groupId, status }: { groupId: string; status
 
   const run = (action: "mute" | "resolve" | "reopen") => {
     startTransition(async () => {
-      if (action === "mute") await api.errors.mute(groupId)
-      if (action === "resolve") await api.errors.resolve(groupId)
-      if (action === "reopen") await api.errors.reopen(groupId)
-      router.refresh()
+      try {
+        if (action === "mute") await api.errors.mute(groupId)
+        if (action === "resolve") await api.errors.resolve(groupId)
+        if (action === "reopen") await api.errors.reopen(groupId)
+        toast.success(`Error group ${action === "reopen" ? "reopened" : `${action}d`}.`)
+        router.refresh()
+      } catch (err) {
+        toast.error("Could not update error group", {
+          description: err instanceof Error ? err.message : "The active errors adapter rejected the action.",
+        })
+      }
     })
   }
 

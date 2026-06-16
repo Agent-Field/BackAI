@@ -7,7 +7,6 @@ package remote
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -55,7 +54,7 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 
 func (s *Store) ListGroups(ctx context.Context, f obserrors.ListFilter) (obserrors.Page, error) {
 	if s == nil || s.client == nil {
-		return obserrors.Page{}, errors.New("remote errors: nil store")
+		return obserrors.Page{}, obserrors.ErrNoBackend
 	}
 	resp, err := s.client.Do(ctx, adapterremote.Request{
 		Method: http.MethodPost,
@@ -74,7 +73,7 @@ func (s *Store) ListGroups(ctx context.Context, f obserrors.ListFilter) (obserro
 
 func (s *Store) GetGroup(ctx context.Context, groupID string) (obserrors.Group, error) {
 	if s == nil || s.client == nil {
-		return obserrors.Group{}, errors.New("remote errors: nil store")
+		return obserrors.Group{}, obserrors.ErrNoBackend
 	}
 	groupID = strings.TrimSpace(groupID)
 	if groupID == "" {
@@ -99,7 +98,7 @@ func (s *Store) GetGroup(ctx context.Context, groupID string) (obserrors.Group, 
 
 func (s *Store) UpdateGroup(ctx context.Context, groupID string, update obserrors.Update) (obserrors.Group, error) {
 	if s == nil || s.client == nil {
-		return obserrors.Group{}, errors.New("remote errors: nil store")
+		return obserrors.Group{}, obserrors.ErrNoBackend
 	}
 	groupID = strings.TrimSpace(groupID)
 	if groupID == "" {

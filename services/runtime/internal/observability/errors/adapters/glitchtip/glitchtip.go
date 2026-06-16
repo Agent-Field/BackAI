@@ -366,6 +366,10 @@ func (i issueWire) toGroup() obserrors.Group {
 type flexibleInt int
 
 func (f *flexibleInt) UnmarshalJSON(data []byte) error {
+	if strings.EqualFold(strings.TrimSpace(string(data)), "null") {
+		*f = 0
+		return nil
+	}
 	var n int
 	if err := json.Unmarshal(data, &n); err == nil {
 		*f = flexibleInt(n)
