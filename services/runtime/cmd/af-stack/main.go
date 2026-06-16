@@ -27,6 +27,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/activity"
+	adapterregistry "github.com/Agent-Field/backai/services/runtime/internal/adapters/registry"
 	"github.com/Agent-Field/backai/services/runtime/internal/agentfield"
 	"github.com/Agent-Field/backai/services/runtime/internal/approvals"
 	"github.com/Agent-Field/backai/services/runtime/internal/billing"
@@ -116,6 +117,320 @@ func (w *webhookAgentInvoker) Execute(
 }
 
 const version = "0.0.1"
+
+func caps(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return json.RawMessage(b)
+}
+
+func defaulted(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func staticStatus(status adapterregistry.Status) adapterregistry.Probe {
+	return func(context.Context) (adapterregistry.Status, error) {
+		return status, nil
+	}
+}
+
+func buildAdapterRegistry(
+	cfg config.Config,
+	database *db.DB,
+	afClient *agentfield.Client,
+	store storage.Storage,
+	vault *secrets.Vault,
+	jobsManager *jobs.Manager,
+	llmGW *llmgateway.Gateway,
+	sandboxSvc *sandbox.Service,
+	notificationsSvc *notifications.Service,
+	webhooksSvc *webhooks.Service,
+	billingSvc *billing.Service,
+) *adapterregistry.Registry {
+	r := adapterregistry.New()
+
+	storageName := defaulted(cfg.Storage.Adapter, "minio")
+	storageStatus := adapterregistry.StatusUnhealthy
+	storageKind := adapterregistry.KindNone
+	storageCaps := map[string]any{"contract_pending": true}
+	if store != nil {
+		storageKind = adapterregistry.KindBuiltin
+		storageStatus = adapterregistry.StatusHealthy
+		c := store.Capabilities()
+		storageCaps = map[string]any{
+			"max_object_size_bytes":     c.MaxObjectSizeBytes,
+			"supports_multipart":        c.SupportsMultipart,
+			"presign_ttl_max_seconds":   c.PresignTTLMaxSeconds,
+			"supports_signed_uploads":   c.PresignTTLMaxSeconds > 0,
+			"supports_range_requests":   false,
+			"supports_metadata_headers": false,
+		}
+	}
+	r.Register(adapterregistry.Slot{
+		ID:               "storage",
+		Tier:             adapterregistry.Tier1,
+		Kind:             storageKind,
+		Name:             storageName,
+		Capabilities:     caps(storageCaps),
+		AvailableBuiltin: []string{"minio", "s3"},
+		SwapMethod:       "env_var",
+		SwapEnv:          "AF_STACK_S3_ADAPTER",
+		AdminUI:          os.Getenv("AF_STACK_MINIO_CONSOLE_URL"),
+		Probe:            staticStatus(storageStatus),
+	})
+
+	sandboxName := defaulted(cfg.Sandbox.Adapter, "docker")
+	sandboxStatus := adapterregistry.StatusUnhealthy
+	sandboxKind := adapterregistry.KindNone
+	sandboxCaps := map[string]any{"contract_pending": true}
+	if sandboxSvc != nil && sandboxSvc.AdapterAvailable() {
+		sandboxKind = adapterregistry.KindBuiltin
+		sandboxStatus = adapterregistry.StatusHealthy
+		sandboxCaps = map[string]any{
+			"max_timeout_s":      sandboxSvc.Capabilities().MaxTimeoutS,
+			"supports_gpu":       sandboxSvc.Capabilities().SupportsGPU,
+			"supports_network":   sandboxSvc.Capabilities().SupportsNetwork,
+			"supports_mounts":    sandboxSvc.Capabilities().SupportsMounts,
+			"supports_streaming": true,
+			"cold_start_ms":      sandboxSvc.Capabilities().ColdStartMS,
+		}
+	}
+	r.Register(adapterregistry.Slot{
+		ID:               "sandbox",
+		Tier:             adapterregistry.Tier1,
+		Kind:             sandboxKind,
+		Name:             sandboxName,
+		Capabilities:     caps(sandboxCaps),
+		AvailableBuiltin: []string{"docker", "gvisor", "firecracker", "e2b"},
+		SwapMethod:       "env_var",
+		SwapEnv:          "AF_STACK_SANDBOX_ADAPTER",
+		Probe:            staticStatus(sandboxStatus),
+	})
+
+	llmName := "unset"
+	llmStatus := adapterregistry.StatusUnhealthy
+	if llmGW != nil {
+		llmName = llmGW.ProviderName()
+		llmStatus = adapterregistry.StatusHealthy
+	}
+	r.Register(adapterregistry.Slot{
+		ID:         "llm-chat",
+		Tier:       adapterregistry.Tier1,
+		Kind:       adapterregistry.KindBuiltin,
+		Name:       llmName,
+		SwapMethod: "env_var",
+		SwapEnv:    "AF_STACK_LLM_GATEWAY_ADAPTER",
+		AdminUI:    os.Getenv("AF_STACK_LITELLM_URL"),
+		Capabilities: caps(map[string]any{
+			"supports_chat":       llmGW != nil,
+			"supports_embeddings": llmGW != nil,
+			"contract_pending":    true,
+		}),
+		Probe: staticStatus(llmStatus),
+	})
+
+	r.Register(adapterregistry.Slot{
+		ID:         "multimodal",
+		Tier:       adapterregistry.Tier1,
+		Kind:       adapterregistry.KindBuiltin,
+		Name:       "first-party + litellm",
+		SwapMethod: "env_var",
+		SwapEnv:    "AF_STACK_MULTIMODAL_ADAPTER",
+		Capabilities: caps(map[string]any{
+			"supports_tts":              true,
+			"supports_stt":              true,
+			"supports_image_generation": true,
+			"contract_pending":          true,
+		}),
+		Probe: staticStatus(llmStatus),
+	})
+
+	notificationName := "none"
+	notificationKind := adapterregistry.KindNone
+	notificationStatus := adapterregistry.StatusUnhealthy
+	channels := []string{}
+	if notificationsSvc != nil && notificationsSvc.AdapterAvailable() {
+		notificationName = notificationsSvc.AdapterName()
+		notificationKind = adapterregistry.KindBuiltin
+		notificationStatus = adapterregistry.StatusHealthy
+		switch notificationName {
+		case "resend":
+			channels = []string{"email"}
+		case "log":
+			channels = []string{"log"}
+		default:
+			channels = []string{notificationName}
+		}
+	}
+	r.Register(adapterregistry.Slot{
+		ID:               "notifications",
+		Tier:             adapterregistry.Tier1,
+		Kind:             notificationKind,
+		Name:             notificationName,
+		AvailableBuiltin: []string{"log", "resend"},
+		SwapMethod:       "env_var",
+		SwapEnv:          "AF_STACK_NOTIFICATIONS_ADAPTER",
+		Capabilities: caps(map[string]any{
+			"channels":                      channels,
+			"supports_html":                 notificationName == "resend",
+			"supports_templates":            false,
+			"supports_cc_bcc":               false,
+			"tracks_delivery_status":        false,
+			"supports_retry":                false,
+			"supports_metadata_passthrough": true,
+			"contract_pending":              true,
+		}),
+		Probe: staticStatus(notificationStatus),
+	})
+
+	billingName := "none"
+	billingStatus := adapterregistry.StatusUnhealthy
+	if billingSvc != nil {
+		billingName = billingSvc.AdapterName()
+		billingStatus = adapterregistry.StatusHealthy
+	}
+	r.Register(adapterregistry.Slot{
+		ID:               "billing",
+		Tier:             adapterregistry.Tier1,
+		Kind:             adapterregistry.KindBuiltin,
+		Name:             billingName,
+		AvailableBuiltin: []string{"stripe", "lago", "none"},
+		SwapMethod:       "env_var",
+		SwapEnv:          "AF_STACK_BILLING_ADAPTER",
+		Capabilities: caps(map[string]any{
+			"supports_customers":            billingSvc != nil,
+			"supports_customer_portal":      billingSvc != nil && billingName != "none",
+			"supports_metered_billing":      billingSvc != nil,
+			"supports_webhook_verification": billingSvc != nil && billingName == "stripe",
+			"contract_pending":              true,
+		}),
+		Probe: staticStatus(billingStatus),
+	})
+
+	secretsStatus := adapterregistry.StatusUnhealthy
+	secretsKind := adapterregistry.KindNone
+	if vault != nil {
+		secretsStatus = adapterregistry.StatusHealthy
+		secretsKind = adapterregistry.KindBuiltin
+	}
+	r.Register(adapterregistry.Slot{
+		ID:         "secrets",
+		Tier:       adapterregistry.Tier1,
+		Kind:       secretsKind,
+		Name:       "envelope-local",
+		SwapMethod: "env_var",
+		SwapEnv:    "AF_STACK_SECRETS_ADAPTER",
+		Capabilities: caps(map[string]any{
+			"supports_rotation":  vault != nil,
+			"supports_reveal":    vault != nil,
+			"supports_metadata":  vault != nil,
+			"audit_log_revealed": true,
+			"kms_backend":        defaulted(os.Getenv("AF_STACK_KMS_PROVIDER"), "local"),
+			"contract_pending":   true,
+		}),
+		Probe: staticStatus(secretsStatus),
+	})
+
+	r.Register(adapterregistry.Slot{
+		ID:         "auth",
+		Tier:       adapterregistry.Tier1,
+		Kind:       adapterregistry.KindBuiltin,
+		Name:       "better-auth",
+		SwapMethod: "env_var",
+		SwapEnv:    "AF_STACK_AUTH_ADAPTER",
+		Capabilities: caps(map[string]any{
+			"supports_oauth_providers":     []string{"google", "github", "microsoft"},
+			"supports_magic_links":         true,
+			"supports_passwordless":        false,
+			"supports_mfa":                 false,
+			"supports_sso":                 false,
+			"supports_token_introspection": true,
+			"supports_session_enumeration": false,
+			"contract_pending":             true,
+		}),
+		Probe: staticStatus(adapterregistry.StatusHealthy),
+	})
+
+	databaseStatus := adapterregistry.StatusUnhealthy
+	if database != nil && database.Pool != nil {
+		databaseStatus = adapterregistry.StatusHealthy
+	}
+	r.Register(adapterregistry.Slot{
+		ID:         "database",
+		Tier:       adapterregistry.Tier2,
+		Kind:       adapterregistry.KindBuiltin,
+		Name:       "postgres",
+		SwapMethod: "connection_string",
+		SwapEnv:    "AF_STACK_DATABASE_URL",
+		Capabilities: caps(map[string]any{
+			"supports_pgvector": true,
+			"supports_rls":      true,
+		}),
+		Probe: staticStatus(databaseStatus),
+	})
+
+	reasoningStatus := adapterregistry.StatusUnhealthy
+	if afClient != nil {
+		reasoningStatus = adapterregistry.StatusHealthy
+	}
+	r.Register(adapterregistry.Slot{
+		ID:         "reasoning",
+		Tier:       adapterregistry.Tier3,
+		Kind:       adapterregistry.KindBuiltin,
+		Name:       "agentfield",
+		SwapMethod: "none",
+		AdminUI:    os.Getenv("AF_STACK_AGENTFIELD_URL"),
+		Capabilities: caps(map[string]any{
+			"supports_runs":         afClient != nil,
+			"supports_capabilities": afClient != nil,
+		}),
+		Probe: staticStatus(reasoningStatus),
+	})
+
+	queueStatus := adapterregistry.StatusUnhealthy
+	if jobsManager != nil {
+		queueStatus = adapterregistry.StatusHealthy
+	}
+	r.Register(adapterregistry.Slot{
+		ID:         "job-queue",
+		Tier:       adapterregistry.Tier3,
+		Kind:       adapterregistry.KindBuiltin,
+		Name:       "river",
+		SwapMethod: "none",
+		Capabilities: caps(map[string]any{
+			"supports_retries":       jobsManager != nil,
+			"supports_cron_dispatch": jobsManager != nil,
+		}),
+		Probe: staticStatus(queueStatus),
+	})
+
+	webhooksStatus := adapterregistry.StatusUnhealthy
+	if webhooksSvc != nil && webhooksSvc.Configured() {
+		webhooksStatus = adapterregistry.StatusHealthy
+	}
+	r.Register(adapterregistry.Slot{
+		ID:         "webhooks",
+		Tier:       adapterregistry.Tier3,
+		Kind:       adapterregistry.KindBuiltin,
+		Name:       "svix",
+		SwapMethod: "env_var",
+		SwapEnv:    "AF_STACK_SVIX_URL",
+		AdminUI:    os.Getenv("AF_STACK_SVIX_URL"),
+		Capabilities: caps(map[string]any{
+			"supports_outbound": webhooksSvc != nil && webhooksSvc.Configured(),
+			"supports_inbound":  webhooksSvc != nil,
+		}),
+		Probe: staticStatus(webhooksStatus),
+	})
+
+	return r
+}
 
 func main() {
 	if len(os.Args) > 1 {
@@ -883,6 +1198,20 @@ func main() {
 		log.Info("crons: store not configured (no database); /api/v1/crons mutations will return 503")
 	}
 
+	adapterRegistry := buildAdapterRegistry(
+		cfg,
+		database,
+		afClient,
+		store,
+		vault,
+		jobsManager,
+		llmGW,
+		sandboxSvc,
+		notificationsSvc,
+		webhooksSvc,
+		billingSvc,
+	)
+
 	srv := server.New(cfg, log, server.Deps{
 		DB:              database,
 		AF:              afClient,
@@ -914,6 +1243,7 @@ func main() {
 		MCPStore:        mcpStore,
 		Crons:           cronsStore,
 		ToolAdapters:    toolAdapterSvc,
+		AdapterRegistry: adapterRegistry,
 		ToolsRegistry:   toolsRegistry,
 		OAuthManager:    oauthManager,
 		OAuthFactory:    oauthFactory,

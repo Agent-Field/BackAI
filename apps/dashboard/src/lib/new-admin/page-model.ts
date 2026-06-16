@@ -147,6 +147,14 @@ function selectedRows(rows: ConsoleRow[], count = 5): PageCard["rows"] {
   }))
 }
 
+function selectedAdapterRows(snapshot: OperatorSnapshot, count = 5): PageCard["rows"] {
+  return snapshot.adapters.slice(0, count).map((adapter) => ({
+    label: adapter.slot,
+    value: adapter.adapter,
+    tone: adapter.status,
+  }))
+}
+
 const definitions: Record<string, PageDefinition> = {
   "/": {
     primaryAction: "Open command center",
@@ -220,7 +228,7 @@ const definitions: Record<string, PageDefinition> = {
   "/operate/traces": {
     primaryAction: "Open trace explorer",
     controls: () => [select("Scope", "Platform", ["Platform", "tenant"]), input("Trace", "Paste trace id or run id..."), tabs("Status", "all", ["all", "slow", "failed", "sampled"])],
-    kpis: () => [kpi("Trace endpoint", "missing", "link out for deep view", "degraded", "warn"), kpi("Span tree", "thin", "from run context", "adapter", "warn"), kpi("Critical path", "external", "Tempo or Honeycomb", "link", "neutral"), kpi("Copy link", "ready", "share trace search", "url", "ok")],
+    kpis: () => [kpi("Trace endpoint", "missing", "runtime query", "degraded", "warn"), kpi("Span tree", "thin", "from run context", "adapter", "warn"), kpi("Critical path", "external", "Tempo or Honeycomb", "backend", "neutral"), kpi("Copy link", "ready", "share trace search", "url", "ok")],
     rows: (snapshot) => snapshot.traces,
     tableTitle: "Trace search",
     tableDescription: "Thin in-product trace context with external explorer handoff.",
@@ -272,7 +280,7 @@ const definitions: Record<string, PageDefinition> = {
   "/operate/webhooks": {
     primaryAction: "Replay delivery",
     controls: () => statusControls("Search event, endpoint, response code..."),
-    kpis: () => [kpi("Replay", "backed", "retry endpoint", "ready", "ok"), kpi("Payload", "drawer", "body preview", "linked", "running"), kpi("Provider", "Svix", "link out", "admin", "neutral"), kpi("Failures", "filter", "status", "fast", "warn")],
+    kpis: () => [kpi("Replay", "backed", "retry endpoint", "ready", "ok"), kpi("Payload", "drawer", "body preview", "linked", "running"), kpi("Provider", "Svix", "runtime metadata", "admin", "neutral"), kpi("Failures", "filter", "status", "fast", "warn")],
     rows: (snapshot) => snapshot.webhooks,
     tableTitle: "Webhook delivery inbox",
     tableDescription: "Outbound delivery attempts, response status, retry state, and payload previews.",
@@ -338,7 +346,7 @@ const definitions: Record<string, PageDefinition> = {
       ...snapshot.observability,
     ],
     tableTitle: "Service topology",
-    tableDescription: "Runtime and backing services with thin health checks and native-admin link-outs.",
+    tableDescription: "Runtime and backing services with health checks surfaced through BackAI.",
     secondaryTitle: "Health caveats",
     secondary: (snapshot) => [
       card("Runtime metrics", "HTTP, heap, goroutine, and route rollups.", selectedRows(snapshot.observability, 5)),
@@ -616,19 +624,19 @@ const definitions: Record<string, PageDefinition> = {
     kpis: () => [kpi("Customers", "backed", "billing adapter", "ready", "ok"), kpi("Meters", "backed", "usage", "ready", "ok"), kpi("Portal", "backed", "provider link", "ready", "running"), kpi("Churn", "derived", "signals", "thin", "warn")],
     rows: (snapshot) => snapshot.billing,
     tableTitle: "Billing summary",
-    tableDescription: "Per-tenant billing records, usage meters, plan state, and adapter portal links.",
+    tableDescription: "Per-tenant billing records, usage meters, plan state, and runtime-returned portal actions.",
     secondaryTitle: "Meter context",
     secondary: (snapshot) => [card("Billing rows", "Deep billing remains in the configured provider.", selectedRows(snapshot.billing, 6))],
   },
   "/setup/adapters": {
-    primaryAction: "Open adapter admin",
+    primaryAction: "Review adapter contract",
     controls: () => setupControls("Search slot, adapter, capability..."),
-    kpis: () => [kpi("Inventory", "degraded", "partial sources", "caveat", "warn"), kpi("Tools", "live", "adapter rows", "ready", "ok"), kpi("Capabilities", "pending", "universal shape", "gap", "warn"), kpi("Swap", "env", "restart", "v1", "neutral")],
+    kpis: () => [kpi("Inventory", "backed", "admin adapters", "ready", "ok"), kpi("Tools", "live", "adapter rows", "ready", "ok"), kpi("Capabilities", "mixed", "slot accessors", "v1", "warn"), kpi("Swap", "env", "restart", "v1", "neutral")],
     rows: (snapshot) => snapshot.adapters.map((adapter) => ({ id: adapter.slot, primary: adapter.slot, secondary: adapter.description, status: adapter.adapter, tone: adapter.status, metric: "configured", timestamp: "current" })),
     tableTitle: "Adapter topology",
-    tableDescription: "Every backend slot, current adapter, capability caveat, and native-admin link-out.",
-    secondaryTitle: "Capability gaps",
-    secondary: () => [card("Missing endpoint", "The universal adapter inventory endpoint is pending.", [{ label: "Needed", value: "GET /api/v1/admin/adapters", tone: "warn" }])],
+    tableDescription: "Every backend slot, current adapter, and capability caveat surfaced through BackAI.",
+    secondaryTitle: "Capability contract",
+    secondary: (snapshot) => [card("Runtime inventory", "BackAI owns the adapter slot contract; OSS services stay behind the runtime.", selectedAdapterRows(snapshot, 6))],
   },
   "/setup/auth-providers": {
     primaryAction: "Open auth docs",
@@ -643,10 +651,10 @@ const definitions: Record<string, PageDefinition> = {
   "/setup/llm-providers": {
     primaryAction: "Open gateway admin",
     controls: () => setupControls("Search model, provider, capability..."),
-    kpis: () => [kpi("Models", "backed", "llm models", "ready", "ok"), kpi("Spend", "linked", "Cost", "ready", "running"), kpi("Gateway", "adapter", "moving", "caveat", "warn"), kpi("Fallback", "link out", "gateway admin", "thin", "neutral")],
+    kpis: () => [kpi("Models", "backed", "llm models", "ready", "ok"), kpi("Spend", "linked", "Cost", "ready", "running"), kpi("Gateway", "adapter", "moving", "caveat", "warn"), kpi("Fallback", "runtime", "gateway metadata", "thin", "neutral")],
     rows: (snapshot) => snapshot.llmProviders,
     tableTitle: "LLM gateway providers",
-    tableDescription: "Models, provider cost, key readiness, and adapter-specific link-outs.",
+    tableDescription: "Models, provider cost, key readiness, and adapter metadata surfaced through BackAI.",
     secondaryTitle: "Gateway caveat",
     secondary: () => [card("Adapter work", "LLM gateway extraction is moving; this page is implemented after adapter docs settle.", [{ label: "Gap", value: "LLM gateway capabilities", tone: "warn" }])],
   },
@@ -663,7 +671,7 @@ const definitions: Record<string, PageDefinition> = {
   "/setup/webhook-subscribers": {
     primaryAction: "Add subscriber",
     controls: () => setupControls("Search endpoint, event, tenant..."),
-    kpis: () => [kpi("Endpoints", "backed", "webhook endpoints", "ready", "ok"), kpi("Send test", "backed", "webhook send", "ready", "running"), kpi("Svix", "link out", "catalog", "admin", "neutral"), kpi("Signing", "visible", "secret ref", "ready", "ok")],
+    kpis: () => [kpi("Endpoints", "backed", "webhook endpoints", "ready", "ok"), kpi("Send test", "backed", "webhook send", "ready", "running"), kpi("Svix", "runtime metadata", "catalog", "admin", "neutral"), kpi("Signing", "visible", "secret ref", "ready", "ok")],
     rows: (snapshot) => snapshot.webhookEndpoints,
     tableTitle: "Webhook subscribers",
     tableDescription: "Outbound endpoint configuration, signing state, tenant scope, and test send.",
@@ -693,10 +701,10 @@ const definitions: Record<string, PageDefinition> = {
   "/setup/observability": {
     primaryAction: "Open metrics",
     controls: () => setupControls("Search metric, exporter, route..."),
-    kpis: () => [kpi("Metrics", "backed", "summary", "ready", "ok"), kpi("Traces", "link out", "external", "thin", "warn"), kpi("Logs", "linked", "Operate", "ready", "ok"), kpi("Config", "env", "no runtime PUT", "v1", "neutral")],
+    kpis: () => [kpi("Metrics", "backed", "summary", "ready", "ok"), kpi("Traces", "missing", "backend query", "thin", "warn"), kpi("Logs", "linked", "Operate", "ready", "ok"), kpi("Config", "env", "no runtime PUT", "v1", "neutral")],
     rows: (snapshot) => snapshot.observability,
     tableTitle: "Observability setup",
-    tableDescription: "Metrics, log, trace, and exporter status with link-outs to deeper tools.",
+    tableDescription: "Metrics, log, trace, and exporter status through runtime-owned contracts.",
     secondaryTitle: "Runtime metrics",
     secondary: (snapshot) => [card("Metric rollups", "Runtime summary powers Health and Observability.", selectedRows(snapshot.observability, 6))],
   },
@@ -713,7 +721,7 @@ const definitions: Record<string, PageDefinition> = {
   "/setup/deploy-targets": {
     primaryAction: "Open provider",
     controls: () => setupControls("Search target, provider, status..."),
-    kpis: () => [kpi("Provisioning", "missing", "no runtime endpoint", "gap", "fail"), kpi("Compose", "informational", "local", "ready", "neutral"), kpi("Provider", "link out", "console", "manual", "neutral"), kpi("Secrets", "linked", "setup", "ready", "ok")],
+    kpis: () => [kpi("Provisioning", "missing", "no runtime endpoint", "gap", "fail"), kpi("Compose", "informational", "local", "ready", "neutral"), kpi("Provider", "missing", "runtime metadata", "manual", "neutral"), kpi("Secrets", "linked", "setup", "ready", "ok")],
     rows: (snapshot) => snapshot.deployTargets,
     tableTitle: "Deploy targets",
     tableDescription: "Informational view of deployment targets. No in-product provisioning in v1.",

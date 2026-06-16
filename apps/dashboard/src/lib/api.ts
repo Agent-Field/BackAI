@@ -1720,6 +1720,37 @@ export const OAuthConnectionListSchema = z.object({
 })
 export type OAuthConnectionList = z.infer<typeof OAuthConnectionListSchema>
 
+export const AdapterRegistryStatusSchema = z.enum([
+  "healthy",
+  "degraded",
+  "unhealthy",
+  "unknown",
+])
+export const AdapterRegistryKindSchema = z.enum(["builtin", "remote", "none"])
+export const AdapterRegistryActiveSchema = z.object({
+  name: z.string(),
+  version: z.string().optional(),
+  status: AdapterRegistryStatusSchema,
+  kind: AdapterRegistryKindSchema,
+  capabilities: z.record(z.string(), z.unknown()).optional(),
+  last_error: z.string().optional(),
+})
+export const AdapterRegistrySlotSchema = z.object({
+  slot: z.string(),
+  tier: z.number(),
+  active: AdapterRegistryActiveSchema,
+  available_builtin: z.array(z.string()).optional(),
+  swap_method: z.string(),
+  swap_env: z.string().optional(),
+  admin_ui: z.string().optional(),
+})
+export type AdapterRegistrySlot = z.infer<typeof AdapterRegistrySlotSchema>
+
+export const AdapterRegistrySchema = z.object({
+  slots: z.array(AdapterRegistrySlotSchema),
+})
+export type AdapterRegistry = z.infer<typeof AdapterRegistrySchema>
+
 // ─── Shipwright task factory (Phase 3 Tier 1) ─────────────────────────────
 //
 // AF Stack stores task + patch metadata only. AgentField owns the
@@ -2414,6 +2445,10 @@ export const api = {
 
   // ─── Tenancy (admin) ───
   admin: {
+    adapters: {
+      list: () =>
+        request("/api/v1/admin/adapters", undefined, AdapterRegistrySchema),
+    },
     tenants: {
       list: () =>
         request("/api/v1/admin/tenants", undefined, TenantListSchema),

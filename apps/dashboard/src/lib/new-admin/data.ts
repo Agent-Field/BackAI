@@ -160,6 +160,13 @@ function toneForStatus(status: string): StatusTone {
   return "neutral"
 }
 
+function toneForAdapterStatus(status: string): StatusTone {
+  if (status === "healthy") return "ok"
+  if (status === "degraded" || status === "unknown") return "warn"
+  if (status === "unhealthy") return "fail"
+  return "neutral"
+}
+
 const seededRuns: ConsoleRow[] = [
   {
     id: "run_8d92f0",
@@ -485,6 +492,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     harnesses,
     crons,
     plugins,
+    adapterRegistry,
     approvals,
     logs,
     oauthConnections,
@@ -529,6 +537,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     settle(() => api.harnesses.list()),
     settle(() => api.crons.list()),
     settle(() => api.plugins()),
+    settle(() => api.admin.adapters.list()),
     settle(() => api.approvals.list({ limit: 20 })),
     settle(() => api.logs({ limit: 120 })),
     settle(() => api.oauth.connections()),
@@ -974,6 +983,16 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
       : seededSnapshot.observability
 
   const adapterRowsLive: AdapterSlot[] = [
+    ...(adapterRegistry?.slots.map((slot) => {
+      const capCount = slot.active.capabilities ? Object.keys(slot.active.capabilities).length : 0
+      const swap = slot.swap_env ? `swap: ${slot.swap_env}` : slot.swap_method
+      return {
+        slot: slot.slot,
+        adapter: slot.active.name,
+        status: toneForAdapterStatus(slot.active.status),
+        description: `tier ${slot.tier} · ${slot.active.kind} · ${swap}${capCount ? ` · ${capCount} caps` : ""}`,
+      }
+    }) ?? []),
     ...(toolAdapters?.adapters.map((adapter) => ({
       slot: adapter.label,
       adapter: adapter.id,
@@ -1024,7 +1043,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     endpointStatus: {
       logs: logs ? "ok" : "missing",
       traces: "degraded",
-      adapters: adapterRowsLive.length ? "degraded" : "missing",
+      adapters: adapterRegistry?.slots.length ? "ok" : adapterRowsLive.length ? "degraded" : "missing",
       auth: "degraded",
       llm: models ? "degraded" : "missing",
       deployTargets: "missing",

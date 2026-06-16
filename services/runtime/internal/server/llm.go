@@ -219,8 +219,16 @@ func (s *Server) registerLLMOpenAPI() {
 		Summary: "OpenAI-compatible image edit (multipart upload)",
 		Tags:    []string{"llm"},
 	})
+	b.Register("POST", "/api/v1/llm/images/edits", openapi.RouteMeta{
+		Summary: "OpenAI-compatible image edit through the LLM namespace",
+		Tags:    []string{"llm"},
+	})
 	b.Register("POST", "/api/v1/images/variations", openapi.RouteMeta{
 		Summary: "OpenAI-compatible image variations (multipart upload)",
+		Tags:    []string{"llm"},
+	})
+	b.Register("POST", "/api/v1/llm/images/variations", openapi.RouteMeta{
+		Summary: "OpenAI-compatible image variations through the LLM namespace",
 		Tags:    []string{"llm"},
 	})
 	b.Register("GET", "/api/v1/llm/models", openapi.RouteMeta{

@@ -1165,6 +1165,7 @@ func (s *Server) registerAdminOpenAPI() {
 	b.Register("GET", "/api/v1/admin/keys", openapi.RouteMeta{Summary: "List API keys", Tags: tags})
 	b.Register("POST", "/api/v1/admin/keys", openapi.RouteMeta{Summary: "Issue a new API key (plaintext value returned ONCE)", Tags: tags})
 	b.Register("DELETE", "/api/v1/admin/keys/{id}", openapi.RouteMeta{Summary: "Revoke an API key", Tags: tags})
+	b.Register("GET", "/api/v1/admin/keys/{id}/spend", openapi.RouteMeta{Summary: "Read live API key spend", Tags: tags})
 	// Audit.
 	b.Register("GET", "/api/v1/admin/audit", openapi.RouteMeta{Summary: "List audit entries", Tags: tags})
 }

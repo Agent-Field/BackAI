@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/activity"
+	adapterregistry "github.com/Agent-Field/backai/services/runtime/internal/adapters/registry"
 	"github.com/Agent-Field/backai/services/runtime/internal/agentfield"
 	"github.com/Agent-Field/backai/services/runtime/internal/audit"
 	"github.com/Agent-Field/backai/services/runtime/internal/billing"
@@ -157,6 +158,9 @@ type Server struct {
 	// toolAdapters powers built-in adapter enablement and stateless
 	// calls. AgentField owns agent tool-call spans/traces.
 	toolAdapters *tooladapters.Service
+	// adapterRegistry is the runtime-owned inventory of backend adapter
+	// slots surfaced to the operator dashboard.
+	adapterRegistry *adapterregistry.Registry
 	// toolsRegistry is the strict-interface native tool surface
 	// (internal/tools). Construction in main.go via tools.BuildRegistry
 	// at boot; nil ⇒ list returns empty + mutations/invokes return 503.
@@ -313,6 +317,9 @@ type Deps struct {
 	// ToolAdapters is the built-in agent tool adapter service. nil =
 	// list returns empty; mutations/calls return 503.
 	ToolAdapters *tooladapters.Service
+	// AdapterRegistry inventories the runtime's configured adapter slots.
+	// nil means /api/v1/admin/adapters returns an empty slot list.
+	AdapterRegistry *adapterregistry.Registry
 	// ToolsRegistry is the strict-interface native tool surface. nil =
 	// /api/v1/tools/native list returns empty; enable/invoke return 503.
 	ToolsRegistry *tools.Registry
@@ -398,6 +405,7 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		mcpStore:        deps.MCPStore,
 		crons:           deps.Crons,
 		toolAdapters:    deps.ToolAdapters,
+		adapterRegistry: deps.AdapterRegistry,
 		toolsRegistry:   deps.ToolsRegistry,
 		oauthManager:    deps.OAuthManager,
 		oauthFactory:    deps.OAuthFactory,
@@ -659,6 +667,8 @@ func (s *Server) registerRoutes() {
 	// wired (the latter is Phase 6.1's responsibility).
 	s.registerAdminRoutes()
 	s.registerAdminOpenAPI()
+	s.registerAdminAdapterRoutes()
+	s.registerAdminAdapterOpenAPI()
 
 	// GDPR/data-rights endpoints for AF Stack-held app/backend records.
 	// AgentField-owned runs/spans/traces/sessions/memory stay in

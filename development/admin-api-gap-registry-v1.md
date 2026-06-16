@@ -44,7 +44,7 @@ Legend: `backed` = endpoint exists and primary UI can be served. `derived` = pri
 | Audit log | backed | `/api/v1/admin/audit` | Export can be client-side until backend export exists |
 | OAuth connections | backed | `/api/v1/oauth/connections`, providers, authorize, delete, token | Refresh history endpoint missing |
 | Billing summary | backed | billing customers/meters/portal | Churn signals are derived until backend flags them |
-| Setup Adapters | degraded | `/api/v1/plugins`, service health, env, tool adapters | Universal `GET /api/v1/admin/adapters` capability declaration missing |
+| Setup Adapters | backed | `/api/v1/admin/adapters`, `/api/v1/plugins`, service health, tool adapters | Slot-specific capability accessors are mixed; some built-in slots still synthesize `contract_pending` capability objects |
 | Auth providers | degraded | better-auth config, auth protocol docs | Runtime adapter capability endpoint pending |
 | LLM providers | degraded | `/api/v1/llm/models`, LiteLLM link-out | Adapter-aware gateway capabilities pending |
 | Sandbox adapter | backed | `/api/v1/sandbox/pool` | Runtime adapter switch is env-only |

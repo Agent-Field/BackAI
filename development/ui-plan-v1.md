@@ -93,7 +93,7 @@ CUSTOMERS  (default collapsed)
   Billing summary              ✅ — Stripe/Lago deep link out
 
 SETUP  (default collapsed)
-  Adapters                     🟡 — read-only inventory; introspection endpoint may need to land
+  Adapters                     ✅ — runtime adapter inventory and capability caveats
   Auth providers               ✅ — display from better-auth config
   LLM providers                🟡 — thin from /llm/models; rich data lives in LiteLLM admin
   Sandbox adapter              ✅ — from /sandbox/pool
@@ -975,11 +975,11 @@ Each entry: **purpose** · **data to show** (product terms) · **primary API(s)*
 
 **APIs**:
 - `GET /api/v1/plugins` ✅ (plugin registry — partial)
-- (Likely upcoming) `GET /api/v1/admin/adapters` — tier-aware adapter introspection endpoint per the protocol architecture under development
+- `GET /api/v1/admin/adapters` ✅ — tier-aware adapter introspection endpoint owned by the runtime
 
 **Actions**: open active adapter's admin UI in new tab
 
-**Status**: 🟡 (depends on the adapter-introspection endpoint that the backend agent is building; for v1 minimum, can be populated from env vars + per-service `/health` polls)
+**Status**: ✅ for inventory; 🟡 for slot-specific typed capability accessors that still synthesize `contract_pending`
 
 ---
 
@@ -1256,12 +1256,11 @@ These are deliberately left unresolved so I can sync with backend progress inste
 
 ### Still open
 
-1. **Adapter introspection endpoint** — will there be a `GET /api/v1/admin/adapters` listing slot → current adapter + capabilities? If yes, Setup → Adapters becomes ✅ instead of 🟡.
-2. **Capability declaration object — universal shape across slots** — auth defines `Capabilities` struct cleanly. Confirm same pattern across LLM gateway / sandbox / storage / billing / notifications / secrets so the dashboard reads them uniformly.
-3. **Trace browser endpoint** — is a `GET /api/v1/traces` planned, or do operators always link out to an external trace store?
-4. **Errors aggregation** — will there be a `GET /api/v1/admin/errors` for dedup/grouping or do we stay client-side on `/logs`?
-5. **Brand admin endpoint** — is `GET / PUT /api/v1/admin/brand` planned, or stays as file edit?
-6. **Plugin manifest schema** — what does the dashboard plugin manifest look like, for the "plugin tabs inject into parent group" behavior?
-7. **Auth session-listing capability** — does any concrete auth adapter expose session enumeration? Determines whether Customers → Sessions "active sessions" tab ever has live data outside better-auth.
+1. **Capability declaration object — universal shape across slots** — auth defines `Capabilities` struct cleanly. Confirm same pattern across LLM gateway / sandbox / storage / billing / notifications / secrets so the dashboard reads them uniformly.
+2. **Trace browser endpoint** — is a `GET /api/v1/traces` planned, or do operators always link out to an external trace store?
+3. **Errors aggregation** — will there be a `GET /api/v1/admin/errors` for dedup/grouping or do we stay client-side on `/logs`?
+4. **Brand admin endpoint** — is `GET / PUT /api/v1/admin/brand` planned, or stays as file edit?
+5. **Plugin manifest schema** — what does the dashboard plugin manifest look like, for the "plugin tabs inject into parent group" behavior?
+6. **Auth session-listing capability** — does any concrete auth adapter expose session enumeration? Determines whether Customers → Sessions "active sessions" tab ever has live data outside better-auth.
 
 Items move from "Still open" → "In progress" → into page specs above as the backend agent answers them via shipped endpoints.
