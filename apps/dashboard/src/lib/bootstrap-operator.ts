@@ -25,7 +25,7 @@
 
 import { randomUUID } from "node:crypto"
 import { hashPassword } from "better-auth/crypto"
-import { Pool } from "pg"
+import { Pool, type PoolClient } from "pg"
 
 const DEFAULT_EMAIL =
   process.env.AF_STACK_DEFAULT_OPERATOR_EMAIL?.trim() || "operator@af-stack.local"
@@ -47,6 +47,18 @@ async function withRetry(fn: () => Promise<void>, attempts = 20, delayMs = 3000)
     }
   }
   throw lastErr
+}
+
+async function ensureDefaultOperatorMembership(client: PoolClient): Promise<void> {
+  await client.query(
+    `insert into suite_memberships (tenant_id, user_id, role, accepted_at)
+     select '00000000-0000-0000-0000-000000000000'::uuid, u.id, 'owner', now()
+     from suite_users u
+     where lower(u.email) = lower($1)
+     on conflict (tenant_id, user_id) do update
+       set accepted_at = coalesce(suite_memberships.accepted_at, excluded.accepted_at)`,
+    [DEFAULT_EMAIL],
+  )
 }
 
 export async function seedDefaultOperator(): Promise<void> {
@@ -79,8 +91,10 @@ export async function seedDefaultOperator(): Promise<void> {
           "select count(*)::text as count from suite_operators",
         )
         if (Number(rows[0]?.count ?? "0") > 0) {
-          // Already bootstrapped — never re-seed, never clobber a changed
-          // password or an operator set the admin curated themselves.
+          // Already bootstrapped — never re-seed or clobber a changed
+          // password, but repair the default tenant membership if an older
+          // seed created only the operator + suite user rows.
+          await ensureDefaultOperatorMembership(client)
           await client.query("commit")
           return
         }
@@ -130,6 +144,7 @@ export async function seedDefaultOperator(): Promise<void> {
            on conflict ("email") do nothing`,
           [DEFAULT_EMAIL, DEFAULT_NAME],
         )
+        await ensureDefaultOperatorMembership(client)
 
         await client.query("commit")
         console.log(

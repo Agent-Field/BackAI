@@ -9,10 +9,10 @@
 //      A single module that re-exports the array of plugin manifests, imported
 //      from the original plugin.ts source. `loadPlugins()` reads from here.
 //
-//   2. src/app/(admin)/plugins/<id>/page.tsx
+//   2. src/app/old/plugins/<id>/page.tsx
 //      A thin proxy file that re-exports the default page component from the
-//      plugin's own `page.tsx`. This wires the plugin into the (admin) layout
-//      so the sidebar, topbar, auth gate, etc. all apply automatically.
+//      plugin's own `page.tsx`. The legacy plugin UI is parked with the old
+//      dashboard while the new admin is rebuilt from the v1 spec.
 //
 // Plugins are inert when the `plugins/` folder is empty: this script writes an
 // empty manifest and creates no route proxies.
@@ -36,7 +36,7 @@ const ROUTE_PROXY_ROOT = join(
   DASHBOARD_ROOT,
   "src",
   "app",
-  "(admin)",
+  "old",
   "plugins",
 )
 

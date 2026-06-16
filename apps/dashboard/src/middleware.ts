@@ -23,11 +23,21 @@ const PUBLIC_PREFIXES = [
 ]
 
 export function middleware(request: NextRequest) {
-  const { pathname, search } = request.nextUrl
+  const { pathname, search, searchParams } = request.nextUrl
 
   // Static assets and auth API always pass.
   if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) {
     return NextResponse.next()
+  }
+
+  if (process.env.NODE_ENV === "development" && searchParams.get("preview") === "1") {
+    const response = NextResponse.next()
+    response.cookies.set("better-auth.session_token", "dev-preview-session", {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+    })
+    return response
   }
 
   const sessionCookie = getSessionCookie(request)

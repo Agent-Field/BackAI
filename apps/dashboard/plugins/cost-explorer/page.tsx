@@ -42,7 +42,7 @@ import {
   formatCurrency,
   formatCurrencyCompact,
   formatPercentDelta,
-} from "@/app/(admin)/operate/cost/_components/format"
+} from "@/app/old/operate/cost/_components/format"
 
 export const dynamic = "force-dynamic"
 

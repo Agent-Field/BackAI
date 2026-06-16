@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field
 
 DATABASE_URL = os.environ["SHIPWRIGHT_DATABASE_URL"]
 RUNTIME_URL = os.getenv("AF_STACK_URL", "http://runtime:8080").rstrip("/")
+AGENTFIELD_URL = os.getenv("AGENTFIELD_URL", "http://agentfield:8080").rstrip("/")
 
 # SHIPWRIGHT_AGENT controls which agent the workload module dispatches to.
 #   - shipwright-v2.execute_task : the iteration stub (sync, ~10s, no keys)
@@ -270,56 +271,55 @@ async def _drive_async(task_id: str, tenant_id: str, input_payload: dict,
             (execution_id, run_id, task_id),
         )
 
-    # Poll the run/agentfield endpoint until terminal. SWE-AF builds can
-    # take 5-30+ min. This endpoint takes the tenant header — no Bearer
-    # needed because the workload module's caller already authenticated.
-    poll_interval_s = 5.0
+    # Poll AgentField's execution endpoint directly. AgentField stores the
+    # canonical execution state and doesn't require af-stack auth (it has
+    # its own DID-based auth which AgentFieldSDK handles, but for read-only
+    # status the public GET is open inside the docker network).
+    poll_interval_s = 2.0  # tighter for fast-failing builds
     max_wait_s = 60 * 60
     elapsed = 0.0
-    poll_path = f"/api/v1/runs/{run_id}/agentfield" if run_id else None
-    fallback_path = f"/api/v1/executions/{execution_id}"
 
-    while elapsed < max_wait_s:
-        await asyncio.sleep(poll_interval_s)
-        elapsed += poll_interval_s
-        try:
-            poll = await _runtime_client.get(poll_path or fallback_path,
-                                              headers=headers)
-        except Exception as exc:  # noqa: BLE001
-            print(f"[shipwright-api] poll error (will retry): {exc}",
-                  flush=True)
-            continue
+    async with httpx.AsyncClient(base_url=AGENTFIELD_URL,
+                                  timeout=10.0) as af:
+        while elapsed < max_wait_s:
+            await asyncio.sleep(poll_interval_s)
+            elapsed += poll_interval_s
+            try:
+                poll = await af.get(f"/api/v1/executions/{execution_id}")
+            except Exception as exc:  # noqa: BLE001
+                print(f"[shipwright-api] poll error (will retry): {exc}",
+                      flush=True)
+                continue
 
-        if poll.status_code == 404 and poll_path:
-            # Fallback path if runs/{id}/agentfield isn't available.
-            poll_path = None
-            continue
-
-        if poll.status_code != 200:
-            print(
-                f"[shipwright-api] poll {poll.status_code} for {execution_id} "
-                f"(elapsed {elapsed:.0f}s)",
-                flush=True,
-            )
-            continue
-
-        exec_body = poll.json() or {}
-        # Extract status from either response shape.
-        overview = exec_body.get("overview") or exec_body
-        status = (overview.get("status") or "").lower()
-
-        if status in ("succeeded", "completed", "failed", "cancelled"):
-            result = exec_body.get("result") or overview.get("result") or {}
-            if status in ("succeeded", "completed"):
-                await _persist_result(task_id, tenant_id, result)
-            else:
-                err = (
-                    exec_body.get("error")
-                    or overview.get("error")
-                    or "agent execution failed"
+            if poll.status_code != 200:
+                print(
+                    f"[shipwright-api] AgentField poll {poll.status_code} "
+                    f"for {execution_id} (elapsed {elapsed:.0f}s)",
+                    flush=True,
                 )
-                await _record_failure(task_id, tenant_id, str(err))
-            return
+                continue
+
+            exec_body = poll.json() or {}
+            status = (exec_body.get("status") or "").lower()
+
+            if status in ("succeeded", "completed", "failed", "cancelled",
+                          "error"):
+                result = exec_body.get("result") or exec_body.get("output") or {}
+                if status in ("succeeded", "completed"):
+                    await _persist_result(task_id, tenant_id, result)
+                else:
+                    err = (
+                        exec_body.get("error")
+                        or exec_body.get("error_message")
+                        or "agent execution failed"
+                    )
+                    print(
+                        f"[shipwright-api] task {task_id} → {status}: "
+                        f"{str(err)[:200]}",
+                        flush=True,
+                    )
+                    await _record_failure(task_id, tenant_id, str(err))
+                return
 
     await _record_failure(
         task_id, tenant_id,

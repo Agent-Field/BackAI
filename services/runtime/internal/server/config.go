@@ -5,6 +5,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/featureflags"
+	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 )
 
 func (s *Server) registerConfigRoutes() {
@@ -30,9 +32,17 @@ func writeFeatureFlagError(w http.ResponseWriter, err error) {
 	}
 }
 
+func (s *Server) featureFlagContext(ctx context.Context, r *http.Request) context.Context {
+	if tenantctx.TenantID(ctx) != "" {
+		return ctx
+	}
+	return tenantctx.WithTenantAndUser(ctx, s.defaultTenant(r), "", tenantctx.UserID(ctx))
+}
+
 func (s *Server) handleListFeatureFlags(w http.ResponseWriter, r *http.Request) {
 	ctx, span := s.dashTracer().Start(r.Context(), "dashboard.config.flags.list")
 	defer span.End()
+	ctx = s.featureFlagContext(ctx, r)
 
 	if s.featureFlags == nil {
 		writeJSON(w, http.StatusOK, featureflags.List{Flags: featureflags.Defaults()})
@@ -57,6 +67,7 @@ type setFeatureFlagInput struct {
 func (s *Server) handleSetFeatureFlag(w http.ResponseWriter, r *http.Request) {
 	ctx, span := s.dashTracer().Start(r.Context(), "dashboard.config.flags.set")
 	defer span.End()
+	ctx = s.featureFlagContext(ctx, r)
 	if s.featureFlags == nil {
 		writeError(w, http.StatusServiceUnavailable, "FEATURE_FLAGS_NOT_CONFIGURED",
 			"feature flag persistence is not configured on this runtime", nil)

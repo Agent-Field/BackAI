@@ -120,6 +120,10 @@ var publicPrefixes = []string{
 	"/api/v1/mcp",
 	// Skills (Phase 11.3) — install/list/attach surface.
 	"/api/v1/skills",
+	// Secrets + config are operator dashboard surfaces. The handlers use
+	// default-tenant semantics until full per-tenant dashboard switching lands.
+	"/api/v1/secrets",
+	"/api/v1/config",
 	// Harnesses (Phase 11.4) — probe + list surface for the dashboard.
 	"/api/v1/harnesses",
 	// Crons (Phase 12.2) — scheduled-job CRUD surface.
