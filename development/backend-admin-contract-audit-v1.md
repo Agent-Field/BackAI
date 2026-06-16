@@ -34,18 +34,22 @@ Streaming pattern for admin:
 | Runtime | BackAI middleware | self | Status row (`/health`, `/ready`, build info) |
 | Dashboard / customer-app / supportdesk-agent | UI + example app | n/a | Not surfaced as adapter; they're consumers |
 
-### 1.2 Observability profile (opt-in via `docker compose --profile observability up`)
+### 1.2 Observability backends (operator-deployed; runtime is env-var-configured)
 
-| Service | Purpose | Native UI port | Surface in admin |
+The runtime exposes 4 adapter slots (`logs`, `traces`, `metrics`, `errors`) that bind to whatever the operator deploys. The mechanism for deploying these services (compose, k8s, external SaaS) is the operator's choice — outside the scope of this contract. The runtime only cares about env vars pointing at the backend's HTTP API.
+
+| Backend | Slot it serves | Native UI port | Runtime env vars |
 |---|---|---|---|
-| **Vector** | Log shipper — reads `/var/run/docker.sock`, parses JSON, forwards to Loki | none | Status row only |
-| **Loki** | Log store; queried by admin via Logs slot | `:3100` (API, no real UI) | Status row; powers `/api/v1/admin/logs` |
-| **otel-collector** | Receives OTLP spans from runtime + agents; forwards to Tempo | none | Status row only |
-| **Tempo** | Trace store; uses MinIO as object backend | `:3200` (API) | Status row; powers `/api/v1/admin/traces` |
-| **Prometheus** | Scrapes `/metrics` from runtime + cAdvisor; time-series store | `:9090` (UI) | Status row + "Open Prometheus" button |
-| **cAdvisor** | Exposes per-container CPU/mem/IO metrics in Prometheus format | `:8080` (UI) | Status row only |
-| **GlitchTip** | Open-source Sentry-compatible error tracker (AGPL); uses our `postgres` | `:8000` (UI) | Status row + "Open GlitchTip" button |
-| **Grafana** | Operator-facing charts + ad-hoc dashboards | `:3000` (UI) | Status row + "Open Grafana" button |
+| **Vector** (log shipper) | feeds Loki | none | (write-side; no runtime config needed) |
+| **Loki** (log store) | `logs` slot | `:3100` (HTTP API only) | `AF_STACK_LOGS_BACKEND=loki`, `AF_STACK_LOGS_LOKI_URL` |
+| **otel-collector** (trace receiver) | feeds Tempo | none | runtime exports via OTel SDK if `OTEL_EXPORTER_OTLP_ENDPOINT` set |
+| **Tempo** (trace store) | `traces` slot | `:3200` (HTTP API) | `AF_STACK_TRACES_BACKEND=tempo`, `AF_STACK_TRACES_TEMPO_URL` |
+| **Prometheus** (metrics store) | `metrics` slot | `:9090` (UI) | `AF_STACK_METRICS_BACKEND=prometheus`, `AF_STACK_METRICS_PROMETHEUS_URL` |
+| **cAdvisor** (container metrics exporter) | feeds Prometheus | `:8080` (UI) | (scraped by Prometheus; no runtime config) |
+| **GlitchTip** (error tracker) | `errors` slot | `:8000` (UI) | `AF_STACK_ERRORS_BACKEND=glitchtip`, `AF_STACK_ERRORS_GLITCHTIP_URL`, `..._ORG`, `..._TOKEN`, `SENTRY_DSN` |
+| **Grafana** (optional charts UI) | none (just link-out) | `:3000` (UI) | `AF_STACK_GRAFANA_URL` (for Connected Services link-out) |
+
+When an env var is unset, the corresponding slot stays on its default builtin (degraded mode); the admin UI gracefully shows zero-state or restricted feature set. See `development/execution-blocks-v1.md` for the full adapter design of each slot.
 
 ### 1.3 Explicitly NOT in scope
 
@@ -75,7 +79,7 @@ Each row: BackAI Go interface + remote-shim contract. Operators swap adapters vi
 
 ### 2.2 NEW observability slots (this audit's scope)
 
-Each is a Tier-1 adapter slot (swappable). Default builtin = in-runtime degraded mode. Real backend = OSS sidecar plugged in via observability profile. Same modularity rule: third parties can ship alternative backends via the remote-shim pattern.
+Each is a Tier-1 adapter slot (swappable). Default builtin = in-runtime degraded mode. Real backend = OSS sidecar plugged in via observability backend. Same modularity rule: third parties can ship alternative backends via the remote-shim pattern.
 
 | Slot | BackAI interface (Go) | Default builtin | Observability-profile backend | Alternative remote backends |
 |---|---|---|---|---|
@@ -182,7 +186,7 @@ Principle: **don't add new admin pages.** Extend existing ones via tabs or panel
 │ Connections  Idle  Active  Slow queries (24h)  Cache hit ratio    │
 │ 14           11    3       2                    98.4%              │
 └────────────────────────────────────────────────────────────────────┘
-┌─ Containers (when observability profile enabled) ──────────────────┐
+┌─ Containers (when observability backend enabled) ──────────────────┐
 │ runtime       cpu 4.2%   mem 320MB   restarts 0   uptime 4d       │
 │ litellm       cpu 1.1%   mem 180MB   restarts 0   uptime 4d       │
 │ agentfield    cpu 0.8%   mem 240MB   restarts 0   uptime 4d       │
@@ -204,10 +208,10 @@ Each block is independently shippable. Order is "most-operator-value-first".
 | 1 | **Quick wins (no new OSS)** | Wire `/admin/adapters` mount · `/admin/services` synth · `/admin/db/health` · `/llm/provider-health` poller · cron trigger · cache flush · key rotate · brand read/write · DB Health tab on SQL page | ~2 days |
 | 2 | **Logs slot** | Define `logs.Store` interface · builtin = current ring · remote shim · protocol spec (logs-v1) · observability compose profile with Loki + Vector · conformance harness adds logs slot · Operate → Logs swaps data source | ~2 days |
 | 3 | **Traces slot** | Define `traces.Store` · uncomment otel-collector in compose · add Tempo (uses MinIO storage) · protocol spec (traces-v1) · conformance · Operate → Traces swaps data source | ~2 days |
-| 4 | **Metrics slot** | Define `metrics.Store` · add Prometheus + cAdvisor to observability profile · protocol spec (metrics-v1) · Operate → Cost chart panel · Operate → Health container subsection | ~2 days |
-| 5 | **Errors slot** | Define `errors.Store` · add GlitchTip to observability profile + SDK wiring in runtime · protocol spec (errors-v1) · Operate → Errors swaps data source | ~2 days |
+| 4 | **Metrics slot** | Define `metrics.Store` · add Prometheus + cAdvisor to observability backend · protocol spec (metrics-v1) · Operate → Cost chart panel · Operate → Health container subsection | ~2 days |
+| 5 | **Errors slot** | Define `errors.Store` · add GlitchTip to observability backend + SDK wiring in runtime · protocol spec (errors-v1) · Operate → Errors swaps data source | ~2 days |
 | 6 | **Aggregation endpoints** | reasoners analytics · tools usage · search index stats · notifications channels CRUD · OAuth refresh history | ~2 days |
-| 7 | **Polish** | Adapter pill on each adapter-backed page showing active backend · Connected Services widget on Home as a compact strip · Grafana link-outs on Cost / Health when observability profile is on | ~1 day |
+| 7 | **Polish** | Adapter pill on each adapter-backed page showing active backend · Connected Services widget on Home as a compact strip · Grafana link-outs on Cost / Health when observability backend is on | ~1 day |
 
 **Total: ~13 days.**
 

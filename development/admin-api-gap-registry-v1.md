@@ -8,7 +8,7 @@ This file records the UI contract status for every page in `development/ui-plan-
 - `derived` — primary data exists but UI computes grouping / forecast / status locally; runtime aggregation deferred.
 - `degraded` — endpoint exists but active adapter or runtime may not expose the full data.
 - `missing` — endpoint or adapter capability is absent.
-- `slot-pending` — adapter-backed surface; works with builtin (degraded) today, swaps to full backend when observability profile or remote adapter is configured.
+- `slot-pending` — adapter-backed surface; works with builtin (degraded) today, swaps to full backend when observability backend or remote adapter is configured.
 
 ## Page status
 
@@ -17,8 +17,8 @@ This file records the UI contract status for every page in `development/ui-plan-
 | Home | backed | `/api/v1/home/overview`, `/api/v1/metrics/summary`, `/api/v1/activity`, `/health`, `/ready`, realtime | None |
 | Runs | backed | `/api/v1/runs`, run events, AgentField link, run actions | None |
 | Cost | derived | `/api/v1/cost`, `/api/v1/cost/events`, budgets, cache stats | **Time-series charts blocked on `metrics` slot.** Forecast + cache savings remain client-derived. |
-| Errors | slot-pending | `/api/v1/logs?level=error,fatal` (builtin) | **Becomes `backed` once `errors` slot lands (GlitchTip default via observability profile).** Add `/api/v1/admin/errors` + mute/resolve endpoints. |
-| Traces | slot-pending | runtime trace context (thin) | **Becomes `backed` once `traces` slot lands (Tempo default via observability profile).** Add `/api/v1/admin/traces` + `/admin/traces/{id}`. |
+| Errors | slot-pending | `/api/v1/logs?level=error,fatal` (builtin) | **Becomes `backed` once `errors` slot lands (GlitchTip default via observability backend).** Add `/api/v1/admin/errors` + mute/resolve endpoints. |
+| Traces | slot-pending | runtime trace context (thin) | **Becomes `backed` once `traces` slot lands (Tempo default via observability backend).** Add `/api/v1/admin/traces` + `/admin/traces/{id}`. |
 | Queue | backed | `/api/v1/queues/summary`, `/api/v1/jobs`, `/api/v1/jobs/definitions`, retry/enqueue | None — already covers River queue admin needs. |
 | Cache | backed | `/api/v1/llm/cache/stats` | **Flush action needs `POST /api/v1/llm/cache/flush`.** |
 | Sandbox runs | backed | `/api/v1/sandbox/runs`, detail, logs, delete | None |
@@ -75,24 +75,20 @@ These add four Tier-1 adapter slots to the platform. Each follows the existing 8
 | `metrics` | none | **Prometheus** (scrapes runtime + cAdvisor) | `/api/v1/admin/metrics/query`, `/api/v1/admin/metrics/range` |
 | `errors` | log-filter aggregation (current) | **GlitchTip** (open-source Sentry-compatible) | `/api/v1/admin/errors`, `/admin/errors/{id}`, `/admin/errors/{id}/mute`, `/admin/errors/{id}/resolve` |
 
-When the observability profile is **not** enabled, every page above degrades gracefully to its builtin source — no broken UI.
+When the observability backend is **not** enabled, every page above degrades gracefully to its builtin source — no broken UI.
 
-## Compose changes
+## Observability backends (operator-deployed)
 
-Single new compose profile: `--profile observability`. Adds:
+The runtime is fully env-var-configured for each observability slot. How the operator deploys Loki / Tempo / Prometheus / GlitchTip / Vector / otel-collector / cAdvisor is outside this contract — the runtime simply binds to whatever HTTP endpoint the env var points at. See `development/execution-blocks-v1.md` for the full adapter design.
 
-```
-vector (log shipper)
-loki (log store)
-otel-collector (trace receiver)
-tempo (trace store; uses MinIO)
-prometheus (metrics store)
-cadvisor (container-metrics exporter)
-glitchtip (error tracker; uses our postgres)
-grafana (admin link-out for charts)
-```
+| Slot | Env var to switch | Backend HTTP endpoint env var |
+|---|---|---|
+| `logs` | `AF_STACK_LOGS_BACKEND=loki` | `AF_STACK_LOGS_LOKI_URL` |
+| `traces` | `AF_STACK_TRACES_BACKEND=tempo` | `AF_STACK_TRACES_TEMPO_URL` |
+| `metrics` | `AF_STACK_METRICS_BACKEND=prometheus` | `AF_STACK_METRICS_PROMETHEUS_URL` |
+| `errors` | `AF_STACK_ERRORS_BACKEND=glitchtip` | `AF_STACK_ERRORS_GLITCHTIP_URL` + `_ORG` + `_TOKEN` |
 
-Each is opt-in. The base stack is unchanged.
+When unset, each slot stays on its default builtin (ring buffer for logs, empty for traces, none for metrics, log-filter for errors). The admin UI's adapter pill reflects which backend is active.
 
 ## Cross-page conventions
 

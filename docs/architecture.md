@@ -158,12 +158,12 @@ architecture is honest:
 
 | Tier | Meaning | Examples | Swap by |
 |---|---|---|---|
-| **1** | Hot-swappable: real Go interface + multiple implementations or remote-adapter pattern | Sandbox, object storage, notifications, billing, multimodal LLM, LLM chat gateway, auth, secrets. **Plus 4 observability slots (logs, traces, metrics, errors) when the `observability` compose profile is active.** | Setting `AF_STACK_<slot>_ADAPTER=...` (or starting the observability profile) and restarting |
+| **1** | Hot-swappable: real Go interface + multiple implementations or remote-adapter pattern | Sandbox, object storage, notifications, billing, multimodal LLM, LLM chat gateway, auth, secrets. **Plus 4 observability slots (logs, traces, metrics, errors) — Tier-1 once shipped per the roadmap.** | Setting `AF_STACK_<slot>_BACKEND=...` (or `AF_STACK_<slot>_ADAPTER=remote`) and restarting |
 | **2** | Config-swappable: same wire protocol | Postgres (Aurora, Neon, RDS, Supabase, self-hosted) | Changing `DATABASE_URL` |
 | **3** | Interface-swappable: Go interface exists, only one impl today | Job queue, outbound webhooks, reasoning | Writing the second adapter |
 | **4** | Foundational: tightly coupled to platform's core abstractions | Postgres RLS pattern, pgvector | Fork the codebase |
 
-> **Observability slots roadmap** — `logs` (Loki+Vector default), `traces` (Tempo via otel-collector default), `metrics` (Prometheus + cAdvisor default), `errors` (GlitchTip default). All four are scoped in `development/backend-admin-contract-audit-v1.md`; they ship as Tier-1 once the observability compose profile is built.
+> **Observability slots roadmap** — `logs` (Loki default backend), `traces` (Tempo default backend), `metrics` (Prometheus default backend), `errors` (GlitchTip default backend). Each follows the existing 8-slot scaffolding. The runtime binds to operator-deployed backends via env vars; how operators deploy those services (compose, k8s, external SaaS) is outside the adapter contract. Full design in `development/execution-blocks-v1.md`.
 
 Tier matters for the dashboard: `Setup → Adapters` renders each slot
 with the affordances appropriate to its tier.

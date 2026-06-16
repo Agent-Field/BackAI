@@ -9,8 +9,9 @@
 2. `development/ui-plan-v1.md` — the operator-console product spec (authoritative for every page).
 3. `development/admin-design-patterns-v1.md` — the implementation contract (shell, grid, page archetypes).
 4. `development/admin-api-gap-registry-v1.md` — per-page UI contract status.
-5. `development/backend-admin-contract-audit-v1.md` — **the to-do list**: backend gaps, compose changes, frontend wiring, ordered roadmap.
-6. `docs/adapters/PROTOCOL.md` + `docs/adapters/protocols/<slot>-v1.md` — adapter contracts (8 slots shipped; 4 more queued in roadmap).
+5. `development/backend-admin-contract-audit-v1.md` — backend-side gap catalogue.
+6. `development/execution-blocks-v1.md` — **the to-do list**: 7 ordered execution blocks, each independently shippable, with the full adapter design for the 4 new observability slots.
+7. `docs/adapters/PROTOCOL.md` + `docs/adapters/protocols/<slot>-v1.md` — adapter contracts (8 slots shipped; 4 more designed in block 2-5 of the execution doc).
 
 ## What's done (shipped on this branch)
 
@@ -23,19 +24,21 @@
 
 ## What's NOT done (the roadmap)
 
-All outstanding work is consolidated in `development/backend-admin-contract-audit-v1.md` §6 (Roadmap). Summary:
+All outstanding work is consolidated in `development/execution-blocks-v1.md` — 7 ordered execution blocks, each independently shippable. Summary:
 
 | Order | Block | Effort |
 |---|---|---|
 | 1 | Quick wins — no new OSS (adapter-registry mount, /admin/services synth, /admin/db/health, provider-health poller, cron trigger, cache flush, key rotate, brand R/W, SQL Health tab) | ~2 days |
-| 2 | **`logs` adapter slot** — Loki + Vector via observability profile | ~2 days |
-| 3 | **`traces` adapter slot** — Tempo + otel-collector via observability profile | ~2 days |
-| 4 | **`metrics` adapter slot** — Prometheus + cAdvisor via observability profile (Cost charts + Container subsection) | ~2 days |
-| 5 | **`errors` adapter slot** — GlitchTip via observability profile | ~2 days |
+| 2 | **`logs` adapter slot** — default Loki backend (operator-deployed); ring-buffer fallback | ~2 days |
+| 3 | **`traces` adapter slot** — default Tempo backend (operator-deployed); empty fallback | ~2 days |
+| 4 | **`metrics` adapter slot** — default Prometheus backend (operator-deployed); Cost charts + Container subsection | ~2 days |
+| 5 | **`errors` adapter slot** — default GlitchTip backend (operator-deployed); log-filter fallback | ~2 days |
 | 6 | Aggregation endpoints (reasoners analytics, tools usage, search index stats, notifications channels CRUD, OAuth refresh history) | ~2 days |
-| 7 | Polish (adapter pill on adapter-backed pages, Home Connected Services strip, Grafana link-outs) | ~1 day |
+| 7 | Polish (adapter pill on adapter-backed pages, Home Connected Services strip, capability-honest degradation) | ~1 day |
 
 **Total: ~13 days.** Each block is independently shippable.
+
+Blocks 2-5 follow the same adapter-slot scaffolding as the existing 8 slots (Go interface + per-slot HTTP protocol + remote-shim + registry row + conformance check). Full design for each in the execution doc.
 
 ## Locked decisions baked into the roadmap
 
@@ -43,7 +46,7 @@ All outstanding work is consolidated in `development/backend-admin-contract-audi
 - **One central "Connected services" hub** at Operate → Health. Reads `/api/v1/admin/services` (synth from adapter registry + observability env). All "Open native UI" link-outs live here.
 - **Per-page deep links only for specific entities** (e.g., Operate → Runs row → "Open in AgentField" for that run id).
 - **Every new observability layer is an adapter slot.** Same scaffolding as existing 8 — protocol doc, Go interface, remote shim, registry row, conformance check. Third parties can swap backends.
-- **Observability profile** — `docker compose --profile observability up` brings up Vector + Loki + otel-collector + Tempo + Prometheus + cAdvisor + GlitchTip + Grafana. Base stack stays lean.
+- **Observability backends are operator-deployed and env-var-bound.** The runtime adapts to whatever the operator stands up (Loki at `AF_STACK_LOGS_LOKI_URL`, Tempo at `AF_STACK_TRACES_TEMPO_URL`, Prometheus at `AF_STACK_METRICS_PROMETHEUS_URL`, GlitchTip at `AF_STACK_ERRORS_GLITCHTIP_URL`). When unset, each slot stays on its default builtin.
 - **LLM-specific observability (Langfuse / Helicone / OpenLIT) is NOT in v1.** Covered by generic Logs + Traces + Errors.
 - **River UI / pgHero / Sentry self-hosted: NOT in v1.** Existing queue page + DB Health tab + GlitchTip cover the same ground.
 

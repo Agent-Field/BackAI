@@ -403,7 +403,7 @@ For each page below: **purpose** (why it exists), **data displayed** (what to sh
   - Hierarchical span tree
   - Per span: name, duration, attributes (model, tokens, tenant, etc.), status
   - Critical path highlighted
-- Link to "Open in Langfuse" when the observability profile is enabled
+- Adapter pill ("via Tempo" / "via builtin") on page header when the traces adapter slot is configured (see `development/execution-blocks-v1.md` Block 3)
 
 **Actions**:
 - Search by trace id
