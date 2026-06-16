@@ -152,3 +152,32 @@ func TestLogsAdapterRequiresURL(t *testing.T) {
 		t.Fatal("expected logs.adapter=remote without url to fail")
 	}
 }
+
+func TestTracesEnvOverrides(t *testing.T) {
+	t.Setenv("AF_STACK_TRACES_ADAPTER", "TEMPO")
+	t.Setenv("AF_STACK_TRACES_TEMPO_URL", "http://tempo:3200")
+	t.Setenv("AF_STACK_TRACES_TEMPO_TENANT", "tenant-a")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Traces.Adapter != "tempo" {
+		t.Fatalf("adapter=%q want tempo", cfg.Traces.Adapter)
+	}
+	if cfg.Traces.Tempo.URL != "http://tempo:3200" || cfg.Traces.Tempo.Tenant != "tenant-a" {
+		t.Fatalf("tempo config=%+v", cfg.Traces.Tempo)
+	}
+}
+
+func TestTracesAdapterRequiresURL(t *testing.T) {
+	cfg := Default()
+	cfg.Traces.Adapter = "tempo"
+	if err := validate(cfg); err == nil {
+		t.Fatal("expected traces.adapter=tempo without url to fail")
+	}
+	cfg = Default()
+	cfg.Traces.Adapter = "remote"
+	if err := validate(cfg); err == nil {
+		t.Fatal("expected traces.adapter=remote without url to fail")
+	}
+}

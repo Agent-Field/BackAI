@@ -88,7 +88,22 @@ type LogsRemoteFeature struct {
 
 type TracesFeature struct {
 	Enabled bool   `yaml:"enabled" json:"enabled"`
-	Backend string `yaml:"backend" json:"backend"`
+	Adapter string `yaml:"adapter" json:"adapter"`
+	// Backend is accepted for Block 2 config-file compatibility. Block 4
+	// standardises this slot on adapter to match the runtime env convention.
+	Backend string              `yaml:"backend,omitempty" json:"-"`
+	Tempo   TracesTempoFeature  `yaml:"tempo" json:"tempo"`
+	Remote  TracesRemoteFeature `yaml:"remote" json:"remote"`
+}
+
+type TracesTempoFeature struct {
+	URL    string `yaml:"url" json:"url"`
+	Tenant string `yaml:"tenant" json:"tenant"`
+}
+
+type TracesRemoteFeature struct {
+	URL   string `yaml:"url" json:"url"`
+	Token string `yaml:"token"`
 }
 
 type MetricsFeature struct {
@@ -187,6 +202,9 @@ func mergeFeatureOverrides(base Features, raw RawFeatures) Features {
 		base.Logs = *raw.Logs
 	}
 	if raw.Traces != nil {
+		if raw.Traces.Adapter == "" && raw.Traces.Backend != "" {
+			raw.Traces.Adapter = raw.Traces.Backend
+		}
 		base.Traces = *raw.Traces
 	}
 	if raw.Metrics != nil {

@@ -60,6 +60,8 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability/logs"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability/logs/logselect"
+	"github.com/Agent-Field/backai/services/runtime/internal/observability/traces"
+	"github.com/Agent-Field/backai/services/runtime/internal/observability/traces/traceselect"
 	"github.com/Agent-Field/backai/services/runtime/internal/probe"
 	"github.com/Agent-Field/backai/services/runtime/internal/retention"
 	"github.com/Agent-Field/backai/services/runtime/internal/sandbox"
@@ -159,6 +161,7 @@ func buildAdapterRegistry(
 	webhooksSvc *webhooks.Service,
 	billingSvc *billing.Service,
 	logsStore logs.Store,
+	tracesStore traces.Store,
 ) *adapterregistry.Registry {
 	r := adapterregistry.New()
 
@@ -303,6 +306,37 @@ func buildAdapterRegistry(
 		AdminUI:          cfg.Logs.Loki.URL,
 		Capabilities:     caps(logsCaps),
 		Probe:            staticStatus(logsStatus),
+	})
+
+	tracesAdapter := traceselect.Adapter(cfg)
+	tracesKind := adapterregistry.KindBuiltin
+	if tracesAdapter == "remote" {
+		tracesKind = adapterregistry.KindRemote
+	}
+	tracesCaps := map[string]any{"contract_pending": true}
+	tracesStatus := adapterregistry.StatusUnhealthy
+	if tracesStore != nil {
+		tracesStatus = adapterregistry.StatusHealthy
+		c := tracesStore.Capabilities()
+		tracesCaps = map[string]any{
+			"supports_traceql":      c.SupportsTraceQL,
+			"supports_tag_search":   c.SupportsTagSearch,
+			"native_query_lang":     c.NativeQueryLang,
+			"retention_hours":       c.RetentionHours,
+			"max_results_per_query": c.MaxResultsPerQuery,
+		}
+	}
+	r.Register(adapterregistry.Slot{
+		ID:               "traces",
+		Tier:             adapterregistry.Tier1,
+		Kind:             tracesKind,
+		Name:             traceselect.Name(cfg, tracesStore),
+		AvailableBuiltin: []string{"empty", "tempo"},
+		SwapMethod:       "env_var",
+		SwapEnv:          "AF_STACK_TRACES_ADAPTER",
+		AdminUI:          cfg.Traces.Tempo.URL,
+		Capabilities:     caps(tracesCaps),
+		Probe:            staticStatus(tracesStatus),
 	})
 
 	notificationName := "none"
@@ -569,6 +603,16 @@ func main() {
 	log.Info("logs adapter ready",
 		"adapter", logselect.Adapter(cfg),
 		"name", logselect.Name(cfg, logsStore),
+	)
+
+	tracesStore, err := traceselect.Select(ctx, cfg)
+	if err != nil {
+		log.Error("traces adapter init failed", "adapter", traceselect.Adapter(cfg), "error", err)
+		os.Exit(1)
+	}
+	log.Info("traces adapter ready",
+		"adapter", traceselect.Adapter(cfg),
+		"name", traceselect.Name(cfg, tracesStore),
 	)
 
 	// Observability: set up OTel + Prometheus. Failures are non-fatal —
@@ -1356,6 +1400,7 @@ func main() {
 		webhooksSvc,
 		billingSvc,
 		logsStore,
+		tracesStore,
 	)
 	probeReg.WithAdapterRegistry(adapterRegistry)
 
@@ -1401,6 +1446,7 @@ func main() {
 		Approvals:       approvalsStore,
 		LogRing:         logRing,
 		LogsStore:       logsStore,
+		TracesStore:     tracesStore,
 		Version:         version,
 	})
 

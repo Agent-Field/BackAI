@@ -44,7 +44,7 @@ LiteLLM gateway features:
 Future slots declared in Block 2:
 
 - `logs.adapter`: `ring | loki | remote`
-- `traces.backend`: `empty | tempo | remote`
+- `traces.adapter`: `empty | tempo | remote`
 - `metrics.backend`: `none | prometheus | remote`
 - `errors.backend`: `logfilter | glitchtip | remote`
 

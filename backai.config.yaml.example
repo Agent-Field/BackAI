@@ -34,7 +34,13 @@ features:
 
   traces:
     enabled: false
-    backend: empty
+    adapter: empty
+    tempo:
+      url: ""
+      tenant: ""
+    remote:
+      url: ""
+      token: ""
 
   metrics:
     enabled: false

@@ -300,6 +300,58 @@ export const LogCapabilitiesSchema = z.object({
 })
 export type LogCapabilities = z.infer<typeof LogCapabilitiesSchema>
 
+export const TraceSummarySchema = z.object({
+  trace_id: z.string(),
+  root_service: z.string().default("unknown"),
+  root_operation: z.string().default("trace"),
+  start_time: z.string().default(""),
+  duration_ms: z.number().default(0),
+  span_count: z.number().default(0),
+  status: z.string().default("unset"),
+})
+export type TraceSummary = z.infer<typeof TraceSummarySchema>
+
+export const SpanEventSchema = z.object({
+  ts: z.string().default(""),
+  name: z.string(),
+  attributes: z.record(z.string(), z.unknown()).optional(),
+})
+
+export const SpanSchema = z.object({
+  span_id: z.string(),
+  parent_span_id: z.string().default(""),
+  service: z.string().default("unknown"),
+  operation: z.string().default("span"),
+  start_time: z.string().default(""),
+  duration_ms: z.number().default(0),
+  status: z.string().default("unset"),
+  attributes: z.record(z.string(), z.unknown()).optional(),
+  events: z.array(SpanEventSchema).optional(),
+})
+export type TraceSpan = z.infer<typeof SpanSchema>
+
+export const TraceSearchSchema = z.object({
+  traces: z.array(TraceSummarySchema),
+  total: z.number().optional(),
+  has_more: z.boolean().optional(),
+})
+export type TraceSearch = z.infer<typeof TraceSearchSchema>
+
+export const TraceDetailSchema = z.object({
+  trace_id: z.string(),
+  spans: z.array(SpanSchema),
+})
+export type TraceDetail = z.infer<typeof TraceDetailSchema>
+
+export const TraceCapabilitiesSchema = z.object({
+  supports_traceql: z.boolean().default(false),
+  supports_tag_search: z.boolean().default(false),
+  native_query_lang: z.string().default(""),
+  retention_hours: z.number().default(0),
+  max_results_per_query: z.number().default(0),
+})
+export type TraceCapabilities = z.infer<typeof TraceCapabilitiesSchema>
+
 export const QueueSummarySchema = z.object({
   pending: z.number(),
   running: z.number(),
@@ -2092,6 +2144,32 @@ export const api = {
   },
   logsCapabilities: () =>
     request("/api/v1/admin/logs/capabilities", undefined, LogCapabilitiesSchema),
+  traces: {
+    list: (params?: {
+      service?: string
+      operation?: string
+      status?: string
+      from?: string
+      to?: string
+      duration_gt?: string
+      limit?: number
+    }) => {
+      const qs = new URLSearchParams()
+      if (params?.service) qs.set("service", params.service)
+      if (params?.operation) qs.set("operation", params.operation)
+      if (params?.status) qs.set("status", params.status)
+      if (params?.from) qs.set("from", params.from)
+      if (params?.to) qs.set("to", params.to)
+      if (params?.duration_gt) qs.set("duration_gt", params.duration_gt)
+      if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+      const q = qs.toString()
+      return request(`/api/v1/admin/traces${q ? "?" + q : ""}`, undefined, TraceSearchSchema)
+    },
+    get: (traceId: string) =>
+      request(`/api/v1/admin/traces/${encodeURIComponent(traceId)}`, undefined, TraceDetailSchema),
+    capabilities: () =>
+      request("/api/v1/admin/traces/capabilities", undefined, TraceCapabilitiesSchema),
+  },
 
   // ─── Jobs ───
 	  jobs: {

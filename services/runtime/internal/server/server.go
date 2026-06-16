@@ -41,6 +41,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/oauth"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability/logs"
+	"github.com/Agent-Field/backai/services/runtime/internal/observability/traces"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
 	"github.com/Agent-Field/backai/services/runtime/internal/probe"
 	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
@@ -192,6 +193,9 @@ type Server struct {
 	// logsStore is the active logs adapter slot. It defaults to the ring
 	// adapter and may be Loki or remote when configured.
 	logsStore logs.Store
+	// tracesStore is the active traces adapter slot. It defaults to the empty
+	// adapter and may be Tempo or remote when configured.
+	tracesStore traces.Store
 	// version is the runtime version label surfaced in
 	// /api/v1/metrics/summary. Defaults to "dev" when empty.
 	version string
@@ -351,6 +355,9 @@ type Deps struct {
 	// LogsStore is the active logs adapter. When nil, New falls back to the
 	// compatibility ring path and the admin endpoint serves an empty page.
 	LogsStore logs.Store
+	// TracesStore is the active traces adapter. When nil, trace search serves
+	// an empty page and trace detail returns traces_no_backend.
+	TracesStore traces.Store
 	// Version is the runtime version string surfaced via
 	// /api/v1/metrics/summary. Defaults to "dev".
 	Version string
@@ -431,6 +438,7 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		metricsRing:     newMetricsRing(MetricsRingSize),
 		logRing:         deps.LogRing,
 		logsStore:       deps.LogsStore,
+		tracesStore:     deps.TracesStore,
 		version:         deps.Version,
 	}
 	if s.rbac == nil {
@@ -799,6 +807,11 @@ func (s *Server) registerRoutes() {
 	// empty array; otherwise returns the most-recent buffered lines.
 	s.registerLogsRoutes()
 	s.registerLogsOpenAPI()
+
+	// Traces adapter slot. The default empty adapter serves zero-state search
+	// and reports no backend for trace detail; Tempo/remote activate by config.
+	s.registerTraceRoutes()
+	s.registerTraceOpenAPI()
 
 	if s.tel != nil {
 		s.mux.Handle("GET /metrics", s.tel.MetricsHandler())

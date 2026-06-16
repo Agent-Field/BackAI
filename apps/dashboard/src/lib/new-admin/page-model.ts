@@ -164,6 +164,15 @@ function logsAdapterLabel(snapshot: OperatorSnapshot) {
   return "ring buffer"
 }
 
+function tracesAdapterLabel(snapshot: OperatorSnapshot) {
+  const registryRow = snapshot.adapters.find((row) => row.slot.toLowerCase() === "traces")
+  if (registryRow?.adapter) return registryRow.adapter
+  const caps = snapshot.traceCapabilities
+  if (caps.native_query_lang === "traceql") return "Tempo"
+  if (caps.native_query_lang) return caps.native_query_lang
+  return "empty"
+}
+
 const definitions: Record<string, PageDefinition> = {
   "/": {
     primaryAction: "Open command center",
@@ -237,14 +246,26 @@ const definitions: Record<string, PageDefinition> = {
   "/operate/traces": {
     primaryAction: "Open trace explorer",
     controls: () => [select("Scope", "Platform", ["Platform", "tenant"]), input("Trace", "Paste trace id or run id..."), tabs("Status", "all", ["all", "slow", "failed", "sampled"])],
-    kpis: () => [kpi("Trace endpoint", "missing", "runtime query", "degraded", "warn"), kpi("Span tree", "thin", "from run context", "adapter", "warn"), kpi("Critical path", "external", "Tempo or Honeycomb", "backend", "neutral"), kpi("Copy link", "ready", "share trace search", "url", "ok")],
+    kpis: (snapshot) => {
+      const caps = snapshot.traceCapabilities
+      const source = caps.native_query_lang === "traceql" ? "Tempo" : caps.native_query_lang ? caps.native_query_lang : "empty"
+      return [
+        kpi("Adapter", source, caps.native_query_lang ? "external query" : "zero-state", "active", caps.native_query_lang ? "running" : "neutral"),
+        kpi("TraceQL", caps.supports_traceql ? "supported" : "disabled", "capability", caps.supports_traceql ? "ready" : "legacy", caps.supports_traceql ? "ok" : "neutral"),
+        kpi("Tag search", caps.supports_tag_search ? "supported" : "disabled", "capability", caps.supports_tag_search ? "ready" : "empty", caps.supports_tag_search ? "ok" : "neutral"),
+        kpi("Result cap", caps.max_results_per_query ? String(caps.max_results_per_query) : "unknown", caps.retention_hours ? `${caps.retention_hours}h retention` : "retention unknown", "adapter", "neutral"),
+      ]
+    },
     rows: (snapshot) => snapshot.traces,
     tableTitle: "Trace search",
-    tableDescription: "Thin in-product trace context with external explorer handoff.",
+    tableDescription: "Trace search backed by the active traces adapter.",
     secondaryTitle: "Span preview",
     secondary: (snapshot) => [
-      card("Capability caveat", "Deep span exploration needs a trace endpoint or adapter query capability.", [{ label: "Missing", value: "GET /api/v1/traces", tone: "warn" }]),
-      card("Recent trace contexts", "Rows are linked by run id until trace ids are first-class.", selectedRows(snapshot.traces, 4)),
+      card("Adapter capabilities", "Search behaviour follows the active traces adapter.", [
+        { label: "TraceQL", value: snapshot.traceCapabilities.supports_traceql ? "supported" : "disabled", tone: snapshot.traceCapabilities.supports_traceql ? "ok" : "neutral" },
+        { label: "Tag search", value: snapshot.traceCapabilities.supports_tag_search ? "supported" : "disabled", tone: snapshot.traceCapabilities.supports_tag_search ? "ok" : "neutral" },
+      ]),
+      card("Recent trace contexts", "Rows link to shareable trace searches.", selectedRows(snapshot.traces, 4)),
     ],
   },
   "/operate/queue": {
@@ -799,8 +820,10 @@ export function buildPageModel(pathname: string, snapshot: OperatorSnapshot): Pa
     dataTruth: navItem.dataTruth,
     apiGap: path === "/setup/features" && snapshot.featureWarnings.length
       ? snapshot.featureWarnings.map((row) => `${row.primary}: ${row.secondary}`).join(" ")
-      : navItem.apiGap,
-    adapter: path === "/operate/logs" ? logsAdapterLabel(snapshot) : navItem.adapter,
+      : path === "/operate/traces"
+        ? undefined
+        : navItem.apiGap,
+    adapter: path === "/operate/logs" ? logsAdapterLabel(snapshot) : path === "/operate/traces" ? tracesAdapterLabel(snapshot) : navItem.adapter,
   }
 
   return {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { api, type LogCapabilities } from "@/lib/api"
+import { api, type LogCapabilities, type TraceCapabilities, type TraceDetail } from "@/lib/api"
 
 export type HealthSource = "live" | "seeded"
 
@@ -101,6 +101,7 @@ export type OperatorSnapshot = {
   brand: ConsoleRow[]
   adapters: AdapterSlot[]
   logCapabilities: LogCapabilities
+  traceCapabilities: TraceCapabilities
   features: ConsoleRow[]
   featureWarnings: ConsoleRow[]
   budgets: BudgetRecord[]
@@ -494,6 +495,13 @@ export const seededSnapshot: OperatorSnapshot = {
     retention_days: 0,
     max_entries_per_page: 1000,
   },
+  traceCapabilities: {
+    supports_traceql: false,
+    supports_tag_search: false,
+    native_query_lang: "",
+    retention_hours: 0,
+    max_results_per_query: 0,
+  },
   features: [
     { id: "feature-db-health", primary: "db_health", secondary: "Database health surface", status: "ok", tone: "ok", metric: "enabled", timestamp: "preset" },
     { id: "feature-logs", primary: "logs", secondary: "Future logs adapter slot", status: "not_configured", tone: "neutral", metric: "ring", timestamp: "preset" },
@@ -565,6 +573,8 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     approvals,
     logs,
     logCapabilities,
+    traces,
+    traceCapabilities,
     oauthConnections,
     oauthProviders,
     features,
@@ -618,6 +628,8 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     settle(() => api.approvals.list({ limit: 20 })),
     settle(() => api.logs({ limit: 120 })),
     settle(() => api.logsCapabilities()),
+    settle(() => api.traces.list({ limit: 20 })),
+    settle(() => api.traces.capabilities()),
     settle(() => api.oauth.connections()),
     settle(() => api.oauth.providers()),
     settle(() => api.admin.features.get()),
@@ -914,6 +926,24 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
       href: `/operate/logs?ts=${encodeURIComponent(line.ts)}`,
       detail: JSON.stringify(line, null, 2),
     })) ?? seededSnapshot.logs
+
+  const firstTraceID = traces?.traces[0]?.trace_id
+  const traceDetail: TraceDetail | null = firstTraceID
+    ? await settle(() => api.traces.get(firstTraceID))
+    : null
+
+  const traceRows: ConsoleRow[] =
+    traces?.traces.map((trace) => ({
+      id: trace.trace_id,
+      primary: trace.root_operation,
+      secondary: `${trace.root_service} · ${trace.span_count} spans`,
+      status: trace.status,
+      tone: trace.status === "error" ? "fail" : trace.status === "ok" ? "ok" : "neutral",
+      metric: `${trace.duration_ms.toLocaleString("en")} ms`,
+      timestamp: trace.start_time ? shortTime(trace.start_time) : "unknown",
+      href: `/operate/traces?trace=${encodeURIComponent(trace.trace_id)}`,
+      detail: JSON.stringify(traceDetail?.trace_id === trace.trace_id ? traceDetail : trace, null, 2),
+    })) ?? seededSnapshot.traces
 
   const oauthRows: ConsoleRow[] =
     oauthConnections?.connections.length
@@ -1444,15 +1474,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
         secondary: `${line.secondary} · grouped client-side from logs`,
         href: `/operate/errors?log=${encodeURIComponent(line.id)}`,
       })),
-    traces: runRows.slice(0, 12).map((run) => ({
-      ...run,
-      id: `trace:${run.id}`,
-      primary: `trace for ${run.primary}`,
-      secondary: `${run.secondary} · in-product trace browser degraded`,
-      status: run.status,
-      metric: run.metric,
-      href: `/operate/traces?run=${encodeURIComponent(run.id)}`,
-    })),
+    traces: traceRows,
     logs: logRows,
     cache: cacheRows,
     webhooks:
@@ -1522,6 +1544,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
           ))
         : seededAdapters,
     logCapabilities: logCapabilities ?? seededSnapshot.logCapabilities,
+    traceCapabilities: traceCapabilities ?? seededSnapshot.traceCapabilities,
     services: serviceRowsLive.length ? serviceRowsLive : seededSnapshot.services,
     brand: brandRows,
     features: featureRows,

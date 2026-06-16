@@ -98,6 +98,35 @@ features:
 	}
 }
 
+func TestFeatureConfigRejectsBadTracesAdapter(t *testing.T) {
+	_, _, err := ParseFeatureConfig([]byte(`
+preset: lean
+features:
+  traces:
+    enabled: false
+    adapter: foo
+`), nil)
+	if err == nil || !strings.Contains(err.Error(), "features.traces.adapter") {
+		t.Fatalf("err = %v, want adapter enum error", err)
+	}
+}
+
+func TestFeatureConfigAcceptsLegacyTracesBackend(t *testing.T) {
+	cfg, _, err := ParseFeatureConfig([]byte(`
+preset: lean
+features:
+  traces:
+    enabled: false
+    backend: tempo
+`), nil)
+	if err != nil {
+		t.Fatalf("ParseFeatureConfig: %v", err)
+	}
+	if cfg.Features.Traces.Adapter != "tempo" {
+		t.Fatalf("traces adapter=%q want tempo", cfg.Features.Traces.Adapter)
+	}
+}
+
 func TestFeatureConfigPresetLean(t *testing.T) {
 	f, err := PresetFeatures(PresetLean)
 	if err != nil {

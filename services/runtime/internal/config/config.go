@@ -26,6 +26,7 @@ type Config struct {
 	Storage       StorageConfig       `yaml:"storage"`
 	Sandbox       SandboxConfig       `yaml:"sandbox"`
 	Logs          LogsConfig          `yaml:"logs"`
+	Traces        TracesConfig        `yaml:"traces"`
 }
 
 // SandboxConfig holds sandbox-adapter settings. The Adapter field picks
@@ -58,6 +59,25 @@ type LogsLokiConfig struct {
 }
 
 type LogsRemoteConfig struct {
+	URL   string `yaml:"url"`
+	Token string `yaml:"token"`
+}
+
+// TracesConfig selects the runtime trace-store adapter. The empty adapter is
+// the zero-config default; Tempo and remote adapters activate only when the
+// operator sets AF_STACK_TRACES_ADAPTER and the corresponding URL.
+type TracesConfig struct {
+	Adapter string             `yaml:"adapter"`
+	Tempo   TracesTempoConfig  `yaml:"tempo"`
+	Remote  TracesRemoteConfig `yaml:"remote"`
+}
+
+type TracesTempoConfig struct {
+	URL    string `yaml:"url"`
+	Tenant string `yaml:"tenant"`
+}
+
+type TracesRemoteConfig struct {
 	URL   string `yaml:"url"`
 	Token string `yaml:"token"`
 }
@@ -169,6 +189,9 @@ func Default() Config {
 		},
 		Logs: LogsConfig{
 			Adapter: "ring",
+		},
+		Traces: TracesConfig{
+			Adapter: "empty",
 		},
 	}
 }
@@ -310,6 +333,22 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("AF_STACK_LOGS_ADAPTER_TOKEN"); v != "" {
 		cfg.Logs.Remote.Token = v
 	}
+
+	if v := os.Getenv("AF_STACK_TRACES_ADAPTER"); v != "" {
+		cfg.Traces.Adapter = strings.ToLower(v)
+	}
+	if v := os.Getenv("AF_STACK_TRACES_TEMPO_URL"); v != "" {
+		cfg.Traces.Tempo.URL = v
+	}
+	if v := os.Getenv("AF_STACK_TRACES_TEMPO_TENANT"); v != "" {
+		cfg.Traces.Tempo.Tenant = v
+	}
+	if v := os.Getenv("AF_STACK_TRACES_ADAPTER_URL"); v != "" {
+		cfg.Traces.Remote.URL = v
+	}
+	if v := os.Getenv("AF_STACK_TRACES_ADAPTER_TOKEN"); v != "" {
+		cfg.Traces.Remote.Token = v
+	}
 }
 
 // validate returns an error if the config is in a non-runnable state.
@@ -342,6 +381,19 @@ func validate(cfg Config) error {
 		}
 	default:
 		return fmt.Errorf("logs.adapter must be ring|loki|remote, got %q", cfg.Logs.Adapter)
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Traces.Adapter)) {
+	case "", "empty":
+	case "tempo":
+		if strings.TrimSpace(cfg.Traces.Tempo.URL) == "" {
+			return fmt.Errorf("traces.tempo.url is required when traces.adapter=tempo (set AF_STACK_TRACES_TEMPO_URL)")
+		}
+	case "remote":
+		if strings.TrimSpace(cfg.Traces.Remote.URL) == "" {
+			return fmt.Errorf("traces.remote.url is required when traces.adapter=remote (set AF_STACK_TRACES_ADAPTER_URL)")
+		}
+	default:
+		return fmt.Errorf("traces.adapter must be empty|tempo|remote, got %q", cfg.Traces.Adapter)
 	}
 	return nil
 }

@@ -27,6 +27,7 @@ The HTTP contract every remote adapter speaks, per slot.
 | **llm-chat** — OpenAI-compat chat + embeddings | [`protocols/llm-chat-v1.md`](protocols/llm-chat-v1.md) | *(via Setup → LLM providers)* |
 | **auth** — session verification + OAuth | [`protocols/auth-v1.md`](protocols/auth-v1.md) | *(via Setup → Auth providers)* |
 | **logs** — log query + tail | [`protocols/logs-v1.md`](protocols/logs-v1.md) | `AF_STACK_LOGS_ADAPTER` |
+| **traces** — trace search + detail | [`protocols/traces-v1.md`](protocols/traces-v1.md) | `AF_STACK_TRACES_ADAPTER` |
 
 ## Reference implementation
 
@@ -34,6 +35,8 @@ The HTTP contract every remote adapter speaks, per slot.
   — a minimal FastAPI sandbox adapter that passes the conformance harness.
 - [`examples/adapters/logs-echo-py/`](../../examples/adapters/logs-echo-py/)
   — a minimal FastAPI logs adapter with query + SSE tail.
+- [`examples/adapters/traces-echo-py/`](../../examples/adapters/traces-echo-py/)
+  — a minimal FastAPI traces adapter with search + trace detail.
 
 ## The conformance binary
 

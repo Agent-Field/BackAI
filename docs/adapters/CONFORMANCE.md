@@ -170,6 +170,17 @@ python3.12 -m venv .venv
 ./backai-adapter-conformance --slot logs --url http://localhost:18091
 ```
 
+Traces reference adapter:
+
+```bash
+cd examples/adapters/traces-echo-py
+python3.12 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/uvicorn main:app --port 18092
+
+./backai-adapter-conformance --slot traces --url http://localhost:18092
+```
+
 ## Extending the harness
 
 The harness lives in

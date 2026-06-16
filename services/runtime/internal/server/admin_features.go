@@ -82,7 +82,7 @@ func (s *Server) handleAdminFeatures(w http.ResponseWriter, r *http.Request) {
 		"api_key_rotate":      featureBoolEntry(f.APIKeyRotate.Enabled, featureStatusOK, nil),
 		"llm_gateway":         llmGatewayFeatureEntry(f.LLMGateway, probes),
 		"logs":                adapterFeatureEntry(f.Logs.Enabled, f.Logs.Adapter),
-		"traces":              backendFeatureEntry(f.Traces.Enabled, f.Traces.Backend),
+		"traces":              adapterFeatureEntry(f.Traces.Enabled, f.Traces.Adapter),
 		"metrics":             metricsFeatureEntry(f.Metrics),
 		"errors":              backendFeatureEntry(f.Errors.Enabled, f.Errors.Backend),
 	}

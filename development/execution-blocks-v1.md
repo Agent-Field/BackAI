@@ -473,7 +473,7 @@ var featureRules = []FeatureRule{
         BackendOptions: []string{"ring", "loki", "remote"},
     },
     {
-        Feature: "traces.backend",
+        Feature: "traces.adapter",
         BackendOptions: []string{"empty", "tempo", "remote"},
     },
     {
@@ -1082,6 +1082,13 @@ MODIFIED:
 
 ## Block 4 — `traces` adapter slot · ~2.5 days
 
+Status: ✅ DONE on `feat/modular-adapter-system`.
+
+Implementation note: Tempo search uses the documented `GET /api/search`
+endpoint for both modes. Tempo `>= 2.0` enables TraceQL via `q=<TraceQL>`;
+older or unparseable versions use `tags=<single logfmt string>`. The runtime
+does not call `/api/v2/search`.
+
 **Why this slot**: the runtime has the OpenTelemetry SDK wired and **does honor `OTEL_EXPORTER_OTLP_ENDPOINT`** (`internal/config/config.go:208-210`). Nothing receives the spans today. The admin's Traces page is empty. Operators need a span store + query.
 
 **Approach**: `traces` adapter slot. Default builtin is empty (admin shows zero-state). First real adapter is **Tempo** (queried via its HTTP API; spans are pushed to it by otel-collector, configured separately by the operator).
@@ -1190,9 +1197,9 @@ Tempo's HTTP API:
 | Tempo endpoint | Used by Store method |
 |---|---|
 | `GET /api/search?tags=&start=&end=&minDuration=&maxDuration=&limit=` | `Search` (when no TraceQL) |
-| `GET /api/v2/search?q=<TraceQL>&start=&end=&limit=` | `Search` (when TraceQL preferred) |
+| `GET /api/search?q=<TraceQL>&start=&end=&limit=` | `Search` (when TraceQL preferred) |
 | `GET /api/traces/{traceID}` | `Get` — returns full trace |
-| `GET /ready` | health |
+| `GET /status/version` | capability probe |
 
 **Capabilities probe**: hit `/status/version`. Tempo ≥ 2.0 supports TraceQL; older versions use legacy tag search.
 

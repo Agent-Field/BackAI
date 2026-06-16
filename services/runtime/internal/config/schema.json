@@ -91,10 +91,27 @@
     "traces": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "backend"],
+      "required": ["enabled"],
       "properties": {
         "enabled": { "type": "boolean" },
-        "backend": { "type": "string", "enum": ["empty", "tempo", "remote"] }
+        "adapter": { "type": "string", "enum": ["empty", "tempo", "remote"] },
+        "backend": { "type": "string", "enum": ["empty", "tempo", "remote"], "deprecated": true },
+        "tempo": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "url": { "type": "string" },
+            "tenant": { "type": "string" }
+          }
+        },
+        "remote": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "url": { "type": "string" },
+            "token": { "type": "string" }
+          }
+        }
       }
     },
     "metrics": {

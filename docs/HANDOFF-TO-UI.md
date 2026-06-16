@@ -11,28 +11,28 @@
 4. `development/admin-api-gap-registry-v1.md` — per-page UI contract status.
 5. `development/backend-admin-contract-audit-v1.md` — backend-side gap catalogue.
 6. `development/execution-blocks-v1.md` — **the to-do list**: 7 ordered execution blocks, each independently shippable, with the full adapter design for the 4 new observability slots.
-7. `docs/adapters/PROTOCOL.md` + `docs/adapters/protocols/<slot>-v1.md` — adapter contracts (8 slots shipped; 4 more designed in block 2-5 of the execution doc).
+7. `docs/adapters/PROTOCOL.md` + `docs/adapters/protocols/<slot>-v1.md` — adapter contracts (10 slots shipped; remaining observability slots designed in block 5-6 of the execution doc).
 
 ## What's done (shipped on this branch)
 
 | Area | State |
 |---|---|
-| Adapter system | **9 Tier-1 slots** (sandbox, storage, notifications, secrets, billing, multimodal, llm-chat, auth, logs) + shared remote HTTP client + capability registry + conformance harness + reference Python adapters. |
+| Adapter system | **10 Tier-1 slots** (sandbox, storage, notifications, secrets, billing, multimodal, llm-chat, auth, logs, traces) + shared remote HTTP client + capability registry + conformance harness + reference Python adapters. |
 | Tests | 61 packages pass. 0 failures. 2 E2E tests (sandbox via Python adapter; LLM via real OpenRouter Kimi via OpenAI-compat proxy). |
 | Dashboard shell | 48 routes registered with central navigation + catch-all renderer + seeded-fallback data loader pulling live runtime endpoints. |
 | Docs | ARCHITECTURE, PROTOCOL, AUTHORING, CONFORMANCE, per-slot specs, dashboard spec, design patterns, gap registry, contract audit. |
 
 ## What's done and what's next
 
-All outstanding work is consolidated in `development/execution-blocks-v1.md` — 9 ordered execution blocks. Blocks 1, 2, and 3 have shipped; Block 4 is the next to dispatch.
+All outstanding work is consolidated in `development/execution-blocks-v1.md` — 9 ordered execution blocks. Blocks 1, 2, 3, and 4 have shipped; Block 5 is the next to dispatch.
 
 | Order | Block | Status | Effort |
 |---|---|---|---|
 | 1 | Endpoint additions — adapter registry mount, /admin/services synth, /admin/db/health, provider-health poller, cron trigger, cache flush, key rotate, brand R/W, SQL Health tab, notifications mute | ✅ **DONE** | (~4 days) |
 | 2 | **Foundation** — config schema (`backai.config.yaml`) + Layer 1/2 validators + capability-probe machinery + retention helper + `/api/v1/admin/features` + Block 1 consolidation | ✅ **DONE** | **~1.5 days** |
 | 3 | **`logs` adapter slot** — ring-buffer default; Loki backend; remote SSE shim | ✅ **DONE** | ~2.5 days |
-| 4 | **`traces` adapter slot** — default Tempo backend (operator-deployed); empty fallback | ⏭️ **NEXT** | ~2.5 days |
-| 5 | **`metrics` adapter slot** — default Prometheus backend (operator-deployed); Cost charts + Container subsection | queued | ~2 days |
+| 4 | **`traces` adapter slot** — empty default; Tempo backend; remote shim | ✅ **DONE** | ~2.5 days |
+| 5 | **`metrics` adapter slot** — default Prometheus backend (operator-deployed); Cost charts + Container subsection | ⏭️ **NEXT** | ~2 days |
 | 6 | **`errors` adapter slot** — default GlitchTip backend (operator-deployed); log-filter fallback | queued | ~3 days |
 | 7 | Aggregation endpoints (reasoners analytics, tools usage, notifications channels CRUD, OAuth refresh history) | queued | ~3–4 days |
 | 8 | Polish (adapter pills, Home Connected Services strip, capability-honest degradation) | queued | ~1 day |

@@ -27,7 +27,7 @@ import (
 
 func main() {
 	var (
-		slot    = flag.String("slot", "", "adapter slot: sandbox | storage | notifications | secrets | billing | multimodal | llm-chat | auth | logs")
+		slot    = flag.String("slot", "", "adapter slot: sandbox | storage | notifications | secrets | billing | multimodal | llm-chat | auth | logs | traces")
 		baseURL = flag.String("url", "", "adapter base URL, e.g. http://localhost:8090")
 		token   = flag.String("token", "", "bearer token (optional)")
 		quiet   = flag.Bool("quiet", false, "suppress per-check output, print only summary")
@@ -76,6 +76,8 @@ func main() {
 		runAuthChecks(ctx, r, c)
 	case "logs":
 		runLogsChecks(ctx, r, c)
+	case "traces":
+		runTracesChecks(ctx, r, c)
 	default:
 		r.fail("unknown slot", fmt.Errorf("slot %q has no per-slot suite", *slot))
 	}
@@ -635,6 +637,74 @@ func runLogsChecks(ctx context.Context, r *runner, c *remote.Client) {
 			return err
 		}
 		return resp.Body.Close()
+	})
+}
+
+// --- traces -------------------------------------------------------------
+
+func runTracesChecks(ctx context.Context, r *runner, c *remote.Client) {
+	var caps struct {
+		SupportsTraceQL    bool   `json:"supports_traceql"`
+		SupportsTagSearch  bool   `json:"supports_tag_search"`
+		NativeQueryLang    string `json:"native_query_lang"`
+		MaxResultsPerQuery int    `json:"max_results_per_query"`
+	}
+
+	r.require("GET /v1/capabilities declares traces capabilities", func() error {
+		env, err := c.Capabilities(ctx)
+		if err != nil {
+			return err
+		}
+		if env.Slot != "traces" {
+			return fmt.Errorf("slot=%q; expected traces", env.Slot)
+		}
+		if err := json.Unmarshal(env.Capabilities, &caps); err != nil {
+			return err
+		}
+		if !caps.SupportsTraceQL && !caps.SupportsTagSearch && caps.NativeQueryLang == "" {
+			return fmt.Errorf("traces adapter declares no search capability")
+		}
+		if caps.MaxResultsPerQuery < 0 {
+			return fmt.Errorf("max_results_per_query must be non-negative")
+		}
+		return nil
+	})
+
+	r.require("POST /v1/traces/search returns a result envelope", func() error {
+		resp, err := c.Do(ctx, remote.Request{
+			Method: http.MethodPost,
+			Path:   "/v1/traces/search",
+			Body: map[string]any{
+				"limit": 1,
+			},
+		})
+		if err != nil {
+			return err
+		}
+		var out struct {
+			Traces  []map[string]any `json:"traces"`
+			HasMore bool             `json:"has_more"`
+		}
+		if err := resp.DecodeJSON(&out); err != nil {
+			return err
+		}
+		_ = out.HasMore
+		return nil
+	})
+
+	r.require("GET /v1/traces/{unknown} returns 404 trace_not_found", func() error {
+		_, err := c.Do(ctx, remote.Request{
+			Method: http.MethodGet,
+			Path:   "/v1/traces/does-not-exist",
+		})
+		if err == nil {
+			return fmt.Errorf("expected missing trace to return an error")
+		}
+		p, ok := remote.AsProblem(err)
+		if !ok || p.HTTPStatus != http.StatusNotFound || p.Code != "trace_not_found" {
+			return fmt.Errorf("expected 404 trace_not_found, got %v", err)
+		}
+		return nil
 	})
 }
 
