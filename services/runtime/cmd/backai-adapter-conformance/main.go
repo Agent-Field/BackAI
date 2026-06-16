@@ -744,11 +744,13 @@ func runMetricsChecks(ctx context.Context, r *runner, c *remote.Client) {
 		return nil
 	})
 
-	r.require("GET /v1/metrics/query returns an instant envelope", func() error {
+	r.require("POST /v1/metrics/query returns an instant envelope", func() error {
 		resp, err := c.Do(ctx, remote.Request{
-			Method: http.MethodGet,
+			Method: http.MethodPost,
 			Path:   "/v1/metrics/query",
-			Query:  mapValues("promql", "up{}"),
+			Body: map[string]any{
+				"query": "up{}",
+			},
 		})
 		if err != nil {
 			return err
@@ -759,16 +761,17 @@ func runMetricsChecks(ctx context.Context, r *runner, c *remote.Client) {
 		return resp.DecodeJSON(&out)
 	})
 
-	r.require("GET /v1/metrics/range returns a range envelope", func() error {
+	r.require("POST /v1/metrics/query_range returns a range envelope", func() error {
 		now := time.Now().UTC()
-		q := mapValues("promql", "up{}")
-		q.Set("from", now.Add(-5*time.Minute).Format(time.RFC3339Nano))
-		q.Set("to", now.Format(time.RFC3339Nano))
-		q.Set("step", "1m")
 		resp, err := c.Do(ctx, remote.Request{
-			Method: http.MethodGet,
-			Path:   "/v1/metrics/range",
-			Query:  q,
+			Method: http.MethodPost,
+			Path:   "/v1/metrics/query_range",
+			Body: map[string]any{
+				"query": "up{}",
+				"from":  now.Add(-5 * time.Minute).Format(time.RFC3339Nano),
+				"to":    now.Format(time.RFC3339Nano),
+				"step":  "1m",
+			},
 		})
 		if err != nil {
 			return err

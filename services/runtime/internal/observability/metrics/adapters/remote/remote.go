@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/url"
 	"time"
 
 	adapterremote "github.com/Agent-Field/backai/services/runtime/internal/adapters/remote"
@@ -56,14 +55,13 @@ func (s *Store) Query(ctx context.Context, promQL string, at time.Time) ([]metri
 	if s == nil || s.client == nil {
 		return nil, errors.New("remote metrics: nil store")
 	}
-	q := url.Values{"promql": []string{promQL}}
-	if !at.IsZero() {
-		q.Set("at", at.UTC().Format(time.RFC3339Nano))
-	}
 	resp, err := s.client.Do(ctx, adapterremote.Request{
-		Method: http.MethodGet,
+		Method: http.MethodPost,
 		Path:   "/v1/metrics/query",
-		Query:  q,
+		Body: queryRequest{
+			Query: promQL,
+			Time:  optionalTime(at),
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -79,20 +77,15 @@ func (s *Store) QueryRange(ctx context.Context, promQL string, from, to time.Tim
 	if s == nil || s.client == nil {
 		return nil, errors.New("remote metrics: nil store")
 	}
-	q := url.Values{"promql": []string{promQL}}
-	if !from.IsZero() {
-		q.Set("from", from.UTC().Format(time.RFC3339Nano))
-	}
-	if !to.IsZero() {
-		q.Set("to", to.UTC().Format(time.RFC3339Nano))
-	}
-	if step > 0 {
-		q.Set("step", step.String())
-	}
 	resp, err := s.client.Do(ctx, adapterremote.Request{
-		Method: http.MethodGet,
-		Path:   "/v1/metrics/range",
-		Query:  q,
+		Method: http.MethodPost,
+		Path:   "/v1/metrics/query_range",
+		Body: rangeRequest{
+			Query: promQL,
+			From:  from.UTC().Format(time.RFC3339Nano),
+			To:    to.UTC().Format(time.RFC3339Nano),
+			Step:  step.String(),
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -124,4 +117,23 @@ type instantResponse struct {
 
 type rangeResponse struct {
 	Series []metrics.RangeSample `json:"series"`
+}
+
+type queryRequest struct {
+	Query string `json:"query"`
+	Time  string `json:"time,omitempty"`
+}
+
+type rangeRequest struct {
+	Query string `json:"query"`
+	From  string `json:"from"`
+	To    string `json:"to"`
+	Step  string `json:"step"`
+}
+
+func optionalTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339Nano)
 }

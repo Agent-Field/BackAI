@@ -10,11 +10,24 @@ import time
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException
+from pydantic import BaseModel, Field
 
 ADAPTER_TOKEN = os.getenv("BACKAI_ADAPTER_TOKEN", "").strip()
 REQUIRE_AUTH = bool(ADAPTER_TOKEN)
 START_TIME = time.time()
+
+
+class QueryRequest(BaseModel):
+    query: str
+    time: Optional[str] = None
+
+
+class RangeRequest(BaseModel):
+    query: str
+    from_: str = Field(alias="from")
+    to: str
+    step: str = "1m"
 
 
 def now_iso() -> str:
@@ -72,41 +85,43 @@ async def info(authorization: Optional[str] = Header(None)):
     return {"docs": "https://github.com/Agent-Field/backai/blob/main/docs/adapters/protocols/metrics-v1.md"}
 
 
-@app.get("/v1/metrics/query")
-async def query_metrics(promql: str = Query(...), at: Optional[str] = None, authorization: Optional[str] = Header(None)):
+@app.post("/v1/metrics/query")
+async def post_query_metrics(body: QueryRequest, authorization: Optional[str] = Header(None)):
     await verify_token(authorization)
-    if promql.strip() == "up{}":
-        return {
-            "samples": [
-                {
-                    "metric": {"__name__": "up", "job": "metrics-echo"},
-                    "value": 1,
-                    "ts": at or now_iso(),
-                }
-            ]
-        }
-    return {"samples": []}
+    return instant_envelope(body.query, body.time)
 
 
-@app.get("/v1/metrics/range")
-async def range_metrics(
-    promql: str = Query(...),
-    from_: str = Query(..., alias="from"),
-    to: str = Query(...),
-    step: str = Query("1m"),
-    authorization: Optional[str] = Header(None),
-):
+@app.post("/v1/metrics/query_range")
+async def post_range_metrics(body: RangeRequest, authorization: Optional[str] = Header(None)):
     await verify_token(authorization)
-    if promql.strip() == "up{}":
-        return {
-            "series": [
-                {
-                    "metric": {"__name__": "up", "job": "metrics-echo"},
-                    "values": [
-                        {"ts": from_, "value": 1},
-                        {"ts": to, "value": 1},
-                    ],
-                }
-            ]
-        }
-    return {"series": []}
+    return range_envelope(body.query, body.from_, body.to)
+
+
+def instant_envelope(query: str, at: Optional[str]):
+    if query.strip() != "up{}":
+        return {"samples": []}
+    return {
+        "samples": [
+            {
+                "metric": {"__name__": "up", "job": "metrics-echo"},
+                "value": 1,
+                "ts": at or now_iso(),
+            }
+        ]
+    }
+
+
+def range_envelope(query: str, from_: str, to: str):
+    if query.strip() != "up{}":
+        return {"series": []}
+    return {
+        "series": [
+            {
+                "metric": {"__name__": "up", "job": "metrics-echo"},
+                "values": [
+                    {"ts": from_, "value": 1},
+                    {"ts": to, "value": 1},
+                ],
+            }
+        ]
+    }

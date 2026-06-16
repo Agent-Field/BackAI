@@ -29,17 +29,31 @@ func TestRemoteMetricsStore(t *testing.T) {
 				},
 			})
 		case "/v1/metrics/query":
-			if r.URL.Query().Get("promql") != "up{}" {
-				t.Fatalf("promql=%q", r.URL.Query().Get("promql"))
+			if r.Method != http.MethodPost {
+				t.Fatalf("method=%s", r.Method)
+			}
+			var req queryRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode query request: %v", err)
+			}
+			if req.Query != "up{}" {
+				t.Fatalf("query=%q", req.Query)
 			}
 			writeJSON(t, w, map[string]any{"samples": []any{map[string]any{
 				"metric": map[string]string{"__name__": "up"},
 				"value":  1,
 				"ts":     "2026-06-16T12:00:00Z",
 			}}})
-		case "/v1/metrics/range":
-			if r.URL.Query().Get("step") != "1m0s" {
-				t.Fatalf("step=%q", r.URL.Query().Get("step"))
+		case "/v1/metrics/query_range":
+			if r.Method != http.MethodPost {
+				t.Fatalf("method=%s", r.Method)
+			}
+			var req rangeRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode range request: %v", err)
+			}
+			if req.Query != "up{}" || req.Step != "1m0s" {
+				t.Fatalf("request=%+v", req)
 			}
 			writeJSON(t, w, map[string]any{"series": []any{map[string]any{
 				"metric": map[string]string{"__name__": "up"},

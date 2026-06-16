@@ -21,9 +21,18 @@ HTTP contract when `AF_STACK_METRICS_ADAPTER=remote`.
 
 ## Instant Query
 
-`GET /v1/metrics/query?promql=<promql>&at=<timestamp>`
+`POST /v1/metrics/query`
 
-`at` is optional and may be RFC3339 or Unix seconds. Response:
+Request:
+
+```json
+{
+  "query": "up{}",
+  "time": "2026-06-16T12:00:00Z"
+}
+```
+
+`time` is optional and may be RFC3339 or Unix seconds. Response:
 
 ```json
 {
@@ -42,7 +51,18 @@ series. Invalid PromQL should use the universal RFC 7807 error envelope.
 
 ## Range Query
 
-`GET /v1/metrics/range?promql=<promql>&from=<timestamp>&to=<timestamp>&step=<duration>`
+`POST /v1/metrics/query_range`
+
+Request:
+
+```json
+{
+  "query": "up{}",
+  "from": "2026-06-16T12:00:00Z",
+  "to": "2026-06-16T13:00:00Z",
+  "step": "1m"
+}
+```
 
 `from` and `to` are required. `step` uses Go/Prometheus duration strings such
 as `30s`, `1m`, or `5m`. Response:
