@@ -148,6 +148,7 @@ func buildAdapterRegistry(
 	vault *secrets.Vault,
 	jobsManager *jobs.Manager,
 	llmGW *llmgateway.Gateway,
+	litellmAdmin *llmgateway.LiteLLMAdmin,
 	sandboxSvc *sandbox.Service,
 	notificationsSvc *notifications.Service,
 	webhooksSvc *webhooks.Service,
@@ -219,20 +220,34 @@ func buildAdapterRegistry(
 		llmName = llmGW.ProviderName()
 		llmStatus = adapterregistry.StatusHealthy
 	}
+	keyMgmtMode := llmgateway.KeyMgmtUnknown
+	keyMgmtErr := ""
+	virtualKeysActive := false
+	if litellmAdmin != nil {
+		keyMgmtMode, keyMgmtErr = litellmAdmin.KeyManagement()
+		virtualKeysActive = litellmAdmin.VirtualKeysActive()
+	}
+	llmCaps := map[string]any{
+		"supports_chat":        llmGW != nil,
+		"supports_embeddings":  llmGW != nil,
+		"virtual_keys_active":  virtualKeysActive,
+		"key_management_mode":  string(keyMgmtMode),
+		"spend_tracking_exact": virtualKeysActive,
+		"contract_pending":     true,
+	}
+	if keyMgmtErr != "" {
+		llmCaps["key_management_error"] = keyMgmtErr
+	}
 	r.Register(adapterregistry.Slot{
-		ID:         "llm-chat",
-		Tier:       adapterregistry.Tier1,
-		Kind:       adapterregistry.KindBuiltin,
-		Name:       llmName,
-		SwapMethod: "env_var",
-		SwapEnv:    "AF_STACK_LLM_GATEWAY_ADAPTER",
-		AdminUI:    os.Getenv("AF_STACK_LITELLM_URL"),
-		Capabilities: caps(map[string]any{
-			"supports_chat":       llmGW != nil,
-			"supports_embeddings": llmGW != nil,
-			"contract_pending":    true,
-		}),
-		Probe: staticStatus(llmStatus),
+		ID:           "llm-chat",
+		Tier:         adapterregistry.Tier1,
+		Kind:         adapterregistry.KindBuiltin,
+		Name:         llmName,
+		SwapMethod:   "env_var",
+		SwapEnv:      "AF_STACK_LLM_GATEWAY_ADAPTER",
+		AdminUI:      os.Getenv("AF_STACK_LITELLM_URL"),
+		Capabilities: caps(llmCaps),
+		Probe:        staticStatus(llmStatus),
 	})
 
 	r.Register(adapterregistry.Slot{
@@ -545,6 +560,9 @@ func main() {
 			}
 			migCancel()
 			log.Info("migrations applied")
+			statsCtx, statsCancel := context.WithTimeout(ctx, 5*time.Second)
+			warnIfPGStatsRoleMissing(statsCtx, database.Pool, log)
+			statsCancel()
 			defer database.Close()
 		}
 	} else {
@@ -700,12 +718,33 @@ func main() {
 	// them through to the client.
 
 	// LiteLLM admin client — talks to the master-key-protected /key/* +
-	// /spend/* surface on the same sidecar the gateway calls. Used by
-	// tenancy.IssueAPIKey to mint a matching LiteLLM virtual key
-	// alongside every suite_api_keys row (item #22). Always constructed;
-	// Configured() reports false when env isn't set so the mirroring
-	// path silently skips.
+	// /spend/* surface on the same sidecar the gateway calls. At boot we
+	// probe key management once and cache the mode: stateless LiteLLM is
+	// supported for chat routing, while virtual-key mirroring activates
+	// only when LiteLLM reports a connected key DB.
 	litellmAdmin := buildLiteLLMAdmin(log)
+	{
+		probeCtx, probeCancel := context.WithTimeout(ctx, 10*time.Second)
+		mode, probeErr := litellmAdmin.ProbeKeyManagement(probeCtx)
+		probeCancel()
+		if probeErr != nil {
+			log.Warn("litellm key-management probe failed",
+				"mode", mode,
+				"virtual_keys_active", litellmAdmin.VirtualKeysActive(),
+				"error", probeErr)
+		} else {
+			log.Info("litellm key-management probe complete",
+				"mode", mode,
+				"virtual_keys_active", litellmAdmin.VirtualKeysActive())
+		}
+	}
+	if database != nil && database.Pool != nil {
+		litellmURL, litellmMasterKey := litellmEnv()
+		if poller := llmgateway.NewProviderHealthPoller(database.Pool, litellmURL, litellmMasterKey, log); poller != nil && poller.Configured() {
+			go poller.Run(ctx, 5*time.Minute)
+			log.Info("llm provider health poller started", "interval", "5m")
+		}
+	}
 
 	// Tenancy manager — required when the multi-tenancy module is enabled,
 	// optional otherwise (admin endpoints already gate on the flag).
@@ -729,6 +768,7 @@ func main() {
 			log.Info("tenancy manager ready",
 				"multi_tenancy_enabled", cfg.Modules.Enabled["multi-tenancy"],
 				"litellm_mirror", litellmAdmin.Configured(),
+				"litellm_virtual_keys_active", litellmAdmin.VirtualKeysActive(),
 				"litellm_secrets_sink", sink != nil,
 			)
 		}
@@ -793,7 +833,7 @@ func main() {
 		// Hand the admin client to the aggregator so the dashboard reads
 		// live totals from /spend/keys; the suite_cost_events sum is now
 		// audit-only.
-		if litellmAdmin.Configured() {
+		if litellmAdmin.VirtualKeysActive() {
 			costAggregate.WithLiteLLM(llmgateway.NewCostSpendReader(litellmAdmin))
 		}
 		if hookEngine != nil {
@@ -1206,6 +1246,7 @@ func main() {
 		vault,
 		jobsManager,
 		llmGW,
+		litellmAdmin,
 		sandboxSvc,
 		notificationsSvc,
 		webhooksSvc,
@@ -1666,6 +1707,22 @@ func litellmEnv() (url, masterKey string) {
 		masterKey = "sk-litellm-dev"
 	}
 	return url, masterKey
+}
+
+func warnIfPGStatsRoleMissing(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) {
+	if pool == nil {
+		return
+	}
+	var ok bool
+	if err := pool.QueryRow(ctx, `
+		select coalesce(pg_has_role(current_user, 'pg_read_all_stats', 'member'), false)
+	`).Scan(&ok); err != nil {
+		log.Warn("postgres stats visibility probe failed", "error", err)
+		return
+	}
+	if !ok {
+		log.Warn("postgres stats visibility is reduced; grant pg_read_all_stats to the runtime DB role for complete DB health and search-index stats")
+	}
 }
 
 // tenancySecretSink adapts *secrets.Vault to the tenancy.SecretSink

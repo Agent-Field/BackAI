@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -59,6 +60,12 @@ type CacheStats struct {
 	HitRate     float64 `json:"hit_rate"`
 	SavingsUSD  float64 `json:"savings_usd"`
 	Entries     int64   `json:"entries"`
+}
+
+// FlushOpts scopes a manual cache flush. Empty fields mean match all.
+type FlushOpts struct {
+	TenantID   string
+	PromptHash string
 }
 
 // Cache is the PG-backed exact-match LLM response cache.
@@ -272,6 +279,55 @@ delete from suite_llm_cache
 		return 0, fmt.Errorf("llmcache: evict: %w", err)
 	}
 	return int(tag.RowsAffected()), nil
+}
+
+// Flush deletes live and expired cache rows matching the supplied filters.
+// Empty filters flush the entire cache.
+func (c *Cache) Flush(ctx context.Context, opts FlushOpts) (int64, error) {
+	if opts.TenantID == "" && opts.PromptHash == "" {
+		var count int64
+		if err := c.pool.QueryRow(ctx, `select count(*)::bigint from suite_llm_cache`).Scan(&count); err != nil {
+			return 0, fmt.Errorf("llmcache: flush count: %w", err)
+		}
+		if _, err := c.pool.Exec(ctx, `truncate table suite_llm_cache`); err != nil {
+			return 0, fmt.Errorf("llmcache: flush: %w", err)
+		}
+		return count, nil
+	}
+
+	conds := []string{"1=1"}
+	args := []any{}
+	if opts.TenantID != "" {
+		args = append(args, opts.TenantID)
+		conds = append(conds, fmt.Sprintf("tenant_id = $%d::uuid", len(args)))
+	}
+	if opts.PromptHash != "" {
+		args = append(args, opts.PromptHash)
+		conds = append(conds, fmt.Sprintf("request_hash = $%d", len(args)))
+	}
+	where := strings.Join(conds, " and ")
+	q := `
+with batch as (
+	select key from suite_llm_cache
+	 where ` + where + `
+	 limit 1000
+)
+delete from suite_llm_cache
+ where key in (select key from batch)
+`
+	var deleted int64
+	for {
+		tag, err := c.pool.Exec(ctx, q, args...)
+		if err != nil {
+			return deleted, fmt.Errorf("llmcache: flush: %w", err)
+		}
+		n := tag.RowsAffected()
+		deleted += n
+		if n < 1000 {
+			break
+		}
+	}
+	return deleted, nil
 }
 
 // tenantIDScanner adapts a nullable uuid column into a string field.

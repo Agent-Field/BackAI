@@ -36,6 +36,14 @@ func (t *TenancyMirror) Configured() bool {
 	return t.admin.Configured()
 }
 
+// VirtualKeysActive reports the cached LiteLLM key-management probe.
+func (t *TenancyMirror) VirtualKeysActive() bool {
+	if t == nil || t.admin == nil {
+		return false
+	}
+	return t.admin.VirtualKeysActive()
+}
+
 // GenerateKey translates the tenancy DTO into the llmgateway DTO and
 // proxies the call.
 func (t *TenancyMirror) GenerateKey(ctx context.Context, cfg tenancy.LiteLLMKeyConfig) (tenancy.LiteLLMKeyInfo, error) {

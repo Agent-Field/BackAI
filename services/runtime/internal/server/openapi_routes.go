@@ -132,6 +132,9 @@ func (s *Server) registerSearchOpenAPI() {
 	b.Register("POST", "/api/v1/search", openapi.RouteMeta{
 		Summary: "Search tenant-scoped app data", Tags: []string{"search"},
 	})
+	b.Register("GET", "/api/v1/search/indexes", openapi.RouteMeta{
+		Summary: "List search index statistics", Tags: []string{"search"},
+	})
 	b.Register("PUT", "/api/v1/search/documents", openapi.RouteMeta{
 		Summary: "Upsert a searchable app-data document", Tags: []string{"search"},
 	})

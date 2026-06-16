@@ -33,6 +33,49 @@ function readBrand() {
   return parsed
 }
 
+async function readBrandOverride() {
+  const dbURL = process.env.DATABASE_URL || process.env.AF_STACK_DATABASE_URL
+  if (!dbURL || process.env.BACKAI_BRAND_DB_OVERRIDE === "0") return {}
+  try {
+    const { Client } = await import("pg")
+    const client = new Client({ connectionString: dbURL, connectionTimeoutMillis: 1000 })
+    await client.connect()
+    try {
+      const res = await client.query("select brand from suite_brand_override where id = true")
+      const brand = res.rows?.[0]?.brand
+      if (brand && typeof brand === "object" && !Array.isArray(brand)) {
+        return brand
+      }
+    } finally {
+      await client.end()
+    }
+  } catch {
+    // Brand generation must work before the runtime database is created.
+    // The admin PUT writes this row; customer-app picks it up on the next
+    // boot/build when the DB is reachable.
+  }
+  return {}
+}
+
+function mergeBrand(base, override) {
+  const out = { ...base }
+  for (const [key, value] of Object.entries(override ?? {})) {
+    if (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      out[key] &&
+      typeof out[key] === "object" &&
+      !Array.isArray(out[key])
+    ) {
+      out[key] = { ...out[key], ...value }
+    } else {
+      out[key] = value
+    }
+  }
+  return out
+}
+
 function getString(obj, key, fallback = "") {
   const value = obj?.[key]
   if (typeof value === "string" && value.trim()) return value.trim()
@@ -148,12 +191,12 @@ export const brand = Object.freeze({
 `
 }
 
-function main() {
-  const brand = readBrand()
+async function main() {
+  const brand = mergeBrand(readBrand(), await readBrandOverride())
   for (const app of apps) {
     writeFile(`${app.appDir}/src/app/brand.css`, cssFor(brand, app.surfaceKey))
     writeFile(`${app.appDir}/src/lib/brand.ts`, brandModule(brand, app))
   }
 }
 
-main()
+await main()

@@ -740,6 +740,116 @@ func TestTenantUpdateAndSoftDelete(t *testing.T) {
 	}
 }
 
+func TestRotateKeyStatelessLiteLLMSkipsMirror(t *testing.T) {
+	mgr, _, cleanup := testSetup(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	t1, err := mgr.CreateTenant(ctx, CreateTenantInput{Slug: "stateless", Name: "Stateless"})
+	if err != nil {
+		t.Fatalf("create tenant: %v", err)
+	}
+	mirror := &fakeMirror{configured: true, virtualKeys: false}
+	mgr.WithLiteLLM(mirror, newFakeSink())
+
+	issued, err := mgr.IssueKey(ctx, IssueAPIKeyInput{TenantID: t1.ID, Scopes: []string{"llm:chat"}})
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	rotated, err := mgr.RotateKey(ctx, issued.ID)
+	if err != nil {
+		t.Fatalf("rotate: %v", err)
+	}
+	if rotated.Value == "" || rotated.ID == issued.ID {
+		t.Fatalf("rotated key not issued correctly: %+v", rotated)
+	}
+	if rotated.LiteLLMKeyAlias != nil {
+		t.Fatalf("stateless rotate should be local-only, alias=%v", *rotated.LiteLLMKeyAlias)
+	}
+	if len(mirror.genCalls) != 0 || len(mirror.deleteCalls) != 0 {
+		t.Fatalf("stateless mode made LiteLLM calls: gen=%d delete=%d", len(mirror.genCalls), len(mirror.deleteCalls))
+	}
+	if _, err := mgr.VerifyKey(ctx, issued.Value); !errors.Is(err, ErrKeyRevoked) {
+		t.Fatalf("old key verify err = %v, want ErrKeyRevoked", err)
+	}
+	if _, err := mgr.VerifyKey(ctx, rotated.Value); err != nil {
+		t.Fatalf("rotated key should verify: %v", err)
+	}
+}
+
+func TestRotateKeyVirtualKeysMirrorsDeterministically(t *testing.T) {
+	mgr, _, cleanup := testSetup(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	t1, err := mgr.CreateTenant(ctx, CreateTenantInput{Slug: "virtual", Name: "Virtual"})
+	if err != nil {
+		t.Fatalf("create tenant: %v", err)
+	}
+	mirror := &fakeMirror{
+		configured:  true,
+		virtualKeys: true,
+		genReturn: LiteLLMKeyInfo{
+			Key: "sk-litellm",
+		},
+	}
+	mgr.WithLiteLLM(mirror, newFakeSink())
+
+	issued, err := mgr.IssueKey(ctx, IssueAPIKeyInput{TenantID: t1.ID, Scopes: []string{"llm:chat"}})
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	rotated, err := mgr.RotateKey(ctx, issued.ID)
+	if err != nil {
+		t.Fatalf("rotate: %v", err)
+	}
+	if rotated.LiteLLMKeyAlias == nil || *rotated.LiteLLMKeyAlias == "" {
+		t.Fatalf("virtual-key rotate should persist new alias")
+	}
+	if len(mirror.genCalls) != 2 {
+		t.Fatalf("genCalls = %d, want 2", len(mirror.genCalls))
+	}
+	if len(mirror.deleteCalls) != 1 {
+		t.Fatalf("deleteCalls = %d, want 1", len(mirror.deleteCalls))
+	}
+}
+
+func TestRotateKeyVirtualKeyMirrorFailureReturnsIssuedKey(t *testing.T) {
+	mgr, _, cleanup := testSetup(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	t1, err := mgr.CreateTenant(ctx, CreateTenantInput{Slug: "mirror-fail", Name: "Mirror Fail"})
+	if err != nil {
+		t.Fatalf("create tenant: %v", err)
+	}
+	issued, err := mgr.IssueKey(ctx, IssueAPIKeyInput{TenantID: t1.ID, Scopes: []string{"llm:chat"}})
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	mirror := &fakeMirror{
+		configured:  true,
+		virtualKeys: true,
+		genErr:      errors.New("litellm unavailable"),
+	}
+	mgr.WithLiteLLM(mirror, newFakeSink())
+
+	rotated, err := mgr.RotateKey(ctx, issued.ID)
+	if err == nil {
+		t.Fatal("expected mirror failure")
+	}
+	var mirrorErr *MirrorRotationError
+	if !errors.As(err, &mirrorErr) {
+		t.Fatalf("err = %T %v, want MirrorRotationError", err, err)
+	}
+	if rotated.Value == "" || rotated.ID == "" {
+		t.Fatalf("mirror failure must still return issued key: %+v", rotated)
+	}
+	if _, verifyErr := mgr.VerifyKey(ctx, rotated.Value); verifyErr != nil {
+		t.Fatalf("locally rotated key should verify: %v", verifyErr)
+	}
+}
+
 // TestParseTokenShape is a pure-Go unit test (no DB) that documents the
 // `af_<prefix>_<secret>` format. Kept inside the integration suite so
 // the parsing rules live next to the verification tests.

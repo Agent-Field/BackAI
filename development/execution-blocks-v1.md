@@ -74,6 +74,8 @@ Audits show every Block 1.5 item carries non-trivial implementation hazards (cac
 
 ## Block 1 — Endpoint additions (no new OSS) · **~3–4 days** (revised up from 2d)
 
+**Status: DONE — implemented and live-verified on 2026-06-16.** Evidence: runtime/dashboard/customer-app rebuilt in Compose; `/admin/services`, `/admin/db/health`, `/admin/llm/provider-health`, `/admin/adapters`, `/search/indexes`, cache flush, key issue/rotate, notification mutes, brand get/update/reset, and cron trigger all exercised against the running stack. Dashboard screenshots verified the LiteLLM stateless capability pill, local-only API key rows, SQL Health tab, Health page, and Brand page.
+
 Closes 8 known gaps. Most items are small but several carry hidden cost (Cache API extension, key rotation race, brand-yaml build-time gotcha, postgres config change for pg_stat_statements).
 
 ### 1.1 ~~Wire~~ Verify `/api/v1/admin/adapters` handler (no work — already mounted)
@@ -173,8 +175,9 @@ If an env var is unset, the corresponding service is absent from the list. The U
 
 1. `shared_preload_libraries = 'pg_stat_statements'` in `postgresql.conf` **before** the postgres image starts. The current compose uses `pgvector/pgvector:pg16` which does NOT set this by default — adding a postgres config file mount is part of this block.
 2. `CREATE EXTENSION IF NOT EXISTS pg_stat_statements` run once (migration).
+3. Grant the runtime DB role `pg_read_all_stats` where the database permits it. Without this role, `pg_stat_user_tables`, `pg_stat_user_indexes`, and `pg_stat_statements` can be empty or session-local, which makes the SQL Health tab falsely quiet.
 
-If step 1 is skipped, step 2 silently succeeds but no stats accumulate. Runtime checks `pg_extension` AND probes a sample stat at boot; if either fails, endpoint returns `{"available": false, "reason": "pg_stat_statements not loaded; see configuration note"}` and the dashboard renders an "extension needed" notice with the exact remediation.
+If step 1 is skipped, step 2 silently succeeds but no stats accumulate. Runtime checks `pg_extension`, the preload setting, and the stats role at boot/health read; if either fails, endpoint returns `{"available": false, "reason": "..."}` and the dashboard renders an exact remediation instead of an artificially sparse health panel.
 
 ### 1.4 LLM provider availability poller
 
@@ -186,6 +189,10 @@ Background goroutine polls LiteLLM's `/health` and writes to a new table `suite_
 - **(b) Per-provider parallel polling**: enumerate `/model/info` to discover providers, then poll each upstream individually with a per-provider goroutine + jittered interval. Lower latency but more code.
 
 For Block 1, prefer (a). Plan (b) as a follow-up if operators report stale data.
+
+**Auth/retention guardrails**:
+- `401` from `/health` means the LiteLLM master key is wrong. Log a warning and skip the insert; do not record a fake provider outage.
+- Raw `suite_provider_health_log` rows are pruned after 30 days by the poller. Daily rollups are a later reporting-contract decision, not Block 1.
 
 **Files**:
 - `services/runtime/internal/db/migrations/<n>_provider_health_log.sql`
@@ -208,7 +215,7 @@ Six endpoints originally listed together; one (`/api/v1/search/indexes`) was a d
 
 1. Loads the cron row (validate `id` + tenant).
 2. Calls `enqueuer.Enqueue(ctx, cron.Name, cron.Args, cron.TenantID)`.
-3. Writes an audit log entry `cron.triggered_manually`.
+3. Writes an audit log entry `cron.triggered_manually` with `trigger=manual`, `cron_id`, `tenant_id`, `job_name`, and `job_id`.
 4. Returns the new job id.
 
 Reuses the same `JobEnqueuer` the scheduler uses; no second code path.
@@ -221,7 +228,7 @@ Reuses the same `JobEnqueuer` the scheduler uses; no second code path.
 
 **Correct approach**:
 1. Add `Cache.Flush(ctx context.Context, opts FlushOpts) (int64, error)` where `FlushOpts` has `TenantID` and `PromptHash` fields (empty = match-all).
-2. Implement against the existing storage (PG today).
+2. Implement against the existing storage (PG today). Full flush uses `TRUNCATE`; tenant/prompt-hash scoped flushes delete in 1K-row batches so large caches do not hold a single long row-locking delete.
 3. Wire the new HTTP handler to it.
 
 **Files**: `internal/llmcache/cache.go` (extend interface), `internal/server/llm.go` (new handler).
@@ -230,10 +237,15 @@ Reuses the same `JobEnqueuer` the scheduler uses; no second code path.
 
 **HAZARD (audit)**: today's revoke (`tenancy/manager.go:1267`) kicks off an **async** cleanup goroutine that removes the LiteLLM virtual-key mirror. A naïve "revoke + reissue" handler races that goroutine and can leave the new key un-mirrored OR the old key half-deleted.
 
-**Correct approach**: add `tenancy.Manager.Rotate(ctx, keyID) (newKey, error)` that:
-1. Acquires the same per-key serialization the manager uses for `Revoke` + `Issue`.
-2. Inside the lock: issues new key (with LiteLLM mirror), revokes old key (with synchronous LiteLLM cleanup), commits both audit rows.
-3. Returns the new key (one-time reveal).
+**Correct approach**: add `tenancy.Manager.Rotate(ctx, keyID) (newKey, error)` with probed two-mode LiteLLM behavior:
+
+1. At runtime boot, the LiteLLM admin client probes key management once via `GET /key/info` with the master key. A "DB not connected" response means `KeyMgmtStateless`; a reachable key-info surface means `KeyMgmtVirtualKeys`.
+2. The adapter registry's `llm-chat` capability envelope carries `capabilities.virtual_keys_active: bool` plus the key-management mode, matching the existing adapter-slot pattern.
+3. `Rotate` acquires the rotation lock for the key, issues the replacement local key, revokes the old local key, and treats that local DB state as the system of record.
+4. If `virtual_keys_active=true`, it synchronously mirrors the new LiteLLM virtual key and deletes the old mirror. A mirror failure is a real failure and is surfaced with `api_key.rotate.mirror_failed`, while still returning the one-time local replacement key.
+5. If `virtual_keys_active=false`, no LiteLLM mirror call is attempted. The dashboard shows `LiteLLM (stateless)` and API keys render `local only` so operators know spend tracking is degraded until they deploy LiteLLM with its DB.
+
+LiteLLM-with-DB is operator-deployed and owned by the separate compose plan; Block 1 must not force a compose change. Both states are supported and first-class.
 
 The dashboard's existing "revoke + issue" flow stays as-is for callers that don't need the atomicity guarantee.
 
@@ -262,7 +274,8 @@ This is materially larger than the other 1.5 items — alone it's ~half a day. P
 **Correct approach** (two-layer):
 1. **GET** reads `brand.yaml` from disk — fine for the dashboard's read-only view today.
 2. **PUT** writes to a new DB row `suite_brand_override` (single-row table, last-write-wins). The customer-app reads this row at boot (next deploy/restart) and merges it over `brand.yaml`. Until the next customer-app restart, the running app uses the build-time YAML.
-3. The UI surfaces the "restart customer-app to apply" caveat explicitly.
+3. `DELETE /api/v1/admin/brand` removes the DB override row and reverts to `brand.yaml`. A `null` value in the PUT body means "fall back to brand.yaml for this key" and is not stored in the override row.
+4. The UI surfaces the "restart customer-app to apply" caveat explicitly.
 
 This avoids a PUT that mutates a build-time file while still letting operators iterate without rebuilds.
 
@@ -288,7 +301,7 @@ Per the cross-cutting pattern (§0.5.3): per-endpoint cost is 5 edits — schema
 | `POST /api/v1/admin/keys/{id}/rotate` | `api.admin.keys.rotate(id)` mutation | n/a | `"/customers/api-keys"` row action; flip "Rotate" KPI |
 | Notifications mute (multiple endpoints) | `api.notifications.mutes.{list,create,delete}` | new settle for list | new "Mutes" tab on `"/operate/notifications"` or section on `"/setup/notifications"`; flip "Mute" KPI |
 | `GET /api/v1/search/indexes` | `api.search.indexes()` + `SearchIndexesSchema` | new settle | `"/build/data/search"` gains an Index Stats panel; flip "Stats" KPI |
-| `GET /api/v1/admin/brand` (+ `PUT`) | `api.admin.brand.{get,update}` | new settle for get | `"/brand"` page becomes editable (this is the ONLY new React component in Block 1) |
+| `GET /api/v1/admin/brand` (+ `PUT`/`DELETE`) | `api.admin.brand.{get,update,reset}` | new settle for get | `"/brand"` page becomes editable (this is the ONLY new React component in Block 1) |
 
 **Gap-indicator flip rule** (§0.5.4): each KPI flip requires the endpoint to be live AND zod to validate AND `settle()` to return non-null. Doc text alone doesn't count.
 

@@ -669,6 +669,14 @@ func (s *Server) registerRoutes() {
 	s.registerAdminOpenAPI()
 	s.registerAdminAdapterRoutes()
 	s.registerAdminAdapterOpenAPI()
+	s.registerAdminServicesRoutes()
+	s.registerAdminServicesOpenAPI()
+	s.registerDBHealthRoutes()
+	s.registerDBHealthOpenAPI()
+	s.registerLLMProviderHealthRoutes()
+	s.registerLLMProviderHealthOpenAPI()
+	s.registerAdminBrandRoutes()
+	s.registerAdminBrandOpenAPI()
 
 	// GDPR/data-rights endpoints for AF Stack-held app/backend records.
 	// AgentField-owned runs/spans/traces/sessions/memory stay in

@@ -24,6 +24,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -35,6 +37,15 @@ type Service struct {
 	adapter  Adapter
 	recorder *Recorder
 	log      *slog.Logger
+
+	muteMu    sync.Mutex
+	muteCache map[string]muteCacheEntry
+	muteTTL   time.Duration
+}
+
+type muteCacheEntry struct {
+	expiresAt time.Time
+	mutes     []Mute
 }
 
 // NewService constructs a Service. adapter is required (use the log
@@ -47,9 +58,11 @@ func NewService(pool *pgxpool.Pool, adapter Adapter, log *slog.Logger) *Service 
 	}
 	rec := NewRecorder(pool, log)
 	return &Service{
-		adapter:  adapter,
-		recorder: rec,
-		log:      log,
+		adapter:   adapter,
+		recorder:  rec,
+		log:       log,
+		muteCache: map[string]muteCacheEntry{},
+		muteTTL:   5 * time.Second,
 	}
 }
 
@@ -94,6 +107,18 @@ func (s *Service) Send(ctx context.Context, in SendInput) (*Notification, error)
 		return nil, err
 	}
 	if s.recorder != nil && s.recorder.HasPool() {
+		mute, err := s.matchingMute(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		if mute != nil {
+			s.log.Info("notification muted",
+				"mute_id", mute.ID,
+				"kind", in.Kind,
+				"template", in.Template,
+				"to", in.To)
+			return s.recorder.InsertSkipped(ctx, in, "muted by rule "+mute.ID)
+		}
 		return s.recorder.Insert(ctx, in)
 	}
 	// No DB wired: synthesise an ephemeral row so callers see a
@@ -127,6 +152,123 @@ func (s *Service) Send(ctx context.Context, in SendInput) (*Notification, error)
 		ScheduledAt: now.Format(time.RFC3339Nano),
 		CreatedAt:   now.Format(time.RFC3339Nano),
 	}, nil
+}
+
+func (s *Service) ListMutes(ctx context.Context, tenantID string) (*MuteListResult, error) {
+	if s == nil {
+		return nil, ErrNotConfigured
+	}
+	if s.recorder == nil {
+		return &MuteListResult{Mutes: []Mute{}}, nil
+	}
+	return s.recorder.ListMutes(ctx, tenantID)
+}
+
+func (s *Service) CreateMute(ctx context.Context, in CreateMuteInput) (*Mute, error) {
+	if s == nil || s.recorder == nil || !s.recorder.HasPool() {
+		return nil, ErrNotConfigured
+	}
+	out, err := s.recorder.CreateMute(ctx, in)
+	if err == nil {
+		s.clearMuteCache()
+	}
+	return out, err
+}
+
+func (s *Service) DeleteMute(ctx context.Context, id string) error {
+	if s == nil || s.recorder == nil || !s.recorder.HasPool() {
+		return ErrNotConfigured
+	}
+	err := s.recorder.DeleteMute(ctx, id)
+	if err == nil {
+		s.clearMuteCache()
+	}
+	return err
+}
+
+func (s *Service) matchingMute(ctx context.Context, in SendInput) (*Mute, error) {
+	if s == nil || s.recorder == nil || !s.recorder.HasPool() {
+		return nil, nil
+	}
+	cacheKey := in.TenantID
+	now := time.Now()
+	s.muteMu.Lock()
+	entry, ok := s.muteCache[cacheKey]
+	if ok && now.Before(entry.expiresAt) {
+		mutes := append([]Mute{}, entry.mutes...)
+		s.muteMu.Unlock()
+		return firstMatchingMute(mutes, in, now, true), nil
+	}
+	s.muteMu.Unlock()
+
+	list, err := s.recorder.ListMutes(ctx, in.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	mutes := []Mute{}
+	if list != nil {
+		mutes = append(mutes, list.Mutes...)
+	}
+	s.muteMu.Lock()
+	s.muteCache[cacheKey] = muteCacheEntry{expiresAt: now.Add(s.muteTTL), mutes: append([]Mute{}, mutes...)}
+	s.muteMu.Unlock()
+	return firstMatchingMute(mutes, in, now, true), nil
+}
+
+func (s *Service) clearMuteCache() {
+	if s == nil {
+		return
+	}
+	s.muteMu.Lock()
+	defer s.muteMu.Unlock()
+	s.muteCache = map[string]muteCacheEntry{}
+}
+
+func firstMatchingMute(mutes []Mute, in SendInput, now time.Time, preferTenantSpecific bool) *Mute {
+	if preferTenantSpecific {
+		if m := firstMatchingMute(mutes, in, now, false); m != nil && m.TenantID != nil {
+			return m
+		}
+		for i := range mutes {
+			if mutes[i].TenantID != nil {
+				continue
+			}
+			if muteMatches(&mutes[i], in, now) {
+				return &mutes[i]
+			}
+		}
+		return nil
+	}
+	for i := range mutes {
+		if mutes[i].TenantID == nil {
+			continue
+		}
+		if muteMatches(&mutes[i], in, now) {
+			return &mutes[i]
+		}
+	}
+	return nil
+}
+
+func muteMatches(m *Mute, in SendInput, now time.Time) bool {
+	category := "*"
+	if v, ok := in.Data["category"].(string); ok && strings.TrimSpace(v) != "" {
+		category = strings.TrimSpace(v)
+	}
+	if m.ExpiresAt != nil {
+		expiresAt, err := time.Parse(time.RFC3339Nano, *m.ExpiresAt)
+		if err == nil && !expiresAt.After(now) {
+			return false
+		}
+	}
+	return muteFieldMatches(m.Pattern.Kind, string(in.Kind)) &&
+		muteFieldMatches(m.Pattern.Recipient, in.To) &&
+		muteFieldMatches(m.Pattern.Template, in.Template) &&
+		muteFieldMatches(m.Pattern.Category, category)
+}
+
+func muteFieldMatches(pattern, value string) bool {
+	return pattern == "*" || pattern == value
 }
 
 // List returns one page of notifications.

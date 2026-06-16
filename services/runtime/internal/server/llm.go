@@ -46,8 +46,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Agent-Field/backai/services/runtime/internal/audit"
 	"github.com/Agent-Field/backai/services/runtime/internal/guardrails"
 	"github.com/Agent-Field/backai/services/runtime/internal/hooks"
+	"github.com/Agent-Field/backai/services/runtime/internal/llmcache"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmgateway"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmgateway/adapters"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
@@ -173,6 +175,7 @@ func (s *Server) registerLLMRoutes() {
 	s.mux.HandleFunc("POST /api/v1/audio/translations", s.handleLLMAudioTranslations)
 	s.mux.HandleFunc("GET /api/v1/llm/models", s.handleLLMModels)
 	s.mux.HandleFunc("GET /api/v1/llm/cache/stats", s.handleLLMCacheStats)
+	s.mux.HandleFunc("POST /api/v1/llm/cache/flush", s.handleLLMCacheFlush)
 }
 
 // registerLLMOpenAPI describes /api/v1/llm/* in the OpenAPI 3.1 spec.
@@ -237,6 +240,10 @@ func (s *Server) registerLLMOpenAPI() {
 	})
 	b.Register("GET", "/api/v1/llm/cache/stats", openapi.RouteMeta{
 		Summary: "LLM response-cache statistics",
+		Tags:    []string{"llm"},
+	})
+	b.Register("POST", "/api/v1/llm/cache/flush", openapi.RouteMeta{
+		Summary: "Flush LLM response-cache entries",
 		Tags:    []string{"llm"},
 	})
 }
@@ -1229,6 +1236,66 @@ func (s *Server) handleLLMCacheStats(w http.ResponseWriter, r *http.Request) {
 		HitRate:     st.HitRate,
 		SavingsUSD:  st.SavingsUSD,
 		Entries:     int(st.Entries),
+	})
+}
+
+func (s *Server) handleLLMCacheFlush(w http.ResponseWriter, r *http.Request) {
+	if s.llmCache == nil {
+		writeError(w, http.StatusServiceUnavailable,
+			"LLM_CACHE_NOT_CONFIGURED",
+			"llm cache is not configured on this runtime", nil)
+		return
+	}
+	q := r.URL.Query()
+	opts := llmcache.FlushOpts{
+		TenantID:   strings.TrimSpace(q.Get("tenant")),
+		PromptHash: strings.TrimSpace(q.Get("prompt_hash")),
+	}
+	if r.Body != nil {
+		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "could not read body", nil)
+			return
+		}
+		if len(strings.TrimSpace(string(body))) > 0 {
+			var in struct {
+				TenantID   string `json:"tenant_id"`
+				Tenant     string `json:"tenant"`
+				PromptHash string `json:"prompt_hash"`
+			}
+			if err := json.Unmarshal(body, &in); err != nil {
+				writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "invalid JSON body: "+err.Error(), nil)
+				return
+			}
+			if opts.TenantID == "" {
+				opts.TenantID = strings.TrimSpace(in.TenantID)
+			}
+			if opts.TenantID == "" {
+				opts.TenantID = strings.TrimSpace(in.Tenant)
+			}
+			if opts.PromptHash == "" {
+				opts.PromptHash = strings.TrimSpace(in.PromptHash)
+			}
+		}
+	}
+	deleted, err := s.llmCache.Flush(r.Context(), opts)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL", err.Error(), nil)
+		return
+	}
+	s.audit.Write(r.Context(), r, audit.Event{
+		Action:       "llm_cache.flush",
+		ResourceType: "llm_cache",
+		ResourceID:   "response-cache",
+		Metadata: map[string]any{
+			"tenant_id":    opts.TenantID,
+			"prompt_hash":  opts.PromptHash,
+			"deleted_rows": deleted,
+		},
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"flushed":      true,
+		"deleted_rows": deleted,
 	})
 }
 

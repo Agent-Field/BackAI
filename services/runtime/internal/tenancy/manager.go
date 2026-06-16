@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -85,8 +86,9 @@ type Manager struct {
 	// are optional — when nil, IssueAPIKey / RevokeAPIKey behave as
 	// in pre-#22 builds (no upstream LiteLLM mirror, no per-tenant
 	// secret). See litellm_mirror.go.
-	litellm LiteLLMMirror
-	secrets SecretSink
+	litellm  LiteLLMMirror
+	secrets  SecretSink
+	rotateMu sync.Mutex
 }
 
 // New constructs a Manager. pool is required; engine and log may be
@@ -1017,12 +1019,13 @@ func (m *Manager) IssueAPIKey(ctx context.Context, in IssueAPIKeyInput) (IssuedA
 // The plaintext is shown ONCE — the table only ever stores the bcrypt
 // hash of the secret half.
 //
-// When a LiteLLMMirror is wired (WithLiteLLM) this method ALSO mints a
-// LiteLLM virtual key with the supplied budget + rate-limits, stores
-// the LiteLLM secret in the secrets vault under
-// "litellm/key/{api_key_id}", and updates the suite_api_keys row with
-// the alias + hash. Failure of the LiteLLM call rolls back the AF
-// Stack row insert so callers see an atomic operation (#22).
+// When a LiteLLMMirror is wired (WithLiteLLM) and its boot-time probe
+// reports virtual keys active, this method ALSO mints a LiteLLM virtual
+// key with the supplied budget + rate-limits, stores the LiteLLM secret
+// in the secrets vault under "litellm/key/{api_key_id}", and updates
+// the suite_api_keys row with the alias + hash. Failure of an active
+// virtual-key mirror rolls back the AF Stack row insert so callers see
+// a real configuration error instead of silent degradation.
 //
 // If no LiteLLMMirror is wired, the legacy path runs (insert only) and
 // the LLM gateway falls back to LITELLM_MASTER_KEY for upstream calls.
@@ -1087,20 +1090,16 @@ func (m *Manager) IssueKey(ctx context.Context, in IssueAPIKeyInput) (IssuedAPIK
 		return IssuedAPIKey{}, fmt.Errorf("tenancy: insert key: %w", err)
 	}
 
-	// LiteLLM mirror. Atomic with respect to the row above: if the
-	// LiteLLM call fails we delete the row before returning so the
-	// caller never sees a half-issued key. The mirror skips silently
-	// when LiteLLM isn't wired.
+	// LiteLLM mirror. This runs only when the adapter capability probe
+	// confirmed virtual keys are active. Stateless LiteLLM is a supported
+	// mode, represented by a local-only key and a registry capability.
 	var (
 		litellmAlias string
 		litellmHash  string
 	)
-	if m.litellm != nil && m.litellm.Configured() {
+	if m.litellm != nil && m.litellm.Configured() && m.litellm.VirtualKeysActive() {
 		litellmAlias, litellmHash, err = m.issueLiteLLMKey(ctx, in.TenantID, id, in)
 		if err != nil {
-			// Roll back. Use a fresh background context so a cancelled
-			// request ctx doesn't leave the row stranded — RLS isn't
-			// active during the admin path, and the row id is local.
 			rollbackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if _, delErr := m.pool.Exec(rollbackCtx, `delete from suite_api_keys where id = $1`, id); delErr != nil {
@@ -1151,6 +1150,86 @@ func (m *Manager) IssueKey(ctx context.Context, in IssueAPIKeyInput) (IssuedAPIK
 	return IssuedAPIKey{
 		APIKey: pub,
 		Value:  keyTokenPrefix + prefix + "_" + secret,
+	}, nil
+}
+
+type keyWriter interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func (m *Manager) issueLocalKey(ctx context.Context, in IssueAPIKeyInput) (IssuedAPIKey, error) {
+	return m.issueLocalKeyWith(ctx, m.pool, in)
+}
+
+func (m *Manager) issueLocalKeyWith(ctx context.Context, writer keyWriter, in IssueAPIKeyInput) (IssuedAPIKey, error) {
+	if in.TenantID == "" {
+		return IssuedAPIKey{}, wrappedErr{base: ErrInvalid, msg: "tenancy: tenant_id required"}
+	}
+	if in.Scopes == nil {
+		in.Scopes = []string{}
+	}
+
+	prefix, err := randomToken(keyPrefixBytes)
+	if err != nil {
+		return IssuedAPIKey{}, fmt.Errorf("tenancy: prefix entropy: %w", err)
+	}
+	secret, err := randomToken(keySecretBytes)
+	if err != nil {
+		return IssuedAPIKey{}, fmt.Errorf("tenancy: secret entropy: %w", err)
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(secret), bcryptCost)
+	if err != nil {
+		return IssuedAPIKey{}, fmt.Errorf("tenancy: bcrypt: %w", err)
+	}
+
+	var (
+		id        string
+		createdAt time.Time
+	)
+	var namePtr *string
+	if strings.TrimSpace(in.Name) != "" {
+		n := in.Name
+		namePtr = &n
+	}
+	var createdByPtr *string
+	if strings.TrimSpace(in.CreatedBy) != "" {
+		c := in.CreatedBy
+		createdByPtr = &c
+	}
+
+	err = writer.QueryRow(ctx, `
+		insert into suite_api_keys
+			(tenant_id, prefix, hashed_secret, name, scopes, created_by, expires_at,
+			 budget_max_usd, rate_limit_rpm, rate_limit_tpm)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		returning id::text, created_at
+	`,
+		in.TenantID, prefix, string(hash), namePtr, in.Scopes, createdByPtr, in.ExpiresAt,
+		in.BudgetMaxUSD, in.RateLimitRPM, in.RateLimitTPM,
+	).Scan(&id, &createdAt)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			return IssuedAPIKey{}, ErrTenantNotFound
+		}
+		return IssuedAPIKey{}, fmt.Errorf("tenancy: insert key: %w", err)
+	}
+
+	return IssuedAPIKey{
+		APIKey: APIKey{
+			ID:           id,
+			TenantID:     in.TenantID,
+			Prefix:       prefix,
+			Name:         namePtr,
+			Scopes:       append([]string{}, in.Scopes...),
+			CreatedBy:    createdByPtr,
+			CreatedAt:    createdAt,
+			ExpiresAt:    in.ExpiresAt,
+			BudgetMaxUSD: in.BudgetMaxUSD,
+			RateLimitRPM: in.RateLimitRPM,
+			RateLimitTPM: in.RateLimitTPM,
+		},
+		Value: keyTokenPrefix + prefix + "_" + secret,
 	}, nil
 }
 
@@ -1283,6 +1362,124 @@ func (m *Manager) RevokeKey(ctx context.Context, id string) error {
 		}()
 	}
 	return nil
+}
+
+// RotateKey issues a replacement API key with the old key's tenant,
+// scopes, name, expiry, and LiteLLM budget/rate-limit settings, then
+// revokes the old key. The local DB row is the system of record and is
+// always rotated first. LiteLLM virtual-key mirroring only runs when the
+// boot-time capability probe confirmed virtual_keys_active=true.
+func (m *Manager) RotateKey(ctx context.Context, id string) (IssuedAPIKey, error) {
+	ctx, span := m.tracer.Start(ctx, "tenancy.rotate_key",
+		trace.WithAttributes(attribute.String("tenancy.api_key_id", id)),
+	)
+	defer span.End()
+
+	if strings.TrimSpace(id) == "" {
+		return IssuedAPIKey{}, wrappedErr{base: ErrInvalid, msg: "tenancy: key id required"}
+	}
+
+	m.rotateMu.Lock()
+	defer m.rotateMu.Unlock()
+
+	tx, err := m.pool.Begin(ctx)
+	if err != nil {
+		span.RecordError(err)
+		return IssuedAPIKey{}, fmt.Errorf("tenancy: rotate begin: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	row := tx.QueryRow(ctx, `
+		select id::text, tenant_id::text, prefix, name, scopes, created_by::text,
+		       created_at, last_used_at, expires_at, revoked_at,
+		       litellm_key_alias, budget_max_usd, rate_limit_rpm, rate_limit_tpm
+		  from suite_api_keys
+		 where id = $1
+		 for update
+	`, id)
+	oldVal, err := scanAPIKey(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return IssuedAPIKey{}, ErrAPIKeyNotFound
+		}
+		span.RecordError(err)
+		return IssuedAPIKey{}, fmt.Errorf("tenancy: rotate load old key: %w", err)
+	}
+	if oldVal.RevokedAt != nil {
+		return IssuedAPIKey{}, ErrAPIKeyNotFound
+	}
+
+	name := ""
+	if oldVal.Name != nil {
+		name = *oldVal.Name
+	}
+	createdBy := ""
+	if oldVal.CreatedBy != nil {
+		createdBy = *oldVal.CreatedBy
+	}
+	in := IssueAPIKeyInput{
+		TenantID:     oldVal.TenantID,
+		Name:         name,
+		Scopes:       append([]string{}, oldVal.Scopes...),
+		ExpiresAt:    oldVal.ExpiresAt,
+		CreatedBy:    createdBy,
+		BudgetMaxUSD: oldVal.BudgetMaxUSD,
+		RateLimitRPM: oldVal.RateLimitRPM,
+		RateLimitTPM: oldVal.RateLimitTPM,
+	}
+	issued, err := m.issueLocalKeyWith(ctx, tx, in)
+	if err != nil {
+		span.RecordError(err)
+		return IssuedAPIKey{}, err
+	}
+
+	var alias string
+	if oldVal.LiteLLMKeyAlias != nil {
+		alias = *oldVal.LiteLLMKeyAlias
+	}
+	tag, err := tx.Exec(ctx, `
+		update suite_api_keys
+		   set revoked_at = now()
+		 where id = $1 and revoked_at is null
+	`, oldVal.ID)
+	if err != nil {
+		span.RecordError(err)
+		return IssuedAPIKey{}, fmt.Errorf("tenancy: rotate revoke old key: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return IssuedAPIKey{}, ErrAPIKeyNotFound
+	}
+	if err := tx.Commit(ctx); err != nil {
+		span.RecordError(err)
+		return IssuedAPIKey{}, fmt.Errorf("tenancy: rotate commit: %w", err)
+	}
+	committed = true
+
+	if m.litellm != nil && m.litellm.Configured() && m.litellm.VirtualKeysActive() {
+		newAlias, newHash, mirrorErr := m.issueLiteLLMKey(ctx, in.TenantID, issued.ID, in)
+		if mirrorErr != nil {
+			span.RecordError(mirrorErr)
+			return issued, &MirrorRotationError{Err: mirrorErr}
+		}
+		if newAlias != "" {
+			if _, err := m.pool.Exec(ctx, `
+				update suite_api_keys
+				   set litellm_key_alias = $2, litellm_key_hash = $3
+				 where id = $1
+			`, issued.ID, newAlias, newHash); err != nil {
+				span.RecordError(err)
+				return issued, &MirrorRotationError{Err: fmt.Errorf("persist new LiteLLM mirror: %w", err)}
+			}
+			issued.LiteLLMKeyAlias = &newAlias
+		}
+		m.revokeLiteLLMKey(ctx, oldVal.TenantID, oldVal.ID, alias)
+	}
+	return issued, nil
 }
 
 // VerifyKey parses an Authorization Bearer value of the form

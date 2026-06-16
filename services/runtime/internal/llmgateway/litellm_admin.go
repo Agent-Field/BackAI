@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -38,6 +39,11 @@ type LiteLLMAdmin struct {
 	baseURL    string
 	masterKey  string
 	httpClient *http.Client
+
+	mu             sync.RWMutex
+	keyMgmt        KeyMgmt
+	keyMgmtProbed  bool
+	keyMgmtLastErr string
 }
 
 // NewLiteLLMAdmin constructs an admin client. baseURL is the LiteLLM
@@ -64,6 +70,86 @@ func (a *LiteLLMAdmin) Configured() bool {
 		return false
 	}
 	return a.baseURL != "" && a.masterKey != ""
+}
+
+// KeyMgmt is the probed operational mode of LiteLLM's admin key surface.
+type KeyMgmt string
+
+const (
+	KeyMgmtUnknown     KeyMgmt = "unknown"
+	KeyMgmtStateless   KeyMgmt = "stateless"
+	KeyMgmtVirtualKeys KeyMgmt = "virtual_keys"
+)
+
+// VirtualKeysActive reports whether the cached boot-time probe confirmed
+// LiteLLM can create/read virtual keys. Unknown is deliberately false.
+func (a *LiteLLMAdmin) VirtualKeysActive() bool {
+	if a == nil {
+		return false
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.keyMgmt == KeyMgmtVirtualKeys
+}
+
+// KeyManagement returns the cached probe result and last probe error text.
+func (a *LiteLLMAdmin) KeyManagement() (KeyMgmt, string) {
+	if a == nil {
+		return KeyMgmtUnknown, ""
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if !a.keyMgmtProbed {
+		return KeyMgmtUnknown, a.keyMgmtLastErr
+	}
+	return a.keyMgmt, a.keyMgmtLastErr
+}
+
+// ProbeKeyManagement detects whether the LiteLLM sidecar has its
+// virtual-key database connected. Stateless LiteLLM still handles model
+// routing through the master key, but key issue/rotate must not assume
+// /key/generate is available.
+func (a *LiteLLMAdmin) ProbeKeyManagement(ctx context.Context) (KeyMgmt, error) {
+	if !a.Configured() {
+		a.setKeyManagement(KeyMgmtStateless, "")
+		return KeyMgmtStateless, nil
+	}
+	q := url.Values{}
+	q.Set("key_alias", "af-stack-capability-probe-never-created")
+	body, status, err := a.do(ctx, http.MethodGet, "/key/info", q, nil)
+	if err != nil {
+		a.setKeyManagement(KeyMgmtUnknown, err.Error())
+		return KeyMgmtUnknown, err
+	}
+	mode := KeyMgmtVirtualKeys
+	var probeErr error
+	if status >= 400 {
+		raw := string(body)
+		switch {
+		case strings.Contains(strings.ToLower(raw), "db not connected"),
+			strings.Contains(strings.ToLower(raw), "database not connected"):
+			mode = KeyMgmtStateless
+		case status == http.StatusNotFound:
+			mode = KeyMgmtVirtualKeys
+		default:
+			mode = KeyMgmtUnknown
+			probeErr = &AdminError{StatusCode: status, Endpoint: "/key/info", Body: raw}
+		}
+	}
+	errText := ""
+	if probeErr != nil {
+		errText = probeErr.Error()
+	}
+	a.setKeyManagement(mode, errText)
+	return mode, probeErr
+}
+
+func (a *LiteLLMAdmin) setKeyManagement(mode KeyMgmt, lastErr string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.keyMgmt = mode
+	a.keyMgmtProbed = true
+	a.keyMgmtLastErr = lastErr
 }
 
 // ─── Wire shapes ─────────────────────────────────────────────────────────

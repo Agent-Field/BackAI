@@ -252,16 +252,16 @@ const definitions: Record<string, PageDefinition> = {
     ],
   },
   "/operate/cache": {
-    primaryAction: "Open LLM admin",
+    primaryAction: "Flush cache",
     controls: () => [select("Tenant", "Platform", ["Platform", "acme", "beta-labs"]), select("Range", "24h", ["24h", "7d", "30d"]), tabs("View", "summary", ["summary", "hits", "misses"])],
-    kpis: () => [kpi("Hit rate", "see rows", "from cache stats", "live", "ok"), kpi("Savings", "derived", "gateway estimate", "client", "running"), kpi("Entries", "live", "cache size", "stats", "ok"), kpi("Flush", "hidden", "no endpoint", "gap", "warn")],
+    kpis: () => [kpi("Hit rate", "see rows", "from cache stats", "live", "ok"), kpi("Savings", "derived", "gateway estimate", "client", "running"), kpi("Entries", "live", "cache size", "stats", "ok"), kpi("Flush", "backed", "tenant or prompt hash", "ready", "warn")],
     rows: (snapshot) => snapshot.cache,
     tableTitle: "Cache effectiveness",
     tableDescription: "LLM cache hit rate, savings, misses, and entries from the gateway cache stats.",
     secondaryTitle: "Cache policy",
     secondary: (snapshot) => [
       card("Top cache signals", "Rows are backed by `/api/v1/llm/cache/stats`.", selectedRows(snapshot.cache, 3)),
-      card("Actions", "Flush controls stay hidden until backend flush endpoints exist.", [{ label: "Gap", value: "flush endpoint missing", tone: "warn" }]),
+      card("Actions", "Flush uses `/api/v1/llm/cache/flush` and can be scoped by tenant or prompt hash.", [{ label: "Endpoint", value: "POST cache flush", tone: "ok" }]),
     ],
   },
   "/operate/sandbox-runs": {
@@ -293,14 +293,14 @@ const definitions: Record<string, PageDefinition> = {
   "/operate/notifications": {
     primaryAction: "Resend notification",
     controls: () => statusControls("Search recipient, template, channel, or status..."),
-    kpis: () => [kpi("Sent", "live", "stats endpoint", "24h", "ok"), kpi("Failures", "live", "stats endpoint", "24h", "warn"), kpi("Channels", "env", "setup page owns config", "thin", "neutral"), kpi("Mute", "gap", "policy endpoint", "missing", "warn")],
+    kpis: () => [kpi("Sent", "live", "stats endpoint", "24h", "ok"), kpi("Failures", "live", "stats endpoint", "24h", "warn"), kpi("Channels", "env", "setup page owns config", "thin", "neutral"), kpi("Mute", "backed", "exact or wildcard", "policy", "ok")],
     rows: (snapshot) => snapshot.notifications,
     tableTitle: "Notification delivery inbox",
     tableDescription: "Email, SMS, push, and log delivery audit with provider responses.",
     secondaryTitle: "Channel context",
     secondary: (snapshot) => [
       card("Delivery rows", "Delivery audit is distinct from Setup channel configuration.", selectedRows(snapshot.notifications, 5)),
-      card("Missing action", "Mute future notifications requires a policy endpoint.", [{ label: "Gap", value: "mute policy endpoint", tone: "warn" }]),
+      card("Mute rules", "Exact values and `*` wildcard rules are enforced before delivery enqueue.", selectedRows(snapshot.notificationMutes, 5)),
     ],
   },
   "/operate/approvals": {
@@ -332,17 +332,19 @@ const definitions: Record<string, PageDefinition> = {
   "/operate/health": {
     primaryAction: "Refresh checks",
     controls: () => setupControls("Search service, adapter, version, or route..."),
-    kpis: () => [kpi("Runtime", "health", "/health", "live", "ok"), kpi("Ready", "ready", "/ready", "live", "ok"), kpi("Metrics", "summary", "route rollups", "live", "ok"), kpi("Deep stats", "missing", "PG/certs/workers", "gap", "warn")],
+    kpis: () => [kpi("Runtime", "health", "/health", "live", "ok"), kpi("Ready", "ready", "/ready", "live", "ok"), kpi("Metrics", "summary", "route rollups", "live", "ok"), kpi("Deep stats", "backed", "DB/provider checks", "live", "ok")],
     rows: (snapshot) => [
       ...snapshot.services.map((service) => ({
         id: service.name,
         primary: service.name,
         secondary: `${service.adapter ?? "service"} · ${service.version}`,
         status: service.status,
-        tone: service.status === "healthy" ? "ok" as StatusTone : service.status === "degraded" ? "warn" as StatusTone : "fail" as StatusTone,
+        tone: service.status === "healthy" || service.status === "configured" ? "ok" as StatusTone : service.status === "degraded" ? "warn" as StatusTone : "fail" as StatusTone,
         metric: service.adapter ?? "service",
         timestamp: service.checked,
       })),
+      ...snapshot.dbHealth,
+      ...snapshot.providerHealth,
       ...snapshot.observability,
     ],
     tableTitle: "Service topology",
@@ -350,7 +352,8 @@ const definitions: Record<string, PageDefinition> = {
     secondaryTitle: "Health caveats",
     secondary: (snapshot) => [
       card("Runtime metrics", "HTTP, heap, goroutine, and route rollups.", selectedRows(snapshot.observability, 5)),
-      card("Missing deep checks", "DB stats, cert expiry, and worker internals need backend endpoints.", [{ label: "Gap", value: "deep checks endpoint", tone: "warn" }]),
+      card("Database health", "Postgres stats include connections, cache ratio, slow queries, table size, vacuum, and locks.", selectedRows(snapshot.dbHealth, 5)),
+      card("Provider health", "LLM provider availability comes from the runtime poller.", selectedRows(snapshot.providerHealth, 5)),
     ],
   },
   "/operate/logs": {
@@ -428,14 +431,14 @@ const definitions: Record<string, PageDefinition> = {
   "/build/crons": {
     primaryAction: "Create cron",
     controls: () => [tabs("State", "all", ["all", "active", "paused"]), input("Search", "Search schedule, job, tenant...")],
-    kpis: () => [kpi("Schedules", "backed", "crons endpoint", "ready", "ok"), kpi("Next run", "visible", "per cron", "ready", "running"), kpi("Pause", "backed", "active toggle", "audited", "ok"), kpi("Trigger now", "missing", "endpoint", "gap", "warn")],
+    kpis: () => [kpi("Schedules", "backed", "crons endpoint", "ready", "ok"), kpi("Next run", "visible", "per cron", "ready", "running"), kpi("Pause", "backed", "active toggle", "audited", "ok"), kpi("Trigger now", "backed", "enqueue once", "audited", "ok")],
     rows: (snapshot) => snapshot.crons,
     tableTitle: "Schedule board",
     tableDescription: "Cron jobs, target actions, next run, last run, and active state.",
     secondaryTitle: "Schedule detail",
     secondary: (snapshot) => [
       card("Next runs", "Cron rows use shareable query links for selected schedules.", selectedRows(snapshot.crons, 5)),
-      card("Missing action", "Manual trigger is hidden until backend exposes an endpoint.", [{ label: "Gap", value: "trigger cron endpoint", tone: "warn" }]),
+      card("Manual trigger", "Trigger creates one queued job through `/api/v1/crons/{id}/trigger`.", [{ label: "Endpoint", value: "POST trigger", tone: "ok" }]),
     ],
   },
   "/build/sandboxes": {
@@ -470,15 +473,15 @@ const definitions: Record<string, PageDefinition> = {
   },
   "/build/data/sql": {
     primaryAction: "Run query",
-    controls: () => [select("Limit", "500", ["100", "500", "1000"]), switcher("Read only", "on"), input("Search", "Search saved snippets...")],
-    kpis: () => [kpi("Read-only", "server", "enforced", "safe", "ok"), kpi("Results", "table", "bounded", "ready", "running"), kpi("History", "local", "until backend", "thin", "neutral"), kpi("Export", "CSV", "client", "ready", "ok")],
-    rows: (snapshot) => snapshot.tables,
+    controls: () => [tabs("View", "query", ["query", "health"]), select("Limit", "500", ["100", "500", "1000"]), switcher("Read only", "on"), input("Search", "Search saved snippets...")],
+    kpis: () => [kpi("Read-only", "server", "enforced", "safe", "ok"), kpi("Results", "table", "bounded", "ready", "running"), kpi("Health", "backed", "admin DB stats", "live", "ok"), kpi("Export", "CSV", "client", "ready", "ok")],
+    rows: (snapshot) => snapshot.dbHealth.length ? snapshot.dbHealth : snapshot.tables,
     tableTitle: "SQL workbench",
     tableDescription: "Read-only SQL editor with bounded results and copy/export affordances.",
     secondaryTitle: "Query context",
-    secondary: () => [
+    secondary: (snapshot) => [
       card("Starter query", "Use bounded read-only SQL for operational inspection.", undefined, "select * from suite_runs order by started_at desc limit 20;"),
-      card("Saved snippets", "Persisted snippet/history storage can be added later."),
+      card("Health tab", "The same surface reads `/api/v1/admin/db/health` for connections, slow queries, locks, and table size.", selectedRows(snapshot.dbHealth, 5)),
     ],
   },
   "/build/data/memory": {
@@ -504,14 +507,13 @@ const definitions: Record<string, PageDefinition> = {
   "/build/data/search": {
     primaryAction: "Run search",
     controls: () => [select("Namespace", "all", ["all", "platform-docs", "tenant"]), input("Query", "Search indexed documents...")],
-    kpis: () => [kpi("Query", "backed", "search route", "ready", "ok"), kpi("Upsert", "backed", "documents", "ready", "ok"), kpi("Stats", "missing", "index stats", "gap", "warn"), kpi("Latency", "result", "per query", "ready", "running")],
+    kpis: () => [kpi("Query", "backed", "search route", "ready", "ok"), kpi("Upsert", "backed", "documents", "ready", "ok"), kpi("Stats", "backed", "index stats", "live", "ok"), kpi("Latency", "result", "per query", "ready", "running")],
     rows: (snapshot) => snapshot.searchIndexes,
     tableTitle: "Search workbench",
     tableDescription: "Query indexes, inspect matches, and test document ingestion.",
     secondaryTitle: "Index context",
     secondary: (snapshot) => [
-      card("Indexes", "Stats remain thin until backend exposes index rollups.", selectedRows(snapshot.searchIndexes, 5)),
-      card("Gap", "Index statistics endpoint is missing.", [{ label: "Needed", value: "GET /api/v1/search/indexes", tone: "warn" }]),
+      card("Indexes", "Index size, scan counts, tuple reads, and vacuum timestamps come from `/api/v1/search/indexes`.", selectedRows(snapshot.searchIndexes, 5)),
     ],
   },
   "/build/feature-flags": {
@@ -558,7 +560,7 @@ const definitions: Record<string, PageDefinition> = {
   "/customers/api-keys": {
     primaryAction: "Issue key",
     controls: () => [select("Tenant", "all", ["all", "acme", "beta-labs"]), tabs("Status", "all", ["all", "active", "revoked", "expired"]), input("Search", "Search alias, prefix, tenant...")],
-    kpis: () => [kpi("Issue", "backed", "one-time reveal", "ready", "ok"), kpi("Spend", "backed", "per key", "ready", "running"), kpi("Rotate", "revoke+issue", "until rotate endpoint", "gap", "warn"), kpi("Bulk", "guarded", "selected keys", "safe", "neutral")],
+    kpis: () => [kpi("Issue", "backed", "one-time reveal", "ready", "ok"), kpi("Spend", "backed", "per key", "ready", "running"), kpi("Rotate", "backed", "single audited endpoint", "ready", "ok"), kpi("Bulk", "guarded", "selected keys", "safe", "neutral")],
     rows: (snapshot) => snapshot.apiKeys,
     tableTitle: "API key operations",
     tableDescription: "Tenant keys, spend, limits, expiration, scopes, and revocation.",
@@ -729,21 +731,16 @@ const definitions: Record<string, PageDefinition> = {
     secondary: () => [card("No provisioning API", "Deploy target status is informational until the runtime owns deploy status.", [{ label: "Gap", value: "deploy status endpoint", tone: "warn" }])],
   },
   "/brand": {
-    primaryAction: "Copy file path",
+    primaryAction: "Update brand",
     controls: () => [input("Search", "Search brand token, color, asset...")],
-    kpis: () => [kpi("Source", "brand.yaml", "file-backed", "v1", "neutral"), kpi("Endpoint", "missing", "admin brand", "gap", "warn"), kpi("Editing", "code", "file edit", "policy", "neutral"), kpi("Reload", "thin", "if hot reload", "manual", "neutral")],
-    rows: (snapshot) => [
-      { id: "brand-name", primary: "Brand name", secondary: "Displayed public name from brand.yaml", status: "file", tone: "neutral", metric: "BackAI", timestamp: "current" },
-      { id: "primary", primary: "Primary color", secondary: "Monochrome admin theme remains separate", status: "file", tone: "neutral", metric: "#fafafa", timestamp: "current" },
-      { id: "logo", primary: "Logo", secondary: "Asset preview when configured", status: "file", tone: "neutral", metric: "logo", timestamp: "current" },
-      ...snapshot.adapters.slice(0, 3).map((adapter) => ({ id: `brand-adapter:${adapter.slot}`, primary: adapter.slot, secondary: adapter.description, status: adapter.adapter, tone: adapter.status, metric: "adapter", timestamp: "current" })),
-    ],
-    tableTitle: "Brand file display",
-    tableDescription: "Read-only display of operator-owned brand.yaml. Editing is a file edit in v1.",
-    secondaryTitle: "File contract",
-    secondary: () => [
-      card("Endpoint gap", "The admin reads file-level brand information until a brand endpoint exists.", [{ label: "Needed", value: "GET /api/v1/admin/brand", tone: "warn" }]),
-      card("Path", "Copy this path into the editor.", undefined, "brand.yaml"),
+    kpis: () => [kpi("Source", "brand.yaml", "file plus DB override", "live", "ok"), kpi("Endpoint", "backed", "admin brand", "ready", "ok"), kpi("Editing", "structured", "brand object", "audited", "running"), kpi("Reload", "restart", "customer-app apply", "required", "warn")],
+    rows: (snapshot) => snapshot.brand,
+    tableTitle: "Brand settings",
+    tableDescription: "Structured brand values from brand.yaml plus the runtime DB override.",
+    secondaryTitle: "Apply contract",
+    secondary: (snapshot) => [
+      card("Structured form", "Brand updates write to `/api/v1/admin/brand`; build-time customer-app surfaces still require restart or redeploy.", selectedRows(snapshot.brand, 5)),
+      card("Path", "The file remains the base layer for self-hosted operators.", snapshot.brand.find((row) => row.id === "brand-source") ? [{ label: "brand.yaml", value: snapshot.brand.find((row) => row.id === "brand-source")?.metric ?? "brand.yaml", tone: "neutral" }] : undefined),
     ],
   },
 }

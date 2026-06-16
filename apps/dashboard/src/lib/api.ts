@@ -564,6 +564,38 @@ export const NotificationListSchema = z.object({
 })
 export type NotificationList = z.infer<typeof NotificationListSchema>
 
+export const NotificationMutePatternSchema = z.object({
+  kind: z.string(),
+  recipient: z.string(),
+  template: z.string(),
+  category: z.string(),
+})
+export type NotificationMutePattern = z.infer<typeof NotificationMutePatternSchema>
+
+export const NotificationMuteSchema = z.object({
+  id: z.string(),
+  tenant_id: z.string().nullable(),
+  pattern: NotificationMutePatternSchema,
+  reason: z.string().nullable(),
+  expires_at: z.string().nullable(),
+  created_by: z.string().nullable(),
+  created_at: z.string(),
+})
+export type NotificationMute = z.infer<typeof NotificationMuteSchema>
+
+export const NotificationMuteListSchema = z.object({
+  mutes: z.array(NotificationMuteSchema),
+})
+export type NotificationMuteList = z.infer<typeof NotificationMuteListSchema>
+
+export const CreateNotificationMuteInputSchema = z.object({
+  tenant_id: z.string().optional(),
+  pattern: NotificationMutePatternSchema,
+  reason: z.string().optional(),
+  expires_at: z.string().optional(),
+})
+export type CreateNotificationMuteInput = z.infer<typeof CreateNotificationMuteInputSchema>
+
 export const SendNotificationInputSchema = z.object({
   kind: NotificationKindSchema.default("email"),
   template: z.string(),
@@ -1092,6 +1124,51 @@ export const DBTableListSchema = z.object({
 })
 export type DBTableList = z.infer<typeof DBTableListSchema>
 
+export const DBHealthSchema = z.object({
+  available: z.boolean(),
+  reason: z.string().optional(),
+  connections: z.object({
+    active: z.number(),
+    idle: z.number(),
+    max: z.number(),
+  }),
+  cache_hit_ratio: z.number(),
+  slow_queries: z.array(
+    z.object({
+      query: z.string(),
+      calls: z.number(),
+      mean_ms: z.number(),
+      total_ms: z.number(),
+    }),
+  ),
+  largest_tables: z.array(
+    z.object({
+      schema: z.string(),
+      table: z.string(),
+      size_bytes: z.number(),
+      row_count: z.number(),
+    }),
+  ),
+  vacuum_status: z.array(
+    z.object({
+      table: z.string(),
+      last_vacuum: z.string().nullable(),
+      dead_tuples: z.number(),
+    }),
+  ),
+  locks: z.array(
+    z.object({
+      pid: z.number(),
+      mode: z.string(),
+      granted: z.boolean(),
+      relation: z.string().optional(),
+      age_ms: z.number(),
+    }),
+  ),
+  checked_at: z.string(),
+})
+export type DBHealth = z.infer<typeof DBHealthSchema>
+
 export const DBColumnSchema = z.object({
   name: z.string(),
   data_type: z.string(),
@@ -1218,6 +1295,24 @@ export const MemorySearchResultSchema = z.object({
 })
 export type MemorySearchResult = z.infer<typeof MemorySearchResultSchema>
 
+export const SearchIndexStatSchema = z.object({
+  schema: z.string(),
+  table: z.string(),
+  index: z.string(),
+  size_bytes: z.number(),
+  index_scans: z.number(),
+  rows_read: z.number(),
+  rows_fetched: z.number(),
+  last_vacuum: z.string().nullable(),
+  definition: z.string(),
+})
+export type SearchIndexStat = z.infer<typeof SearchIndexStatSchema>
+
+export const SearchIndexStatsSchema = z.object({
+  indexes: z.array(SearchIndexStatSchema),
+})
+export type SearchIndexStats = z.infer<typeof SearchIndexStatsSchema>
+
 // ─── LLM Gateway + Cost (Phase 7) ─────────────────────────────────────────
 
 export const CostEventSchema = z.object({
@@ -1292,6 +1387,12 @@ export const CacheStatsSchema = z.object({
   entries: z.number(),
 })
 export type CacheStats = z.infer<typeof CacheStatsSchema>
+
+export const CacheFlushSchema = z.object({
+  flushed: z.boolean(),
+  deleted_rows: z.number(),
+})
+export type CacheFlush = z.infer<typeof CacheFlushSchema>
 
 // ─── Tenancy (Phase 6) ────────────────────────────────────────────────────
 
@@ -1751,6 +1852,58 @@ export const AdapterRegistrySchema = z.object({
 })
 export type AdapterRegistry = z.infer<typeof AdapterRegistrySchema>
 
+export const AdminServiceSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  kind: z.string(),
+  status: z.string(),
+  version: z.string().optional(),
+  host: z.string().optional(),
+  port: z.number().nullable(),
+  admin_url: z.string().nullable(),
+  purpose: z.string(),
+  checked_at: z.string(),
+})
+export type AdminService = z.infer<typeof AdminServiceSchema>
+
+export const AdminServiceListSchema = z.object({
+  services: z.array(AdminServiceSchema),
+})
+export type AdminServiceList = z.infer<typeof AdminServiceListSchema>
+
+export const ProviderHealthSchema = z.object({
+  provider: z.string(),
+  status: z.string(),
+  availability_pct: z.number(),
+  observations: z.number(),
+  median_latency_ms: z.number(),
+  p95_latency_ms: z.number(),
+  last_observed_at: z.string().nullable(),
+  latency_buckets: z.record(z.string(), z.number()),
+})
+export type ProviderHealth = z.infer<typeof ProviderHealthSchema>
+
+export const ProviderHealthListSchema = z.object({
+  providers: z.array(ProviderHealthSchema),
+  window: z.string(),
+})
+export type ProviderHealthList = z.infer<typeof ProviderHealthListSchema>
+
+export const BrandResponseSchema = z.object({
+  brand: z.record(z.string(), z.unknown()),
+  override: z.record(z.string(), z.unknown()).optional(),
+  source: z.string(),
+  updated_at: z.string().nullable(),
+  apply: z.string(),
+  brand_yaml_path: z.string(),
+})
+export type BrandResponse = z.infer<typeof BrandResponseSchema>
+
+export const BrandUpdateInputSchema = z.object({
+  brand: z.record(z.string(), z.unknown()),
+})
+export type BrandUpdateInput = z.infer<typeof BrandUpdateInputSchema>
+
 // ─── Shipwright task factory (Phase 3 Tier 1) ─────────────────────────────
 //
 // AF Stack stores task + patch metadata only. AgentField owns the
@@ -2031,6 +2184,30 @@ export const api = {
         { method: "POST", json: input },
         NotificationSchema,
       ),
+    mutes: {
+      list: (params?: { tenant?: string }) => {
+        const qs = params?.tenant
+          ? `?tenant=${encodeURIComponent(params.tenant)}`
+          : ""
+        return request(
+          `/api/v1/notifications/mutes${qs}`,
+          undefined,
+          NotificationMuteListSchema,
+        )
+      },
+      create: (input: CreateNotificationMuteInput) =>
+        request(
+          "/api/v1/notifications/mutes",
+          { method: "POST", json: input },
+          NotificationMuteSchema,
+        ),
+      delete: (id: string) =>
+        request(
+          `/api/v1/notifications/mutes/${encodeURIComponent(id)}`,
+          { method: "DELETE" },
+          z.object({ deleted: z.boolean() }),
+        ),
+    },
   },
 
   // ─── Webhooks (Phase 10.2 + 10.3) ───
@@ -2312,6 +2489,12 @@ export const api = {
         { method: "PUT", json: { is_active: isActive } },
         CronSchema,
       ),
+    trigger: (id: string) =>
+      request(
+        `/api/v1/crons/${encodeURIComponent(id)}/trigger`,
+        { method: "POST" },
+        JobSchema,
+      ),
     delete: (id: string) =>
       request(
         `/api/v1/crons/${encodeURIComponent(id)}`,
@@ -2330,6 +2513,7 @@ export const api = {
   // ─── Database studio + memory (Phase 8) ───
   db: {
     tables: () => request("/api/v1/db/tables", undefined, DBTableListSchema),
+    health: () => request("/api/v1/admin/db/health", undefined, DBHealthSchema),
     table: (schema: string, name: string) =>
       request(
         `/api/v1/db/tables/${encodeURIComponent(schema)}/${encodeURIComponent(name)}`,
@@ -2396,12 +2580,27 @@ export const api = {
         MemorySearchResultSchema,
       ),
   },
+  search: {
+    indexes: () =>
+      request("/api/v1/search/indexes", undefined, SearchIndexStatsSchema),
+  },
 
   // ─── LLM gateway + cost (Phase 7) ───
   llm: {
     models: () => request("/api/v1/llm/models", undefined, LLMModelListSchema),
     cacheStats: () =>
       request("/api/v1/llm/cache/stats", undefined, CacheStatsSchema),
+    cacheFlush: (params?: { tenant?: string; prompt_hash?: string }) => {
+      const qs = new URLSearchParams()
+      if (params?.tenant) qs.set("tenant", params.tenant)
+      if (params?.prompt_hash) qs.set("prompt_hash", params.prompt_hash)
+      const q = qs.toString()
+      return request(
+        `/api/v1/llm/cache/flush${q ? "?" + q : ""}`,
+        { method: "POST" },
+        CacheFlushSchema,
+      )
+    },
   },
   costEvents: (params?: {
     tenant?: string
@@ -2448,6 +2647,37 @@ export const api = {
     adapters: {
       list: () =>
         request("/api/v1/admin/adapters", undefined, AdapterRegistrySchema),
+    },
+    services: {
+      list: () =>
+        request("/api/v1/admin/services", undefined, AdminServiceListSchema),
+    },
+    llm: {
+      providerHealth: (params?: { window?: string }) => {
+        const qs = params?.window
+          ? `?window=${encodeURIComponent(params.window)}`
+          : ""
+        return request(
+          `/api/v1/admin/llm/provider-health${qs}`,
+          undefined,
+          ProviderHealthListSchema,
+        )
+      },
+    },
+    brand: {
+      get: () => request("/api/v1/admin/brand", undefined, BrandResponseSchema),
+      update: (input: BrandUpdateInput) =>
+        request(
+          "/api/v1/admin/brand",
+          { method: "PUT", json: input },
+          BrandResponseSchema,
+        ),
+      reset: () =>
+        request(
+          "/api/v1/admin/brand",
+          { method: "DELETE" },
+          BrandResponseSchema,
+        ),
     },
     tenants: {
       list: () =>
@@ -2545,6 +2775,12 @@ export const api = {
           `/api/v1/admin/keys/${id}`,
           { method: "DELETE" },
           z.object({ revoked: z.boolean() }),
+        ),
+      rotate: (id: string) =>
+        request(
+          `/api/v1/admin/keys/${encodeURIComponent(id)}/rotate`,
+          { method: "POST" },
+          IssuedAPIKeySchema,
         ),
       spend: (id: string) =>
         request(

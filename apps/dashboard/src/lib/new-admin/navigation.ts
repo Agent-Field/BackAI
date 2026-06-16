@@ -205,8 +205,7 @@ export const navGroups: NavGroup[] = [
         icon: "gauge",
         description: "Runtime and backing service status.",
         archetype: "topology",
-        dataTruth: "derived",
-        apiGap: "Deep DB, cert, and worker stats require additional endpoints.",
+        dataTruth: "backed",
       },
       {
         title: "Logs",
@@ -273,7 +272,6 @@ export const navGroups: NavGroup[] = [
         description: "Scheduled jobs, next runs, active state, and history.",
         archetype: "registry-detail",
         dataTruth: "backed",
-        apiGap: "Manual trigger endpoint is not in the route snapshot.",
       },
       {
         title: "Sandboxes",
@@ -335,7 +333,6 @@ export const navGroups: NavGroup[] = [
         description: "Search indexes and query probes.",
         archetype: "workbench",
         dataTruth: "backed",
-        apiGap: "Index statistics endpoint is missing.",
       },
       {
         title: "Feature flags",
@@ -374,7 +371,6 @@ export const navGroups: NavGroup[] = [
         description: "Tenant keys, spend, limits, rotation, and revocation.",
         archetype: "customer-drilldown",
         dataTruth: "backed",
-        apiGap: "Rotate is revoke plus issue unless a rotate endpoint lands.",
       },
       {
         title: "Members",
@@ -537,10 +533,9 @@ export const pinnedNavItems: NavItem[] = [
     title: "Brand",
     href: "/brand",
     icon: "brand",
-    description: "Read-only brand.yaml display and public identity tokens.",
-    archetype: "read-only-file",
-    dataTruth: "missing",
-    apiGap: "brand.yaml is file-backed; admin brand endpoint is not present.",
+    description: "Structured brand.yaml display, DB override, and public identity tokens.",
+    archetype: "config-inventory",
+    dataTruth: "backed",
   },
 ]
 

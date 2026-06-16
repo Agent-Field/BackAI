@@ -28,6 +28,9 @@ type LiteLLMMirror interface {
 	// and the LLM gateway falls back to LITELLM_MASTER_KEY at request
 	// time.
 	Configured() bool
+	// VirtualKeysActive returns true only when the runtime has probed
+	// LiteLLM and confirmed its virtual-key database is available.
+	VirtualKeysActive() bool
 	GenerateKey(ctx context.Context, cfg LiteLLMKeyConfig) (LiteLLMKeyInfo, error)
 	UpdateKey(ctx context.Context, alias string, cfg LiteLLMKeyConfig) error
 	DeleteKey(ctx context.Context, alias string) error

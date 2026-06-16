@@ -65,6 +65,7 @@ func (s *Server) registerAdminRoutes() {
 	// API keys.
 	s.mux.HandleFunc("GET /api/v1/admin/keys", s.handleAdminListKeys)
 	s.mux.HandleFunc("POST /api/v1/admin/keys", s.handleAdminIssueKey)
+	s.mux.HandleFunc("POST /api/v1/admin/keys/{id}/rotate", s.handleAdminRotateKey)
 	s.mux.HandleFunc("DELETE /api/v1/admin/keys/{id}", s.handleAdminRevokeKey)
 	s.mux.HandleFunc("GET /api/v1/admin/keys/{id}/spend", s.handleAdminKeySpend)
 
@@ -231,7 +232,9 @@ type keySpendWire struct {
 // Returned ONCE by POST /api/v1/admin/keys.
 type issuedKeyWire struct {
 	apiKeyWire
-	Value string `json:"value"`
+	Value        string  `json:"value"`
+	MirrorStatus *string `json:"mirror_status,omitempty"`
+	MirrorError  *string `json:"mirror_error,omitempty"`
 }
 
 // tenantDetailMemberWire mirrors TenantDetailSchema.members[].
@@ -1078,6 +1081,56 @@ func (s *Server) handleAdminRevokeKey(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"revoked": true})
 }
 
+func (s *Server) handleAdminRotateKey(w http.ResponseWriter, r *http.Request) {
+	ctx, span := s.dashTracer().Start(r.Context(), "admin.keys.rotate")
+	defer span.End()
+	if s.adminAccessDenied(w, r, rbac.ResourceAdminKeys, rbac.ActionWrite) {
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, errEnvelope("VALIDATION_FAILED", "key id required"))
+		return
+	}
+	issued, err := s.tenancy.RotateKey(ctx, id)
+	if err != nil {
+		var mirrorErr *tenancy.MirrorRotationError
+		if errors.As(err, &mirrorErr) && issued.Value != "" {
+			span.RecordError(err)
+			s.audit.Write(ctx, r, audit.Event{
+				Action:       "api_key.rotate.mirror_failed",
+				ResourceType: "api_key",
+				ResourceID:   id,
+				Metadata: map[string]any{
+					"new_api_key_id": issued.ID,
+					"tenant_id":      issued.TenantID,
+					"error":          mirrorErr.Error(),
+				},
+			})
+			resp := marshalIssuedKey(issued)
+			status := "failed"
+			msg := mirrorErr.Error()
+			resp.MirrorStatus = &status
+			resp.MirrorError = &msg
+			writeJSON(w, http.StatusCreated, resp)
+			return
+		}
+		span.RecordError(err)
+		writeTenancyError(w, err)
+		return
+	}
+	s.audit.Write(ctx, r, audit.Event{
+		Action:       "api_key.rotate",
+		ResourceType: "api_key",
+		ResourceID:   id,
+		Metadata: map[string]any{
+			"new_api_key_id": issued.ID,
+			"tenant_id":      issued.TenantID,
+		},
+	})
+	writeJSON(w, http.StatusCreated, marshalIssuedKey(issued))
+}
+
 // ─── Audit ────────────────────────────────────────────────────────────────
 
 func (s *Server) handleAdminListAudit(w http.ResponseWriter, r *http.Request) {
@@ -1164,6 +1217,7 @@ func (s *Server) registerAdminOpenAPI() {
 	// API keys.
 	b.Register("GET", "/api/v1/admin/keys", openapi.RouteMeta{Summary: "List API keys", Tags: tags})
 	b.Register("POST", "/api/v1/admin/keys", openapi.RouteMeta{Summary: "Issue a new API key (plaintext value returned ONCE)", Tags: tags})
+	b.Register("POST", "/api/v1/admin/keys/{id}/rotate", openapi.RouteMeta{Summary: "Rotate an API key atomically", Tags: tags})
 	b.Register("DELETE", "/api/v1/admin/keys/{id}", openapi.RouteMeta{Summary: "Revoke an API key", Tags: tags})
 	b.Register("GET", "/api/v1/admin/keys/{id}/spend", openapi.RouteMeta{Summary: "Read live API key spend", Tags: tags})
 	// Audit.

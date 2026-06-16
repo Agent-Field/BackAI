@@ -30,9 +30,10 @@ export type ConsoleRow = {
 export type ServiceVital = {
   name: string
   version: string
-  status: "healthy" | "degraded" | "offline"
+  status: "healthy" | "degraded" | "offline" | "configured"
   checked: string
   adapter?: string
+  href?: string
 }
 
 export type AdapterSlot = {
@@ -63,6 +64,7 @@ export type OperatorSnapshot = {
   members: ConsoleRow[]
   agents: ConsoleRow[]
   tables: ConsoleRow[]
+  dbHealth: ConsoleRow[]
   queue: ConsoleRow[]
   errors: ConsoleRow[]
   traces: ConsoleRow[]
@@ -89,11 +91,14 @@ export type OperatorSnapshot = {
   billing: ConsoleRow[]
   secrets: ConsoleRow[]
   notifications: ConsoleRow[]
+  notificationMutes: ConsoleRow[]
   llmProviders: ConsoleRow[]
+  providerHealth: ConsoleRow[]
   sandbox: ConsoleRow[]
   observability: ConsoleRow[]
   deployTargets: ConsoleRow[]
   services: ServiceVital[]
+  brand: ConsoleRow[]
   adapters: AdapterSlot[]
   budgets: BudgetRecord[]
   snippets: {
@@ -143,9 +148,29 @@ function duration(ms?: number | null) {
   return `${(ms / 1000).toFixed(1)} s`
 }
 
+function bytes(value?: number | null) {
+  const n = value ?? 0
+  if (n >= 1024 * 1024 * 1024) return `${(n / 1024 / 1024 / 1024).toFixed(1)} GiB`
+  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MiB`
+  if (n >= 1024) return `${Math.round(n / 1024).toLocaleString("en")} KiB`
+  return `${n.toLocaleString("en")} B`
+}
+
+function displayValue(value: unknown) {
+  if (value == null) return "not set"
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value)
+  }
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return "structured value"
+  }
+}
+
 function toneForStatus(status: string): StatusTone {
   const normalized = status.toLowerCase()
-  if (["healthy", "ok", "succeeded", "delivered", "completed", "sent", "enabled"].includes(normalized)) {
+  if (["healthy", "ok", "succeeded", "delivered", "completed", "sent", "enabled", "configured"].includes(normalized)) {
     return "ok"
   }
   if (["running", "queued", "pending", "retryable", "sending", "available"].includes(normalized)) {
@@ -311,6 +336,10 @@ export const seededSnapshot: OperatorSnapshot = {
     { id: "suite_runs", primary: "suite_runs", secondary: "runtime execution summaries", status: "rls on", tone: "ok", metric: "1,642 rows", timestamp: "updated now" },
     { id: "suite_cost_events", primary: "suite_cost_events", secondary: "provider spend and token ledger", status: "rls on", tone: "ok", metric: "8,921 rows", timestamp: "updated now" },
   ],
+  dbHealth: [
+    { id: "db-connections", primary: "Connections", secondary: "Postgres connection pool", status: "healthy", tone: "ok", metric: "0 active", timestamp: "current" },
+    { id: "db-cache", primary: "Cache hit ratio", secondary: "pg_statio_user_tables", status: "healthy", tone: "ok", metric: "n/a", timestamp: "current" },
+  ],
   queue: [
     { id: "job_1", primary: "billing.syncCustomer", secondary: "tenant beta-labs", status: "retrying", tone: "warn", metric: "attempt 2/5", timestamp: "09:12:02" },
     { id: "job_2", primary: "webhook.deliver", secondary: "endpoint whsec_live", status: "running", tone: "running", metric: "240 ms", timestamp: "09:14:10" },
@@ -418,9 +447,15 @@ export const seededSnapshot: OperatorSnapshot = {
     { id: "notif_budget", primary: "budget-warning", secondary: "email · ops@beta.test · resend", status: "sent", tone: "ok", metric: "attempt 1", timestamp: "08:44:10" },
     { id: "notif_invite", primary: "tenant-invite", secondary: "log · sara@acme.test", status: "queued", tone: "running", metric: "attempt 0", timestamp: "09:12:01" },
   ],
+  notificationMutes: [
+    { id: "mute-default", primary: "*", secondary: "* · * · *", status: "available", tone: "neutral", metric: "no active mute", timestamp: "policy" },
+  ],
   llmProviders: [
     { id: "llm_openai", primary: "OpenAI", secondary: "gpt-4.1, gpt-4o-mini, embeddings", status: "healthy", tone: "ok", metric: "8 models", timestamp: "current" },
     { id: "llm_anthropic", primary: "Anthropic", secondary: "claude-sonnet and fallback review models", status: "healthy", tone: "ok", metric: "5 models", timestamp: "current" },
+  ],
+  providerHealth: [
+    { id: "provider-health-litellm", primary: "litellm", secondary: "provider poller", status: "pending", tone: "running", metric: "0 observations", timestamp: "waiting" },
   ],
   sandbox: [
     { id: "sandbox_pool", primary: "Sandbox pool", secondary: "remote isolated execution and artifact upload", status: "available", tone: "running", metric: "6 slots", timestamp: "current" },
@@ -435,6 +470,10 @@ export const seededSnapshot: OperatorSnapshot = {
     { id: "deploy_dashboard", primary: "Dashboard", secondary: "Next.js admin app and old admin fallback", status: "ready", tone: "ok", metric: "33000", timestamp: "checked 2m" },
   ],
   services: seededServices,
+  brand: [
+    { id: "brand-source", primary: "Source", secondary: "brand.yaml plus DB override", status: "file", tone: "neutral", metric: "brand.yaml", timestamp: "current" },
+    { id: "brand-restart", primary: "Apply behavior", secondary: "Customer-app build-time surfaces need restart/redeploy", status: "restart", tone: "warn", metric: "required", timestamp: "policy" },
+  ],
   adapters: seededAdapters,
   budgets: [
     { tenant: "acme", cap: "$500", used: 37, status: "ok" },
@@ -465,10 +504,12 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     audit,
     budgets,
     tables,
+    dbHealth,
     webhooks,
     webhookEndpoints,
     models,
     cacheStats,
+    providerHealth,
     costEvents,
     jobs,
     jobDefinitions,
@@ -482,6 +523,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     secrets,
     notificationStats,
     notifications,
+    notificationMutes,
     sandboxPool,
     sandboxRuns,
     metrics,
@@ -493,6 +535,9 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     crons,
     plugins,
     adapterRegistry,
+    connectedServices,
+    searchIndexStats,
+    brand,
     approvals,
     logs,
     oauthConnections,
@@ -510,10 +555,12 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     settle(() => api.admin.audit.list({ limit: 20 })),
     settle(() => api.budgets.list()),
     settle(() => api.db.tables()),
+    settle(() => api.db.health()),
     settle(() => api.webhooks.deliveries({ limit: 10 })),
     settle(() => api.webhooks.endpoints()),
     settle(() => api.llm.models()),
     settle(() => api.llm.cacheStats()),
+    settle(() => api.admin.llm.providerHealth({ window: "24h" })),
     settle(() => api.costEvents({ limit: 20 })),
     settle(() => api.jobs.list({ limit: 12 })),
     settle(() => api.jobs.definitions()),
@@ -527,6 +574,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     settle(() => api.secrets.list()),
     settle(() => api.notifications.stats()),
     settle(() => api.notifications.list({ limit: 20 })),
+    settle(() => api.notifications.mutes.list()),
     settle(() => api.sandbox.pool()),
     settle(() => api.sandbox.list({ limit: 12 })),
     settle(() => api.metrics()),
@@ -538,6 +586,9 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     settle(() => api.crons.list()),
     settle(() => api.plugins()),
     settle(() => api.admin.adapters.list()),
+    settle(() => api.admin.services.list()),
+    settle(() => api.search.indexes()),
+    settle(() => api.admin.brand.get()),
     settle(() => api.approvals.list({ limit: 20 })),
     settle(() => api.logs({ limit: 120 })),
     settle(() => api.oauth.connections()),
@@ -747,7 +798,31 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
       timestamp: shortTime(endpoint.created_at),
     })) ?? seededSnapshot.webhookEndpoints
 
-  const llmRows: ConsoleRow[] =
+  const llmChatSlot = adapterRegistry?.slots.find((slot) => slot.slot === "llm-chat")
+  const llmChatCaps = llmChatSlot?.active.capabilities
+  const llmVirtualKeysActive = llmChatCaps?.virtual_keys_active === true
+  const llmKeyMode =
+    typeof llmChatCaps?.key_management_mode === "string"
+      ? llmChatCaps.key_management_mode
+      : llmVirtualKeysActive
+        ? "virtual_keys"
+        : "stateless"
+  const llmModeLabel = llmVirtualKeysActive ? "LiteLLM (virtual-keys)" : "LiteLLM (stateless)"
+  const llmCapabilityRows: ConsoleRow[] = llmChatSlot
+    ? [
+        {
+          id: "litellm-key-management",
+          primary: llmModeLabel,
+          secondary: `${llmChatSlot.active.name} · key management ${llmKeyMode}`,
+          status: llmChatSlot.active.status,
+          tone: toneForAdapterStatus(llmChatSlot.active.status),
+          metric: llmVirtualKeysActive ? "mirrors keys" : "local only",
+          timestamp: "runtime probe",
+        },
+      ]
+    : []
+
+  const modelRows: ConsoleRow[] =
     models?.models.map((model) => ({
       id: model.id,
       primary: model.display_name,
@@ -756,7 +831,11 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
       tone: "ok",
       metric: `${money(model.prompt_usd_per_1m)}/${money(model.completion_usd_per_1m)}`,
       timestamp: "current",
-    })) ?? seededSnapshot.llmProviders
+    })) ?? []
+  const llmRows: ConsoleRow[] =
+    llmCapabilityRows.length || modelRows.length
+      ? [...llmCapabilityRows, ...modelRows]
+      : seededSnapshot.llmProviders
 
   const sandboxRows: ConsoleRow[] =
     sandboxRuns?.runs.map((run) => ({
@@ -986,9 +1065,15 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     ...(adapterRegistry?.slots.map((slot) => {
       const capCount = slot.active.capabilities ? Object.keys(slot.active.capabilities).length : 0
       const swap = slot.swap_env ? `swap: ${slot.swap_env}` : slot.swap_method
+      const adapter =
+        slot.slot === "llm-chat"
+          ? slot.active.capabilities?.virtual_keys_active === true
+            ? "LiteLLM (virtual-keys)"
+            : "LiteLLM (stateless)"
+          : slot.active.name
       return {
         slot: slot.slot,
-        adapter: slot.active.name,
+        adapter,
         status: toneForAdapterStatus(slot.active.status),
         description: `tier ${slot.tier} · ${slot.active.kind} · ${swap}${capCount ? ` · ${capCount} caps` : ""}`,
       }
@@ -1035,6 +1120,137 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     })) ?? []),
   ]
 
+  const serviceRowsLive: ServiceVital[] =
+    connectedServices?.services.map((service) => {
+      const status = service.status === "healthy" || service.status === "degraded" || service.status === "offline" || service.status === "configured"
+        ? service.status
+        : toneForStatus(service.status) === "fail" ? "offline" : "degraded"
+      return {
+        name: service.name,
+        version: service.version ?? service.kind,
+        status,
+        checked: shortTime(service.checked_at),
+        adapter: service.purpose,
+        href: service.admin_url ?? undefined,
+      }
+    }) ?? []
+
+  const dbHealthRows: ConsoleRow[] = dbHealth
+    ? [
+        {
+          id: "db-connections",
+          primary: "Connections",
+          secondary: `${dbHealth.connections.active} active · ${dbHealth.connections.idle} idle`,
+          status: dbHealth.available ? "available" : "degraded",
+          tone: dbHealth.available ? "ok" : "warn",
+          metric: `${dbHealth.connections.max} max`,
+          timestamp: shortTime(dbHealth.checked_at),
+        },
+        {
+          id: "db-cache-hit",
+          primary: "Cache hit ratio",
+          secondary: dbHealth.reason ?? "pg_statio_user_tables",
+          status: dbHealth.available ? "healthy" : "limited",
+          tone: dbHealth.available ? "ok" : "warn",
+          metric: `${Math.round(dbHealth.cache_hit_ratio * 100)}%`,
+          timestamp: "current",
+        },
+        ...dbHealth.slow_queries.slice(0, 4).map((query, index) => ({
+          id: `db-slow-${index}`,
+          primary: query.query,
+          secondary: `${query.calls.toLocaleString("en")} calls · ${Math.round(query.total_ms).toLocaleString("en")} ms total`,
+          status: query.mean_ms > 1000 ? "slow" : "tracked",
+          tone: query.mean_ms > 1000 ? "warn" : "running" as StatusTone,
+          metric: duration(query.mean_ms),
+          timestamp: "pg_stat",
+        })),
+        ...dbHealth.largest_tables.slice(0, 4).map((table) => ({
+          id: `db-table-${table.schema}.${table.table}`,
+          primary: `${table.schema}.${table.table}`,
+          secondary: `${table.row_count.toLocaleString("en")} estimated rows`,
+          status: "largest",
+          tone: "neutral" as StatusTone,
+          metric: bytes(table.size_bytes),
+          timestamp: "storage",
+        })),
+        ...dbHealth.locks.slice(0, 4).map((lock) => ({
+          id: `db-lock-${lock.pid}-${lock.mode}`,
+          primary: lock.relation || `pid ${lock.pid}`,
+          secondary: lock.mode,
+          status: lock.granted ? "granted" : "waiting",
+          tone: lock.granted ? "ok" : "warn" as StatusTone,
+          metric: duration(lock.age_ms),
+          timestamp: "lock",
+        })),
+      ]
+    : seededSnapshot.dbHealth
+
+  const providerHealthRows: ConsoleRow[] =
+    providerHealth?.providers.map((provider) => ({
+      id: `provider-health-${provider.provider}`,
+      primary: provider.provider,
+      secondary: `${provider.observations.toLocaleString("en")} observations · p95 ${duration(provider.p95_latency_ms)}`,
+      status: provider.status,
+      tone: toneForStatus(provider.status),
+      metric: `${provider.availability_pct.toFixed(1)}%`,
+      timestamp: provider.last_observed_at ? shortTime(provider.last_observed_at) : providerHealth.window,
+    })) ?? seededSnapshot.providerHealth
+
+  const notificationMuteRows: ConsoleRow[] =
+    notificationMutes?.mutes.map((mute) => ({
+      id: mute.id,
+      primary: `${mute.pattern.kind}:${mute.pattern.template}`,
+      secondary: `${mute.pattern.recipient} · category ${mute.pattern.category}`,
+      status: mute.expires_at ? "expires" : "active",
+      tone: mute.expires_at ? "warn" : "ok",
+      metric: mute.reason ?? "mute",
+      timestamp: mute.expires_at ? shortTime(mute.expires_at) : shortTime(mute.created_at),
+    })) ?? seededSnapshot.notificationMutes
+
+  const searchIndexRows: ConsoleRow[] =
+    searchIndexStats?.indexes.map((index) => ({
+      id: `${index.schema}.${index.index}`,
+      primary: index.index,
+      secondary: `${index.schema}.${index.table}`,
+      status: index.index_scans > 0 ? "used" : "idle",
+      tone: index.index_scans > 0 ? "ok" : "neutral",
+      metric: `${bytes(index.size_bytes)} · ${index.index_scans.toLocaleString("en")} scans`,
+      timestamp: index.last_vacuum ? `vacuum ${shortTime(index.last_vacuum)}` : "no vacuum",
+      detail: index.definition,
+    })) ?? seededSnapshot.searchIndexes
+
+  const brandRows: ConsoleRow[] = brand
+    ? [
+        {
+          id: "brand-source",
+          primary: "Source",
+          secondary: brand.source,
+          status: brand.override ? "override" : "file",
+          tone: brand.override ? "running" : "neutral",
+          metric: brand.brand_yaml_path,
+          timestamp: brand.updated_at ? shortTime(brand.updated_at) : "file",
+        },
+        ...Object.entries(brand.brand).map(([key, value]) => ({
+          id: `brand-${key}`,
+          primary: key,
+          secondary: displayValue(value),
+          status: brand.override && Object.prototype.hasOwnProperty.call(brand.override, key) ? "override" : "file",
+          tone: brand.override && Object.prototype.hasOwnProperty.call(brand.override, key) ? "running" as StatusTone : "neutral" as StatusTone,
+          metric: typeof value,
+          timestamp: brand.updated_at ? shortTime(brand.updated_at) : "current",
+        })),
+        {
+          id: "brand-apply",
+          primary: "Apply behavior",
+          secondary: brand.apply,
+          status: "restart",
+          tone: "warn",
+          metric: "required",
+          timestamp: "policy",
+        },
+      ]
+    : seededSnapshot.brand
+
   return {
     ...seededSnapshot,
     source: "live",
@@ -1047,7 +1263,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
       auth: "degraded",
       llm: models ? "degraded" : "missing",
       deployTargets: "missing",
-      brand: "missing",
+      brand: brand ? "ok" : "missing",
     },
     kpis: [
       {
@@ -1105,15 +1321,18 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     costRows: costEventRows,
     tenants: tenantRows,
     apiKeys:
-      keys?.keys.map((key) => ({
-        id: key.id,
-        primary: key.name ?? key.prefix,
-        secondary: `${key.tenant_id ?? "platform"} · ${key.prefix}`,
-        status: key.revoked_at ? "revoked" : "active",
-        tone: key.revoked_at ? "fail" : "ok",
-        metric: key.live_spend_usd == null ? "no live spend" : money(key.live_spend_usd),
-        timestamp: shortTime(key.created_at),
-      })) ?? seededSnapshot.apiKeys,
+      keys?.keys.map((key) => {
+        const mirror = key.litellm_key_alias ? "mirrored" : "local only"
+        return {
+          id: key.id,
+          primary: key.name ?? key.prefix,
+          secondary: `${key.tenant_id ?? "platform"} · ${key.prefix} · ${mirror}`,
+          status: key.revoked_at ? "revoked" : "active",
+          tone: key.revoked_at ? "fail" : "ok",
+          metric: key.live_spend_usd == null ? mirror : `${money(key.live_spend_usd)} · ${mirror}`,
+          timestamp: shortTime(key.created_at),
+        }
+      }) ?? seededSnapshot.apiKeys,
     members:
       users?.users.map((user) => ({
         id: user.id,
@@ -1144,6 +1363,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
         metric: `${table.estimated_rows.toLocaleString("en")} rows`,
         timestamp: "schema",
       })) ?? seededSnapshot.tables,
+    dbHealth: dbHealthRows,
     queue: jobRows.length ? jobRows : (
       queue?.recent.map((job) => ({
           id: job.id,
@@ -1217,13 +1437,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     jobDefinitions: jobDefinitionRows,
     storage: storageRows,
     memory: memoryRows,
-    searchIndexes: memoryRows.length ? memoryRows.map((entry) => ({
-      ...entry,
-      id: `idx:${entry.id}`,
-      primary: entry.primary.replace("/", "-"),
-      status: entry.status === "embedded" ? "indexed" : "stored",
-      metric: entry.metric === "memory" ? "searchable" : entry.metric,
-    })) : seededSnapshot.searchIndexes,
+    searchIndexes: searchIndexRows,
     modules: moduleRows,
     skills: skillRows.length ? skillRows : seededSnapshot.skills,
     tools: toolRows.length ? toolRows : seededSnapshot.tools,
@@ -1234,7 +1448,9 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     billing: billingRows,
     secrets: secretRows,
     notifications: notificationRows,
-    llmProviders: llmRows,
+    notificationMutes: notificationMuteRows,
+    llmProviders: providerHealthRows.length ? [...providerHealthRows, ...llmRows].slice(0, 20) : llmRows,
+    providerHealth: providerHealthRows,
     sandbox: sandboxRows,
     observability: observabilityRows,
     deployTargets: deployRows,
@@ -1245,5 +1461,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
             slot.slot === "LLM gateway" ? { ...slot, status: "ok" } : slot
           ))
         : seededAdapters,
+    services: serviceRowsLive.length ? serviceRowsLive : seededSnapshot.services,
+    brand: brandRows,
   }
 }

@@ -5,16 +5,16 @@
 // Four write paths:
 //
 //   - Insert      : a new notification queued; row goes in at
-//                   status='queued' with adapter NULL (the worker sets
-//                   it when it picks the row up).
+//     status='queued' with adapter NULL (the worker sets
+//     it when it picks the row up).
 //   - UpdateStatus: lifecycle transition (queued -> sending, sending ->
-//                   sent/failed). Touches status, provider_message_id,
-//                   last_error, attempts, sent_at as appropriate.
+//     sent/failed). Touches status, provider_message_id,
+//     last_error, attempts, sent_at as appropriate.
 //   - ClaimQueued : atomic worker drain: marks up to N queued rows
-//                   (whose scheduled_at <= now()) as 'sending' and
-//                   returns their bodies. Concurrent worker pods cannot
-//                   double-process a row thanks to the FOR UPDATE SKIP
-//                   LOCKED predicate.
+//     (whose scheduled_at <= now()) as 'sending' and
+//     returns their bodies. Concurrent worker pods cannot
+//     double-process a row thanks to the FOR UPDATE SKIP
+//     LOCKED predicate.
 //   - Stats       : aggregate counters for the dashboard KPI strip.
 //
 // The Pool may be nil — every method returns (zero, ErrNotConfigured)
@@ -58,6 +58,14 @@ func (r *Recorder) HasPool() bool {
 // Insert writes a fresh row at status='queued' and returns the rendered
 // Notification (with the generated id + created_at).
 func (r *Recorder) Insert(ctx context.Context, in SendInput) (*Notification, error) {
+	return r.insert(ctx, in, StatusQueued, "")
+}
+
+func (r *Recorder) InsertSkipped(ctx context.Context, in SendInput, reason string) (*Notification, error) {
+	return r.insert(ctx, in, StatusSkipped, reason)
+}
+
+func (r *Recorder) insert(ctx context.Context, in SendInput, status Status, lastError string) (*Notification, error) {
 	if !r.HasPool() {
 		return nil, ErrNotConfigured
 	}
@@ -90,8 +98,8 @@ func (r *Recorder) Insert(ctx context.Context, in SendInput) (*Notification, err
 
 	const q = `
 		insert into suite_notifications
-		    (tenant_id, kind, template, "to", "from", subject, data, scheduled_at)
-		values ($1, $2, $3, $4, $5, $6, $7, coalesce($8, now()))
+		    (tenant_id, kind, template, "to", "from", subject, data, scheduled_at, status, last_error)
+		values ($1, $2, $3, $4, $5, $6, $7, coalesce($8, now()), $9, nullif($10, ''))
 		returning id, scheduled_at, created_at
 	`
 	var (
@@ -101,7 +109,7 @@ func (r *Recorder) Insert(ctx context.Context, in SendInput) (*Notification, err
 	)
 	if err := r.pool.QueryRow(ctx, q,
 		tenantPtr, string(in.Kind), in.Template, in.To,
-		fromPtr, subjectPtr, dataJSON, schedPtr,
+		fromPtr, subjectPtr, dataJSON, schedPtr, string(status), lastError,
 	).Scan(&id, &scheduledAt, &createdAt); err != nil {
 		return nil, fmt.Errorf("notifications: insert: %w", err)
 	}
@@ -116,10 +124,181 @@ func (r *Recorder) Insert(ctx context.Context, in SendInput) (*Notification, err
 		From:        fromPtr,
 		Subject:     subjectPtr,
 		Data:        cloneData(in.Data),
-		Status:      StatusQueued,
+		Status:      status,
 		Attempts:    0,
+		LastError:   nullableString(lastError),
 		ScheduledAt: scheduledAt.UTC().Format(time.RFC3339Nano),
 		CreatedAt:   createdAt.UTC().Format(time.RFC3339Nano),
+	}, nil
+}
+
+func nullableString(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+// ListMutes returns active and expired mute rows ordered newest-first.
+func (r *Recorder) ListMutes(ctx context.Context, tenantID string) (*MuteListResult, error) {
+	if !r.HasPool() {
+		return &MuteListResult{Mutes: []Mute{}}, nil
+	}
+	args := []any{}
+	where := ""
+	if tenantID != "" {
+		args = append(args, tenantID)
+		where = " where tenant_id = $1 or tenant_id is null"
+	}
+	rows, err := r.pool.Query(ctx, `
+		select id, tenant_id, kind, recipient, template, category,
+		       reason, expires_at, created_by, created_at
+		  from suite_notification_mutes`+where+`
+		 order by created_at desc
+	`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("notifications: list mutes: %w", err)
+	}
+	defer rows.Close()
+	out := []Mute{}
+	for rows.Next() {
+		m, err := scanMute(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return &MuteListResult{Mutes: out}, nil
+}
+
+func (r *Recorder) CreateMute(ctx context.Context, in CreateMuteInput) (*Mute, error) {
+	if !r.HasPool() {
+		return nil, ErrNotConfigured
+	}
+	if err := in.Pattern.Validate(); err != nil {
+		return nil, err
+	}
+	var tenantPtr, reasonPtr, createdByPtr *string
+	if strings.TrimSpace(in.TenantID) != "" {
+		t := strings.TrimSpace(in.TenantID)
+		tenantPtr = &t
+	}
+	if strings.TrimSpace(in.Reason) != "" {
+		reason := strings.TrimSpace(in.Reason)
+		reasonPtr = &reason
+	}
+	if strings.TrimSpace(in.CreatedBy) != "" {
+		createdBy := strings.TrimSpace(in.CreatedBy)
+		createdByPtr = &createdBy
+	}
+	rows, err := r.pool.Query(ctx, `
+		insert into suite_notification_mutes
+		    (tenant_id, kind, recipient, template, category, reason, expires_at, created_by)
+		values ($1, $2, $3, $4, $5, $6, $7, $8)
+		returning id, tenant_id, kind, recipient, template, category,
+		          reason, expires_at, created_by, created_at
+	`, tenantPtr, in.Pattern.Kind, in.Pattern.Recipient, in.Pattern.Template,
+		in.Pattern.Category, reasonPtr, in.ExpiresAt, createdByPtr)
+	if err != nil {
+		return nil, fmt.Errorf("notifications: create mute: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("notifications: create mute: no row returned")
+	}
+	return scanMute(rows)
+}
+
+func (r *Recorder) DeleteMute(ctx context.Context, id string) error {
+	if !r.HasPool() {
+		return ErrNotConfigured
+	}
+	tag, err := r.pool.Exec(ctx, `delete from suite_notification_mutes where id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("notifications: delete mute: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *Recorder) MatchingMute(ctx context.Context, in SendInput) (*Mute, error) {
+	if !r.HasPool() {
+		return nil, nil
+	}
+	category := ""
+	if v, ok := in.Data["category"].(string); ok {
+		category = strings.TrimSpace(v)
+	}
+	if category == "" {
+		category = "*"
+	}
+	var tenant any
+	if in.TenantID != "" {
+		tenant = in.TenantID
+	}
+	rows, err := r.pool.Query(ctx, `
+		select id, tenant_id, kind, recipient, template, category,
+		       reason, expires_at, created_by, created_at
+		  from suite_notification_mutes
+		 where ($1::uuid is null or tenant_id is null or tenant_id = $1::uuid)
+		   and (expires_at is null or expires_at > now())
+		   and (kind = '*' or kind = $2)
+		   and (recipient = '*' or recipient = $3)
+		   and (template = '*' or template = $4)
+		   and (category = '*' or category = $5)
+		 order by tenant_id nulls last, created_at desc
+		 limit 1
+	`, tenant, string(in.Kind), in.To, in.Template, category)
+	if err != nil {
+		return nil, fmt.Errorf("notifications: matching mute: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+	return scanMute(rows)
+}
+
+func scanMute(rows pgx.Rows) (*Mute, error) {
+	var (
+		id, kind, recipient, template, category string
+		tenantID, reason, createdBy             *string
+		expiresAt                               *time.Time
+		createdAt                               time.Time
+	)
+	if err := rows.Scan(&id, &tenantID, &kind, &recipient, &template, &category,
+		&reason, &expiresAt, &createdBy, &createdAt); err != nil {
+		return nil, fmt.Errorf("notifications: scan mute: %w", err)
+	}
+	var expires *string
+	if expiresAt != nil {
+		s := expiresAt.UTC().Format(time.RFC3339Nano)
+		expires = &s
+	}
+	return &Mute{
+		ID:       id,
+		TenantID: tenantID,
+		Pattern: MutePattern{
+			Kind:      kind,
+			Recipient: recipient,
+			Template:  template,
+			Category:  category,
+		},
+		Reason:    reason,
+		ExpiresAt: expires,
+		CreatedBy: createdBy,
+		CreatedAt: createdAt.UTC().Format(time.RFC3339Nano),
 	}, nil
 }
 

@@ -140,6 +140,80 @@ func TestLiteLLMAdmin_GenerateKey_UpstreamError(t *testing.T) {
 	}
 }
 
+func TestLiteLLMAdmin_ProbeKeyManagement_StatelessWhenDBMissing(t *testing.T) {
+	server := fakeAdminServer(t, map[string]http.HandlerFunc{
+		"/key/info": func(w http.ResponseWriter, r *http.Request) {
+			if got := r.Header.Get("Authorization"); got != "Bearer sk-master" {
+				t.Errorf("Authorization header = %q, want Bearer sk-master", got)
+			}
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":"Database not connected. Connect a database to your proxy"}`))
+		},
+	})
+	defer server.Close()
+
+	a := NewLiteLLMAdmin(server.URL, "sk-master")
+	mode, err := a.ProbeKeyManagement(context.Background())
+	if err != nil {
+		t.Fatalf("ProbeKeyManagement: %v", err)
+	}
+	if mode != KeyMgmtStateless {
+		t.Fatalf("mode = %q, want %q", mode, KeyMgmtStateless)
+	}
+	if a.VirtualKeysActive() {
+		t.Fatalf("VirtualKeysActive = true, want false")
+	}
+	cached, lastErr := a.KeyManagement()
+	if cached != KeyMgmtStateless || lastErr != "" {
+		t.Fatalf("cached = %q err=%q, want stateless no err", cached, lastErr)
+	}
+}
+
+func TestLiteLLMAdmin_ProbeKeyManagement_VirtualKeysWhenKeyInfoReachable(t *testing.T) {
+	server := fakeAdminServer(t, map[string]http.HandlerFunc{
+		"/key/info": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"key not found"}`))
+		},
+	})
+	defer server.Close()
+
+	a := NewLiteLLMAdmin(server.URL, "sk-master")
+	mode, err := a.ProbeKeyManagement(context.Background())
+	if err != nil {
+		t.Fatalf("ProbeKeyManagement: %v", err)
+	}
+	if mode != KeyMgmtVirtualKeys {
+		t.Fatalf("mode = %q, want %q", mode, KeyMgmtVirtualKeys)
+	}
+	if !a.VirtualKeysActive() {
+		t.Fatalf("VirtualKeysActive = false, want true")
+	}
+}
+
+func TestLiteLLMAdmin_ProbeKeyManagement_UnknownOnAuthFailure(t *testing.T) {
+	server := fakeAdminServer(t, map[string]http.HandlerFunc{
+		"/key/info": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"bad master key"}`))
+		},
+	})
+	defer server.Close()
+
+	a := NewLiteLLMAdmin(server.URL, "sk-master")
+	mode, err := a.ProbeKeyManagement(context.Background())
+	if err == nil {
+		t.Fatal("expected auth failure")
+	}
+	if mode != KeyMgmtUnknown {
+		t.Fatalf("mode = %q, want %q", mode, KeyMgmtUnknown)
+	}
+	if a.VirtualKeysActive() {
+		t.Fatalf("VirtualKeysActive = true, want false")
+	}
+}
+
 func TestLiteLLMAdmin_UpdateKey(t *testing.T) {
 	var received KeyConfig
 	server := fakeAdminServer(t, map[string]http.HandlerFunc{

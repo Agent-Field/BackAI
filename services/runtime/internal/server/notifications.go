@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Agent-Field/backai/services/runtime/internal/audit"
 	"github.com/Agent-Field/backai/services/runtime/internal/notifications"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
 )
@@ -53,10 +54,17 @@ type notificationListResponse struct {
 // with the value 0). We emit only the statuses with non-zero counts;
 // the dashboard treats absent entries as 0.
 type notificationStatsResponse struct {
-	ByStatus    map[string]int                 `json:"by_status"`
-	ByAdapter   []notifications.AdapterCount   `json:"by_adapter"`
-	SentToday   int                            `json:"sent_today"`
-	FailedToday int                            `json:"failed_today"`
+	ByStatus    map[string]int               `json:"by_status"`
+	ByAdapter   []notifications.AdapterCount `json:"by_adapter"`
+	SentToday   int                          `json:"sent_today"`
+	FailedToday int                          `json:"failed_today"`
+}
+
+type createNotificationMuteInput struct {
+	TenantID  string                    `json:"tenant_id,omitempty"`
+	Pattern   notifications.MutePattern `json:"pattern"`
+	Reason    string                    `json:"reason,omitempty"`
+	ExpiresAt *string                   `json:"expires_at,omitempty"`
 }
 
 // ─── Registration ─────────────────────────────────────────────────────────
@@ -65,6 +73,9 @@ func (s *Server) registerNotificationsRoutes() {
 	s.mux.HandleFunc("POST /api/v1/notifications", s.handleSendNotification)
 	s.mux.HandleFunc("GET /api/v1/notifications", s.handleListNotifications)
 	s.mux.HandleFunc("GET /api/v1/notifications/stats", s.handleNotificationsStats)
+	s.mux.HandleFunc("GET /api/v1/notifications/mutes", s.handleListNotificationMutes)
+	s.mux.HandleFunc("POST /api/v1/notifications/mutes", s.handleCreateNotificationMute)
+	s.mux.HandleFunc("DELETE /api/v1/notifications/mutes/{id}", s.handleDeleteNotificationMute)
 	s.mux.HandleFunc("GET /api/v1/notifications/{id}", s.handleGetNotification)
 }
 
@@ -228,6 +239,99 @@ func (s *Server) handleGetNotification(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+func (s *Server) handleListNotificationMutes(w http.ResponseWriter, r *http.Request) {
+	ctx, span := s.dashTracer().Start(r.Context(), "dashboard.notifications.mutes.list")
+	defer span.End()
+	if s.notifications == nil {
+		writeJSON(w, http.StatusOK, notifications.MuteListResult{Mutes: []notifications.Mute{}})
+		return
+	}
+	tenant := strings.TrimSpace(r.URL.Query().Get("tenant"))
+	out, err := s.notifications.ListMutes(ctx, tenant)
+	if err != nil {
+		writeNotificationError(w, err)
+		return
+	}
+	if out.Mutes == nil {
+		out.Mutes = []notifications.Mute{}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleCreateNotificationMute(w http.ResponseWriter, r *http.Request) {
+	ctx, span := s.dashTracer().Start(r.Context(), "dashboard.notifications.mutes.create")
+	defer span.End()
+	if s.notifications == nil {
+		writeNotificationError(w, notifications.ErrNotConfigured)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "could not read body", nil)
+		return
+	}
+	var in createNotificationMuteInput
+	if err := json.Unmarshal(body, &in); err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED",
+			"invalid JSON body: "+err.Error(), nil)
+		return
+	}
+	create := notifications.CreateMuteInput{
+		TenantID: s.defaultTenant(r),
+		Pattern:  in.Pattern,
+		Reason:   in.Reason,
+	}
+	if strings.TrimSpace(in.TenantID) != "" {
+		create.TenantID = strings.TrimSpace(in.TenantID)
+	}
+	if in.ExpiresAt != nil && *in.ExpiresAt != "" {
+		t, err := parseRFC3339(*in.ExpiresAt)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "expires_at must be RFC3339", nil)
+			return
+		}
+		create.ExpiresAt = &t
+	}
+	out, err := s.notifications.CreateMute(ctx, create)
+	if err != nil {
+		writeNotificationError(w, err)
+		return
+	}
+	s.audit.Write(ctx, r, audit.Event{
+		Action:       "notification_mute.create",
+		ResourceType: "notification_mute",
+		ResourceID:   out.ID,
+		Metadata: map[string]any{
+			"pattern": out.Pattern,
+		},
+	})
+	writeJSON(w, http.StatusCreated, out)
+}
+
+func (s *Server) handleDeleteNotificationMute(w http.ResponseWriter, r *http.Request) {
+	ctx, span := s.dashTracer().Start(r.Context(), "dashboard.notifications.mutes.delete")
+	defer span.End()
+	if s.notifications == nil {
+		writeNotificationError(w, notifications.ErrNotConfigured)
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "id is required", nil)
+		return
+	}
+	if err := s.notifications.DeleteMute(ctx, id); err != nil {
+		writeNotificationError(w, err)
+		return
+	}
+	s.audit.Write(ctx, r, audit.Event{
+		Action:       "notification_mute.delete",
+		ResourceType: "notification_mute",
+		ResourceID:   id,
+	})
+	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+}
+
 // ─── OpenAPI ──────────────────────────────────────────────────────────────
 
 func (s *Server) registerNotificationsOpenAPI() {
@@ -248,6 +352,15 @@ func (s *Server) registerNotificationsOpenAPI() {
 	})
 	b.Register("GET", "/api/v1/notifications/stats", openapi.RouteMeta{
 		Summary: "Notification KPI aggregates", Tags: []string{"notifications"},
+	})
+	b.Register("GET", "/api/v1/notifications/mutes", openapi.RouteMeta{
+		Summary: "List notification mute rules", Tags: []string{"notifications"},
+	})
+	b.Register("POST", "/api/v1/notifications/mutes", openapi.RouteMeta{
+		Summary: "Create a notification mute rule", Tags: []string{"notifications"},
+	})
+	b.Register("DELETE", "/api/v1/notifications/mutes/{id}", openapi.RouteMeta{
+		Summary: "Delete a notification mute rule", Tags: []string{"notifications"},
 	})
 	b.Register("GET", "/api/v1/notifications/{id}", openapi.RouteMeta{
 		Summary: "Get a single notification", Tags: []string{"notifications"},
