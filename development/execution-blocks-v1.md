@@ -311,7 +311,9 @@ Per the cross-cutting pattern (§0.5.3): per-endpoint cost is 5 edits — schema
 
 ## Block 2 — Foundation: config + probes + retention + features API · ~1.5 days
 
-**This is the next block to dispatch.**
+**Status: ✅ DONE.** Shipped as the Block 2 foundation: feature config
+validation, capability probes, retention registry, `/admin/features`, Setup
+→ Features, and Block 1 consolidation.
 
 **Why this block exists**: Block 1 shipped concrete endpoints, several of which carry ad-hoc instances of patterns that the rest of the roadmap (Blocks 3–9) needs to reuse. Specifically: a LiteLLM virtual-key capability probe (inside `Manager.Rotate`), a retention prune for `suite_provider_health_log`, and the implicit "feature is on" toggles for db_health / provider polling / mute / brand. Each future block has its own probes, retention needs, and feature toggles. Without a foundation, every block reinvents these and we end up with eight slightly-different patterns.
 
@@ -501,14 +503,14 @@ $ backai config validate
 
 **Acceptance criteria**:
 
-- [ ] `backai config validate` exits 0 on the shipped `backai.config.yaml.example`
-- [ ] `backai config validate` exits 1 with a clear message when `metrics.container_metrics=true` and `metrics.enabled=false`
-- [ ] `backai config validate` exits 1 when `errors.backend=glitchtip` and `SENTRY_DSN` is unset
-- [ ] Renaming `db_health` to `dbHealth` in the YAML fails Layer 1 (unknown field)
-- [ ] Setting `logs.backend: "foo"` fails Layer 1 (enum)
-- [ ] Preset `lean` produces a valid `Features` struct
-- [ ] Preset `full-observability` + override `errors.enabled=false` produces a valid `Features` struct
-- [ ] Preset `custom` requires every feature enumerated; partial = Layer 1 error
+- [x] `backai config validate` exits 0 on the shipped `backai.config.yaml.example`
+- [x] `backai config validate` exits 1 with a clear message when `metrics.container_metrics=true` and `metrics.enabled=false`
+- [x] `backai config validate` exits 1 when `errors.backend=glitchtip` and `SENTRY_DSN` is unset
+- [x] Renaming `db_health` to `dbHealth` in the YAML fails Layer 1 (unknown field)
+- [x] Setting `logs.backend: "foo"` fails Layer 1 (enum)
+- [x] Preset `lean` produces a valid `Features` struct
+- [x] Preset `full-observability` + override `errors.enabled=false` produces a valid `Features` struct
+- [x] Preset `custom` requires every feature enumerated; partial = Layer 1 error
 
 ### 2.2 Capability-probe machinery
 
@@ -589,10 +591,10 @@ func (r *Registry) Snapshot() map[string]Result      // dashboard reads this via
 
 **Acceptance criteria**:
 
-- [ ] `probe.Registry` runs each registered probe; results readable via `Snapshot()`
-- [ ] Scheduled probes (`Schedule() > 0`) re-run on the configured interval
-- [ ] Adapter registry `Slot.Capabilities` reflects probe results within one tick of the probe completing
-- [ ] Block 1's `tenancy.Manager.Rotate` no longer calls LiteLLM `/key/info` directly; it reads the probe's cached result from the registry (consolidation work — §2.6)
+- [x] `probe.Registry` runs each registered probe; results readable via `Snapshot()`
+- [x] Scheduled probes (`Schedule() > 0`) re-run on the configured interval
+- [x] Adapter registry `Slot.Capabilities` reflects probe results within one tick of the probe completing
+- [x] Block 1's `tenancy.Manager.Rotate` no longer calls LiteLLM `/key/info` directly; it reads the probe's cached result from the registry (consolidation work — §2.6)
 
 ### 2.3 Retention helper
 
@@ -677,10 +679,10 @@ crons.RegisterSystem("retention.daily", "0 3 * * *", func(ctx context.Context) e
 
 **Acceptance criteria**:
 
-- [ ] `Registry.Run` deletes rows older than `RetainDays` in batches of `BatchSize`
-- [ ] Run is idempotent — a second call deletes nothing additional if no time has passed
-- [ ] Run honours context cancellation between batches
-- [ ] Block 1's ad-hoc `suite_provider_health_log` prune is removed; replaced by the registry registration (consolidation — §2.6)
+- [x] `Registry.Run` deletes rows older than `RetainDays` in batches of `BatchSize`
+- [x] Run is idempotent — a second call deletes nothing additional if no time has passed
+- [x] Run honours context cancellation between batches
+- [x] Block 1's ad-hoc `suite_provider_health_log` prune is removed; replaced by the registry registration (consolidation — §2.6)
 
 ### 2.4 `GET /api/v1/admin/features` endpoint
 
@@ -728,11 +730,11 @@ crons.RegisterSystem("retention.daily", "0 3 * * *", func(ctx context.Context) e
 
 **Acceptance criteria**:
 
-- [ ] Endpoint returns `200` with the shape above
-- [ ] When `backai config validate` would emit a warning, the warning appears in `validator_warnings`
-- [ ] Probe results from §2.2 are folded into `details`
-- [ ] Boot-time probe failures don't crash the endpoint; they appear as `severity: unavailable` entries
-- [ ] OpenAPI registered
+- [x] Endpoint returns `200` with the shape above
+- [x] When `backai config validate` would emit a warning, the warning appears in `validator_warnings`
+- [x] Probe results from §2.2 are folded into `details`
+- [x] Boot-time probe failures don't crash the endpoint; they appear as `severity: unavailable` entries
+- [x] OpenAPI registered
 
 ### 2.5 Dashboard `Setup → Features` read-only tab
 
@@ -749,9 +751,9 @@ crons.RegisterSystem("retention.daily", "0 3 * * *", func(ctx context.Context) e
 
 **Acceptance criteria**:
 
-- [ ] `/setup/features` route renders without errors against a running runtime
-- [ ] Features the runtime reports as `not_configured` are visually distinct (muted) from `ok`
-- [ ] Validator warnings appear in a banner at the top of the page when present
+- [x] `/setup/features` route renders without errors against a running runtime
+- [x] Features the runtime reports as `not_configured` are visually distinct (muted) from `ok`
+- [x] Validator warnings appear in a banner at the top of the page when present
 
 ### 2.6 Block 1 consolidation work
 
@@ -764,8 +766,8 @@ crons.RegisterSystem("retention.daily", "0 3 * * *", func(ctx context.Context) e
 
 **Tests for consolidation**:
 
-- [ ] `tenancy.Manager.Rotate` test: with `litellm-virtual-keys` probe returning `false`, rotation succeeds locally without attempting LiteLLM mirror; with probe returning `true`, mirror is attempted; with probe returning `unknown` (first boot, not yet run), rotation falls back to a synchronous probe call.
-- [ ] `retention.Registry.Run` test: pre-populate `suite_provider_health_log` with rows older than 30d; run; assert deletion.
+- [x] `tenancy.Manager.Rotate` test: with `litellm-virtual-keys` probe returning `false`, rotation succeeds locally without attempting LiteLLM mirror; with probe returning `true`, mirror is attempted; with probe returning `unknown` (first boot, not yet run), rotation falls back to a synchronous probe call.
+- [x] `retention.Registry.Run` test: pre-populate `suite_provider_health_log` with rows older than 30d; run; assert deletion.
 
 ### 2.7 Documentation
 
@@ -1025,7 +1027,7 @@ Same universal envelope as the other 8 slots (auth, idempotency, RFC 7807 errors
 
 ```go
 var logsStore logs.Store
-switch os.Getenv("AF_STACK_LOGS_BACKEND") {
+switch os.Getenv("AF_STACK_LOGS_ADAPTER") {
 case "loki":
     logsStore = lokilogs.New(os.Getenv("AF_STACK_LOGS_LOKI_URL"), ...)
 case "remote":
@@ -1790,7 +1792,7 @@ Persist a per-operator history of SQL queries (currently UI-only local state in 
 | Block | Status | Days | Notes |
 |---|---|---|---|
 | 1 — Endpoint additions | ✅ **DONE** | (~4) | Shipped with all audit corrections. Some ad-hoc patterns (LiteLLM virtual-key probe, provider-health retention) need consolidating into Block 2's generalised frameworks. |
-| 2 — **Foundation** (config + probes + retention + features API) | ⏭️ **NEXT** | **~1.5** | NEW. Foundation that every downstream block reuses; also consolidates ad-hoc work from Block 1. Full spec below. |
+| 2 — **Foundation** (config + probes + retention + features API) | ✅ **DONE** | **~1.5** | Feature config, probe registry, retention helper, `/admin/features`, and Setup → Features shipped. |
 | 3 — `logs` adapter slot | queued | ~2.5 | Ring needs new Subscribe/channel layer; WebSocket dep |
 | 4 — `traces` adapter slot | queued | ~2.5 | Tempo decoder shape variations; tags translator fix |
 | 5 — `metrics` adapter slot | queued | ~2 | Env var + cAdvisor metric names; provider-health stays on Postgres path |

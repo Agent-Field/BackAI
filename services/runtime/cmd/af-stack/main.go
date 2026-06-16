@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/activity"
 	adapterregistry "github.com/Agent-Field/backai/services/runtime/internal/adapters/registry"
@@ -57,6 +58,8 @@ import (
 	notificationsresend "github.com/Agent-Field/backai/services/runtime/internal/notifications/adapters/resend"
 	"github.com/Agent-Field/backai/services/runtime/internal/oauth"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
+	"github.com/Agent-Field/backai/services/runtime/internal/probe"
+	"github.com/Agent-Field/backai/services/runtime/internal/retention"
 	"github.com/Agent-Field/backai/services/runtime/internal/sandbox"
 	dockersandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/docker"
 	e2bsandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/e2b"
@@ -475,6 +478,17 @@ func main() {
 		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
 		os.Exit(1)
 	}
+	featureCfg, featureIssues, featureErr := config.LoadFeatureConfig(config.DefaultFeatureConfigPath)
+	if featureErr != nil {
+		lean, _ := config.PresetFeatures(config.PresetLean)
+		featureCfg = config.FeatureConfig{Preset: config.PresetLean, Features: lean}
+		featureIssues = []config.ValidationError{{
+			Feature:     "backai.config",
+			Level:       config.ValidationErrorLevel,
+			Message:     featureErr.Error(),
+			Remediation: "Fix backai.config.yaml or copy backai.config.yaml.example.",
+		}}
+	}
 
 	// Log ring buffer + slog wiring. The ring tees every structured log
 	// record into a fixed-capacity in-memory buffer the dashboard's
@@ -723,11 +737,21 @@ func main() {
 	// supported for chat routing, while virtual-key mirroring activates
 	// only when LiteLLM reports a connected key DB.
 	litellmAdmin := buildLiteLLMAdmin(log)
+	probeReg := probe.NewRegistry(log)
+	litellmURL, litellmMasterKey := litellmEnv()
+	probeReg.Register(probe.NewLiteLLMVirtualKeysProbe(litellmURL, litellmMasterKey, 5*time.Minute))
+	probeReg.Register(probe.NewLiteLLMSpendTrackingProbe(litellmURL, litellmMasterKey, 5*time.Minute))
+	if database != nil && database.Pool != nil {
+		probeReg.Register(&probe.PGStatStatementsProbe{Pool: database.Pool, Interval: 5 * time.Minute})
+		probeReg.Register(&probe.PGRoleReadAllStatsProbe{Pool: database.Pool, Interval: 5 * time.Minute})
+	}
+	litellmAdmin.WithProbeRegistry(probeReg)
 	{
 		probeCtx, probeCancel := context.WithTimeout(ctx, 10*time.Second)
-		mode, probeErr := litellmAdmin.ProbeKeyManagement(probeCtx)
+		probeReg.RunAll(probeCtx)
 		probeCancel()
-		if probeErr != nil {
+		mode, probeErr := litellmAdmin.KeyManagement()
+		if probeErr != "" {
 			log.Warn("litellm key-management probe failed",
 				"mode", mode,
 				"virtual_keys_active", litellmAdmin.VirtualKeysActive(),
@@ -737,12 +761,46 @@ func main() {
 				"mode", mode,
 				"virtual_keys_active", litellmAdmin.VirtualKeysActive())
 		}
+		go probeReg.StartScheduled(ctx)
 	}
 	if database != nil && database.Pool != nil {
-		litellmURL, litellmMasterKey := litellmEnv()
 		if poller := llmgateway.NewProviderHealthPoller(database.Pool, litellmURL, litellmMasterKey, log); poller != nil && poller.Configured() {
 			go poller.Run(ctx, 5*time.Minute)
 			log.Info("llm provider health poller started", "interval", "5m")
+		}
+		retentionReg := retention.NewRegistry()
+		retentionReg.Register(retention.Policy{
+			Table:       "suite_provider_health_log",
+			RetainDays:  30,
+			OrderColumn: "observed_at",
+			BatchSize:   1000,
+		})
+		sqlDB := stdlib.OpenDBFromPool(database.Pool)
+		systemCrons := crons.NewSystemScheduler(log)
+		if err := systemCrons.RegisterSystem("retention.daily", "0 3 * * *", func(runCtx context.Context) error {
+			retentionCtx, cancel := context.WithTimeout(runCtx, 5*time.Minute)
+			defer cancel()
+			report, err := retentionReg.Run(retentionCtx, sqlDB)
+			if err != nil {
+				return err
+			}
+			if report.RowsDeleted > 0 || report.RowsRolledUp > 0 {
+				log.Info("retention run complete",
+					"table", report.Table,
+					"rows_deleted", report.RowsDeleted,
+					"rows_rolled_up", report.RowsRolledUp,
+					"duration", report.Duration)
+			}
+			return nil
+		}); err != nil {
+			log.Warn("retention system cron registration failed", "error", err)
+		} else {
+			go systemCrons.Run(ctx)
+			go func() {
+				if err := systemCrons.RunNow(ctx, "retention.daily"); err != nil {
+					log.Warn("retention startup run failed", "error", err)
+				}
+			}()
 		}
 	}
 
@@ -1252,6 +1310,7 @@ func main() {
 		webhooksSvc,
 		billingSvc,
 	)
+	probeReg.WithAdapterRegistry(adapterRegistry)
 
 	srv := server.New(cfg, log, server.Deps{
 		DB:              database,
@@ -1285,6 +1344,9 @@ func main() {
 		Crons:           cronsStore,
 		ToolAdapters:    toolAdapterSvc,
 		AdapterRegistry: adapterRegistry,
+		ProbeRegistry:   probeReg,
+		FeatureConfig:   featureCfg,
+		FeatureWarnings: featureIssues,
 		ToolsRegistry:   toolsRegistry,
 		OAuthManager:    oauthManager,
 		OAuthFactory:    oauthFactory,

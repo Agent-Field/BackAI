@@ -100,6 +100,8 @@ export type OperatorSnapshot = {
   services: ServiceVital[]
   brand: ConsoleRow[]
   adapters: AdapterSlot[]
+  features: ConsoleRow[]
+  featureWarnings: ConsoleRow[]
   budgets: BudgetRecord[]
   snippets: {
     runtimeUrl: string
@@ -189,6 +191,13 @@ function toneForAdapterStatus(status: string): StatusTone {
   if (status === "healthy") return "ok"
   if (status === "degraded" || status === "unknown") return "warn"
   if (status === "unhealthy") return "fail"
+  return "neutral"
+}
+
+function toneForFeatureStatus(status: string): StatusTone {
+  if (status === "ok") return "ok"
+  if (status === "degraded") return "warn"
+  if (status === "unavailable") return "fail"
   return "neutral"
 }
 
@@ -475,6 +484,11 @@ export const seededSnapshot: OperatorSnapshot = {
     { id: "brand-restart", primary: "Apply behavior", secondary: "Customer-app build-time surfaces need restart/redeploy", status: "restart", tone: "warn", metric: "required", timestamp: "policy" },
   ],
   adapters: seededAdapters,
+  features: [
+    { id: "feature-db-health", primary: "db_health", secondary: "Database health surface", status: "ok", tone: "ok", metric: "enabled", timestamp: "preset" },
+    { id: "feature-logs", primary: "logs", secondary: "Future logs adapter slot", status: "not_configured", tone: "neutral", metric: "ring", timestamp: "preset" },
+  ],
+  featureWarnings: [],
   budgets: [
     { tenant: "acme", cap: "$500", used: 37, status: "ok" },
     { tenant: "beta-labs", cap: "$1,200", used: 83, status: "warn" },
@@ -542,6 +556,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     logs,
     oauthConnections,
     oauthProviders,
+    features,
   ] = await Promise.all([
     settle(() => api.health()),
     settle(() => api.home()),
@@ -593,6 +608,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     settle(() => api.logs({ limit: 120 })),
     settle(() => api.oauth.connections()),
     settle(() => api.oauth.providers()),
+    settle(() => api.admin.features.get()),
   ])
 
   const live = Boolean(health || home || cost || runs || queue || agents || tenants)
@@ -1251,6 +1267,36 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
       ]
     : seededSnapshot.brand
 
+  const featureRows: ConsoleRow[] = features
+    ? Object.entries(features.features).map(([name, feature]) => {
+        const details = feature.details?.map((detail) => `${detail.key}=${displayValue(detail.value)} · ${detail.severity} · ${detail.message}`).join("; ")
+        const metric =
+          feature.backend ??
+          (feature.enabled !== undefined ? (feature.enabled ? "enabled" : "disabled") : undefined) ??
+          (feature.virtual_keys ? "virtual keys" : "local")
+        return {
+          id: `feature-${name}`,
+          primary: name,
+          secondary: details || "No capability caveats reported.",
+          status: feature.capability_status,
+          tone: toneForFeatureStatus(feature.capability_status),
+          metric,
+          timestamp: features.preset,
+        }
+      })
+    : seededSnapshot.features
+
+  const featureWarningRows: ConsoleRow[] =
+    features?.validator_warnings.map((warning) => ({
+      id: `feature-warning-${warning.feature}`,
+      primary: warning.feature,
+      secondary: warning.message,
+      status: warning.level,
+      tone: warning.level === "error" ? "fail" : "warn",
+      metric: warning.remediation,
+      timestamp: "validator",
+    })) ?? []
+
   return {
     ...seededSnapshot,
     source: "live",
@@ -1260,6 +1306,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
       logs: logs ? "ok" : "missing",
       traces: "degraded",
       adapters: adapterRegistry?.slots.length ? "ok" : adapterRowsLive.length ? "degraded" : "missing",
+      features: features ? "ok" : "missing",
       auth: "degraded",
       llm: models ? "degraded" : "missing",
       deployTargets: "missing",
@@ -1463,5 +1510,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
         : seededAdapters,
     services: serviceRowsLive.length ? serviceRowsLive : seededSnapshot.services,
     brand: brandRows,
+    features: featureRows,
+    featureWarnings: featureWarningRows,
   }
 }

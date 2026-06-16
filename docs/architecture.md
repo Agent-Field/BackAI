@@ -158,7 +158,7 @@ architecture is honest:
 
 | Tier | Meaning | Examples | Swap by |
 |---|---|---|---|
-| **1** | Hot-swappable: real Go interface + multiple implementations or remote-adapter pattern | Sandbox, object storage, notifications, billing, multimodal LLM, LLM chat gateway, auth, secrets. **Plus 4 observability slots (logs, traces, metrics, errors) — Tier-1 once shipped per the roadmap.** | Setting `AF_STACK_<slot>_BACKEND=...` (or `AF_STACK_<slot>_ADAPTER=remote`) and restarting |
+| **1** | Hot-swappable: real Go interface + multiple implementations or remote-adapter pattern | Sandbox, object storage, notifications, billing, multimodal LLM, LLM chat gateway, auth, secrets. **Plus 4 observability slots (logs, traces, metrics, errors) — Tier-1 once shipped per the roadmap.** | Setting `AF_STACK_<slot>_ADAPTER=...` and restarting |
 | **2** | Config-swappable: same wire protocol | Postgres (Aurora, Neon, RDS, Supabase, self-hosted) | Changing `DATABASE_URL` |
 | **3** | Interface-swappable: Go interface exists, only one impl today | Job queue, outbound webhooks, reasoning | Writing the second adapter |
 | **4** | Foundational: tightly coupled to platform's core abstractions | Postgres RLS pattern, pgvector | Fork the codebase |

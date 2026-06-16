@@ -44,6 +44,25 @@ func (t *TenancyMirror) VirtualKeysActive() bool {
 	return t.admin.VirtualKeysActive()
 }
 
+func (t *TenancyMirror) VirtualKeysProbeKnown() bool {
+	if t == nil || t.admin == nil {
+		return false
+	}
+	mode, _ := t.admin.KeyManagement()
+	return mode != KeyMgmtUnknown
+}
+
+// ProbeVirtualKeys synchronously refreshes the shared LiteLLM key-management
+// probe. tenancy.Manager uses this only when the cached state is still
+// unknown, preserving Block 1's local-first rotation behavior.
+func (t *TenancyMirror) ProbeVirtualKeys(ctx context.Context) (bool, error) {
+	if t == nil || t.admin == nil {
+		return false, ErrLiteLLMNotConfigured
+	}
+	mode, err := t.admin.ProbeKeyManagement(ctx)
+	return mode == KeyMgmtVirtualKeys, err
+}
+
 // GenerateKey translates the tenancy DTO into the llmgateway DTO and
 // proxies the call.
 func (t *TenancyMirror) GenerateKey(ctx context.Context, cfg tenancy.LiteLLMKeyConfig) (tenancy.LiteLLMKeyInfo, error) {

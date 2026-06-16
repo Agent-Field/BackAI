@@ -440,6 +440,14 @@ export const navGroups: NavGroup[] = [
         dataTruth: "backed",
       },
       {
+        title: "Features",
+        href: "/setup/features",
+        icon: "flag",
+        description: "Read-only feature flags, probes, and validator caveats.",
+        archetype: "config-inventory",
+        dataTruth: "backed",
+      },
+      {
         title: "Auth providers",
         href: "/setup/auth-providers",
         icon: "lock",

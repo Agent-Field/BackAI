@@ -1460,7 +1460,28 @@ func (m *Manager) RotateKey(ctx context.Context, id string) (IssuedAPIKey, error
 	}
 	committed = true
 
-	if m.litellm != nil && m.litellm.Configured() && m.litellm.VirtualKeysActive() {
+	virtualKeysActive := false
+	if m.litellm != nil && m.litellm.Configured() {
+		virtualKeysActive = m.litellm.VirtualKeysActive()
+		probeKnown := true
+		if known, ok := m.litellm.(interface {
+			VirtualKeysProbeKnown() bool
+		}); ok {
+			probeKnown = known.VirtualKeysProbeKnown()
+		}
+		if !virtualKeysActive && !probeKnown {
+			if prober, ok := m.litellm.(interface {
+				ProbeVirtualKeys(context.Context) (bool, error)
+			}); ok {
+				active, probeErr := prober.ProbeVirtualKeys(ctx)
+				if probeErr != nil {
+					span.RecordError(probeErr)
+				}
+				virtualKeysActive = active
+			}
+		}
+	}
+	if m.litellm != nil && m.litellm.Configured() && virtualKeysActive {
 		newAlias, newHash, mirrorErr := m.issueLiteLLMKey(ctx, in.TenantID, issued.ID, in)
 		if mirrorErr != nil {
 			span.RecordError(mirrorErr)

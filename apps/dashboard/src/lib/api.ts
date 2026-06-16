@@ -1871,6 +1871,40 @@ export const AdminServiceListSchema = z.object({
 })
 export type AdminServiceList = z.infer<typeof AdminServiceListSchema>
 
+export const FeatureCapabilityStatusSchema = z.enum([
+  "ok",
+  "degraded",
+  "not_configured",
+  "unavailable",
+])
+export const FeatureDetailSchema = z.object({
+  key: z.string(),
+  value: z.unknown(),
+  severity: z.string(),
+  message: z.string(),
+})
+export const FeatureEntrySchema = z.object({
+  enabled: z.boolean().optional(),
+  virtual_keys: z.boolean().optional(),
+  spend_tracking: z.boolean().optional(),
+  backend: z.string().optional(),
+  container_metrics: z.boolean().optional(),
+  capability_status: FeatureCapabilityStatusSchema,
+  details: z.array(FeatureDetailSchema).optional(),
+})
+export const FeatureValidationWarningSchema = z.object({
+  feature: z.string(),
+  level: z.string(),
+  message: z.string(),
+  remediation: z.string(),
+})
+export const FeaturesResponseSchema = z.object({
+  preset: z.string(),
+  features: z.record(z.string(), FeatureEntrySchema),
+  validator_warnings: z.array(FeatureValidationWarningSchema),
+})
+export type FeaturesResponse = z.infer<typeof FeaturesResponseSchema>
+
 export const ProviderHealthSchema = z.object({
   provider: z.string(),
   status: z.string(),
@@ -2651,6 +2685,10 @@ export const api = {
     services: {
       list: () =>
         request("/api/v1/admin/services", undefined, AdminServiceListSchema),
+    },
+    features: {
+      get: () =>
+        request("/api/v1/admin/features", undefined, FeaturesResponseSchema),
     },
     llm: {
       providerHealth: (params?: { window?: string }) => {

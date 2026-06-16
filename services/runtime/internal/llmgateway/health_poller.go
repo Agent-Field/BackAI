@@ -133,16 +133,6 @@ func (p *ProviderHealthPoller) poll(ctx context.Context) {
 	`, "litellm", status, latency, detailsJSON); err != nil {
 		p.log.Warn("provider health insert failed", "error", err)
 	}
-	p.prune(ctx)
-}
-
-func (p *ProviderHealthPoller) prune(ctx context.Context) {
-	if _, err := p.pool.Exec(ctx, `
-		delete from suite_provider_health_log
-		 where observed_at < now() - interval '30 days'
-	`); err != nil {
-		p.log.Warn("provider health prune failed", "error", err)
-	}
 }
 
 func ReadProviderHealth(ctx context.Context, pool *pgxpool.Pool, window time.Duration) (ProviderHealthList, error) {

@@ -22,6 +22,7 @@ package registry
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -176,16 +177,47 @@ func (r *Registry) Register(s Slot) {
 	r.slots = append(r.slots, s)
 }
 
+// UpdateCapability writes one capability value into a registered slot while
+// preserving every other capability key. Missing or invalid capability JSON is
+// treated as an empty object.
+func (r *Registry) UpdateCapability(slotID, key string, value any) error {
+	if slotID == "" {
+		return fmt.Errorf("registry: slot id required")
+	}
+	if key == "" {
+		return fmt.Errorf("registry: capability key required")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := range r.slots {
+		if r.slots[i].ID != slotID {
+			continue
+		}
+		caps := map[string]any{}
+		if len(r.slots[i].Capabilities) > 0 {
+			_ = json.Unmarshal(r.slots[i].Capabilities, &caps)
+		}
+		caps[key] = value
+		raw, err := json.Marshal(caps)
+		if err != nil {
+			return fmt.Errorf("registry: encode capabilities: %w", err)
+		}
+		r.slots[i].Capabilities = raw
+		return nil
+	}
+	return fmt.Errorf("registry: slot %q not found", slotID)
+}
+
 // SlotView is the JSON shape returned by /api/v1/admin/adapters for
 // one slot. Mirrors docs/adapters/PROTOCOL.md §11.
 type SlotView struct {
-	Slot             string          `json:"slot"`
-	Tier             int             `json:"tier"`
-	Active           ActiveView      `json:"active"`
-	AvailableBuiltin []string        `json:"available_builtin,omitempty"`
-	SwapMethod       string          `json:"swap_method"`
-	SwapEnv          string          `json:"swap_env,omitempty"`
-	AdminUI          string          `json:"admin_ui,omitempty"`
+	Slot             string     `json:"slot"`
+	Tier             int        `json:"tier"`
+	Active           ActiveView `json:"active"`
+	AvailableBuiltin []string   `json:"available_builtin,omitempty"`
+	SwapMethod       string     `json:"swap_method"`
+	SwapEnv          string     `json:"swap_env,omitempty"`
+	AdminUI          string     `json:"admin_ui,omitempty"`
 }
 
 // ActiveView is the active-adapter sub-object.

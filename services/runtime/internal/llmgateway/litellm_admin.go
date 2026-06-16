@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Agent-Field/backai/services/runtime/internal/probe"
 )
 
 // LiteLLMAdmin is a thin HTTP client over LiteLLM's admin API.
@@ -44,6 +46,7 @@ type LiteLLMAdmin struct {
 	keyMgmt        KeyMgmt
 	keyMgmtProbed  bool
 	keyMgmtLastErr string
+	probes         *probe.Registry
 }
 
 // NewLiteLLMAdmin constructs an admin client. baseURL is the LiteLLM
@@ -58,6 +61,19 @@ func NewLiteLLMAdmin(baseURL, masterKey string) *LiteLLMAdmin {
 			Timeout: 15 * time.Second,
 		},
 	}
+}
+
+// WithProbeRegistry connects the shared capability-probe registry. The
+// public key-management methods remain on LiteLLMAdmin so Block 1 callers do
+// not change, but the registry owns the actual /key/info probe.
+func (a *LiteLLMAdmin) WithProbeRegistry(reg *probe.Registry) *LiteLLMAdmin {
+	if a == nil {
+		return nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.probes = reg
+	return a
 }
 
 // Configured returns true when both baseURL and masterKey are set.
@@ -87,6 +103,9 @@ func (a *LiteLLMAdmin) VirtualKeysActive() bool {
 	if a == nil {
 		return false
 	}
+	if mode, _, ok := a.keyManagementFromProbe(); ok {
+		return mode == KeyMgmtVirtualKeys
+	}
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.keyMgmt == KeyMgmtVirtualKeys
@@ -96,6 +115,9 @@ func (a *LiteLLMAdmin) VirtualKeysActive() bool {
 func (a *LiteLLMAdmin) KeyManagement() (KeyMgmt, string) {
 	if a == nil {
 		return KeyMgmtUnknown, ""
+	}
+	if mode, errText, ok := a.keyManagementFromProbe(); ok {
+		return mode, errText
 	}
 	a.mu.RLock()
 	defer a.mu.RUnlock()
@@ -114,34 +136,30 @@ func (a *LiteLLMAdmin) ProbeKeyManagement(ctx context.Context) (KeyMgmt, error) 
 		a.setKeyManagement(KeyMgmtStateless, "")
 		return KeyMgmtStateless, nil
 	}
-	q := url.Values{}
-	q.Set("key_alias", "af-stack-capability-probe-never-created")
-	body, status, err := a.do(ctx, http.MethodGet, "/key/info", q, nil)
-	if err != nil {
-		a.setKeyManagement(KeyMgmtUnknown, err.Error())
-		return KeyMgmtUnknown, err
+	a.mu.RLock()
+	reg := a.probes
+	a.mu.RUnlock()
+	var (
+		res probe.Result
+		ok  bool
+	)
+	if reg != nil {
+		res, ok = reg.Run(ctx, probe.LiteLLMVirtualKeysProbeID)
 	}
-	mode := KeyMgmtVirtualKeys
-	var probeErr error
-	if status >= 400 {
-		raw := string(body)
-		switch {
-		case strings.Contains(strings.ToLower(raw), "db not connected"),
-			strings.Contains(strings.ToLower(raw), "database not connected"):
-			mode = KeyMgmtStateless
-		case status == http.StatusNotFound:
-			mode = KeyMgmtVirtualKeys
-		default:
-			mode = KeyMgmtUnknown
-			probeErr = &AdminError{StatusCode: status, Endpoint: "/key/info", Body: raw}
+	if !ok {
+		p := probe.NewLiteLLMVirtualKeysProbe(a.baseURL, a.masterKey, 0)
+		var err error
+		res, err = p.Run(ctx)
+		if err != nil {
+			res.LastErr = err
 		}
 	}
-	errText := ""
-	if probeErr != nil {
-		errText = probeErr.Error()
-	}
+	mode, errText := keyManagementFromProbeResult(res)
 	a.setKeyManagement(mode, errText)
-	return mode, probeErr
+	if res.LastErr != nil {
+		return mode, res.LastErr
+	}
+	return mode, nil
 }
 
 func (a *LiteLLMAdmin) setKeyManagement(mode KeyMgmt, lastErr string) {
@@ -150,6 +168,37 @@ func (a *LiteLLMAdmin) setKeyManagement(mode KeyMgmt, lastErr string) {
 	a.keyMgmt = mode
 	a.keyMgmtProbed = true
 	a.keyMgmtLastErr = lastErr
+}
+
+func (a *LiteLLMAdmin) keyManagementFromProbe() (KeyMgmt, string, bool) {
+	a.mu.RLock()
+	reg := a.probes
+	a.mu.RUnlock()
+	if reg == nil {
+		return KeyMgmtUnknown, "", false
+	}
+	res, ok := reg.Get(probe.LiteLLMVirtualKeysProbeID)
+	if !ok {
+		return KeyMgmtUnknown, "", false
+	}
+	mode, errText := keyManagementFromProbeResult(res)
+	return mode, errText, true
+}
+
+func keyManagementFromProbeResult(res probe.Result) (KeyMgmt, string) {
+	errText := ""
+	if res.LastErr != nil {
+		errText = res.LastErr.Error()
+	}
+	active, _ := res.Value.(bool)
+	switch {
+	case active:
+		return KeyMgmtVirtualKeys, errText
+	case res.Severity == probe.SeverityUnavailable && errText != "":
+		return KeyMgmtUnknown, errText
+	default:
+		return KeyMgmtStateless, errText
+	}
 }
 
 // ─── Wire shapes ─────────────────────────────────────────────────────────

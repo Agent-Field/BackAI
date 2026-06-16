@@ -19,18 +19,18 @@
 |---|---|
 | Adapter system | **8 Tier-1 slots** (sandbox, storage, notifications, secrets, billing, multimodal, llm-chat, auth) + shared remote HTTP client + capability registry + conformance harness + reference Python adapter. |
 | Tests | 61 packages pass. 0 failures. 2 E2E tests (sandbox via Python adapter; LLM via real OpenRouter Kimi via OpenAI-compat proxy). |
-| Dashboard shell | 47 routes registered with central navigation + catch-all renderer + seeded-fallback data loader pulling 44 live runtime endpoints. |
+| Dashboard shell | 48 routes registered with central navigation + catch-all renderer + seeded-fallback data loader pulling live runtime endpoints. |
 | Docs | ARCHITECTURE, PROTOCOL, AUTHORING, CONFORMANCE, per-slot specs, dashboard spec, design patterns, gap registry, contract audit. |
 
 ## What's done and what's next
 
-All outstanding work is consolidated in `development/execution-blocks-v1.md` — 9 ordered execution blocks. Block 1 has shipped; Block 2 is the next to dispatch.
+All outstanding work is consolidated in `development/execution-blocks-v1.md` — 9 ordered execution blocks. Blocks 1 and 2 have shipped; Block 3 is the next to dispatch.
 
 | Order | Block | Status | Effort |
 |---|---|---|---|
 | 1 | Endpoint additions — adapter registry mount, /admin/services synth, /admin/db/health, provider-health poller, cron trigger, cache flush, key rotate, brand R/W, SQL Health tab, notifications mute | ✅ **DONE** | (~4 days) |
-| 2 | **Foundation** — config schema (`backai.config.yaml`) + Layer 1/2 validators + capability-probe machinery + retention helper + `/api/v1/admin/features` + Block 1 consolidation | ⏭️ **NEXT** | **~1.5 days** |
-| 3 | **`logs` adapter slot** — default Loki backend (operator-deployed); ring-buffer fallback | queued | ~2.5 days |
+| 2 | **Foundation** — config schema (`backai.config.yaml`) + Layer 1/2 validators + capability-probe machinery + retention helper + `/api/v1/admin/features` + Block 1 consolidation | ✅ **DONE** | **~1.5 days** |
+| 3 | **`logs` adapter slot** — default Loki backend (operator-deployed); ring-buffer fallback | ⏭️ **NEXT** | ~2.5 days |
 | 4 | **`traces` adapter slot** — default Tempo backend (operator-deployed); empty fallback | queued | ~2.5 days |
 | 5 | **`metrics` adapter slot** — default Prometheus backend (operator-deployed); Cost charts + Container subsection | queued | ~2 days |
 | 6 | **`errors` adapter slot** — default GlitchTip backend (operator-deployed); log-filter fallback | queued | ~3 days |

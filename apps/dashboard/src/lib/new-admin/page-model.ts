@@ -640,6 +640,29 @@ const definitions: Record<string, PageDefinition> = {
     secondaryTitle: "Capability contract",
     secondary: (snapshot) => [card("Runtime inventory", "BackAI owns the adapter slot contract; OSS services stay behind the runtime.", selectedAdapterRows(snapshot, 6))],
   },
+  "/setup/features": {
+    primaryAction: "Copy config path",
+    controls: () => setupControls("Search feature, status, capability..."),
+    kpis: (snapshot) => [
+      kpi("Preset", snapshot.features[0]?.timestamp ?? "lean", "backai.config.yaml", "active", "ok"),
+      kpi("Warnings", String(snapshot.featureWarnings.length), "validator output", snapshot.featureWarnings.length ? "review" : "clear", snapshot.featureWarnings.length ? "warn" : "ok"),
+      kpi("Configured", String(snapshot.features.filter((row) => row.status !== "not_configured").length), "runtime features", "visible", "running"),
+      kpi("Probe source", "live", "capability registry", "cached", "neutral"),
+    ],
+    rows: (snapshot) => snapshot.features,
+    tableTitle: "Feature contract",
+    tableDescription: "Feature toggles, active capability status, and probe-backed details reported by the runtime.",
+    secondaryTitle: "Validator warnings",
+    secondary: (snapshot) => [
+      card(
+        "backai.config.yaml",
+        snapshot.featureWarnings.length
+          ? snapshot.featureWarnings.map((row) => `${row.primary}: ${row.secondary}`).join(" ")
+          : "No validator warnings reported by the runtime.",
+        snapshot.featureWarnings.length ? selectedRows(snapshot.featureWarnings, 6) : [{ label: "Path", value: "backai.config.yaml", tone: "neutral" }],
+      ),
+    ],
+  },
   "/setup/auth-providers": {
     primaryAction: "Open auth docs",
     controls: () => setupControls("Search provider, origin, session config..."),
@@ -756,7 +779,9 @@ export function buildPageModel(pathname: string, snapshot: OperatorSnapshot): Pa
   const rows = definition.rows(snapshot)
   const modelBase = {
     dataTruth: navItem.dataTruth,
-    apiGap: navItem.apiGap,
+    apiGap: path === "/setup/features" && snapshot.featureWarnings.length
+      ? snapshot.featureWarnings.map((row) => `${row.primary}: ${row.secondary}`).join(" ")
+      : navItem.apiGap,
     adapter: navItem.adapter,
   }
 
@@ -770,7 +795,7 @@ export function buildPageModel(pathname: string, snapshot: OperatorSnapshot): Pa
     generatedAt: snapshot.generatedAt,
     adapter: navItem.adapter,
     dataTruth: navItem.dataTruth,
-    apiGap: navItem.apiGap,
+    apiGap: modelBase.apiGap,
     archetype: navItem.archetype,
     primaryAction: definition.primaryAction,
     controls: definition.controls(snapshot),

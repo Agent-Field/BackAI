@@ -41,6 +41,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/oauth"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
+	"github.com/Agent-Field/backai/services/runtime/internal/probe"
 	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
 	"github.com/Agent-Field/backai/services/runtime/internal/sandbox"
 	"github.com/Agent-Field/backai/services/runtime/internal/search"
@@ -161,6 +162,9 @@ type Server struct {
 	// adapterRegistry is the runtime-owned inventory of backend adapter
 	// slots surfaced to the operator dashboard.
 	adapterRegistry *adapterregistry.Registry
+	probeRegistry   *probe.Registry
+	featureConfig   config.FeatureConfig
+	featureWarnings []config.ValidationError
 	// toolsRegistry is the strict-interface native tool surface
 	// (internal/tools). Construction in main.go via tools.BuildRegistry
 	// at boot; nil ⇒ list returns empty + mutations/invokes return 503.
@@ -320,6 +324,9 @@ type Deps struct {
 	// AdapterRegistry inventories the runtime's configured adapter slots.
 	// nil means /api/v1/admin/adapters returns an empty slot list.
 	AdapterRegistry *adapterregistry.Registry
+	ProbeRegistry   *probe.Registry
+	FeatureConfig   config.FeatureConfig
+	FeatureWarnings []config.ValidationError
 	// ToolsRegistry is the strict-interface native tool surface. nil =
 	// /api/v1/tools/native list returns empty; enable/invoke return 503.
 	ToolsRegistry *tools.Registry
@@ -406,6 +413,9 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		crons:           deps.Crons,
 		toolAdapters:    deps.ToolAdapters,
 		adapterRegistry: deps.AdapterRegistry,
+		probeRegistry:   deps.ProbeRegistry,
+		featureConfig:   deps.FeatureConfig,
+		featureWarnings: deps.FeatureWarnings,
 		toolsRegistry:   deps.ToolsRegistry,
 		oauthManager:    deps.OAuthManager,
 		oauthFactory:    deps.OAuthFactory,
@@ -671,6 +681,8 @@ func (s *Server) registerRoutes() {
 	s.registerAdminAdapterOpenAPI()
 	s.registerAdminServicesRoutes()
 	s.registerAdminServicesOpenAPI()
+	s.registerAdminFeaturesRoutes()
+	s.registerAdminFeaturesOpenAPI()
 	s.registerDBHealthRoutes()
 	s.registerDBHealthOpenAPI()
 	s.registerLLMProviderHealthRoutes()

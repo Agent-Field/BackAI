@@ -1,0 +1,40 @@
+# backai.config.yaml.example - operator copies to backai.config.yaml and edits.
+# Validate with: backai config validate
+
+preset: lean # lean | full-observability | production | custom
+
+# When preset != custom, presets define a baseline feature set; this block
+# overrides individual flags. When preset = custom, every feature must be
+# explicitly enumerated.
+features:
+  # Block 1 shipped features.
+  db_health: { enabled: true }
+  provider_health_polling: { enabled: true }
+  notifications_mute: { enabled: true }
+  brand_override: { enabled: true }
+  search_index_stats: { enabled: true }
+  cron_manual_trigger: { enabled: true }
+  cache_flush: { enabled: true }
+  api_key_rotate: { enabled: true }
+
+  llm_gateway:
+    virtual_keys: false
+    spend_tracking: false
+
+  # Future-block features. Declared here now; implemented in later blocks.
+  logs:
+    enabled: false
+    backend: ring
+
+  traces:
+    enabled: false
+    backend: empty
+
+  metrics:
+    enabled: false
+    backend: none
+    container_metrics: false
+
+  errors:
+    enabled: false
+    backend: logfilter
