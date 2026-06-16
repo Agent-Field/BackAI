@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ConsoleRow, Kpi, OperatorSnapshot, StatusTone } from "@/lib/new-admin/data"
-import { allNavItems, groupForPath, navItemForPath, normalizePath } from "@/lib/new-admin/navigation"
+import {
+  allNavItems,
+  groupForPath,
+  navItemForPath,
+  normalizePath,
+  type DataTruth,
+  type PageArchetype,
+} from "@/lib/new-admin/navigation"
 
 export type PageControl =
   | {
@@ -44,8 +51,12 @@ export type PageModel = {
   title: string
   description: string
   live: boolean
+  source: OperatorSnapshot["source"]
   generatedAt: string
   adapter?: string
+  dataTruth: DataTruth
+  apiGap?: string
+  archetype: PageArchetype
   primaryAction: string
   controls: PageControl[]
   kpis: Kpi[]
@@ -58,1209 +69,712 @@ export type PageModel = {
 }
 
 type PageDefinition = {
-  adapter?: string
   primaryAction: string
-  controls?: PageControl[]
-  kpis?: (snapshot: OperatorSnapshot) => Kpi[]
+  controls: (snapshot: OperatorSnapshot) => PageControl[]
+  kpis: (snapshot: OperatorSnapshot) => Kpi[]
+  columns?: [string, string, string, string]
+  rows: (snapshot: OperatorSnapshot) => ConsoleRow[]
   tableTitle: string
   tableDescription: string
-  tableColumns?: [string, string, string, string]
-  rows: (snapshot: OperatorSnapshot) => ConsoleRow[]
   secondaryTitle: string
   secondary: (snapshot: OperatorSnapshot) => PageCard[]
 }
 
 const defaultColumns: [string, string, string, string] = ["Object", "Context", "Metric", "Updated"]
 
-const platformControls: PageControl[] = [
-  { kind: "select", label: "Scope", value: "Platform", options: ["Platform", "acme", "beta-labs", "delta-health"] },
-  { kind: "select", label: "Range", value: "24h", options: ["1h", "24h", "7d", "30d"] },
-  { kind: "input", label: "Search", placeholder: "Filter current page..." },
-]
-
-const developControls: PageControl[] = [
-  { kind: "select", label: "Runtime", value: "local", options: ["local", "staging", "production"] },
-  { kind: "select", label: "Tenant", value: "Platform", options: ["Platform", "acme", "beta-labs", "delta-health"] },
-  { kind: "input", label: "Search", placeholder: "Find endpoint, snippet, or recipe..." },
-]
-
-const operateControls: PageControl[] = [
-  { kind: "select", label: "Tenant", value: "Platform", options: ["Platform", "acme", "beta-labs", "delta-health"] },
-  { kind: "select", label: "Range", value: "24h", options: ["15m", "1h", "24h", "7d"] },
-  { kind: "tabs", label: "State", value: "all", options: ["all", "live", "failed", "queued"] },
-]
-
-const buildControls: PageControl[] = [
-  { kind: "select", label: "Source", value: "Runtime", options: ["Runtime", "Database", "Config", "Repo"] },
-  { kind: "select", label: "Tenant", value: "Platform", options: ["Platform", "acme", "beta-labs", "delta-health"] },
-  { kind: "input", label: "Search", placeholder: "Find agent, table, module, or flag..." },
-]
-
-const customerControls: PageControl[] = [
-  { kind: "select", label: "Tenant", value: "Platform", options: ["Platform", "acme", "beta-labs", "delta-health"] },
-  { kind: "select", label: "Plan", value: "All plans", options: ["All plans", "Free", "Team", "Enterprise"] },
-  { kind: "input", label: "Search", placeholder: "Find customer, key, member, or audit entry..." },
-]
-
-const setupControls: PageControl[] = [
-  { kind: "select", label: "Environment", value: "local", options: ["local", "staging", "production"] },
-  { kind: "tabs", label: "Readiness", value: "all", options: ["all", "ready", "warning", "missing"] },
-  { kind: "switch", label: "Show secrets", value: "off" },
-]
-
-function makeKpi(label: string, value: string, detail: string, trend: string, tone: StatusTone = "neutral", sparkline = [8, 10, 9, 12, 14, 13, 16, 15]): Kpi {
-  return { label, value, detail, trend, tone, sparkline }
+function select(label: string, value: string, options: string[]): PageControl {
+  return { kind: "select", label, value, options }
 }
 
-function pickKpis(snapshot: OperatorSnapshot, indexes: number[]) {
+function tabs(label: string, value: string, options: string[]): PageControl {
+  return { kind: "tabs", label, value, options }
+}
+
+function input(label: string, placeholder: string): PageControl {
+  return { kind: "input", label, placeholder }
+}
+
+function switcher(label: string, value: "on" | "off" = "off"): PageControl {
+  return { kind: "switch", label, value }
+}
+
+function platformControls(search = "Search current page..."): PageControl[] {
+  return [
+    select("Scope", "Platform", ["Platform", "acme", "beta-labs", "delta-health"]),
+    select("Range", "24h", ["15m", "1h", "24h", "7d", "30d"]),
+    input("Search", search),
+  ]
+}
+
+function statusControls(search = "Search objects..."): PageControl[] {
+  return [...platformControls(search), tabs("State", "all", ["all", "active", "failed", "pending"])]
+}
+
+function setupControls(search = "Search setup..."): PageControl[] {
+  return [
+    select("Environment", "local", ["local", "staging", "production"]),
+    tabs("Readiness", "all", ["all", "ready", "warning", "missing"]),
+    input("Search", search),
+  ]
+}
+
+function kpi(label: string, value: string, detail: string, trend: string, tone: StatusTone = "neutral"): Kpi {
+  return { label, value, detail, trend, tone, sparkline: [8, 10, 9, 12, 14, 13, 16, 15] }
+}
+
+function pick(snapshot: OperatorSnapshot, indexes: number[]) {
   return indexes.map((index) => snapshot.kpis[index]).filter(Boolean).slice(0, 4)
-}
-
-function storageTotal(rows: ConsoleRow[]) {
-  if (rows.length === 0) return "0 B"
-  if (rows.length === 1) return rows[0]?.metric ?? "1 object"
-  return `${rows.length} objects`
-}
-
-function row(
-  id: string,
-  primary: string,
-  secondary: string,
-  status: string,
-  tone: StatusTone,
-  metric: string,
-  timestamp: string
-): ConsoleRow {
-  return { id, primary, secondary, status, tone, metric, timestamp }
 }
 
 function card(title: string, description: string, rows?: PageCard["rows"], code?: string): PageCard {
   return { title, description, rows, code }
 }
 
-function serviceRows(snapshot: OperatorSnapshot) {
-  return snapshot.services.map((service) =>
-    row(
-      service.name,
-      service.name,
-      `${service.adapter ?? "adapter"} · ${service.version}`,
-      service.status,
-      service.status === "healthy" ? "ok" : service.status === "degraded" ? "warn" : "fail",
-      service.adapter ?? "service",
-      service.checked
-    )
-  )
+function statusCard(model: { dataTruth: DataTruth; apiGap?: string; adapter?: string }, snapshot: OperatorSnapshot): PageCard {
+  return card("Data contract", "What this page can claim from the current backend.", [
+    { label: "Source", value: snapshot.source === "live" ? "runtime API" : "seeded fallback", tone: snapshot.source === "live" ? "ok" : "warn" },
+    { label: "Truth", value: model.dataTruth, tone: model.dataTruth === "backed" ? "ok" : model.dataTruth === "missing" ? "fail" : "warn" },
+    { label: "Adapter", value: model.adapter ?? "runtime" },
+    ...(model.apiGap ? [{ label: "Gap", value: model.apiGap, tone: "warn" as StatusTone }] : []),
+  ])
 }
 
-function budgetRows(snapshot: OperatorSnapshot) {
-  return snapshot.budgets.map((budget) =>
-    row(
-      budget.tenant,
-      budget.tenant,
-      `${budget.cap} monthly cap`,
-      budget.status === "ok" ? "within cap" : budget.status === "warn" ? "near cap" : "over cap",
-      budget.status,
-      `${budget.used}% used`,
-      "current period"
-    )
-  )
-}
-
-function adapterRows(snapshot: OperatorSnapshot) {
-  return snapshot.adapters.map((adapter) =>
-    row(adapter.slot, adapter.slot, adapter.description, adapter.adapter, adapter.status, "configured", "current")
-  )
-}
-
-function quickstartSecondary(snapshot: OperatorSnapshot): PageCard[] {
-  return [
-    card("Runtime", "The values developers need before making a first call.", [
-      { label: "Base URL", value: snapshot.snippets.runtimeUrl },
-      { label: "Tenant key", value: snapshot.snippets.tenantKey },
-      { label: "Runtime", value: snapshot.runtimeStatus, tone: snapshot.source === "live" ? "ok" : "warn" },
-    ]),
-    card("First call", "Copy-safe starter request scoped to the selected tenant.", undefined, snapshot.snippets.curl),
-  ]
+function selectedRows(rows: ConsoleRow[], count = 5): PageCard["rows"] {
+  return rows.slice(0, count).map((row) => ({
+    label: row.primary,
+    value: row.metric,
+    tone: row.tone,
+  }))
 }
 
 const definitions: Record<string, PageDefinition> = {
   "/": {
-    adapter: "BackAI runtime",
     primaryAction: "Open command center",
-    controls: platformControls,
-    kpis: (snapshot) => pickKpis(snapshot, [0, 1, 2, 4]),
-    tableTitle: "Platform activity",
-    tableDescription: "The most recent operator-relevant events across requests, runs, alerts, tenants, and budgets.",
+    controls: () => platformControls("Find tenant, run, key, or action..."),
+    kpis: (snapshot) => pick(snapshot, [0, 1, 2, 4]),
     rows: (snapshot) => snapshot.activity,
+    tableTitle: "Recent platform activity",
+    tableDescription: "Runs, alerts, tenant changes, budget events, and service signals in time order.",
     secondaryTitle: "System posture",
     secondary: (snapshot) => [
-      card("Services", "Live service health and configured adapters.", serviceRows(snapshot).slice(0, 5).map((service) => ({
-        label: service.primary,
-        value: `${service.status} · ${service.metric}`,
-        tone: service.tone,
+      card("Service status", "Backing services and adapter readiness.", snapshot.services.map((service) => ({
+        label: service.name,
+        value: `${service.status} · ${service.adapter ?? "service"}`,
+        tone: service.status === "healthy" ? "ok" : service.status === "degraded" ? "warn" : "fail",
       }))),
-      card("Budget pressure", "Tenant spend pressure for the current billing window.", snapshot.budgets.map((budget) => ({
+      card("Budget pressure", "Current tenant budget usage.", snapshot.budgets.map((budget) => ({
         label: budget.tenant,
-        value: `${budget.used}%`,
+        value: `${budget.used}% of ${budget.cap}`,
         tone: budget.status,
       }))),
-    ],
-  },
-  "/develop/quickstart": {
-    adapter: "OpenAPI + SDK",
-    primaryAction: "Issue developer key",
-    controls: developControls,
-    kpis: () => [
-      makeKpi("First call", "3 min", "curl, TS, Python", "ready", "ok"),
-      makeKpi("Auth context", "1 key", "selected tenant", "masked", "running"),
-      makeKpi("SDKs", "3", "typescript, python, go", "current", "ok"),
-      makeKpi("Examples", "5", "common runtime paths", "+2", "neutral"),
-    ],
-    tableTitle: "Starter checklist",
-    tableDescription: "Everything a developer needs to connect to this BackAI fork without leaving the console.",
-    rows: (snapshot) => [
-      row("runtime-url", "Runtime URL", "Active backend endpoint for SDK and curl calls.", "ready", "ok", snapshot.snippets.runtimeUrl, "current"),
-      row("tenant-key", "Tenant API key", "Scoped bearer key for the selected tenant.", "masked", "running", snapshot.snippets.tenantKey, "current"),
-      row("install-ts", "Install TypeScript SDK", "npm, pnpm, or bun package command.", "ready", "ok", "1 command", "copy"),
-      row("install-py", "Install Python SDK", "pip or uv package command.", "ready", "ok", "1 command", "copy"),
-      row("first-run", "Create first run", "Call an agent and inspect request, run, and trace IDs.", "ready", "ok", "POST /agents", "guided"),
-    ],
-    secondaryTitle: "Copy panel",
-    secondary: quickstartSecondary,
-  },
-  "/develop/api-explorer": {
-    adapter: "OpenAPI explorer",
-    primaryAction: "Send request",
-    controls: developControls,
-    kpis: () => [
-      makeKpi("Endpoint groups", "9", "agents, runs, data, admin", "mapped", "ok"),
-      makeKpi("Auth mode", "Bearer", "tenant key", "active", "running"),
-      makeKpi("Schema", "3.1", "OpenAPI", "valid", "ok"),
-      makeKpi("Last response", "202", "run accepted", "268 ms", "ok"),
-    ],
-    tableTitle: "Endpoint surface",
-    tableDescription: "Testable runtime and admin endpoints with the current auth context.",
-    rows: () => [
-      row("POST /api/v1/agents/{id}/runs", "Create agent run", "Body schema, streaming toggle, and tenant header.", "ready", "ok", "POST", "runtime"),
-      row("GET /api/v1/runs", "List runs", "Filters by tenant, status, agent, and time window.", "ready", "ok", "GET", "runtime"),
-      row("GET /api/v1/cost", "Cost summary", "Provider spend, cache savings, forecasts, and budgets.", "ready", "ok", "GET", "operate"),
-      row("POST /api/admin/keys", "Issue API key", "Tenant-scoped key creation with limit fields.", "guarded", "warn", "POST", "admin"),
-      row("GET /api/db/tables", "Database tables", "Schema inventory and RLS posture.", "ready", "ok", "GET", "build"),
-    ],
-    secondaryTitle: "Request context",
-    secondary: (snapshot) => [
-      card("Headers", "Headers applied to test requests.", [
-        { label: "Authorization", value: "Bearer tenant key", tone: "running" },
-        { label: "X-BackAI-Tenant", value: "selected scope" },
-        { label: "Runtime", value: snapshot.snippets.runtimeUrl },
-      ]),
-      card("Response shape", "IDs returned by successful requests are linkable back into Runs and Traces.", [
-        { label: "run_id", value: "opens Runs" },
-        { label: "trace_id", value: "opens Traces" },
-        { label: "cost_event_id", value: "opens Cost" },
-      ]),
-    ],
-  },
-  "/develop/sdk-cli": {
-    adapter: "SDK packages",
-    primaryAction: "Copy install",
-    controls: developControls,
-    kpis: () => [
-      makeKpi("SDKs", "3", "typescript, python, go", "stable", "ok"),
-      makeKpi("CLI", "1", "backai command", "local", "running"),
-      makeKpi("Examples", "12", "runtime and admin", "+4", "neutral"),
-      makeKpi("Typed calls", "100%", "from schema", "generated", "ok"),
-    ],
-    tableTitle: "SDK and CLI commands",
-    tableDescription: "Install, configure, run, and inspect the system from code or terminal.",
-    rows: (snapshot) => [
-      row("typescript", "TypeScript client", "Runtime calls, admin operations, and typed responses.", "ready", "ok", "npm", "current"),
-      row("python", "Python client", "Async-first calls for worker and notebook use.", "ready", "ok", "pip", "current"),
-      row("go", "Go client", "Server integrations with context-aware requests.", "ready", "ok", "go", "current"),
-      row("cli-config", "backai login", "Stores runtime URL and tenant key locally.", "ready", "ok", "CLI", "local"),
-      row("cli-runs", "backai runs tail", "Streams live run and error events.", "ready", "ok", "CLI", "live"),
-      row("snippet", "List runs", "Canonical runtime list call.", "ready", "ok", "code", snapshot.generatedAt.slice(11, 19)),
-    ],
-    secondaryTitle: "Snippets",
-    secondary: (snapshot) => [
-      card("TypeScript", "Common runtime list call.", undefined, snapshot.snippets.typescript),
-      card("Python", "Equivalent async-friendly client call.", undefined, snapshot.snippets.python),
-      card("Go", "Server-side context-aware call.", undefined, snapshot.snippets.go),
-    ],
-  },
-  "/develop/schema": {
-    adapter: "OpenAPI",
-    primaryAction: "Download schema",
-    controls: developControls,
-    kpis: () => [
-      makeKpi("Spec", "3.1", "OpenAPI", "valid", "ok"),
-      makeKpi("Schemas", "46", "request/response", "+3", "neutral"),
-      makeKpi("Clients", "3", "generated", "current", "ok"),
-      makeKpi("Breaking changes", "0", "last build", "clean", "ok"),
-    ],
-    tableTitle: "Schema artifacts",
-    tableDescription: "Published contract files and generated client targets.",
-    rows: () => [
-      row("openapi-json", "openapi.json", "Machine-readable canonical API contract.", "valid", "ok", "842 KiB", "generated"),
-      row("openapi-yaml", "openapi.yaml", "Human-readable contract for review and docs.", "valid", "ok", "916 KiB", "generated"),
-      row("typescript-types", "TypeScript types", "Generated from OpenAPI and exported by SDK.", "current", "ok", "136 types", "generated"),
-      row("python-models", "Python models", "Pydantic-compatible request and response models.", "current", "ok", "121 models", "generated"),
-      row("contract-diff", "Contract diff", "Last schema diff against main branch.", "clean", "ok", "0 breaking", "CI"),
-    ],
-    secondaryTitle: "Generation",
-    secondary: () => [
-      card("Client targets", "Supported generated clients for product and customer integrations.", [
-        { label: "TypeScript", value: "runtime + admin", tone: "ok" },
-        { label: "Python", value: "runtime + data", tone: "ok" },
-        { label: "Go", value: "runtime", tone: "running" },
-      ]),
-      card("Validation gates", "Checks that should block backend drift before release.", [
-        { label: "Schema diff", value: "required", tone: "ok" },
-        { label: "Example compile", value: "required", tone: "ok" },
-        { label: "E2E smoke", value: "recommended", tone: "running" },
-      ]),
-    ],
-  },
-  "/develop/recipes": {
-    adapter: "Integration guide",
-    primaryAction: "Create recipe",
-    controls: developControls,
-    kpis: () => [
-      makeKpi("Recipes", "8", "copy-ready", "+2", "neutral"),
-      makeKpi("Webhook flows", "3", "in/out/replay", "ready", "ok"),
-      makeKpi("Job flows", "2", "queue and cron", "ready", "ok"),
-      makeKpi("Billing flows", "2", "meter and portal", "draft", "running"),
-    ],
-    tableTitle: "Integration recipes",
-    tableDescription: "Opinionated glue patterns for common product and customer workflows.",
-    rows: () => [
-      row("recipe-agent-call", "Call an agent from an app", "Server action with tenant key, run link, and trace link.", "ready", "ok", "15 min", "runtime"),
-      row("recipe-webhook-in", "Receive customer webhook", "Verify signature, enqueue job, create audit row.", "ready", "ok", "25 min", "webhooks"),
-      row("recipe-webhook-out", "Notify customer endpoint", "Emit signed event and replay failed delivery.", "ready", "ok", "20 min", "webhooks"),
-      row("recipe-metering", "Meter LLM usage", "Record spend and sync to billing adapter.", "draft", "running", "30 min", "billing"),
-      row("recipe-rag", "Attach search to agent", "Index docs, query search, write memory.", "ready", "ok", "40 min", "build"),
-      row("recipe-queue", "Run async workflow", "Enqueue, retry, inspect job and trace.", "ready", "ok", "20 min", "queue"),
-    ],
-    secondaryTitle: "Recipe policy",
-    secondary: () => [
-      card("Reusable shape", "Each recipe should include route, auth, data touchpoints, trace links, and rollback notes.", [
-        { label: "Auth", value: "tenant scoped", tone: "ok" },
-        { label: "Observability", value: "trace linked", tone: "ok" },
-        { label: "Idempotency", value: "explicit", tone: "running" },
-      ]),
     ],
   },
   "/operate/runs": {
-    adapter: "AgentField runtime",
-    primaryAction: "Replay run",
-    controls: operateControls,
-    kpis: (snapshot) => pickKpis(snapshot, [0, 5, 6, 2]),
-    tableTitle: "Run stream",
-    tableDescription: "Live executions with tenant, model, cost, duration, and debug entry points.",
+    primaryAction: "Test agent",
+    controls: () => statusControls("Search run id, agent, or tenant..."),
+    kpis: (snapshot) => pick(snapshot, [0, 5, 6, 2]),
     rows: (snapshot) => snapshot.runs,
-    secondaryTitle: "Debug lens",
+    tableTitle: "Execution stream",
+    tableDescription: "Agent and handler runs with status, tenant context, cost, and timing.",
+    secondaryTitle: "Run drilldown",
     secondary: (snapshot) => [
-      card("Selected run", "The first row is preselected for keyboard-friendly triage.", [
-        { label: "Status", value: snapshot.runs[0]?.status ?? "none", tone: snapshot.runs[0]?.tone ?? "neutral" },
-        { label: "Cost and duration", value: snapshot.runs[0]?.metric ?? "n/a" },
-        { label: "Trace", value: "linked in Traces" },
-      ]),
-      card("Run actions", "Operator actions stay in drawers so the list remains dense.", [
-        { label: "Replay", value: "available", tone: "running" },
-        { label: "Cancel", value: "guarded", tone: "warn" },
-        { label: "Export", value: "json" },
-      ]),
+      card("Selected run", "Use row links to share a filtered run view.", selectedRows(snapshot.runs, 4)),
+      card("Actions", "Pause, resume, cancel, request approval, or copy input into the agent playground."),
     ],
   },
   "/operate/cost": {
-    adapter: "LiteLLM + billing",
     primaryAction: "Set budget",
-    controls: operateControls,
-    kpis: (snapshot) => pickKpis(snapshot, [2, 3, 7, 0]),
-    tableTitle: "Cost ledger",
-    tableDescription: "Tenant and agent spend with budget pressure, provider context, and cache impact.",
+    controls: () => [
+      select("Tenant", "Platform", ["Platform", "acme", "beta-labs", "delta-health"]),
+      select("Range", "30d", ["24h", "7d", "30d", "90d"]),
+      tabs("Group", "tenant", ["tenant", "model", "agent", "day"]),
+      input("Search", "Find model, tenant, or run..."),
+    ],
+    kpis: (snapshot) => pick(snapshot, [2, 3, 7, 1]),
     rows: (snapshot) => snapshot.costRows,
-    secondaryTitle: "Budget controls",
+    tableTitle: "Spend ledger",
+    tableDescription: "Cost events and derived spend views grouped by the selected control.",
+    secondaryTitle: "Budget and cache",
     secondary: (snapshot) => [
-      card("Budget pressure", "Current period usage by tenant.", snapshot.budgets.map((budget) => ({
+      card("Budget pressure", "Caps remain visible while the spend ledger updates.", snapshot.budgets.map((budget) => ({
         label: budget.tenant,
         value: `${budget.used}%`,
         tone: budget.status,
       }))),
-      card("Savings", "Cache and model-routing opportunities surfaced for operators.", [
-        { label: "Cache savings", value: "$18.42", tone: "ok" },
-        { label: "Top model", value: "claude-sonnet" },
-        { label: "Forecast", value: "$2.8k month", tone: "warn" },
-      ]),
+      card("Cache value", "Savings are labeled derived unless the gateway returns a native aggregate.", selectedRows(snapshot.cache, 3)),
     ],
   },
   "/operate/errors": {
-    adapter: "Runtime alerts",
-    primaryAction: "Acknowledge error",
-    controls: operateControls,
-    kpis: (snapshot) => pickKpis(snapshot, [1, 6, 4, 0]),
-    tableTitle: "Failure triage",
-    tableDescription: "Grouped errors across agent runs, handlers, queues, providers, and webhooks.",
-    rows: (snapshot) => snapshot.errors,
-    secondaryTitle: "Triage state",
-    secondary: () => [
-      card("Ownership", "Every active error should have a route to run, trace, tenant, and owning adapter.", [
-        { label: "Grouping", value: "fingerprint", tone: "ok" },
-        { label: "Mute", value: "time-boxed", tone: "running" },
-        { label: "Escalation", value: "Slack or email", tone: "neutral" },
-      ]),
-      card("Severity guide", "Failure color is reserved for broken user-visible work.", [
-        { label: "Fail", value: "red", tone: "fail" },
-        { label: "Warn", value: "amber", tone: "warn" },
-        { label: "Running", value: "neutral", tone: "running" },
-      ]),
+    primaryAction: "Mute error",
+    controls: () => statusControls("Search stack, source, tenant, or run..."),
+    kpis: () => [kpi("Open groups", "derived", "from error logs", "client", "warn"), kpi("Grouping", "pattern", "client-side", "logs", "warn"), kpi("Source", "logs", "/api/v1/logs", "live", "running"), kpi("Endpoint gap", "1", "admin errors endpoint", "missing", "fail")],
+    rows: (snapshot) => snapshot.errors.length ? snapshot.errors : snapshot.logs.filter((row) => row.tone === "fail"),
+    tableTitle: "Failure groups",
+    tableDescription: "Runtime errors grouped client-side until a dedicated error aggregation endpoint exists.",
+    secondaryTitle: "Triage",
+    secondary: (snapshot) => [
+      card("Muted and resolved", "Use audit-backed mutations when backend grouping lands."),
+      card("Raw samples", "Every group links back to the original log row.", selectedRows(snapshot.logs.filter((row) => row.tone === "fail"), 4)),
     ],
   },
   "/operate/traces": {
-    adapter: "OpenTelemetry",
-    primaryAction: "Open trace",
-    controls: operateControls,
-    kpis: () => [
-      makeKpi("p95 latency", "2.8 s", "agent calls", "+0.2 s", "warn"),
-      makeKpi("Span errors", "7", "last 24h", "-3", "ok"),
-      makeKpi("Slowest span", "llm.chat", "provider wait", "1.9 s", "running"),
-      makeKpi("Sampling", "100%", "local runtime", "full", "ok"),
-    ],
-    tableTitle: "Trace list",
-    tableDescription: "Request spans, critical path timing, and linked run context.",
+    primaryAction: "Open trace explorer",
+    controls: () => [select("Scope", "Platform", ["Platform", "tenant"]), input("Trace", "Paste trace id or run id..."), tabs("Status", "all", ["all", "slow", "failed", "sampled"])],
+    kpis: () => [kpi("Trace endpoint", "missing", "link out for deep view", "degraded", "warn"), kpi("Span tree", "thin", "from run context", "adapter", "warn"), kpi("Critical path", "external", "Tempo or Honeycomb", "link", "neutral"), kpi("Copy link", "ready", "share trace search", "url", "ok")],
     rows: (snapshot) => snapshot.traces,
-    secondaryTitle: "Span tree",
-    secondary: () => [
-      card("Critical path", "Collapsed span tree for the selected request.", [
-        { label: "HTTP handler", value: "42 ms", tone: "ok" },
-        { label: "Agent graph", value: "520 ms", tone: "running" },
-        { label: "LLM call", value: "1.1 s", tone: "warn" },
-        { label: "Persist event", value: "18 ms", tone: "ok" },
-      ]),
+    tableTitle: "Trace search",
+    tableDescription: "Thin in-product trace context with external explorer handoff.",
+    secondaryTitle: "Span preview",
+    secondary: (snapshot) => [
+      card("Capability caveat", "Deep span exploration needs a trace endpoint or adapter query capability.", [{ label: "Missing", value: "GET /api/v1/traces", tone: "warn" }]),
+      card("Recent trace contexts", "Rows are linked by run id until trace ids are first-class.", selectedRows(snapshot.traces, 4)),
     ],
   },
   "/operate/queue": {
-    adapter: "River jobs",
-    primaryAction: "Drain queue",
-    controls: operateControls,
-    kpis: (snapshot) => pickKpis(snapshot, [4, 5, 6, 1]),
-    tableTitle: "Async jobs",
-    tableDescription: "Queue depth, retry pressure, scheduled jobs, and dead-letter candidates.",
+    primaryAction: "Enqueue job",
+    controls: () => statusControls("Search job id, kind, tenant, or error..."),
+    kpis: (snapshot) => pick(snapshot, [4, 5, 6, 1]),
     rows: (snapshot) => snapshot.queue,
-    secondaryTitle: "Worker posture",
-    secondary: () => [
-      card("Workers", "Capacity and lag for the selected environment.", [
-        { label: "Concurrency", value: "12 slots", tone: "ok" },
-        { label: "Oldest queued", value: "42 s", tone: "running" },
-        { label: "Dead letters", value: "0", tone: "ok" },
-      ]),
-      card("Retry policy", "Default job behavior applied unless a module overrides it.", [
-        { label: "Max attempts", value: "5" },
-        { label: "Backoff", value: "exponential" },
-        { label: "Cron", value: "enabled", tone: "ok" },
-      ]),
-    ],
-  },
-  "/operate/webhooks": {
-    adapter: "Svix",
-    primaryAction: "Replay delivery",
-    controls: operateControls,
-    kpis: () => [
-      makeKpi("Deliveries", "1,842", "24h", "+8%", "ok"),
-      makeKpi("Failed", "2", "needs replay", "-1", "warn"),
-      makeKpi("Median latency", "244 ms", "outbound", "stable", "ok"),
-      makeKpi("Subscribers", "7", "active endpoints", "+1", "neutral"),
-    ],
-    tableTitle: "Webhook deliveries",
-    tableDescription: "Inbound and outbound events with response status, signing, and replay state.",
-    rows: (snapshot) => snapshot.webhooks,
-    secondaryTitle: "Subscriber health",
-    secondary: () => [
-      card("Replay rules", "Failed deliveries stay actionable without leaving the page.", [
-        { label: "Retry window", value: "72h", tone: "running" },
-        { label: "Signature", value: "required", tone: "ok" },
-        { label: "Event catalog", value: "12 events" },
-      ]),
+    tableTitle: "Queue pressure",
+    tableDescription: "Async jobs, attempts, retry state, and queue latency signals.",
+    secondaryTitle: "Job detail",
+    secondary: (snapshot) => [
+      card("Job definitions", "Registered workers and cron-backed jobs.", selectedRows(snapshot.jobDefinitions, 5)),
+      card("Retry policy", "Failed jobs open a drawer with payload, attempts, and retry action."),
     ],
   },
   "/operate/cache": {
-    adapter: "LLM cache",
-    primaryAction: "Purge namespace",
-    controls: operateControls,
-    kpis: () => [
-      makeKpi("Hit rate", "31%", "last 24h", "+4 pts", "ok"),
-      makeKpi("Saved cost", "$18.42", "last 24h", "+11%", "ok"),
-      makeKpi("Saved latency", "4.8 h", "aggregate", "stable", "running"),
-      makeKpi("Namespaces", "6", "tenant scoped", "clean", "neutral"),
+    primaryAction: "Open LLM admin",
+    controls: () => [select("Tenant", "Platform", ["Platform", "acme", "beta-labs"]), select("Range", "24h", ["24h", "7d", "30d"]), tabs("View", "summary", ["summary", "hits", "misses"])],
+    kpis: () => [kpi("Hit rate", "see rows", "from cache stats", "live", "ok"), kpi("Savings", "derived", "gateway estimate", "client", "running"), kpi("Entries", "live", "cache size", "stats", "ok"), kpi("Flush", "hidden", "no endpoint", "gap", "warn")],
+    rows: (snapshot) => snapshot.cache,
+    tableTitle: "Cache effectiveness",
+    tableDescription: "LLM cache hit rate, savings, misses, and entries from the gateway cache stats.",
+    secondaryTitle: "Cache policy",
+    secondary: (snapshot) => [
+      card("Top cache signals", "Rows are backed by `/api/v1/llm/cache/stats`.", selectedRows(snapshot.cache, 3)),
+      card("Actions", "Flush controls stay hidden until backend flush endpoints exist.", [{ label: "Gap", value: "flush endpoint missing", tone: "warn" }]),
     ],
-    tableTitle: "Cache namespaces",
-    tableDescription: "Reusable prompt and response caches with hit rate, cost savings, and invalidation controls.",
-    rows: (snapshot) => snapshot.costRows,
-    secondaryTitle: "Invalidation",
-    secondary: () => [
-      card("Purge guardrails", "Purge is scoped and previewed before execution.", [
-        { label: "Tenant prefix", value: "required", tone: "ok" },
-        { label: "Dry run", value: "default", tone: "running" },
-        { label: "Audit row", value: "created", tone: "ok" },
-      ]),
+  },
+  "/operate/sandbox-runs": {
+    primaryAction: "Cancel run",
+    controls: () => statusControls("Search command, image, tenant, or exit code..."),
+    kpis: () => [kpi("Tail", "ready", "logs route", "linked", "running"), kpi("Cancel", "backed", "DELETE run", "guarded", "ok"), kpi("Artifacts", "linked", "storage", "drill", "neutral"), kpi("Pool", "live", "sandbox adapter", "status", "ok")],
+    rows: (snapshot) => snapshot.sandbox,
+    tableTitle: "Sandbox execution log",
+    tableDescription: "Every sandbox command, exit code, duration, cost, and live output link.",
+    secondaryTitle: "Run output",
+    secondary: (snapshot) => [
+      card("Pool status", "Current sandbox adapter and warm capacity.", selectedRows(snapshot.sandbox, 4)),
+      card("Log behavior", "Detail drawers tail stdout and stderr, with pause and copy controls."),
+    ],
+  },
+  "/operate/webhooks": {
+    primaryAction: "Replay delivery",
+    controls: () => statusControls("Search event, endpoint, response code..."),
+    kpis: () => [kpi("Replay", "backed", "retry endpoint", "ready", "ok"), kpi("Payload", "drawer", "body preview", "linked", "running"), kpi("Provider", "Svix", "link out", "admin", "neutral"), kpi("Failures", "filter", "status", "fast", "warn")],
+    rows: (snapshot) => snapshot.webhooks,
+    tableTitle: "Webhook delivery inbox",
+    tableDescription: "Outbound delivery attempts, response status, retry state, and payload previews.",
+    secondaryTitle: "Subscriber context",
+    secondary: (snapshot) => [
+      card("Endpoints", "Configured outbound subscribers and signing state.", selectedRows(snapshot.webhookEndpoints, 5)),
+      card("Payload drawer", "Rows open request headers, response body, and retry schedule."),
+    ],
+  },
+  "/operate/notifications": {
+    primaryAction: "Resend notification",
+    controls: () => statusControls("Search recipient, template, channel, or status..."),
+    kpis: () => [kpi("Sent", "live", "stats endpoint", "24h", "ok"), kpi("Failures", "live", "stats endpoint", "24h", "warn"), kpi("Channels", "env", "setup page owns config", "thin", "neutral"), kpi("Mute", "gap", "policy endpoint", "missing", "warn")],
+    rows: (snapshot) => snapshot.notifications,
+    tableTitle: "Notification delivery inbox",
+    tableDescription: "Email, SMS, push, and log delivery audit with provider responses.",
+    secondaryTitle: "Channel context",
+    secondary: (snapshot) => [
+      card("Delivery rows", "Delivery audit is distinct from Setup channel configuration.", selectedRows(snapshot.notifications, 5)),
+      card("Missing action", "Mute future notifications requires a policy endpoint.", [{ label: "Gap", value: "mute policy endpoint", tone: "warn" }]),
+    ],
+  },
+  "/operate/approvals": {
+    primaryAction: "Create approval",
+    controls: () => statusControls("Search approval id, kind, requester, tenant..."),
+    kpis: () => [kpi("Pending", "live", "approval queue", "HITL", "running"), kpi("Decision", "drawer", "approve or deny", "audited", "ok"), kpi("Blocked run", "linked", "source object", "drill", "neutral"), kpi("Bulk", "guarded", "filtered decide", "careful", "warn")],
+    rows: (snapshot) => snapshot.approvals,
+    tableTitle: "Human decision queue",
+    tableDescription: "Requests waiting on an operator before workflow execution continues.",
+    secondaryTitle: "Decision context",
+    secondary: (snapshot) => [
+      card("Pending requests", "Rows link to related runs or jobs when present.", selectedRows(snapshot.approvals, 5)),
+      card("Decision drawer", "Approve, deny, or cancel with note. Every decision produces audit context."),
+    ],
+  },
+  "/operate/activity": {
+    primaryAction: "Export CSV",
+    controls: () => [select("Actor", "all", ["all", "user", "api key", "system", "anonymous"]), select("Resource", "all", ["all", "run", "tenant", "key", "budget"]), input("Search", "Search actor, verb, resource, IP...")],
+    kpis: (snapshot) => pick(snapshot, [0, 1, 2, 4]),
+    rows: (snapshot) => snapshot.activity,
+    tableTitle: "Customer-side activity",
+    tableDescription: "Actions customers took inside the customer app and what they triggered.",
+    secondaryTitle: "Related impact",
+    secondary: (snapshot) => [
+      card("Triggered runs", "Activity rows drill into related runs, cost, and tenants.", selectedRows(snapshot.runs, 4)),
+      card("Export", "CSV export can be client-side for filtered rows in v1."),
+    ],
+  },
+  "/operate/health": {
+    primaryAction: "Refresh checks",
+    controls: () => setupControls("Search service, adapter, version, or route..."),
+    kpis: () => [kpi("Runtime", "health", "/health", "live", "ok"), kpi("Ready", "ready", "/ready", "live", "ok"), kpi("Metrics", "summary", "route rollups", "live", "ok"), kpi("Deep stats", "missing", "PG/certs/workers", "gap", "warn")],
+    rows: (snapshot) => [
+      ...snapshot.services.map((service) => ({
+        id: service.name,
+        primary: service.name,
+        secondary: `${service.adapter ?? "service"} · ${service.version}`,
+        status: service.status,
+        tone: service.status === "healthy" ? "ok" as StatusTone : service.status === "degraded" ? "warn" as StatusTone : "fail" as StatusTone,
+        metric: service.adapter ?? "service",
+        timestamp: service.checked,
+      })),
+      ...snapshot.observability,
+    ],
+    tableTitle: "Service topology",
+    tableDescription: "Runtime and backing services with thin health checks and native-admin link-outs.",
+    secondaryTitle: "Health caveats",
+    secondary: (snapshot) => [
+      card("Runtime metrics", "HTTP, heap, goroutine, and route rollups.", selectedRows(snapshot.observability, 5)),
+      card("Missing deep checks", "DB stats, cert expiry, and worker internals need backend endpoints.", [{ label: "Gap", value: "deep checks endpoint", tone: "warn" }]),
+    ],
+  },
+  "/operate/logs": {
+    primaryAction: "Export JSONL",
+    controls: () => [select("Level", "all", ["all", "debug", "info", "warn", "error"]), select("Service", "all", ["all", "runtime", "worker", "gateway"]), input("Search", "Search message, field, run id, tenant..."), switcher("Tail", "on")],
+    kpis: () => [kpi("Rows", "bounded", "virtualized pattern", "scale", "ok"), kpi("Tail", "toggle", "pause/resume", "live", "running"), kpi("Fields", "expand", "structured JSON", "copy", "ok"), kpi("Export", "JSONL", "filtered rows", "ready", "neutral")],
+    rows: (snapshot) => snapshot.logs,
+    tableTitle: "Log stream",
+    tableDescription: "Scale-safe log viewer with severity filters, tail mode, structured fields, and copy/export.",
+    secondaryTitle: "Structured fields",
+    secondary: (snapshot) => [
+      card("Selected log", "Rows expose shareable timestamp filters and copyable JSON.", selectedRows(snapshot.logs, 4)),
+      card("Tail mode", "Live tail shows connection status and pause/resume to avoid losing position."),
     ],
   },
   "/build/agents": {
-    adapter: "AgentField registry",
     primaryAction: "Test agent",
-    controls: buildControls,
-    kpis: (snapshot) => [
-      makeKpi("Agents", String(snapshot.agents.length), "registered", "runtime", "ok"),
-      makeKpi("Reasoners", "7", "across agents", "+1", "neutral"),
-      makeKpi("Healthy", String(snapshot.agents.filter((agent) => agent.tone === "ok").length), "runtime check", "current", "ok"),
-      makeKpi("Drafts", "2", "not deployed", "repo", "running"),
-    ],
-    tableTitle: "Agent registry",
-    tableDescription: "Agents, reasoner graphs, versions, runtime health, and direct playground links.",
+    controls: () => [select("Status", "all", ["all", "healthy", "degraded"]), input("Search", "Search agent, reasoner, tag...")],
+    kpis: (snapshot) => pick(snapshot, [5, 0, 2, 6]),
     rows: (snapshot) => snapshot.agents,
-    secondaryTitle: "Agent operations",
-    secondary: () => [
-      card("Expected detail pages", "Each agent gets a detail route and a playground route.", [
-        { label: "Detail", value: "/build/agents/{id}" },
-        { label: "Playground", value: "/build/agents/{id}/playground" },
-        { label: "Version source", value: "runtime manifest", tone: "running" },
-      ]),
-      card("Deployment gates", "Before an agent is exposed to customers, these fields should be present.", [
-        { label: "Input schema", value: "required", tone: "ok" },
-        { label: "Cost policy", value: "required", tone: "ok" },
-        { label: "Replay sample", value: "recommended", tone: "running" },
-      ]),
+    tableTitle: "Agent registry",
+    tableDescription: "Runtime agents, reasoners, versions, tags, and recent run context.",
+    secondaryTitle: "Playground",
+    secondary: (snapshot) => [
+      card("Reasoners", "Agent detail includes schema and declared tools.", selectedRows(snapshot.reasoners, 5)),
+      card("Invoke", "Generated form opens in a drawer and links resulting run back to Operate."),
     ],
   },
-  "/build/data/tables": {
-    adapter: "Postgres",
-    primaryAction: "Open table",
-    controls: buildControls,
-    kpis: () => [
-      makeKpi("Tables", "18", "tenant aware", "current", "ok"),
-      makeKpi("RLS coverage", "100%", "customer tables", "clean", "ok"),
-      makeKpi("Rows", "10.7k", "estimated", "+2%", "neutral"),
-      makeKpi("Writes", "184", "last hour", "normal", "running"),
-    ],
-    tableTitle: "Database tables",
-    tableDescription: "Schema inventory with estimated rows, storage size, and isolation posture.",
-    rows: (snapshot) => snapshot.tables,
-    secondaryTitle: "Table policy",
-    secondary: () => [
-      card("Isolation posture", "Customer-facing tables must expose tenant boundaries clearly.", [
-        { label: "Tenant column", value: "required", tone: "ok" },
-        { label: "RLS", value: "on", tone: "ok" },
-        { label: "Audit mutations", value: "on", tone: "ok" },
-      ]),
+  "/build/reasoners": {
+    primaryAction: "Open agent",
+    controls: () => [select("Agent", "all", ["all", "support.triage", "coder.review"]), input("Search", "Search reasoner, schema, tool...")],
+    kpis: () => [kpi("Listing", "derived", "from agents", "ok", "ok"), kpi("Analytics", "deferred", "cost/latency", "gap", "warn"), kpi("Schema", "preview", "input/output", "ready", "running"), kpi("Tools", "declared", "agent-level", "runtime", "ok")],
+    rows: (snapshot) => snapshot.reasoners,
+    tableTitle: "Reasoner inventory",
+    tableDescription: "Cross-agent list of reasoning steps derived from the agent registry.",
+    secondaryTitle: "Source links",
+    secondary: (snapshot) => [
+      card("Parent agents", "Every reasoner links back to its owning agent.", selectedRows(snapshot.agents, 5)),
+      card("Deferred analytics", "Cost and latency stay on Cost until backend grouping is first-class.", [{ label: "Gap", value: "reasoner analytics endpoint", tone: "warn" }]),
     ],
   },
-  "/build/data/sql": {
-    adapter: "Postgres",
-    primaryAction: "Run read-only query",
-    controls: buildControls,
-    kpis: () => [
-      makeKpi("Saved queries", "9", "operator vetted", "+1", "neutral"),
-      makeKpi("Read-only", "on", "enforced", "safe", "ok"),
-      makeKpi("p95 query", "74 ms", "last 24h", "-8 ms", "ok"),
-      makeKpi("Exports", "3", "today", "csv", "running"),
-    ],
-    tableTitle: "SQL workbench",
-    tableDescription: "Read-only saved operational queries and recent safe query runs.",
-    rows: () => [
-      row("sql-cost-by-tenant", "Cost by tenant", "Aggregates cost_events over selected range.", "saved", "ok", "31 ms", "today"),
-      row("sql-failed-runs", "Failed runs", "Lists failures with tenant, agent, and trace IDs.", "saved", "ok", "44 ms", "today"),
-      row("sql-key-spend", "API key spend", "Maps key prefix to cost and request count.", "saved", "ok", "52 ms", "today"),
-      row("sql-queue-lag", "Queue lag", "Checks oldest waiting job by queue.", "saved", "ok", "18 ms", "today"),
-    ],
-    secondaryTitle: "Query safety",
-    secondary: () => [
-      card("Guards", "SQL is an operational read surface, not a migration surface.", [
-        { label: "Read-only role", value: "enabled", tone: "ok" },
-        { label: "Timeout", value: "10 s", tone: "running" },
-        { label: "Export audit", value: "recorded", tone: "ok" },
-      ]),
-    ],
-  },
-  "/build/data/memory": {
-    adapter: "AgentField memory",
-    primaryAction: "Search memory",
-    controls: buildControls,
-    kpis: (snapshot) => [
-      makeKpi("Scopes", String(new Set(snapshot.memory.map((item) => item.primary)).size), "tenant + agent", "mapped", "ok"),
-      makeKpi("Entries", String(snapshot.memory.length), "active", "live", "neutral"),
-      makeKpi("Vectorized", String(snapshot.memory.filter((item) => item.metric.includes("vector")).length), "searchable", "live", "ok"),
-      makeKpi("Stale", "0", "needs compaction", "live", "ok"),
-    ],
-    tableTitle: "Memory scopes",
-    tableDescription: "Memory namespaces, vector coverage, retention rules, and query probes.",
-    rows: (snapshot) => snapshot.memory,
-    secondaryTitle: "Retrieval probes",
-    secondary: () => [
-      card("Quality checks", "Operator-visible memory needs both coverage and trust boundaries.", [
-        { label: "Tenant isolation", value: "enforced", tone: "ok" },
-        { label: "Search sample", value: "available", tone: "running" },
-        { label: "Delete path", value: "required", tone: "warn" },
-      ]),
-    ],
-  },
-  "/build/data/storage": {
-    adapter: "S3 / MinIO",
-    primaryAction: "Create signed URL",
-    controls: buildControls,
-    kpis: (snapshot) => [
-      makeKpi("Objects", String(snapshot.storage.length), "tenant prefixed", "live", "neutral"),
-      makeKpi("Storage", storageTotal(snapshot.storage), "current", "live", "running"),
-      makeKpi("Signed URLs", "0", "last hour", "live", "neutral"),
-      makeKpi("Policy drift", "0", "checks", "clean", "ok"),
-    ],
-    tableTitle: "Object storage",
-    tableDescription: "Tenant-prefixed buckets, object keys, signed URL activity, and retention posture.",
-    rows: (snapshot) => snapshot.storage,
-    secondaryTitle: "Storage policy",
-    secondary: () => [
-      card("Access model", "Storage access should flow through signed URLs and audited operations.", [
-        { label: "Tenant prefix", value: "required", tone: "ok" },
-        { label: "Public buckets", value: "0", tone: "ok" },
-        { label: "Default expiry", value: "15 min", tone: "running" },
-      ]),
-    ],
-  },
-  "/build/data/search": {
-    adapter: "Search index",
-    primaryAction: "Run retrieval probe",
-    controls: buildControls,
-    kpis: () => [
-      makeKpi("Indexes", "6", "tenant scoped", "current", "ok"),
-      makeKpi("Indexed docs", "14.2k", "chunks", "+260", "neutral"),
-      makeKpi("Freshness p95", "42 s", "ingest to search", "-6 s", "ok"),
-      makeKpi("Probe pass", "91%", "sample set", "+3 pts", "ok"),
-    ],
-    tableTitle: "Search indexes",
-    tableDescription: "Index health, ingestion freshness, retrieval quality, and sample queries.",
-    rows: (snapshot) => snapshot.searchIndexes,
-    secondaryTitle: "Retrieval quality",
-    secondary: () => [
-      card("Probe set", "Retrieval checks should be concrete enough for operators to trust search-backed agents.", [
-        { label: "Golden queries", value: "42" },
-        { label: "Min hit score", value: "0.78", tone: "ok" },
-        { label: "Stale docs", value: "11", tone: "warn" },
-      ]),
-    ],
-  },
-  "/build/modules": {
-    adapter: "Module registry",
-    primaryAction: "Open module",
-    controls: buildControls,
-    kpis: () => [
-      makeKpi("Modules", "8", "mounted", "current", "ok"),
-      makeKpi("Routes", "37", "owned", "+4", "neutral"),
-      makeKpi("Migrations", "0", "pending", "clean", "ok"),
-      makeKpi("Workers", "5", "module queues", "running", "running"),
-    ],
-    tableTitle: "Runtime modules",
-    tableDescription: "Code-owned extension points, routes, background jobs, and migration state.",
-    rows: (snapshot) => snapshot.modules,
-    secondaryTitle: "Module contract",
-    secondary: () => [
-      card("Code ownership", "Modules should expose their routes, jobs, tables, and operator pages explicitly.", [
-        { label: "Routes", value: "declared", tone: "ok" },
-        { label: "Tables", value: "declared", tone: "ok" },
-        { label: "Jobs", value: "declared", tone: "ok" },
-      ]),
+  "/build/tools": {
+    primaryAction: "Invoke tool",
+    controls: () => [tabs("Type", "all", ["all", "native", "adapter", "mcp"]), input("Search", "Search tool, adapter, schema...")],
+    kpis: () => [kpi("Native", "live", "strict tools", "ready", "ok"), kpi("MCP", "live", "servers/tools", "ready", "ok"), kpi("Invoke", "drawer", "schema form", "ready", "running"), kpi("Usage", "deferred", "analytics", "gap", "warn")],
+    rows: (snapshot) => snapshot.tools,
+    tableTitle: "Tool inventory",
+    tableDescription: "Native tools, adapter tools, and MCP tools with schemas and invoke entry points.",
+    secondaryTitle: "Invoke context",
+    secondary: (snapshot) => [
+      card("Available tools", "Rows open a schema-generated invoke drawer.", selectedRows(snapshot.tools, 6)),
+      card("Usage analytics", "Tool usage analytics are deferred in v1.", [{ label: "Gap", value: "tool usage endpoint", tone: "warn" }]),
     ],
   },
   "/build/skills": {
-    adapter: "MCP",
-    primaryAction: "Test skill",
-    controls: buildControls,
-    kpis: () => [
-      makeKpi("Servers", "5", "connected", "current", "ok"),
-      makeKpi("Tools", "42", "available", "+3", "neutral"),
-      makeKpi("Skill tests", "18", "passing", "clean", "ok"),
-      makeKpi("Disabled", "2", "needs auth", "review", "warn"),
-    ],
-    tableTitle: "Skills and MCP servers",
-    tableDescription: "Installed tool servers, exposed tools, auth posture, and last probe.",
+    primaryAction: "Install skill",
+    controls: () => [select("Harness", "all", ["all", "claude-code", "codex", "gemini", "opencode"]), input("Search", "Search skill, MCP server, tool...")],
+    kpis: () => [kpi("Servers", "live", "MCP", "ready", "ok"), kpi("Skills", "live", "registry", "ready", "ok"), kpi("Attach", "drawer", "agent binding", "audited", "running"), kpi("Status", "probe", "server reachability", "live", "ok")],
     rows: (snapshot) => snapshot.skills,
-    secondaryTitle: "Tool safety",
+    tableTitle: "Skills and MCP servers",
+    tableDescription: "Installed skills, MCP server status, exposed tools, and agent attachments.",
+    secondaryTitle: "Server detail",
+    secondary: (snapshot) => [card("Tool schemas", "MCP tool schemas are shown inline before invoke.", selectedRows(snapshot.skills, 6))],
+  },
+  "/build/harnesses": {
+    primaryAction: "Probe harness",
+    controls: () => [select("Provider", "all", ["all", "claude-code", "codex", "gemini", "opencode"]), input("Search", "Search provider, model, env...")],
+    kpis: () => [kpi("Probe", "backed", "provider probe", "ready", "ok"), kpi("Auth", "visible", "required env", "clear", "running"), kpi("Logs", "drawer", "probe history", "linked", "neutral"), kpi("Disable", "deferred", "per agent", "gap", "warn")],
+    rows: (snapshot) => snapshot.harnesses,
+    tableTitle: "Harness registry",
+    tableDescription: "Coding-agent harness binaries, versions, auth readiness, and probe status.",
+    secondaryTitle: "Capability matrix",
+    secondary: (snapshot) => [card("Providers", "Each harness row opens capability and probe detail.", selectedRows(snapshot.harnesses, 5))],
+  },
+  "/build/crons": {
+    primaryAction: "Create cron",
+    controls: () => [tabs("State", "all", ["all", "active", "paused"]), input("Search", "Search schedule, job, tenant...")],
+    kpis: () => [kpi("Schedules", "backed", "crons endpoint", "ready", "ok"), kpi("Next run", "visible", "per cron", "ready", "running"), kpi("Pause", "backed", "active toggle", "audited", "ok"), kpi("Trigger now", "missing", "endpoint", "gap", "warn")],
+    rows: (snapshot) => snapshot.crons,
+    tableTitle: "Schedule board",
+    tableDescription: "Cron jobs, target actions, next run, last run, and active state.",
+    secondaryTitle: "Schedule detail",
+    secondary: (snapshot) => [
+      card("Next runs", "Cron rows use shareable query links for selected schedules.", selectedRows(snapshot.crons, 5)),
+      card("Missing action", "Manual trigger is hidden until backend exposes an endpoint.", [{ label: "Gap", value: "trigger cron endpoint", tone: "warn" }]),
+    ],
+  },
+  "/build/sandboxes": {
+    primaryAction: "Run command",
+    controls: () => [select("Image", "python:3.12", ["python:3.12", "node:22", "ubuntu:24.04"]), select("Network", "restricted", ["open", "restricted", "isolated"]), input("Command", "python -c 'print(42)'")],
+    kpis: () => [kpi("Pool", "live", "warm/active/queued", "ready", "ok"), kpi("Run", "backed", "POST sandbox/run", "ready", "running"), kpi("Cancel", "backed", "DELETE run", "guarded", "ok"), kpi("Logs", "live", "tail route", "linked", "running")],
+    rows: (snapshot) => snapshot.sandbox,
+    tableTitle: "Sandbox workbench",
+    tableDescription: "Run ad-hoc commands against the configured sandbox adapter and inspect pool pressure.",
+    secondaryTitle: "Pool",
+    secondary: (snapshot) => [card("Recent runs", "Completed commands drill into Operate Sandbox runs.", selectedRows(snapshot.sandbox, 5))],
+  },
+  "/build/modules": {
+    primaryAction: "Open source",
+    controls: () => [select("Status", "all", ["all", "enabled", "disabled"]), input("Search", "Search module, route, migration...")],
+    kpis: () => [kpi("Modules", "backed", "runtime registry", "ready", "ok"), kpi("Writes", "code", "not console", "policy", "neutral"), kpi("Routes", "visible", "manifest", "ready", "running"), kpi("Migrations", "visible", "status", "thin", "warn")],
+    rows: (snapshot) => snapshot.modules,
+    tableTitle: "Workload modules",
+    tableDescription: "Mounted modules, versions, routes, migrations, and source paths.",
+    secondaryTitle: "Manifest",
+    secondary: (snapshot) => [card("Installed modules", "Structural changes are code-owned in v1.", selectedRows(snapshot.modules, 6))],
+  },
+  "/build/data/tables": {
+    primaryAction: "Copy table link",
+    controls: () => [select("Schema", "all", ["all", "public", "suite", "agentfield"]), input("Search", "Search table or column...")],
+    kpis: () => [kpi("Tables", "backed", "schema list", "ready", "ok"), kpi("Rows", "paged", "preview", "ready", "running"), kpi("RLS", "visible", "policy tabs", "ready", "ok"), kpi("Writes", "off", "read-only", "policy", "neutral")],
+    rows: (snapshot) => snapshot.tables,
+    tableTitle: "Database explorer",
+    tableDescription: "Schema browser with selected table structure, policies, indexes, and row preview.",
+    secondaryTitle: "Selected table",
+    secondary: (snapshot) => [card("Tables", "Every table row should be shareable by schema and name.", selectedRows(snapshot.tables, 6))],
+  },
+  "/build/data/sql": {
+    primaryAction: "Run query",
+    controls: () => [select("Limit", "500", ["100", "500", "1000"]), switcher("Read only", "on"), input("Search", "Search saved snippets...")],
+    kpis: () => [kpi("Read-only", "server", "enforced", "safe", "ok"), kpi("Results", "table", "bounded", "ready", "running"), kpi("History", "local", "until backend", "thin", "neutral"), kpi("Export", "CSV", "client", "ready", "ok")],
+    rows: (snapshot) => snapshot.tables,
+    tableTitle: "SQL workbench",
+    tableDescription: "Read-only SQL editor with bounded results and copy/export affordances.",
+    secondaryTitle: "Query context",
     secondary: () => [
-      card("Operator rules", "Skills are powerful enough to need visible auth and blast-radius indicators.", [
-        { label: "Auth scope", value: "visible", tone: "ok" },
-        { label: "Last probe", value: "visible", tone: "ok" },
-        { label: "Disable switch", value: "required", tone: "running" },
-      ]),
+      card("Starter query", "Use bounded read-only SQL for operational inspection.", undefined, "select * from suite_runs order by started_at desc limit 20;"),
+      card("Saved snippets", "Persisted snippet/history storage can be added later."),
+    ],
+  },
+  "/build/data/memory": {
+    primaryAction: "Search memory",
+    controls: () => [select("Scope", "tenant", ["global", "tenant", "agent", "session", "run"]), input("Search", "Semantic query or key prefix...")],
+    kpis: () => [kpi("Entries", "backed", "memory list", "ready", "ok"), kpi("Search", "backed", "semantic", "ready", "running"), kpi("Embeddings", "visible", "per entry", "ready", "ok"), kpi("Delete", "guarded", "drawer", "audited", "warn")],
+    rows: (snapshot) => snapshot.memory,
+    tableTitle: "Memory explorer",
+    tableDescription: "Per-scope memory entries, values, metadata, embedding state, and semantic search.",
+    secondaryTitle: "Entry detail",
+    secondary: (snapshot) => [card("Memory rows", "Entries link by scope and key.", selectedRows(snapshot.memory, 6))],
+  },
+  "/build/data/storage": {
+    primaryAction: "Upload object",
+    controls: () => [select("Bucket", "all", ["all", "tenant", "platform"]), input("Prefix", "tenant/acme/")],
+    kpis: () => [kpi("Objects", "backed", "list route", "ready", "ok"), kpi("Signed URL", "backed", "preview", "ready", "running"), kpi("Upload", "backed", "storage/upload", "ready", "ok"), kpi("Delete", "guarded", "confirm", "audited", "warn")],
+    rows: (snapshot) => snapshot.storage,
+    tableTitle: "Object browser",
+    tableDescription: "Storage keys, sizes, content types, signed URLs, and metadata.",
+    secondaryTitle: "Object detail",
+    secondary: (snapshot) => [card("Objects", "Rows open metadata and signed URL controls.", selectedRows(snapshot.storage, 6))],
+  },
+  "/build/data/search": {
+    primaryAction: "Run search",
+    controls: () => [select("Namespace", "all", ["all", "platform-docs", "tenant"]), input("Query", "Search indexed documents...")],
+    kpis: () => [kpi("Query", "backed", "search route", "ready", "ok"), kpi("Upsert", "backed", "documents", "ready", "ok"), kpi("Stats", "missing", "index stats", "gap", "warn"), kpi("Latency", "result", "per query", "ready", "running")],
+    rows: (snapshot) => snapshot.searchIndexes,
+    tableTitle: "Search workbench",
+    tableDescription: "Query indexes, inspect matches, and test document ingestion.",
+    secondaryTitle: "Index context",
+    secondary: (snapshot) => [
+      card("Indexes", "Stats remain thin until backend exposes index rollups.", selectedRows(snapshot.searchIndexes, 5)),
+      card("Gap", "Index statistics endpoint is missing.", [{ label: "Needed", value: "GET /api/v1/search/indexes", tone: "warn" }]),
     ],
   },
   "/build/feature-flags": {
-    adapter: "Runtime config",
-    primaryAction: "Create flag",
-    controls: buildControls,
-    kpis: (snapshot) => [
-      makeKpi("Flags", String(snapshot.featureFlags.length), "active", "live", "neutral"),
-      makeKpi("Enabled", String(snapshot.featureFlags.filter((item) => item.status === "enabled").length), "runtime", "live", "running"),
-      makeKpi("Overrides", String(snapshot.featureFlags.filter((item) => item.secondary.includes("db")).length), "tenant scoped", "live", "warn"),
-      makeKpi("Incidents", "0", "last 7d", "clean", "ok"),
-    ],
-    tableTitle: "Feature flags",
-    tableDescription: "Runtime flags, tenant overrides, rollout stage, and audit history.",
+    primaryAction: "Edit flag",
+    controls: () => [tabs("State", "all", ["all", "enabled", "disabled"]), input("Search", "Search key, source, description...")],
+    kpis: () => [kpi("Flags", "backed", "config endpoint", "ready", "ok"), kpi("Audit", "required", "mutation toast", "ready", "running"), kpi("Overrides", "deferred", "tenant history", "gap", "warn"), kpi("Rollout", "thin", "boolean first", "v1", "neutral")],
     rows: (snapshot) => snapshot.featureFlags,
-    secondaryTitle: "Rollout control",
+    tableTitle: "Feature flags",
+    tableDescription: "Runtime feature flags with drawer-based edits and audit references.",
+    secondaryTitle: "Flag detail",
+    secondary: (snapshot) => [card("Flags", "Rows open edit drawers with show-as-code.", selectedRows(snapshot.featureFlags, 6))],
+  },
+  "/build/api-explorer": {
+    primaryAction: "Send request",
+    controls: () => [select("Auth", "Operator session", ["Operator session", "Tenant key"]), input("Endpoint", "Search OpenAPI operation...")],
+    kpis: () => [kpi("Schema", "backed", "/openapi.json", "ready", "ok"), kpi("Try it", "local", "same-origin", "ready", "running"), kpi("Downloads", "client", "json/yaml/types", "thin", "neutral"), kpi("Docs", "outside", "pure reference", "policy", "ok")],
+    rows: () => [
+      { id: "GET /openapi.json", primary: "OpenAPI schema", secondary: "Runtime schema source for this fork", status: "backed", tone: "ok", metric: "GET", timestamp: "current", href: "/openapi.json" },
+      { id: "GET /api/v1/runs", primary: "List runs", secondary: "Execution stream endpoint", status: "backed", tone: "ok", metric: "GET", timestamp: "runtime" },
+      { id: "POST /api/v1/llm/chat/completions", primary: "Chat completions", secondary: "Gateway-compatible LLM call", status: "backed", tone: "ok", metric: "POST", timestamp: "runtime" },
+      { id: "POST /api/v1/sandbox/run", primary: "Sandbox run", secondary: "Run command in configured adapter", status: "backed", tone: "ok", metric: "POST", timestamp: "runtime" },
+    ],
+    tableTitle: "Runtime API explorer",
+    tableDescription: "Try endpoints against this running fork with the selected auth context.",
+    secondaryTitle: "Request context",
     secondary: () => [
-      card("Guardrails", "Every flag should be reversible and visible in audit.", [
-        { label: "Kill switch", value: "required", tone: "ok" },
-        { label: "Tenant override", value: "supported", tone: "running" },
-        { label: "Audit", value: "recorded", tone: "ok" },
-      ]),
+      card("Auth selector", "Default uses operator session. Tenant mode uses a selected API key."),
+      card("Copy as code", "Responses can be copied as curl, TypeScript, or Python snippets."),
     ],
   },
   "/customers/tenants": {
-    adapter: "Admin API",
-    primaryAction: "Create tenant",
-    controls: customerControls,
-    kpis: () => [
-      makeKpi("Tenants", "3", "active", "+1", "neutral"),
-      makeKpi("Healthy", "2", "no warnings", "current", "ok"),
-      makeKpi("Near budget", "1", "beta-labs", "watch", "warn"),
-      makeKpi("Deleted", "0", "current", "clean", "ok"),
-    ],
-    tableTitle: "Tenant workspaces",
-    tableDescription: "Customer workspaces with isolation, health, members, keys, budgets, and drilldowns.",
+    primaryAction: "Add tenant",
+    controls: () => [select("Plan", "all", ["all", "free", "team", "enterprise"]), input("Search", "Search tenant, slug, id...")],
+    kpis: (snapshot) => pick(snapshot, [7, 2, 0, 1]),
     rows: (snapshot) => snapshot.tenants,
+    tableTitle: "Tenant drilldown",
+    tableDescription: "Customer workspaces, members, keys, spend, budget pressure, and status.",
     secondaryTitle: "Tenant detail",
-    secondary: () => [
-      card("Drilldown route", "Tenant detail pages consolidate keys, users, spend, and audit.", [
-        { label: "Route", value: "/customers/tenants/{id}" },
-        { label: "Budget", value: "inline", tone: "running" },
-        { label: "Isolation", value: "visible", tone: "ok" },
-      ]),
+    secondary: (snapshot) => [
+      card("Budgets", "Budget status stays visible beside tenant operations.", snapshot.budgets.map((budget) => ({ label: budget.tenant, value: `${budget.used}%`, tone: budget.status }))),
+      card("Shareable drilldown", "Tenant rows link by tenant id or slug."),
     ],
   },
   "/customers/api-keys": {
-    adapter: "Admin API",
-    primaryAction: "Issue API key",
-    controls: customerControls,
-    kpis: () => [
-      makeKpi("Active keys", "6", "all tenants", "+1", "neutral"),
-      makeKpi("Rotation due", "1", "next 7d", "watch", "warn"),
-      makeKpi("Revoked", "0", "current", "clean", "ok"),
-      makeKpi("Spend linked", "100%", "metered keys", "clean", "ok"),
-    ],
-    tableTitle: "API keys",
-    tableDescription: "Tenant keys, prefixes, limits, spend, rotation, and revocation state.",
+    primaryAction: "Issue key",
+    controls: () => [select("Tenant", "all", ["all", "acme", "beta-labs"]), tabs("Status", "all", ["all", "active", "revoked", "expired"]), input("Search", "Search alias, prefix, tenant...")],
+    kpis: () => [kpi("Issue", "backed", "one-time reveal", "ready", "ok"), kpi("Spend", "backed", "per key", "ready", "running"), kpi("Rotate", "revoke+issue", "until rotate endpoint", "gap", "warn"), kpi("Bulk", "guarded", "selected keys", "safe", "neutral")],
     rows: (snapshot) => snapshot.apiKeys,
-    secondaryTitle: "Key policy",
-    secondary: () => [
-      card("Defaults", "New keys should be safe by default and useful for developers.", [
-        { label: "Prefix", value: "visible", tone: "ok" },
-        { label: "Secret", value: "one-time", tone: "ok" },
-        { label: "Rate limit", value: "required", tone: "running" },
-      ]),
-    ],
+    tableTitle: "API key operations",
+    tableDescription: "Tenant keys, spend, limits, expiration, scopes, and revocation.",
+    secondaryTitle: "Issue drawer",
+    secondary: (snapshot) => [card("Keys", "New secrets reveal once and then become masked.", selectedRows(snapshot.apiKeys, 5))],
   },
   "/customers/members": {
-    adapter: "Admin API",
     primaryAction: "Invite member",
-    controls: customerControls,
-    kpis: () => [
-      makeKpi("Members", "10", "active", "+2", "neutral"),
-      makeKpi("Owners", "3", "one per tenant", "ok", "ok"),
-      makeKpi("Invites", "2", "pending", "watch", "running"),
-      makeKpi("Deactivated", "0", "current", "clean", "ok"),
-    ],
-    tableTitle: "Members",
-    tableDescription: "Users and memberships across tenants with role and session context.",
+    controls: () => [select("Role", "all", ["all", "owner", "admin", "member"]), input("Search", "Search email, tenant, role...")],
+    kpis: () => [kpi("Users", "backed", "admin users", "ready", "ok"), kpi("Memberships", "backed", "roles", "ready", "ok"), kpi("Export", "backed", "GDPR", "ready", "ok"), kpi("Invite", "adapter", "auth dependent", "thin", "warn")],
     rows: (snapshot) => snapshot.members,
-    secondaryTitle: "Access model",
-    secondary: () => [
-      card("Roles", "Membership roles should be clear enough for support and billing operations.", [
-        { label: "Owner", value: "tenant admin", tone: "ok" },
-        { label: "Admin", value: "manage keys", tone: "running" },
-        { label: "Member", value: "runtime access" },
-      ]),
+    tableTitle: "Members and access",
+    tableDescription: "Users, tenant memberships, role assignments, export, and erase actions.",
+    secondaryTitle: "Security detail",
+    secondary: (snapshot) => [card("Sessions", "Session enumeration is capability-gated by auth adapter.", selectedRows(snapshot.sessions, 5))],
+  },
+  "/customers/sessions": {
+    primaryAction: "Force logout",
+    controls: () => [tabs("View", "active", ["active", "auth events"]), input("Search", "Search user, IP, user-agent, tenant...")],
+    kpis: () => [kpi("Sessions", "degraded", "adapter capability", "caveat", "warn"), kpi("Auth events", "logs", "works across adapters", "ready", "running"), kpi("Logout", "hidden", "needs endpoint", "gap", "warn"), kpi("Suspicious", "derived", "log filters", "thin", "neutral")],
+    rows: (snapshot) => snapshot.sessions,
+    tableTitle: "Session security",
+    tableDescription: "Active sessions when supported by the auth adapter, plus auth events from logs.",
+    secondaryTitle: "Auth adapter caveat",
+    secondary: (snapshot) => [
+      card("Active sessions", "Better Auth can be read today; pluggable adapters may not enumerate sessions.", selectedRows(snapshot.sessions, 5)),
+      card("Missing capability", "Universal session-listing capability is pending.", [{ label: "Needed", value: "auth supports session enumeration", tone: "warn" }]),
     ],
   },
   "/customers/budgets": {
-    adapter: "Billing meter",
     primaryAction: "Set budget",
-    controls: customerControls,
-    kpis: (snapshot) => pickKpis(snapshot, [3, 7, 2, 1]),
-    tableTitle: "Budgets",
-    tableDescription: "Tenant caps, spend usage, thresholds, and alert posture for the current period.",
-    rows: budgetRows,
-    secondaryTitle: "Budget automation",
-    secondary: (snapshot) => [
-      card("Thresholds", "Default threshold behavior for all configured budgets.", [
-        { label: "Warn", value: "80%", tone: "warn" },
-        { label: "Block", value: "100%", tone: "fail" },
-        { label: "Notification", value: "email + webhook", tone: "running" },
-      ]),
-      card("Current tenants", "Usage should be visible before a cap is changed.", snapshot.budgets.map((budget) => ({
-        label: budget.tenant,
-        value: `${budget.used}%`,
-        tone: budget.status,
-      }))),
-    ],
+    controls: () => [select("Status", "all", ["all", "ok", "near", "over"]), input("Search", "Search tenant or cap...")],
+    kpis: (snapshot) => pick(snapshot, [2, 3, 7, 1]),
+    rows: (snapshot) => snapshot.budgets.map((budget) => ({ id: budget.tenant, primary: budget.tenant, secondary: `${budget.cap} monthly cap`, status: budget.status, tone: budget.status, metric: `${budget.used}% used`, timestamp: "current" })),
+    tableTitle: "Budget controls",
+    tableDescription: "Tenant caps, alert thresholds, usage, and alert delivery status.",
+    secondaryTitle: "Spend context",
+    secondary: (snapshot) => [card("Top spenders", "Budget rows link into Cost with tenant scope.", selectedRows(snapshot.costRows, 5))],
   },
   "/customers/audit": {
-    adapter: "Audit log",
     primaryAction: "Export audit",
-    controls: customerControls,
-    kpis: () => [
-      makeKpi("Events", "184", "24h", "+12", "neutral"),
-      makeKpi("Key changes", "7", "24h", "normal", "running"),
-      makeKpi("Budget edits", "2", "24h", "review", "warn"),
-      makeKpi("Integrity", "ok", "append-only", "clean", "ok"),
-    ],
-    tableTitle: "Audit log",
-    tableDescription: "Operator and system mutations with actor, resource, tenant, and source links.",
+    controls: () => [select("Actor", "all", ["all", "operator", "system", "api key"]), select("Action", "all", ["all", "create", "update", "delete"]), input("Search", "Search entity id or action...")],
+    kpis: () => [kpi("Audit", "backed", "mutation feed", "ready", "ok"), kpi("Diff", "drawer", "JSON", "copy", "running"), kpi("Export", "client", "filtered CSV", "ready", "neutral"), kpi("Retention", "runtime", "policy", "visible", "ok")],
     rows: (snapshot) => snapshot.audit,
-    secondaryTitle: "Audit policy",
-    secondary: () => [
-      card("Required fields", "Entries need enough context to reconstruct operator decisions.", [
-        { label: "Actor", value: "required", tone: "ok" },
-        { label: "Tenant", value: "required when scoped", tone: "ok" },
-        { label: "Diff", value: "preferred", tone: "running" },
-      ]),
-    ],
+    tableTitle: "Audit timeline",
+    tableDescription: "Full provenance feed for operator and system mutations.",
+    secondaryTitle: "Diff detail",
+    secondary: (snapshot) => [card("Recent mutations", "Rows open JSON diff and copyable resource links.", selectedRows(snapshot.audit, 6))],
+  },
+  "/customers/oauth": {
+    primaryAction: "Authorize provider",
+    controls: () => [select("Provider", "all", ["all", "google", "slack", "github"]), tabs("Status", "all", ["all", "active", "expired", "revoked", "failed"]), input("Search", "Search user, tenant, scope...")],
+    kpis: () => [kpi("Connections", "backed", "OAuth list", "ready", "ok"), kpi("Providers", "backed", "provider list", "ready", "ok"), kpi("Refresh history", "missing", "endpoint", "gap", "warn"), kpi("Revoke", "backed", "provider delete", "guarded", "ok")],
+    rows: (snapshot) => snapshot.oauth,
+    tableTitle: "OAuth connections",
+    tableDescription: "Tenant-scoped external grants used when agents act on behalf of users.",
+    secondaryTitle: "Provider detail",
+    secondary: (snapshot) => [card("Connections", "Rows are shareable by provider.", selectedRows(snapshot.oauth, 6))],
   },
   "/customers/billing": {
-    adapter: "Lago / Stripe",
-    primaryAction: "Sync billing",
-    controls: customerControls,
-    kpis: () => [
-      makeKpi("Customers", "3", "linked", "current", "ok"),
-      makeKpi("Meters", "5", "active", "current", "ok"),
-      makeKpi("Uninvoiced", "$184", "current period", "+$21", "running"),
-      makeKpi("Sync lag", "4 min", "provider", "normal", "ok"),
-    ],
-    tableTitle: "Billing summary",
-    tableDescription: "Customer records, meters, invoices, portal links, and sync state.",
+    primaryAction: "Open billing portal",
+    controls: () => [select("Plan", "all", ["all", "free", "pro", "enterprise"]), input("Search", "Search tenant, plan, invoice...")],
+    kpis: () => [kpi("Customers", "backed", "billing adapter", "ready", "ok"), kpi("Meters", "backed", "usage", "ready", "ok"), kpi("Portal", "backed", "provider link", "ready", "running"), kpi("Churn", "derived", "signals", "thin", "warn")],
     rows: (snapshot) => snapshot.billing,
-    secondaryTitle: "Billing adapters",
-    secondary: () => [
-      card("Adapter contract", "Billing can be swapped, but operator surfaces should stay stable.", [
-        { label: "Customer sync", value: "required", tone: "ok" },
-        { label: "Meter sync", value: "required", tone: "ok" },
-        { label: "Portal link", value: "optional", tone: "neutral" },
-      ]),
-    ],
+    tableTitle: "Billing summary",
+    tableDescription: "Per-tenant billing records, usage meters, plan state, and adapter portal links.",
+    secondaryTitle: "Meter context",
+    secondary: (snapshot) => [card("Billing rows", "Deep billing remains in the configured provider.", selectedRows(snapshot.billing, 6))],
   },
   "/setup/adapters": {
-    adapter: "Adapter registry",
-    primaryAction: "Test adapters",
-    controls: setupControls,
-    kpis: () => [
-      makeKpi("Slots", "10", "swappable", "mapped", "ok"),
-      makeKpi("Ready", "7", "configured", "current", "ok"),
-      makeKpi("Warnings", "1", "Svix local", "review", "warn"),
-      makeKpi("Optional", "2", "billing, notifications", "neutral", "neutral"),
-    ],
-    tableTitle: "Adapter slots",
-    tableDescription: "Every backend capability slot and its currently wired implementation.",
-    rows: adapterRows,
-    secondaryTitle: "Adapter readiness",
-    secondary: (snapshot) => [
-      card("Slots", "Configured backend slots should be visible before backend hardening.", snapshot.adapters.slice(0, 6).map((adapter) => ({
-        label: adapter.slot,
-        value: adapter.adapter,
-        tone: adapter.status,
-      }))),
-    ],
+    primaryAction: "Open adapter admin",
+    controls: () => setupControls("Search slot, adapter, capability..."),
+    kpis: () => [kpi("Inventory", "degraded", "partial sources", "caveat", "warn"), kpi("Tools", "live", "adapter rows", "ready", "ok"), kpi("Capabilities", "pending", "universal shape", "gap", "warn"), kpi("Swap", "env", "restart", "v1", "neutral")],
+    rows: (snapshot) => snapshot.adapters.map((adapter) => ({ id: adapter.slot, primary: adapter.slot, secondary: adapter.description, status: adapter.adapter, tone: adapter.status, metric: "configured", timestamp: "current" })),
+    tableTitle: "Adapter topology",
+    tableDescription: "Every backend slot, current adapter, capability caveat, and native-admin link-out.",
+    secondaryTitle: "Capability gaps",
+    secondary: () => [card("Missing endpoint", "The universal adapter inventory endpoint is pending.", [{ label: "Needed", value: "GET /api/v1/admin/adapters", tone: "warn" }])],
   },
   "/setup/auth-providers": {
-    adapter: "Better Auth",
-    primaryAction: "Test sign-in",
-    controls: setupControls,
-    kpis: () => [
-      makeKpi("Providers", "2", "email + oauth", "configured", "ok"),
-      makeKpi("Sessions", "14", "active", "normal", "running"),
-      makeKpi("MFA", "optional", "operator", "review", "warn"),
-      makeKpi("Invite flow", "on", "customers", "ready", "ok"),
-    ],
-    tableTitle: "Auth providers",
-    tableDescription: "Operator sessions, customer signups, provider readiness, and tenant membership links.",
-    rows: () => [
-      row("auth-email", "Email link", "Passwordless operator and customer sign-in.", "enabled", "ok", "primary", "current"),
-      row("auth-google", "Google OAuth", "Workspace-friendly customer signup.", "enabled", "ok", "oauth", "current"),
-      row("auth-github", "GitHub OAuth", "Developer account linking.", "planned", "neutral", "oauth", "backlog"),
-      row("auth-mfa", "MFA enforcement", "Optional for operators, tenant policy later.", "partial", "warn", "policy", "review"),
-    ],
-    secondaryTitle: "Session policy",
-    secondary: () => [
-      card("Defaults", "Session controls should be predictable for operators.", [
-        { label: "Operator session", value: "7 days", tone: "running" },
-        { label: "Customer session", value: "14 days" },
-        { label: "Audit sign-ins", value: "on", tone: "ok" },
-      ]),
-    ],
+    primaryAction: "Open auth docs",
+    controls: () => setupControls("Search provider, origin, session config..."),
+    kpis: () => [kpi("Current", "Better Auth", "config-backed", "ready", "ok"), kpi("Protocol", "landed", "docs", "moving", "running"), kpi("Capabilities", "pending", "runtime endpoint", "gap", "warn"), kpi("Secrets", "linked", "provider keys", "visible", "ok")],
+    rows: (snapshot) => snapshot.sessions,
+    tableTitle: "Auth provider inventory",
+    tableDescription: "Configured auth providers, session behavior, trusted origins, and capability caveats.",
+    secondaryTitle: "Adapter caveat",
+    secondary: () => [card("Pending adapter shape", "Auth protocol is moving; runtime capability surface is implemented last.", [{ label: "Gap", value: "auth capabilities endpoint", tone: "warn" }])],
   },
   "/setup/llm-providers": {
-    adapter: "LiteLLM",
-    primaryAction: "Test model route",
-    controls: setupControls,
-    kpis: () => [
-      makeKpi("Providers", "4", "openai, anthropic, google", "configured", "ok"),
-      makeKpi("Models", "21", "available", "current", "ok"),
-      makeKpi("Fallbacks", "3", "routes", "ready", "running"),
-      makeKpi("Rate limit", "0", "active blocks", "clean", "ok"),
-    ],
-    tableTitle: "LLM provider routes",
-    tableDescription: "Model routing, fallback, provider health, and spend recording posture.",
+    primaryAction: "Open gateway admin",
+    controls: () => setupControls("Search model, provider, capability..."),
+    kpis: () => [kpi("Models", "backed", "llm models", "ready", "ok"), kpi("Spend", "linked", "Cost", "ready", "running"), kpi("Gateway", "adapter", "moving", "caveat", "warn"), kpi("Fallback", "link out", "gateway admin", "thin", "neutral")],
     rows: (snapshot) => snapshot.llmProviders,
-    secondaryTitle: "Routing policy",
-    secondary: () => [
-      card("Fallback chain", "Provider routing should explain what happens when a model is unavailable.", [
-        { label: "Primary", value: "agent configured", tone: "running" },
-        { label: "Fallback", value: "same class" },
-        { label: "Cost ledger", value: "always on", tone: "ok" },
-      ]),
-    ],
+    tableTitle: "LLM gateway providers",
+    tableDescription: "Models, provider cost, key readiness, and adapter-specific link-outs.",
+    secondaryTitle: "Gateway caveat",
+    secondary: () => [card("Adapter work", "LLM gateway extraction is moving; this page is implemented after adapter docs settle.", [{ label: "Gap", value: "LLM gateway capabilities", tone: "warn" }])],
   },
   "/setup/sandbox": {
-    adapter: "E2B / local",
-    primaryAction: "Run sandbox probe",
-    controls: setupControls,
-    kpis: () => [
-      makeKpi("Capacity", "6", "concurrent", "normal", "ok"),
-      makeKpi("Cold start", "1.4 s", "p50", "-0.2 s", "ok"),
-      makeKpi("Artifacts", "on", "S3 backed", "ready", "ok"),
-      makeKpi("Network policy", "restricted", "default", "safe", "running"),
-    ],
-    tableTitle: "Sandbox adapter",
-    tableDescription: "Code execution capacity, network policy, artifacts, and provider probe results.",
+    primaryAction: "Open sandbox docs",
+    controls: () => setupControls("Search pool, image, adapter..."),
+    kpis: () => [kpi("Pool", "backed", "sandbox/pool", "ready", "ok"), kpi("Switching", "env", "restart", "v1", "neutral"), kpi("Runs", "linked", "Operate", "ready", "running"), kpi("Limits", "visible", "capability", "ready", "ok")],
     rows: (snapshot) => snapshot.sandbox,
-    secondaryTitle: "Execution policy",
-    secondary: () => [
-      card("Limits", "Sandbox limits should be visible before a user hits them.", [
-        { label: "CPU", value: "2 vCPU" },
-        { label: "Memory", value: "4 GB" },
-        { label: "Timeout", value: "10 min", tone: "running" },
-      ]),
-    ],
+    tableTitle: "Sandbox adapter",
+    tableDescription: "Current sandbox adapter, pool status, capability limits, and run links.",
+    secondaryTitle: "Pool context",
+    secondary: (snapshot) => [card("Recent sandbox signals", "Pool and run rows link to Operate and Build surfaces.", selectedRows(snapshot.sandbox, 5))],
   },
   "/setup/webhook-subscribers": {
-    adapter: "Svix",
-    primaryAction: "Add endpoint",
-    controls: setupControls,
-    kpis: () => [
-      makeKpi("Endpoints", "7", "subscribed", "+1", "neutral"),
-      makeKpi("Events", "12", "published", "current", "ok"),
-      makeKpi("Signing", "on", "all endpoints", "safe", "ok"),
-      makeKpi("Failed probes", "1", "needs replay", "watch", "warn"),
-    ],
-    tableTitle: "Webhook subscribers",
-    tableDescription: "Outbound endpoints, event subscriptions, signing, retries, and delivery posture.",
+    primaryAction: "Add subscriber",
+    controls: () => setupControls("Search endpoint, event, tenant..."),
+    kpis: () => [kpi("Endpoints", "backed", "webhook endpoints", "ready", "ok"), kpi("Send test", "backed", "webhook send", "ready", "running"), kpi("Svix", "link out", "catalog", "admin", "neutral"), kpi("Signing", "visible", "secret ref", "ready", "ok")],
     rows: (snapshot) => snapshot.webhookEndpoints,
-    secondaryTitle: "Endpoint policy",
-    secondary: () => [
-      card("Delivery defaults", "Subscriber state should match delivery log behavior.", [
-        { label: "Signing", value: "required", tone: "ok" },
-        { label: "Retries", value: "72h", tone: "running" },
-        { label: "Replay", value: "operator action", tone: "running" },
-      ]),
-    ],
+    tableTitle: "Webhook subscribers",
+    tableDescription: "Outbound endpoint configuration, signing state, tenant scope, and test send.",
+    secondaryTitle: "Delivery audit",
+    secondary: (snapshot) => [card("Recent deliveries", "Delivery audit lives under Operate.", selectedRows(snapshot.webhooks, 5))],
   },
   "/setup/notifications": {
-    adapter: "Resend / log",
     primaryAction: "Send test",
-    controls: setupControls,
-    kpis: () => [
-      makeKpi("Channels", "3", "email, webhook, log", "mapped", "ok"),
-      makeKpi("Templates", "9", "operator/customer", "+1", "neutral"),
-      makeKpi("Failures", "0", "last 24h", "clean", "ok"),
-      makeKpi("Outbox", "4", "queued", "normal", "running"),
-    ],
-    tableTitle: "Notification channels",
-    tableDescription: "Outbox adapters, templates, routing rules, and test delivery results.",
+    controls: () => setupControls("Search channel, template, adapter..."),
+    kpis: () => [kpi("Channels", "env", "display only", "thin", "warn"), kpi("Test send", "backed", "notifications", "ready", "ok"), kpi("CRUD", "deferred", "endpoint", "gap", "warn"), kpi("Audit", "linked", "delivery page", "ready", "running")],
     rows: (snapshot) => snapshot.notifications,
-    secondaryTitle: "Template state",
-    secondary: () => [
-      card("Required templates", "Customer-facing system events should not ship as raw logs.", [
-        { label: "Invite", value: "ready", tone: "ok" },
-        { label: "Budget warning", value: "ready", tone: "ok" },
-        { label: "Run failure", value: "draft", tone: "running" },
-      ]),
-    ],
+    tableTitle: "Notification channels",
+    tableDescription: "Channel configuration, key status, and test send. Delivery audit is separate.",
+    secondaryTitle: "Config caveat",
+    secondary: () => [card("Missing CRUD", "Full channel CRUD is deferred; v1 displays env config and sends tests.", [{ label: "Gap", value: "notification channel CRUD endpoint", tone: "warn" }])],
   },
   "/setup/secrets": {
-    adapter: "Vault",
-    primaryAction: "Rotate secret",
-    controls: setupControls,
-    kpis: (snapshot) => [
-      makeKpi("Secrets", String(snapshot.secrets.length), "configured", "live", "ok"),
-      makeKpi("Due rotation", String(snapshot.secrets.filter((item) => item.status.includes("rotation")).length), "next 30d", "live", "warn"),
-      makeKpi("Tenant overrides", String(snapshot.secrets.filter((item) => item.secondary.includes("tenant")).length), "scoped", "live", "running"),
-      makeKpi("Plaintext", "0", "visible", "clean", "ok"),
-    ],
-    tableTitle: "Secrets",
-    tableDescription: "Provider keys, rotation windows, tenant overrides, and last access posture.",
+    primaryAction: "Add secret",
+    controls: () => setupControls("Search key, description, tenant..."),
+    kpis: () => [kpi("Keys", "backed", "vault list", "ready", "ok"), kpi("Reveal", "audited", "once", "guarded", "warn"), kpi("Rotate", "backed", "rotate route", "ready", "ok"), kpi("Delete", "dialog", "destructive", "safe", "warn")],
     rows: (snapshot) => snapshot.secrets,
-    secondaryTitle: "Secret policy",
-    secondary: () => [
-      card("Visibility", "Operators need state, not secret values.", [
-        { label: "Plaintext display", value: "never", tone: "ok" },
-        { label: "Rotation audit", value: "required", tone: "ok" },
-        { label: "Tenant override", value: "scoped", tone: "running" },
-      ]),
-    ],
+    tableTitle: "Secrets vault",
+    tableDescription: "Secret names, rotation windows, usage references, and guarded reveal controls.",
+    secondaryTitle: "Usage context",
+    secondary: (snapshot) => [card("Secrets", "Values are never shown in lists. Reveal is audited.", selectedRows(snapshot.secrets, 6))],
   },
   "/setup/observability": {
-    adapter: "OpenTelemetry",
-    primaryAction: "Open dashboards",
-    controls: setupControls,
-    kpis: () => [
-      makeKpi("Logs", "enabled", "runtime", "current", "ok"),
-      makeKpi("Metrics", "enabled", "prometheus", "current", "ok"),
-      makeKpi("Traces", "enabled", "100% local", "current", "ok"),
-      makeKpi("Alerts", "5", "configured", "normal", "running"),
-    ],
-    tableTitle: "Observability sinks",
-    tableDescription: "Logs, metrics, traces, alerts, and external dashboard links.",
+    primaryAction: "Open metrics",
+    controls: () => setupControls("Search metric, exporter, route..."),
+    kpis: () => [kpi("Metrics", "backed", "summary", "ready", "ok"), kpi("Traces", "link out", "external", "thin", "warn"), kpi("Logs", "linked", "Operate", "ready", "ok"), kpi("Config", "env", "no runtime PUT", "v1", "neutral")],
     rows: (snapshot) => snapshot.observability,
-    secondaryTitle: "Signal links",
-    secondary: () => [
-      card("Dashboard links", "Operator pages should deep-link to external observability when configured.", [
-        { label: "Logs", value: "available", tone: "ok" },
-        { label: "Metrics", value: "available", tone: "ok" },
-        { label: "Traces", value: "internal + external", tone: "running" },
-      ]),
-    ],
+    tableTitle: "Observability setup",
+    tableDescription: "Metrics, log, trace, and exporter status with link-outs to deeper tools.",
+    secondaryTitle: "Runtime metrics",
+    secondary: (snapshot) => [card("Metric rollups", "Runtime summary powers Health and Observability.", selectedRows(snapshot.observability, 6))],
   },
   "/setup/billing-adapter": {
-    adapter: "Lago / Stripe",
-    primaryAction: "Test billing sync",
-    controls: setupControls,
-    kpis: () => [
-      makeKpi("Adapter", "Stripe", "active", "configured", "ok"),
-      makeKpi("Meters", "5", "mapped", "current", "ok"),
-      makeKpi("Sync jobs", "3", "running", "normal", "running"),
-      makeKpi("Failures", "0", "24h", "clean", "ok"),
-    ],
-    tableTitle: "Billing adapter",
-    tableDescription: "Customer sync, meter mappings, invoice state, and provider readiness.",
+    primaryAction: "Open billing admin",
+    controls: () => setupControls("Search plan, adapter, meter..."),
+    kpis: () => [kpi("Adapter", "env", "Stripe/Lago", "v1", "neutral"), kpi("Customers", "backed", "billing list", "ready", "ok"), kpi("Meters", "backed", "usage", "ready", "ok"), kpi("Switch", "env", "restart", "v1", "neutral")],
     rows: (snapshot) => snapshot.billing,
-    secondaryTitle: "Meter contract",
-    secondary: () => [
-      card("Required meters", "Billing should explain exactly what usage becomes money.", [
-        { label: "Requests", value: "metered", tone: "ok" },
-        { label: "Tokens", value: "metered", tone: "ok" },
-        { label: "Storage", value: "optional", tone: "neutral" },
-      ]),
-    ],
+    tableTitle: "Billing adapter",
+    tableDescription: "Provider selection, API key status, plan mapping, customers, and meters.",
+    secondaryTitle: "Provider context",
+    secondary: (snapshot) => [card("Billing records", "Deep billing remains in Stripe or Lago.", selectedRows(snapshot.billing, 6))],
   },
   "/setup/deploy-targets": {
-    adapter: "Deploy config",
-    primaryAction: "Run deploy check",
-    controls: setupControls,
-    kpis: () => [
-      makeKpi("Targets", "5", "runtime surfaces", "mapped", "ok"),
-      makeKpi("Ready", "4", "configured", "current", "ok"),
-      makeKpi("Missing env", "1", "billing optional", "review", "warn"),
-      makeKpi("Last check", "2m", "ago", "fresh", "ok"),
-    ],
-    tableTitle: "Deploy targets",
-    tableDescription: "Runtime, dashboard, worker, storage, and webhook deployment surfaces.",
+    primaryAction: "Open provider",
+    controls: () => setupControls("Search target, provider, status..."),
+    kpis: () => [kpi("Provisioning", "missing", "no runtime endpoint", "gap", "fail"), kpi("Compose", "informational", "local", "ready", "neutral"), kpi("Provider", "link out", "console", "manual", "neutral"), kpi("Secrets", "linked", "setup", "ready", "ok")],
     rows: (snapshot) => snapshot.deployTargets,
-    secondaryTitle: "Release checklist",
-    secondary: () => [
-      card("Before deploy", "A deploy target page should make missing environment pieces obvious.", [
-        { label: "Runtime health", value: "required", tone: "ok" },
-        { label: "Worker health", value: "required", tone: "ok" },
-        { label: "Webhook reachability", value: "required", tone: "running" },
-      ]),
-    ],
+    tableTitle: "Deploy targets",
+    tableDescription: "Informational view of deployment targets. No in-product provisioning in v1.",
+    secondaryTitle: "Missing endpoint",
+    secondary: () => [card("No provisioning API", "Deploy target status is informational until the runtime owns deploy status.", [{ label: "Gap", value: "deploy status endpoint", tone: "warn" }])],
   },
   "/brand": {
-    adapter: "Theme file",
-    primaryAction: "Preview brand",
-    controls: [
-      { kind: "select", label: "Surface", value: "Admin", options: ["Admin", "Customer app", "Docs"] },
-      { kind: "tabs", label: "Mode", value: "dark", options: ["dark", "light", "system"] },
-      { kind: "switch", label: "Monochrome", value: "on" },
+    primaryAction: "Copy file path",
+    controls: () => [input("Search", "Search brand token, color, asset...")],
+    kpis: () => [kpi("Source", "brand.yaml", "file-backed", "v1", "neutral"), kpi("Endpoint", "missing", "admin brand", "gap", "warn"), kpi("Editing", "code", "file edit", "policy", "neutral"), kpi("Reload", "thin", "if hot reload", "manual", "neutral")],
+    rows: (snapshot) => [
+      { id: "brand-name", primary: "Brand name", secondary: "Displayed public name from brand.yaml", status: "file", tone: "neutral", metric: "BackAI", timestamp: "current" },
+      { id: "primary", primary: "Primary color", secondary: "Monochrome admin theme remains separate", status: "file", tone: "neutral", metric: "#fafafa", timestamp: "current" },
+      { id: "logo", primary: "Logo", secondary: "Asset preview when configured", status: "file", tone: "neutral", metric: "logo", timestamp: "current" },
+      ...snapshot.adapters.slice(0, 3).map((adapter) => ({ id: `brand-adapter:${adapter.slot}`, primary: adapter.slot, secondary: adapter.description, status: adapter.adapter, tone: adapter.status, metric: "adapter", timestamp: "current" })),
     ],
-    kpis: () => [
-      makeKpi("Radius", "6px", "base token", "locked", "ok"),
-      makeKpi("Cards", "8px", "max radius", "locked", "ok"),
-      makeKpi("Palette", "zinc", "monochrome", "locked", "ok"),
-      makeKpi("Motion", "150ms", "standard", "locked", "running"),
-    ],
-    tableTitle: "Brand tokens",
-    tableDescription: "Operator-owned identity, shell tokens, type scale, and public naming assets.",
-    rows: () => [
-      row("brand-name", "BackAI Studio", "Admin app wordmark and product shell name.", "active", "ok", "text", "locked"),
-      row("brand-radius", "Radius", "Base 6px, cards 8px, compact controls.", "active", "ok", "6px", "locked"),
-      row("brand-palette", "Palette", "Zinc monochrome with semantic status only.", "active", "ok", "zinc", "locked"),
-      row("brand-type", "Typography", "Geist Sans with Geist Mono for data values.", "active", "ok", "2 fonts", "locked"),
-      row("brand-motion", "Motion", "120-150ms controls, 200ms drawers.", "active", "running", "tokens", "locked"),
-    ],
-    secondaryTitle: "Design rules",
+    tableTitle: "Brand file display",
+    tableDescription: "Read-only display of operator-owned brand.yaml. Editing is a file edit in v1.",
+    secondaryTitle: "File contract",
     secondary: () => [
-      card("Layout grammar", "These values come from the design package and should stay centralized.", [
-        { label: "Top bar", value: "48px", tone: "ok" },
-        { label: "Sidebar", value: "206px", tone: "ok" },
-        { label: "Page padding", value: "24px", tone: "ok" },
-        { label: "Rows", value: "32-40px", tone: "running" },
-      ]),
-      card("Color use", "Status color is semantic; navigation and hierarchy stay monochrome.", [
-        { label: "OK", value: "green", tone: "ok" },
-        { label: "Warn", value: "amber", tone: "warn" },
-        { label: "Fail", value: "red", tone: "fail" },
-      ]),
+      card("Endpoint gap", "The admin reads file-level brand information until a brand endpoint exists.", [{ label: "Needed", value: "GET /api/v1/admin/brand", tone: "warn" }]),
+      card("Path", "Copy this path into the editor.", undefined, "brand.yaml"),
     ],
   },
-}
-
-function dynamicAgentPage(pathname: string, snapshot: OperatorSnapshot): PageModel | null {
-  const match = pathname.match(/^\/build\/agents\/([^/]+)(\/playground)?$/)
-  if (!match) return null
-  const agentId = decodeURIComponent(match[1])
-  const agent = snapshot.agents.find((item) => item.id === agentId || item.primary === agentId) ?? snapshot.agents[0]
-  const playground = Boolean(match[2])
-
-  return {
-    path: pathname,
-    group: "Build",
-    title: playground ? `${agentId} playground` : agentId,
-    description: playground
-      ? "Run controlled test prompts against the selected agent with trace, cost, and output inspection."
-      : "Agent detail with reasoner graph, runtime health, versions, cost posture, and recent executions.",
-    live: snapshot.source === "live",
-    generatedAt: snapshot.generatedAt,
-    adapter: "AgentField runtime",
-    primaryAction: playground ? "Run test" : "Open playground",
-    controls: buildControls,
-    kpis: playground
-      ? [
-          makeKpi("Test runs", "12", "today", "+3", "running"),
-          makeKpi("Last status", "ok", "streamed", "clean", "ok"),
-          makeKpi("Avg cost", "$0.11", "sample set", "-4%", "ok"),
-          makeKpi("Avg latency", "1.8 s", "sample set", "stable", "running"),
-        ]
-      : [
-          makeKpi("Runs", agent?.metric ?? "0", "selected agent", "runtime", agent?.tone ?? "neutral"),
-          makeKpi("Version", agent?.timestamp ?? "n/a", "deployed", "current", "running"),
-          makeKpi("Health", agent?.status ?? "unknown", "runtime", "current", agent?.tone ?? "neutral"),
-          makeKpi("Cost today", "$14.82", "agent scoped", "+6%", "neutral"),
-        ],
-    tableTitle: playground ? "Playground runs" : "Agent internals",
-    tableDescription: playground
-      ? "Recent manual test inputs, output status, traces, and cost for this agent."
-      : "Reasoners, tools, memory scopes, data access, and recent execution context for this agent.",
-    tableColumns: defaultColumns,
-    rows: playground
-      ? [
-          row("pg-smoke", "Smoke prompt", "Short happy-path prompt with streaming enabled.", "succeeded", "ok", "$0.03 · 0.8 s", "just now"),
-          row("pg-edge", "Edge prompt", "Missing context, expects refusal or clarification.", "succeeded", "ok", "$0.04 · 1.1 s", "4m ago"),
-          row("pg-long", "Long context prompt", "Retrieval and memory attached.", "warning", "warn", "$0.16 · 4.2 s", "18m ago"),
-        ]
-      : [
-          row("agent-summary", agent?.primary ?? agentId, agent?.secondary ?? "Runtime manifest entry.", agent?.status ?? "unknown", agent?.tone ?? "neutral", agent?.metric ?? "n/a", agent?.timestamp ?? "runtime"),
-          row("agent-reasoners", "Reasoner graph", agent?.secondary ?? "Configured reasoners.", "ready", "ok", "3 nodes", "runtime"),
-          row("agent-memory", "Memory scope", `${agentId}/default`, "available", "running", "searchable", "current"),
-          row("agent-tools", "Tool access", "MCP and internal tools exposed to the graph.", "guarded", "warn", "5 tools", "current"),
-          row("agent-runs", "Recent executions", "Filtered run stream for this agent.", "linked", "ok", agent?.metric ?? "0 runs", "live"),
-        ],
-    secondaryTitle: playground ? "Test harness" : "Agent controls",
-    secondary: playground
-      ? [
-          card("Input schema", "Playground form should be generated from the agent input contract.", [
-            { label: "Schema", value: "available", tone: "ok" },
-            { label: "Streaming", value: "toggleable", tone: "running" },
-            { label: "Trace link", value: "required", tone: "ok" },
-          ]),
-          card("Sample request", "Minimal request shape for the selected agent.", undefined, `POST /api/v1/agents/${agentId}/runs`),
-        ]
-      : [
-          card("Lifecycle", "Operational controls for the selected agent.", [
-            { label: "Deploy version", value: agent?.timestamp ?? "runtime" },
-            { label: "Rollback", value: "available", tone: "running" },
-            { label: "Disable", value: "guarded", tone: "warn" },
-          ]),
-          card("Links", "Detail routes operators expect to jump between.", [
-            { label: "Playground", value: `/build/agents/${agentId}/playground` },
-            { label: "Runs", value: "/operate/runs" },
-            { label: "Traces", value: "/operate/traces" },
-          ]),
-        ],
-  }
-}
-
-function dynamicTenantPage(pathname: string, snapshot: OperatorSnapshot): PageModel | null {
-  const match = pathname.match(/^\/customers\/tenants\/([^/]+)$/)
-  if (!match) return null
-  const tenantId = decodeURIComponent(match[1])
-  const tenant = snapshot.tenants.find((item) => item.id === tenantId || item.primary === tenantId) ?? snapshot.tenants[0]
-  const budget = snapshot.budgets.find((item) => item.tenant === tenantId) ?? snapshot.budgets[0]
-
-  return {
-    path: pathname,
-    group: "Customers",
-    title: tenant?.primary ?? tenantId,
-    description: "Tenant detail with workspace health, keys, members, budget, recent runs, and audit entries.",
-    live: snapshot.source === "live",
-    generatedAt: snapshot.generatedAt,
-    adapter: "Admin API",
-    primaryAction: "Manage tenant",
-    controls: customerControls,
-    kpis: [
-      makeKpi("Budget used", `${budget?.used ?? 0}%`, budget?.cap ?? "no cap", "current", budget?.status ?? "neutral"),
-      makeKpi("API keys", String(snapshot.apiKeys.length), "active keys", "current", "ok"),
-      makeKpi("Members", String(snapshot.members.length), "active members", "current", "ok"),
-      makeKpi("Runs", String(snapshot.runs.length), "recent executions", "live", "running"),
-    ],
-    tableTitle: "Tenant workspace",
-    tableDescription: "Workspace objects that support a customer conversation without jumping across pages.",
-    tableColumns: defaultColumns,
-    rows: [
-      row("tenant-summary", tenant?.primary ?? tenantId, tenant?.secondary ?? "Tenant workspace.", tenant?.status ?? "active", tenant?.tone ?? "neutral", tenant?.metric ?? "n/a", tenant?.timestamp ?? "current"),
-      ...snapshot.apiKeys.slice(0, 2).map((key) => ({ ...key, id: `tenant-${key.id}` })),
-      ...snapshot.members.slice(0, 2).map((member) => ({ ...member, id: `tenant-${member.id}` })),
-      ...snapshot.runs.slice(0, 2).map((run) => ({ ...run, id: `tenant-${run.id}` })),
-    ],
-    secondaryTitle: "Tenant controls",
-    secondary: [
-      card("Isolation", "Tenant detail should make boundaries and spend visible.", [
-        { label: "Tenant ID", value: tenantId },
-        { label: "Budget", value: `${budget?.used ?? 0}%`, tone: budget?.status ?? "neutral" },
-        { label: "Audit", value: "linked", tone: "ok" },
-      ]),
-      card("Common actions", "Actions remain guarded because they can affect a customer workspace.", [
-        { label: "Issue key", value: "available", tone: "running" },
-        { label: "Set budget", value: "available", tone: "running" },
-        { label: "Delete tenant", value: "requires confirmation", tone: "fail" },
-      ]),
-    ],
-  }
 }
 
 export function buildPageModel(pathname: string, snapshot: OperatorSnapshot): PageModel | null {
-  const normalized = normalizePath(pathname)
-  const dynamic = dynamicAgentPage(normalized, snapshot) ?? dynamicTenantPage(normalized, snapshot)
-  if (dynamic) return dynamic
-
-  const definition = definitions[normalized]
+  const path = normalizePath(pathname)
+  const navItem = navItemForPath(path)
+  if (!allNavItems.some((item) => item.href === navItem.href) || navItem.href !== path) {
+    return null
+  }
+  const definition = definitions[path]
   if (!definition) return null
-
-  const navItem = navItemForPath(normalized)
-  const listed = allNavItems.some((item) => item.href === normalized)
-  if (!listed) return null
+  const rows = definition.rows(snapshot)
+  const modelBase = {
+    dataTruth: navItem.dataTruth,
+    apiGap: navItem.apiGap,
+    adapter: navItem.adapter,
+  }
 
   return {
-    path: normalized,
-    group: groupForPath(normalized),
+    path,
+    group: groupForPath(path),
     title: navItem.title,
     description: navItem.description,
-    live: snapshot.source === "live",
+    live: Boolean(navItem.live && snapshot.source === "live"),
+    source: snapshot.source,
     generatedAt: snapshot.generatedAt,
-    adapter: definition.adapter,
+    adapter: navItem.adapter,
+    dataTruth: navItem.dataTruth,
+    apiGap: navItem.apiGap,
+    archetype: navItem.archetype,
     primaryAction: definition.primaryAction,
-    controls: definition.controls ?? platformControls,
-    kpis: definition.kpis ? definition.kpis(snapshot) : pickKpis(snapshot, [0, 1, 2, 3]),
+    controls: definition.controls(snapshot),
+    kpis: definition.kpis(snapshot),
     tableTitle: definition.tableTitle,
     tableDescription: definition.tableDescription,
-    tableColumns: definition.tableColumns ?? defaultColumns,
-    rows: definition.rows(snapshot),
+    tableColumns: definition.columns ?? defaultColumns,
+    rows,
     secondaryTitle: definition.secondaryTitle,
-    secondary: definition.secondary(snapshot),
+    secondary: [statusCard(modelBase, snapshot), ...definition.secondary(snapshot)],
   }
 }

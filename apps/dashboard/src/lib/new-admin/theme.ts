@@ -13,6 +13,14 @@ export const adminTheme = {
     standard: "150ms",
     drawer: "200ms",
     easing: "ease-out",
+    activeScale: "0.98",
+  },
+  interaction: {
+    rowHeightDense: "32px",
+    rowHeightComfortable: "40px",
+    hover: "color-mix(in srgb, var(--foreground) 3.5%, transparent)",
+    selected: "color-mix(in srgb, var(--foreground) 7%, transparent)",
+    focus: "0 0 0 3px var(--ring)",
   },
   typography: {
     pageTitle: "20px / 600",

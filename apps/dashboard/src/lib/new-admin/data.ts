@@ -23,6 +23,8 @@ export type ConsoleRow = {
   tone: StatusTone
   metric: string
   timestamp: string
+  href?: string
+  detail?: string
 }
 
 export type ServiceVital = {
@@ -51,6 +53,7 @@ export type OperatorSnapshot = {
   source: HealthSource
   generatedAt: string
   runtimeStatus: string
+  endpointStatus: Record<string, "ok" | "missing" | "degraded">
   kpis: Kpi[]
   activity: ConsoleRow[]
   runs: ConsoleRow[]
@@ -63,9 +66,14 @@ export type OperatorSnapshot = {
   queue: ConsoleRow[]
   errors: ConsoleRow[]
   traces: ConsoleRow[]
+  logs: ConsoleRow[]
+  cache: ConsoleRow[]
   webhooks: ConsoleRow[]
   webhookEndpoints: ConsoleRow[]
+  approvals: ConsoleRow[]
   audit: ConsoleRow[]
+  oauth: ConsoleRow[]
+  sessions: ConsoleRow[]
   jobs: ConsoleRow[]
   jobDefinitions: ConsoleRow[]
   storage: ConsoleRow[]
@@ -73,6 +81,10 @@ export type OperatorSnapshot = {
   searchIndexes: ConsoleRow[]
   modules: ConsoleRow[]
   skills: ConsoleRow[]
+  tools: ConsoleRow[]
+  reasoners: ConsoleRow[]
+  harnesses: ConsoleRow[]
+  crons: ConsoleRow[]
   featureFlags: ConsoleRow[]
   billing: ConsoleRow[]
   secrets: ConsoleRow[]
@@ -243,6 +255,15 @@ export const seededSnapshot: OperatorSnapshot = {
   source: "seeded",
   generatedAt: nowIso(),
   runtimeStatus: "seeded",
+  endpointStatus: {
+    logs: "missing",
+    traces: "degraded",
+    adapters: "degraded",
+    auth: "degraded",
+    llm: "degraded",
+    deployTargets: "missing",
+    brand: "missing",
+  },
   kpis: [
     { label: "Requests / min", value: "1,240", detail: "last 5 min", trend: "+4%", tone: "ok", sparkline: [32, 29, 27, 28, 30, 22, 21, 24] },
     { label: "Error rate · 1h", value: "2.1%", detail: "41 failed events", trend: "+0.4 pts", tone: "warn", sparkline: [8, 6, 7, 6, 10, 8, 7, 7] },
@@ -295,6 +316,16 @@ export const seededSnapshot: OperatorSnapshot = {
     { id: "trace_88af", primary: "POST /api/v1/agents/support.triage", secondary: "12 spans · critical path llm.chat", status: "succeeded", tone: "ok", metric: "1.7 s", timestamp: "09:14:22" },
     { id: "trace_21ca", primary: "webhook stripe.invoice.created", secondary: "18 spans · job enqueue slow", status: "warning", tone: "warn", metric: "4.9 s", timestamp: "09:10:51" },
   ],
+  logs: [
+    { id: "log_1", primary: "provider rate limit", secondary: "runtime · run_id=run_117b2e tenant=beta-labs", status: "error", tone: "fail", metric: "llm.gateway", timestamp: "09:13:58" },
+    { id: "log_2", primary: "webhook delivery retry scheduled", secondary: "worker · delivery=wh_2 attempt=2", status: "warn", tone: "warn", metric: "webhooks", timestamp: "09:09:44" },
+    { id: "log_3", primary: "agent run completed", secondary: "runtime · run_id=run_8d92f0", status: "info", tone: "ok", metric: "runs", timestamp: "09:14:22" },
+  ],
+  cache: [
+    { id: "cache_hits", primary: "Cache hits", secondary: "LLM cache calls served without provider spend", status: "healthy", tone: "ok", metric: "68%", timestamp: "24h" },
+    { id: "cache_misses", primary: "Top misses", secondary: "Prompts not reusable in current policy window", status: "watch", tone: "warn", metric: "$12.40", timestamp: "24h" },
+    { id: "cache_entries", primary: "Entries", secondary: "Stored prompt and response fingerprints", status: "active", tone: "running", metric: "1,284", timestamp: "current" },
+  ],
   webhooks: [
     { id: "wh_1", primary: "invoice.created", secondary: "outbound · https://api.acme.test/webhooks", status: "delivered", tone: "ok", metric: "202", timestamp: "09:11:02" },
     { id: "wh_2", primary: "run.failed", secondary: "outbound · https://hooks.beta.test/backai", status: "failed", tone: "fail", metric: "503", timestamp: "09:09:42" },
@@ -303,9 +334,21 @@ export const seededSnapshot: OperatorSnapshot = {
     { id: "whend_github", primary: "github-pr", secondary: "github · forwards to af://agents/coder.review", status: "active", tone: "ok", metric: "sha256", timestamp: "current" },
     { id: "whend_stripe", primary: "stripe-billing", secondary: "stripe · forwards to billing.syncCustomer", status: "active", tone: "ok", metric: "sha256", timestamp: "current" },
   ],
+  approvals: [
+    { id: "appr_release", primary: "Release deployment", secondary: "coder.review requested approval for tenant beta-labs", status: "pending", tone: "running", metric: "waiting 12m", timestamp: "09:02:12" },
+    { id: "appr_budget", primary: "Budget override", secondary: "support.triage requested cap increase", status: "approved", tone: "ok", metric: "8m decision", timestamp: "08:42:33" },
+  ],
   audit: [
     { id: "aud_1", primary: "admin.keys.issue", secondary: "prod-server issued for tenant acme", status: "recorded", tone: "ok", metric: "operator", timestamp: "08:40:09" },
     { id: "aud_2", primary: "budgets.set", secondary: "beta-labs cap set to $1,200", status: "recorded", tone: "ok", metric: "operator", timestamp: "07:12:18" },
+  ],
+  oauth: [
+    { id: "oauth_google", primary: "Google", secondary: "tenant acme · user sara@acme.test · drive.readonly", status: "active", tone: "ok", metric: "expires 21d", timestamp: "connected" },
+    { id: "oauth_slack", primary: "Slack", secondary: "tenant beta-labs · user ops@beta.test · chat:write", status: "refresh failed", tone: "warn", metric: "needs action", timestamp: "09:01:44" },
+  ],
+  sessions: [
+    { id: "sess_1", primary: "sara@acme.test", secondary: "acme · Chrome macOS · MFA yes", status: "active", tone: "ok", metric: "last 4m", timestamp: "expires 2h" },
+    { id: "sess_2", primary: "ops@beta.test", secondary: "beta-labs · Safari iOS · MFA no", status: "active", tone: "running", metric: "last 1h", timestamp: "expires 3h" },
   ],
   jobs: [
     { id: "job_billing", primary: "billing.syncCustomer", secondary: "tenant beta-labs · last error: provider timeout", status: "retrying", tone: "warn", metric: "attempt 2/5", timestamp: "09:12:02" },
@@ -334,6 +377,23 @@ export const seededSnapshot: OperatorSnapshot = {
   skills: [
     { id: "skill_shadcn", primary: "shadcn/ui", secondary: "component registry, source, and demos", status: "connected", tone: "ok", metric: "56 components", timestamp: "probed now" },
     { id: "skill_browser", primary: "Browser", secondary: "local app navigation and screenshots", status: "connected", tone: "ok", metric: "automation", timestamp: "probed now" },
+  ],
+  tools: [
+    { id: "tool_browser", primary: "browser", secondary: "browser-use adapter · navigate, click, extract", status: "enabled", tone: "ok", metric: "3 verbs", timestamp: "current" },
+    { id: "tool_search", primary: "search", secondary: "searxng adapter · query and retrieve", status: "enabled", tone: "ok", metric: "2 verbs", timestamp: "current" },
+    { id: "tool_exec", primary: "exec", secondary: "local exec adapter · command sandboxed by policy", status: "configured", tone: "running", metric: "4 verbs", timestamp: "current" },
+  ],
+  reasoners: [
+    { id: "support.triage/classify", primary: "support.triage/classify", secondary: "entry reasoner · routes support requests", status: "declared", tone: "ok", metric: "schema", timestamp: "runtime" },
+    { id: "coder.review/risk", primary: "coder.review/risk", secondary: "analysis reasoner · tool-enabled", status: "declared", tone: "ok", metric: "3 tools", timestamp: "runtime" },
+  ],
+  harnesses: [
+    { id: "claude-code", primary: "Claude Code", secondary: "binary resolved · auth present", status: "ready", tone: "ok", metric: "probed", timestamp: "current" },
+    { id: "codex", primary: "Codex", secondary: "binary resolved · model route configured", status: "ready", tone: "ok", metric: "probed", timestamp: "current" },
+  ],
+  crons: [
+    { id: "cron_billing", primary: "billing.syncCustomer", secondary: "0 */6 * * * · sync billing adapters", status: "active", tone: "running", metric: "next 11:00", timestamp: "last ok" },
+    { id: "cron_cleanup", primary: "storage.cleanupArtifacts", secondary: "0 3 * * * · remove expired artifacts", status: "active", tone: "running", metric: "next 03:00", timestamp: "last ok" },
   ],
   featureFlags: [
     { id: "flag_new_admin", primary: "new-admin-console", secondary: "routes / to the new operator console", status: "enabled", tone: "ok", metric: "100%", timestamp: "current" },
@@ -425,6 +485,10 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     harnesses,
     crons,
     plugins,
+    approvals,
+    logs,
+    oauthConnections,
+    oauthProviders,
   ] = await Promise.all([
     settle(() => api.health()),
     settle(() => api.home()),
@@ -465,6 +529,10 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     settle(() => api.harnesses.list()),
     settle(() => api.crons.list()),
     settle(() => api.plugins()),
+    settle(() => api.approvals.list({ limit: 20 })),
+    settle(() => api.logs({ limit: 120 })),
+    settle(() => api.oauth.connections()),
+    settle(() => api.oauth.providers()),
   ])
 
   const live = Boolean(health || home || cost || runs || queue || agents || tenants)
@@ -705,6 +773,173 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
         ]
       : seededSnapshot.sandbox)
 
+  const approvalRows: ConsoleRow[] =
+    approvals?.approvals.map((approval) => ({
+      id: approval.id,
+      primary: approval.kind,
+      secondary: `${approval.tenant_id} · requested by ${approval.requested_by ?? "system"}`,
+      status: approval.status,
+      tone: toneForStatus(approval.status),
+      metric: approval.decided_at ? `decided ${shortTime(approval.decided_at)}` : "awaiting decision",
+      timestamp: shortTime(approval.created_at),
+      href: `/operate/approvals?approval=${encodeURIComponent(approval.id)}`,
+      detail: JSON.stringify(approval.payload, null, 2),
+    })) ?? seededSnapshot.approvals
+
+  const logRows: ConsoleRow[] =
+    logs?.logs.map((line, index) => ({
+      id: `${line.ts}:${index}`,
+      primary: line.msg,
+      secondary: `${line.service}${line.tenant_id ? ` · tenant=${line.tenant_id}` : ""}${line.request_id ? ` · request=${line.request_id}` : ""}`,
+      status: line.level,
+      tone: toneForStatus(line.level),
+      metric: line.agent ?? line.service,
+      timestamp: shortTime(line.ts),
+      href: `/operate/logs?ts=${encodeURIComponent(line.ts)}`,
+      detail: JSON.stringify(line, null, 2),
+    })) ?? seededSnapshot.logs
+
+  const oauthRows: ConsoleRow[] =
+    oauthConnections?.connections.length
+      ? oauthConnections.connections.map((connection) => ({
+          id: connection.id ?? `${connection.provider}:${connection.account_id ?? connection.user_id ?? "unknown"}`,
+          primary: connection.provider,
+          secondary: `${connection.tenant_id ?? "platform"} · ${connection.user_id ?? connection.account_id ?? "connected account"}`,
+          status: connection.status ?? "active",
+          tone: toneForStatus(connection.status ?? "active"),
+          metric: connection.expires_at ? `expires ${shortTime(connection.expires_at)}` : `${connection.scopes?.length ?? 0} scopes`,
+          timestamp: connection.updated_at ? shortTime(connection.updated_at) : "current",
+          href: `/customers/oauth?provider=${encodeURIComponent(connection.provider)}`,
+          detail: connection.scopes?.join(", "),
+        }))
+      : oauthProviders?.providers.map((provider) => ({
+          id: provider.provider,
+          primary: provider.provider,
+          secondary: provider.scopes?.join(", ") || "provider configured for OAuth flow",
+          status: provider.configured ? "configured" : "missing",
+          tone: provider.configured ? "ok" : "warn",
+          metric: provider.auth_url ? "authorize" : "no auth URL",
+          timestamp: "provider",
+          href: `/customers/oauth?provider=${encodeURIComponent(provider.provider)}`,
+        })) ?? seededSnapshot.oauth
+
+  const sessionRows: ConsoleRow[] = [
+    ...(users?.users.slice(0, 8).map((user) => ({
+      id: `session:${user.id}`,
+      primary: user.email,
+      secondary: `${user.name ?? "customer user"} · active-session enumeration depends on auth adapter`,
+      status: user.deleted_at ? "disabled" : "auth events only",
+      tone: user.deleted_at ? "fail" : "warn" as StatusTone,
+      metric: "capability gated",
+      timestamp: user.created_at ? shortTime(user.created_at) : "unknown",
+      href: `/customers/sessions?user=${encodeURIComponent(user.id)}`,
+    })) ?? []),
+  ]
+
+  const toolRows: ConsoleRow[] = [
+    ...(nativeTools?.tools.map((tool) => ({
+      id: `native:${tool.tool}`,
+      primary: tool.tool,
+      secondary: `${tool.adapter_id} · ${tool.description}`,
+      status: tool.enabled ? "enabled" : tool.configured ? "configured" : "missing",
+      tone: tool.enabled ? "ok" : tool.configured ? "running" : "warn" as StatusTone,
+      metric: `${tool.verbs.length} verbs`,
+      timestamp: tool.updated_at ? shortTime(tool.updated_at) : "current",
+      href: `/build/tools?tool=${encodeURIComponent(tool.tool)}`,
+    })) ?? []),
+    ...(toolAdapters?.adapters.map((adapter) => ({
+      id: `adapter:${adapter.id}`,
+      primary: adapter.label,
+      secondary: adapter.description,
+      status: adapter.enabled ? "enabled" : adapter.configured ? "configured" : "missing",
+      tone: adapter.enabled ? "ok" : adapter.configured ? "running" : "warn" as StatusTone,
+      metric: `${adapter.tools.length} tools`,
+      timestamp: adapter.updated_at ? shortTime(adapter.updated_at) : "current",
+      href: `/build/tools?adapter=${encodeURIComponent(adapter.id)}`,
+    })) ?? []),
+    ...(mcpTools?.tools.slice(0, 8).map((tool) => ({
+      id: `mcp:${tool.id}`,
+      primary: tool.name,
+      secondary: `${tool.server} · ${tool.description ?? "MCP tool"}`,
+      status: "available",
+      tone: "running" as StatusTone,
+      metric: "schema",
+      timestamp: "current",
+      href: `/build/tools?mcp=${encodeURIComponent(tool.id)}`,
+    })) ?? []),
+  ]
+
+  const reasonerRows: ConsoleRow[] =
+    agents?.agents.flatMap((agent) =>
+      (agent.reasoners?.length ? agent.reasoners : ["default"]).map((reasoner) => ({
+        id: `${agent.node_id}:${reasoner}`,
+        primary: `${agent.node_id}/${reasoner}`,
+        secondary: `${agent.version ?? "runtime"} · source agent ${agent.node_id}`,
+        status: "declared",
+        tone: "ok" as StatusTone,
+        metric: agent.tags?.slice(0, 2).join(", ") || "schema",
+        timestamp: "runtime",
+        href: `/build/agents?agent=${encodeURIComponent(agent.node_id)}&reasoner=${encodeURIComponent(reasoner)}`,
+      })),
+    ) ?? seededSnapshot.reasoners
+
+  const harnessRows: ConsoleRow[] =
+    harnesses?.harnesses.map((harness) => ({
+      id: harness.provider,
+      primary: harness.provider,
+      secondary: harness.binary_path ?? harness.last_error ?? "binary not resolved",
+      status: harness.status,
+      tone: toneForStatus(harness.status),
+      metric: harness.version ?? (harness.required_env.join(", ") || "probe"),
+      timestamp: "current",
+      href: `/build/harnesses?provider=${encodeURIComponent(harness.provider)}`,
+    })) ?? seededSnapshot.harnesses
+
+  const cronRows: ConsoleRow[] =
+    crons?.crons.map((cron) => ({
+      id: cron.id,
+      primary: cron.name,
+      secondary: `${cron.job_name} · ${cron.schedule}`,
+      status: cron.is_active ? "active" : "paused",
+      tone: cron.is_active ? "running" : "neutral",
+      metric: cron.next_run_at ? shortTime(cron.next_run_at) : "no next run",
+      timestamp: cron.last_run_at ? `last ${shortTime(cron.last_run_at)}` : "never run",
+      href: `/build/crons?cron=${encodeURIComponent(cron.id)}`,
+    })) ?? seededSnapshot.crons
+
+  const cacheRows: ConsoleRow[] =
+    cacheStats
+      ? [
+          {
+            id: "cache-hit-rate",
+            primary: "Hit rate",
+            secondary: `${cacheStats.cache_hits.toLocaleString("en")} hits from ${cacheStats.total_calls.toLocaleString("en")} total calls`,
+            status: cacheStats.hit_rate >= 0.5 ? "healthy" : "watch",
+            tone: cacheStats.hit_rate >= 0.5 ? "ok" : "warn",
+            metric: `${Math.round(cacheStats.hit_rate * 100)}%`,
+            timestamp: "selected range",
+          },
+          {
+            id: "cache-savings",
+            primary: "Estimated savings",
+            secondary: "Provider spend avoided by cache hits",
+            status: "derived",
+            tone: "running",
+            metric: money(cacheStats.savings_usd),
+            timestamp: "client visible",
+          },
+          {
+            id: "cache-entries",
+            primary: "Entries",
+            secondary: `${cacheStats.cache_misses.toLocaleString("en")} misses still went to provider`,
+            status: "active",
+            tone: "ok",
+            metric: cacheStats.entries.toLocaleString("en"),
+            timestamp: "current",
+          },
+        ]
+      : seededSnapshot.cache
+
   const observabilityRows: ConsoleRow[] =
     metrics
       ? [
@@ -786,6 +1021,15 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     source: "live",
     generatedAt: nowIso(),
     runtimeStatus: health?.status ?? "reachable",
+    endpointStatus: {
+      logs: logs ? "ok" : "missing",
+      traces: "degraded",
+      adapters: adapterRowsLive.length ? "degraded" : "missing",
+      auth: "degraded",
+      llm: models ? "degraded" : "missing",
+      deployTargets: "missing",
+      brand: "missing",
+    },
     kpis: [
       {
         ...seededSnapshot.kpis[0],
@@ -892,6 +1136,26 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
           timestamp: shortTime(job.enqueued_at),
         })) ?? seededSnapshot.queue
     ),
+    errors: logRows
+      .filter((line) => line.status === "error")
+      .slice(0, 20)
+      .map((line) => ({
+        ...line,
+        primary: line.primary || "Runtime error",
+        secondary: `${line.secondary} · grouped client-side from logs`,
+        href: `/operate/errors?log=${encodeURIComponent(line.id)}`,
+      })),
+    traces: runRows.slice(0, 12).map((run) => ({
+      ...run,
+      id: `trace:${run.id}`,
+      primary: `trace for ${run.primary}`,
+      secondary: `${run.secondary} · in-product trace browser degraded`,
+      status: run.status,
+      metric: run.metric,
+      href: `/operate/traces?run=${encodeURIComponent(run.id)}`,
+    })),
+    logs: logRows,
+    cache: cacheRows,
     webhooks:
       webhooks?.deliveries.map((delivery) => ({
         id: delivery.id,
@@ -903,6 +1167,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
         timestamp: shortTime(delivery.created_at),
       })) ?? seededSnapshot.webhooks,
     webhookEndpoints: webhookEndpointRows,
+    approvals: approvalRows,
     audit:
       audit?.entries.map((entry) => ({
         id: entry.id,
@@ -912,7 +1177,11 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
         tone: "ok",
         metric: entry.tenant_id ?? "platform",
         timestamp: shortTime(entry.occurred_at),
+        href: `/customers/audit?entry=${encodeURIComponent(entry.id)}`,
+        detail: JSON.stringify(entry.metadata, null, 2),
       })) ?? seededSnapshot.audit,
+    oauth: oauthRows,
+    sessions: sessionRows.length ? sessionRows : seededSnapshot.sessions,
     budgets:
       budgets?.budgets.map((budget) => ({
         tenant: budget.tenant_id,
@@ -938,6 +1207,10 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     })) : seededSnapshot.searchIndexes,
     modules: moduleRows,
     skills: skillRows.length ? skillRows : seededSnapshot.skills,
+    tools: toolRows.length ? toolRows : seededSnapshot.tools,
+    reasoners: reasonerRows,
+    harnesses: harnessRows,
+    crons: cronRows,
     featureFlags: flagRows,
     billing: billingRows,
     secrets: secretRows,

@@ -149,6 +149,43 @@
     outline: 2px solid var(--ring);
     outline-offset: 2px;
   }
+  .admin-interactive {
+    transition:
+      background-color 120ms ease-out,
+      border-color 120ms ease-out,
+      color 120ms ease-out,
+      transform 120ms ease-out;
+  }
+  .admin-interactive:hover {
+    background: color-mix(in srgb, var(--foreground) 3.5%, transparent);
+  }
+  .admin-interactive:active {
+    transform: scale(0.98);
+  }
+  .admin-selected {
+    background: color-mix(in srgb, var(--foreground) 7%, transparent);
+    box-shadow: inset 2px 0 0 var(--foreground);
+  }
+  .admin-skeleton {
+    position: relative;
+    overflow: hidden;
+    background: var(--muted);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .admin-skeleton::after {
+      position: absolute;
+      inset: 0;
+      content: "";
+      transform: translateX(-100%);
+      background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--foreground) 8%, transparent), transparent);
+      animation: admin-skeleton-shimmer 1.2s ease-out infinite;
+    }
+    @keyframes admin-skeleton-shimmer {
+      to {
+        transform: translateX(100%);
+      }
+    }
+  }
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,

@@ -281,6 +281,13 @@ export const LogLineSchema = z.object({
 })
 export type LogLine = z.infer<typeof LogLineSchema>
 
+export const LogListSchema = z.object({
+  logs: z.array(LogLineSchema),
+  total: z.number().optional(),
+  has_more: z.boolean().optional(),
+})
+export type LogList = z.infer<typeof LogListSchema>
+
 export const QueueSummarySchema = z.object({
   pending: z.number(),
   running: z.number(),
@@ -1681,6 +1688,38 @@ export const ApprovalListSchema = z.object({
 })
 export type ApprovalList = z.infer<typeof ApprovalListSchema>
 
+export const OAuthProviderSchema = z.object({
+  provider: z.string(),
+  configured: z.boolean().optional(),
+  scopes: z.array(z.string()).optional(),
+  auth_url: z.string().nullable().optional(),
+})
+export type OAuthProvider = z.infer<typeof OAuthProviderSchema>
+
+export const OAuthProviderListSchema = z.object({
+  providers: z.array(OAuthProviderSchema),
+})
+export type OAuthProviderList = z.infer<typeof OAuthProviderListSchema>
+
+export const OAuthConnectionSchema = z.object({
+  id: z.string().optional(),
+  tenant_id: z.string().nullable().optional(),
+  provider: z.string(),
+  user_id: z.string().nullable().optional(),
+  account_id: z.string().nullable().optional(),
+  scopes: z.array(z.string()).optional(),
+  status: z.string().optional(),
+  expires_at: z.string().nullable().optional(),
+  created_at: z.string().optional(),
+  updated_at: z.string().optional(),
+})
+export type OAuthConnection = z.infer<typeof OAuthConnectionSchema>
+
+export const OAuthConnectionListSchema = z.object({
+  connections: z.array(OAuthConnectionSchema),
+})
+export type OAuthConnectionList = z.infer<typeof OAuthConnectionListSchema>
+
 // ─── Shipwright task factory (Phase 3 Tier 1) ─────────────────────────────
 //
 // AF Stack stores task + patch metadata only. AgentField owns the
@@ -1802,6 +1841,24 @@ export const api = {
   home: () => request("/api/v1/home/overview", undefined, HomeOverviewSchema),
   modulesState: () => request("/api/v1/modules", undefined, ModulesStateSchema),
   queue: () => request("/api/v1/queues/summary", undefined, QueueSummarySchema),
+  logs: (params?: {
+    level?: string
+    service?: string
+    tenant?: string
+    search?: string
+    limit?: number
+    offset?: number
+  }) => {
+    const qs = new URLSearchParams()
+    if (params?.level) qs.set("level", params.level)
+    if (params?.service) qs.set("service", params.service)
+    if (params?.tenant) qs.set("tenant", params.tenant)
+    if (params?.search) qs.set("search", params.search)
+    if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+    if (params?.offset !== undefined) qs.set("offset", String(params.offset))
+    const q = qs.toString()
+    return request(`/api/v1/logs${q ? "?" + q : ""}`, undefined, LogListSchema)
+  },
 
   // ─── Jobs ───
 	  jobs: {
@@ -2004,6 +2061,25 @@ export const api = {
         `/api/v1/webhooks/deliveries/${id}/retry`,
         { method: "POST" },
         WebhookDeliverySchema,
+      ),
+  },
+
+  oauth: {
+    connections: () =>
+      request("/api/v1/oauth/connections", undefined, OAuthConnectionListSchema),
+    providers: () =>
+      request("/api/v1/oauth/providers", undefined, OAuthProviderListSchema),
+    authorize: (provider: string) =>
+      request(
+        `/api/v1/oauth/${encodeURIComponent(provider)}/authorize`,
+        { method: "POST" },
+        z.record(z.string(), z.unknown()),
+      ),
+    revoke: (provider: string) =>
+      request(
+        `/api/v1/oauth/${encodeURIComponent(provider)}`,
+        { method: "DELETE" },
+        z.object({ deleted: z.boolean().optional(), revoked: z.boolean().optional() }),
       ),
   },
 

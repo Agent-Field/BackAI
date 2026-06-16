@@ -10,7 +10,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:new-admin": "node scripts/verify-new-admin.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
