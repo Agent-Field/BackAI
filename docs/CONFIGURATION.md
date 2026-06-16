@@ -46,7 +46,7 @@ Future slots declared in Block 2:
 - `logs.adapter`: `ring | loki | remote`
 - `traces.adapter`: `empty | tempo | remote`
 - `metrics.adapter`: `none | prometheus | remote`
-- `errors.backend`: `logfilter | glitchtip | remote`
+- `errors.adapter`: `logfilter | glitchtip | remote`
 
 Adapter selection env vars use `_ADAPTER`, not `_BACKEND`:
 
@@ -61,7 +61,9 @@ Backend-specific URLs keep their backend names, for example
 ## Validation
 
 Layer 1 is structural: YAML shape, unknown fields, preset names, custom
-completeness, and adapter/backend enums.
+completeness, and adapter enums. Legacy `errors.backend` is still accepted
+as a read alias for existing config files, but new configs should use
+`errors.adapter`.
 
 Layer 2 is dependency validation: `metrics.container_metrics` requires
 `metrics.enabled`, spend tracking requires virtual keys, and configured

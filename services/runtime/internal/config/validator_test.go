@@ -62,15 +62,38 @@ func TestFeatureConfigRejectsGlitchTipWithoutEnv(t *testing.T) {
 		Preset: PresetLean,
 		Features: RawFeatures{Errors: &ErrorsFeature{
 			Enabled: true,
-			Backend: "glitchtip",
+			Adapter: "glitchtip",
 		}},
 	}
 	_, issues, err := ResolveFeatureConfig(raw, func(string) string { return "" })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !containsIssue(issues, "errors.backend=glitchtip", "SENTRY_DSN") {
+	if !containsIssue(issues, "errors.adapter=glitchtip", "SENTRY_DSN") {
 		t.Fatalf("issues = %+v", issues)
+	}
+}
+
+func TestFeatureConfigAcceptsLegacyErrorsBackend(t *testing.T) {
+	cfg, _, err := ParseFeatureConfig([]byte(`
+preset: lean
+features:
+  errors:
+    enabled: true
+    backend: glitchtip
+`), func(name string) string {
+		switch name {
+		case "SENTRY_DSN", "AF_STACK_ERRORS_GLITCHTIP_TOKEN":
+			return "set"
+		default:
+			return ""
+		}
+	})
+	if err != nil {
+		t.Fatalf("ParseFeatureConfig: %v", err)
+	}
+	if cfg.Features.Errors.Adapter != "glitchtip" {
+		t.Fatalf("errors adapter=%q want glitchtip", cfg.Features.Errors.Adapter)
 	}
 }
 
@@ -158,7 +181,7 @@ func TestFeatureConfigFullObservabilityOverrideErrorsOff(t *testing.T) {
 		Preset: PresetFullObservability,
 		Features: RawFeatures{Errors: &ErrorsFeature{
 			Enabled: false,
-			Backend: "logfilter",
+			Adapter: "logfilter",
 		}},
 	}
 	cfg, issues, err := ResolveFeatureConfig(raw, func(string) string { return "" })

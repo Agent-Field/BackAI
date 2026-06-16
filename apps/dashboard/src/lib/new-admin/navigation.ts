@@ -122,8 +122,7 @@ export const navGroups: NavGroup[] = [
         icon: "alert",
         description: "Failure triage across runs, jobs, handlers, and deliveries.",
         archetype: "split-debugger",
-        dataTruth: "derived",
-        apiGap: "Dedicated grouped errors endpoint is missing; grouping is derived from logs.",
+        dataTruth: "backed",
         live: true,
       },
       {

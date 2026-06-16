@@ -272,7 +272,7 @@ export type HomeOverview = z.infer<typeof HomeOverviewSchema>
 
 export const LogLineSchema = z.object({
   ts: z.string(),
-  level: z.enum(["debug", "info", "warn", "error"]),
+  level: z.enum(["debug", "info", "warn", "error", "fatal"]),
   service: z.string(),
   msg: z.string(),
   request_id: z.string().optional(),
@@ -351,6 +351,44 @@ export const TraceCapabilitiesSchema = z.object({
   max_results_per_query: z.number().default(0),
 })
 export type TraceCapabilities = z.infer<typeof TraceCapabilitiesSchema>
+
+export const ErrorGroupSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  service: z.string(),
+  status: z.enum(["open", "muted", "resolved"]),
+  count: z.number().default(0),
+  user_count: z.number().optional(),
+  first_seen: z.string().default(""),
+  last_seen: z.string().default(""),
+  fingerprint: z.string().optional(),
+  permalink: z.string().optional(),
+  culprit: z.string().optional(),
+  sample_event: z.record(z.string(), z.unknown()).optional(),
+})
+export type ErrorGroup = z.infer<typeof ErrorGroupSchema>
+
+export const ErrorListSchema = z.object({
+  groups: z.array(ErrorGroupSchema),
+  total: z.number().optional(),
+  next_cursor: z.string().optional(),
+  has_more: z.boolean().optional(),
+})
+export type ErrorList = z.infer<typeof ErrorListSchema>
+
+export const ErrorCapabilitiesSchema = z.object({
+  supports_list: z.boolean().default(false),
+  supports_get: z.boolean().default(false),
+  supports_mute: z.boolean().default(false),
+  supports_resolve: z.boolean().default(false),
+  supports_ingest: z.boolean().default(false),
+  supports_alerting: z.boolean().default(false),
+  native_query_lang: z.string().default(""),
+  retention_days: z.number().default(0),
+  persistence: z.string().default(""),
+  max_groups_per_page: z.number().default(0),
+})
+export type ErrorCapabilities = z.infer<typeof ErrorCapabilitiesSchema>
 
 export const QueueSummarySchema = z.object({
   pending: z.number(),
@@ -2203,6 +2241,36 @@ export const api = {
       request(`/api/v1/admin/traces/${encodeURIComponent(traceId)}`, undefined, TraceDetailSchema),
     capabilities: () =>
       request("/api/v1/admin/traces/capabilities", undefined, TraceCapabilitiesSchema),
+  },
+  errors: {
+    list: (params?: {
+      status?: "open" | "muted" | "resolved"
+      service?: string
+      tenant_id?: string
+      since?: string
+      limit?: number
+      cursor?: string
+    }) => {
+      const qs = new URLSearchParams()
+      if (params?.status) qs.set("status", params.status)
+      if (params?.service) qs.set("service", params.service)
+      if (params?.tenant_id) qs.set("tenant_id", params.tenant_id)
+      if (params?.since) qs.set("since", params.since)
+      if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+      if (params?.cursor) qs.set("cursor", params.cursor)
+      const q = qs.toString()
+      return request(`/api/v1/admin/errors${q ? "?" + q : ""}`, undefined, ErrorListSchema)
+    },
+    get: (id: string) =>
+      request(`/api/v1/admin/errors/${encodeURIComponent(id)}`, undefined, ErrorGroupSchema),
+    capabilities: () =>
+      request("/api/v1/admin/errors/capabilities", undefined, ErrorCapabilitiesSchema),
+    mute: (id: string) =>
+      request(`/api/v1/admin/errors/${encodeURIComponent(id)}/mute`, { method: "POST" }, ErrorGroupSchema),
+    resolve: (id: string) =>
+      request(`/api/v1/admin/errors/${encodeURIComponent(id)}/resolve`, { method: "POST" }, ErrorGroupSchema),
+    reopen: (id: string) =>
+      request(`/api/v1/admin/errors/${encodeURIComponent(id)}/reopen`, { method: "POST" }, ErrorGroupSchema),
   },
 
   // ─── Jobs ───

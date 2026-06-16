@@ -209,3 +209,47 @@ func TestMetricsAdapterRequiresURL(t *testing.T) {
 		t.Fatal("expected metrics.adapter=remote without url to fail")
 	}
 }
+
+func TestErrorsEnvOverrides(t *testing.T) {
+	t.Setenv("AF_STACK_ERRORS_ADAPTER", "GLITCHTIP")
+	t.Setenv("AF_STACK_ERRORS_GLITCHTIP_URL", "http://glitchtip:8000")
+	t.Setenv("AF_STACK_ERRORS_GLITCHTIP_ORG", "backai")
+	t.Setenv("AF_STACK_ERRORS_GLITCHTIP_TOKEN", "token")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Errors.Adapter != "glitchtip" {
+		t.Fatalf("adapter=%q want glitchtip", cfg.Errors.Adapter)
+	}
+	if cfg.Errors.GlitchTip.URL != "http://glitchtip:8000" || cfg.Errors.GlitchTip.Org != "backai" || cfg.Errors.GlitchTip.Token != "token" {
+		t.Fatalf("glitchtip config=%+v", cfg.Errors.GlitchTip)
+	}
+}
+
+func TestErrorsAdapterRequiresConfig(t *testing.T) {
+	cfg := Default()
+	cfg.Errors.Adapter = "glitchtip"
+	if err := validate(cfg); err == nil {
+		t.Fatal("expected errors.adapter=glitchtip without url/org/token to fail")
+	}
+	cfg = Default()
+	cfg.Errors.Adapter = "remote"
+	if err := validate(cfg); err == nil {
+		t.Fatal("expected errors.adapter=remote without url to fail")
+	}
+}
+
+func TestErrorsBackendAlias(t *testing.T) {
+	cfg := Default()
+	cfg.Errors.Adapter = ""
+	cfg.Errors.Backend = "remote"
+	cfg.Errors.Remote.URL = "http://adapter:8080"
+	applyEnvOverrides(&cfg)
+	if cfg.Errors.Adapter != "remote" {
+		t.Fatalf("adapter=%q want remote from backend alias", cfg.Errors.Adapter)
+	}
+	if err := validate(cfg); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+}

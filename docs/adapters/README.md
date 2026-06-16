@@ -29,6 +29,7 @@ The HTTP contract every remote adapter speaks, per slot.
 | **logs** — log query + tail | [`protocols/logs-v1.md`](protocols/logs-v1.md) | `AF_STACK_LOGS_ADAPTER` |
 | **traces** — trace search + detail | [`protocols/traces-v1.md`](protocols/traces-v1.md) | `AF_STACK_TRACES_ADAPTER` |
 | **metrics** — PromQL query + range | [`protocols/metrics-v1.md`](protocols/metrics-v1.md) | `AF_STACK_METRICS_ADAPTER` |
+| **errors** — error groups + state | [`protocols/errors-v1.md`](protocols/errors-v1.md) | `AF_STACK_ERRORS_ADAPTER` |
 
 ## Reference implementation
 
@@ -40,6 +41,8 @@ The HTTP contract every remote adapter speaks, per slot.
   — a minimal FastAPI traces adapter with search + trace detail.
 - [`examples/adapters/metrics-echo-py/`](../../examples/adapters/metrics-echo-py/)
   — a minimal FastAPI metrics adapter with instant + range query.
+- [`examples/adapters/errors-echo-py/`](../../examples/adapters/errors-echo-py/)
+  — a minimal FastAPI errors adapter with list + group state updates.
 
 ## The conformance binary
 

@@ -17,6 +17,7 @@ import {
 } from "lucide-react"
 
 import { ActionDrawer } from "@/components/new-admin/action-drawer"
+import { ErrorGroupActions } from "@/components/new-admin/error-group-actions"
 import Link from "next/link"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -995,29 +996,38 @@ function DenseTable({
         </TableRow>
       </TableHeader>
       <TableBody>
-        {rows.map((row, index) => (
-          <TableRow key={row.id} data-state={index === 0 ? "selected" : undefined} className="h-9">
-            <TableCell className="w-[38%] max-w-0 whitespace-normal px-4 py-1.5 md:w-auto md:max-w-[340px]">
-              <RowLink row={row} className="font-medium" value={row.primary} />
-              <div className="flex items-center gap-1 truncate font-mono text-xs text-muted-foreground">
-                <span className="truncate">{row.id}</span>
-                {row.href && <ExternalLink className="size-3 shrink-0" />}
-              </div>
-            </TableCell>
-            <TableCell className="max-w-0 whitespace-normal px-4 py-1.5 md:max-w-[380px]">
-              <div className="truncate text-sm text-muted-foreground">{row.secondary}</div>
-              <div className="mt-1 flex items-center gap-2">
-                <StatusBadge status={row.status} tone={row.tone} />
-                <span className="font-mono text-xs text-muted-foreground md:hidden">{row.metric}</span>
-              </div>
-            </TableCell>
-            <TableCell className="hidden px-4 py-1.5 text-right font-mono text-sm md:table-cell">{row.metric}</TableCell>
-            <TableCell className="hidden px-4 py-1.5 text-right font-mono text-xs text-muted-foreground md:table-cell">{row.timestamp}</TableCell>
-          </TableRow>
-        ))}
+        {rows.map((row, index) => {
+          const groupId = errorGroupID(row)
+          return (
+            <TableRow key={row.id} data-state={index === 0 ? "selected" : undefined} className="h-9">
+              <TableCell className="w-[38%] max-w-0 whitespace-normal px-4 py-1.5 md:w-auto md:max-w-[340px]">
+                <RowLink row={row} className="font-medium" value={row.primary} />
+                <div className="flex items-center gap-1 truncate font-mono text-xs text-muted-foreground">
+                  <span className="truncate">{row.id}</span>
+                  {row.href && <ExternalLink className="size-3 shrink-0" />}
+                </div>
+              </TableCell>
+              <TableCell className="max-w-0 whitespace-normal px-4 py-1.5 md:max-w-[380px]">
+                <div className="truncate text-sm text-muted-foreground">{row.secondary}</div>
+                <div className="mt-1 flex items-center gap-2">
+                  <StatusBadge status={row.status} tone={row.tone} />
+                  <span className="font-mono text-xs text-muted-foreground md:hidden">{row.metric}</span>
+                </div>
+                {groupId && <ErrorGroupActions groupId={groupId} status={row.status} />}
+              </TableCell>
+              <TableCell className="hidden px-4 py-1.5 text-right font-mono text-sm md:table-cell">{row.metric}</TableCell>
+              <TableCell className="hidden px-4 py-1.5 text-right font-mono text-xs text-muted-foreground md:table-cell">{row.timestamp}</TableCell>
+            </TableRow>
+          )
+        })}
       </TableBody>
     </Table>
   )
+}
+
+function errorGroupID(row: ConsoleRow) {
+  if (!row.href?.startsWith("/operate/errors?group=")) return null
+  return row.id
 }
 
 function RowLink({ row, value, className }: { row: ConsoleRow; value: string; className?: string }) {

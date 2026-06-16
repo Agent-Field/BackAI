@@ -27,7 +27,7 @@ import (
 
 func main() {
 	var (
-		slot    = flag.String("slot", "", "adapter slot: sandbox | storage | notifications | secrets | billing | multimodal | llm-chat | auth | logs | traces | metrics")
+		slot    = flag.String("slot", "", "adapter slot: sandbox | storage | notifications | secrets | billing | multimodal | llm-chat | auth | logs | traces | metrics | errors")
 		baseURL = flag.String("url", "", "adapter base URL, e.g. http://localhost:8090")
 		token   = flag.String("token", "", "bearer token (optional)")
 		quiet   = flag.Bool("quiet", false, "suppress per-check output, print only summary")
@@ -80,6 +80,8 @@ func main() {
 		runTracesChecks(ctx, r, c)
 	case "metrics":
 		runMetricsChecks(ctx, r, c)
+	case "errors":
+		runErrorsChecks(ctx, r, c)
 	default:
 		r.fail("unknown slot", fmt.Errorf("slot %q has no per-slot suite", *slot))
 	}
@@ -778,6 +780,61 @@ func runMetricsChecks(ctx context.Context, r *runner, c *remote.Client) {
 		}
 		var out struct {
 			Series []map[string]any `json:"series"`
+		}
+		return resp.DecodeJSON(&out)
+	})
+}
+
+// --- errors -------------------------------------------------------------
+
+func runErrorsChecks(ctx context.Context, r *runner, c *remote.Client) {
+	var caps struct {
+		SupportsList     bool   `json:"supports_list"`
+		SupportsGet      bool   `json:"supports_get"`
+		SupportsMute     bool   `json:"supports_mute"`
+		SupportsResolve  bool   `json:"supports_resolve"`
+		NativeQueryLang  string `json:"native_query_lang"`
+		Persistence      string `json:"persistence"`
+		MaxGroupsPerPage int    `json:"max_groups_per_page"`
+	}
+
+	r.require("GET /v1/capabilities declares errors capabilities", func() error {
+		env, err := c.Capabilities(ctx)
+		if err != nil {
+			return err
+		}
+		if env.Slot != "errors" {
+			return fmt.Errorf("slot=%q; expected errors", env.Slot)
+		}
+		if err := json.Unmarshal(env.Capabilities, &caps); err != nil {
+			return err
+		}
+		if !caps.SupportsList {
+			return fmt.Errorf("errors adapter must support list")
+		}
+		if caps.Persistence == "" {
+			return fmt.Errorf("persistence must be declared")
+		}
+		if caps.MaxGroupsPerPage < 0 {
+			return fmt.Errorf("max_groups_per_page must be non-negative")
+		}
+		return nil
+	})
+
+	r.require("POST /v1/errors/list returns a list envelope", func() error {
+		resp, err := c.Do(ctx, remote.Request{
+			Method: http.MethodPost,
+			Path:   "/v1/errors/list",
+			Body: map[string]any{
+				"status": "open",
+				"limit":  10,
+			},
+		})
+		if err != nil {
+			return err
+		}
+		var out struct {
+			Groups []map[string]any `json:"groups"`
 		}
 		return resp.DecodeJSON(&out)
 	})

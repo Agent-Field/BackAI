@@ -181,6 +181,20 @@ function metricsAdapterLabel(snapshot: OperatorSnapshot) {
   return "none"
 }
 
+function errorsAdapterLabel(snapshot: OperatorSnapshot) {
+  const registryRow = snapshot.adapters.find((row) => row.slot.toLowerCase() === "errors")
+  if (registryRow?.adapter) {
+    if (registryRow.adapter === "log-filter" && snapshot.errorCapabilities.persistence === "volatile") {
+      return "log-filter (volatile)"
+    }
+    return registryRow.adapter
+  }
+  const caps = snapshot.errorCapabilities
+  if (caps.native_query_lang === "sentry-search") return "GlitchTip"
+  if (caps.native_query_lang) return caps.persistence === "volatile" ? `${caps.native_query_lang} (volatile)` : caps.native_query_lang
+  return "log-filter"
+}
+
 const definitions: Record<string, PageDefinition> = {
   "/": {
     primaryAction: "Open command center",
@@ -242,14 +256,27 @@ const definitions: Record<string, PageDefinition> = {
   "/operate/errors": {
     primaryAction: "Mute error",
     controls: () => statusControls("Search stack, source, tenant, or run..."),
-    kpis: () => [kpi("Open groups", "derived", "from error logs", "client", "warn"), kpi("Grouping", "pattern", "client-side", "logs", "warn"), kpi("Source", "logs", "/api/v1/logs", "live", "running"), kpi("Endpoint gap", "1", "admin errors endpoint", "missing", "fail")],
+    kpis: (snapshot) => {
+      const caps = snapshot.errorCapabilities
+      return [
+        kpi("Adapter", errorsAdapterLabel(snapshot), caps.persistence || "adapter", "active", caps.supports_list ? "running" : "warn"),
+        kpi("Open groups", String(snapshot.errors.length), "from /admin/errors", "live", snapshot.errors.length ? "fail" : "ok"),
+        kpi("Actions", `${caps.supports_mute ? "mute" : ""}${caps.supports_mute && caps.supports_resolve ? " + " : ""}${caps.supports_resolve ? "resolve" : ""}` || "read-only", "capability", "adapter", caps.supports_mute || caps.supports_resolve ? "ok" : "neutral"),
+        kpi("Persistence", caps.persistence || "unknown", caps.retention_days ? `${caps.retention_days}d retention` : "retention unknown", "capability", caps.persistence === "volatile" ? "warn" : "ok"),
+      ]
+    },
     rows: (snapshot) => snapshot.errors.length ? snapshot.errors : snapshot.logs.filter((row) => row.tone === "fail"),
     tableTitle: "Failure groups",
-    tableDescription: "Runtime errors grouped client-side until a dedicated error aggregation endpoint exists.",
+    tableDescription: "Runtime error groups from the active errors adapter.",
     secondaryTitle: "Triage",
     secondary: (snapshot) => [
-      card("Muted and resolved", "Use audit-backed mutations when backend grouping lands."),
-      card("Raw samples", "Every group links back to the original log row.", selectedRows(snapshot.logs.filter((row) => row.tone === "fail"), 4)),
+      statusCard({ dataTruth: "backed", adapter: `via ${errorsAdapterLabel(snapshot)}` }, snapshot),
+      card("Adapter capability", "Mute, resolve, persistence, and ingest support from the active errors slot.", [
+        { label: "Mute", value: snapshot.errorCapabilities.supports_mute ? "supported" : "unsupported", tone: snapshot.errorCapabilities.supports_mute ? "ok" : "neutral" },
+        { label: "Resolve", value: snapshot.errorCapabilities.supports_resolve ? "supported" : "unsupported", tone: snapshot.errorCapabilities.supports_resolve ? "ok" : "neutral" },
+        { label: "Write path", value: snapshot.errorCapabilities.supports_ingest ? "Sentry-compatible" : "logs only", tone: snapshot.errorCapabilities.supports_ingest ? "ok" : "warn" },
+      ]),
+      card("Raw samples", "Groups preserve adapter sample payloads for detail inspection.", selectedRows(snapshot.errors, 4)),
     ],
   },
   "/operate/traces": {

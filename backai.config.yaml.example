@@ -49,4 +49,4 @@ features:
 
   errors:
     enabled: false
-    backend: logfilter
+    adapter: logfilter

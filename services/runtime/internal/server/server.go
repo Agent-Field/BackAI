@@ -40,6 +40,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/notifications"
 	"github.com/Agent-Field/backai/services/runtime/internal/oauth"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
+	obserrors "github.com/Agent-Field/backai/services/runtime/internal/observability/errors"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability/logs"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability/metrics"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability/traces"
@@ -200,6 +201,9 @@ type Server struct {
 	// metricsStore is the active metrics adapter slot. It defaults to the none
 	// adapter and may be Prometheus or remote when configured.
 	metricsStore metrics.Store
+	// errorsStore is the active errors adapter slot. It defaults to logfilter
+	// and may be GlitchTip or remote when configured.
+	errorsStore obserrors.Store
 	// version is the runtime version label surfaced in
 	// /api/v1/metrics/summary. Defaults to "dev" when empty.
 	version string
@@ -365,6 +369,9 @@ type Deps struct {
 	// MetricsStore is the active metrics adapter. When nil, admin metrics
 	// queries return metrics_no_backend.
 	MetricsStore metrics.Store
+	// ErrorsStore is the active errors adapter. When nil, admin errors queries
+	// return errors_no_backend.
+	ErrorsStore obserrors.Store
 	// Version is the runtime version string surfaced via
 	// /api/v1/metrics/summary. Defaults to "dev".
 	Version string
@@ -447,6 +454,7 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		logsStore:       deps.LogsStore,
 		tracesStore:     deps.TracesStore,
 		metricsStore:    deps.MetricsStore,
+		errorsStore:     deps.ErrorsStore,
 		version:         deps.Version,
 	}
 	if s.rbac == nil {
@@ -812,6 +820,11 @@ func (s *Server) registerRoutes() {
 	s.registerMetricsOpenAPI()
 	s.registerAdminMetricsRoutes()
 	s.registerAdminMetricsOpenAPI()
+
+	// Errors adapter slot. The default logfilter adapter groups error logs with
+	// volatile status overrides; GlitchTip/remote activate by config.
+	s.registerAdminErrorsRoutes()
+	s.registerAdminErrorsOpenAPI()
 
 	// Logs (Phase 12.2). When no ring is wired the endpoint serves an
 	// empty array; otherwise returns the most-recent buffered lines.

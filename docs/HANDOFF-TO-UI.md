@@ -11,20 +11,20 @@
 4. `development/admin-api-gap-registry-v1.md` — per-page UI contract status.
 5. `development/backend-admin-contract-audit-v1.md` — backend-side gap catalogue.
 6. `development/execution-blocks-v1.md` — **the to-do list**: 7 ordered execution blocks, each independently shippable, with the full adapter design for the 4 new observability slots.
-7. `docs/adapters/PROTOCOL.md` + `docs/adapters/protocols/<slot>-v1.md` — adapter contracts (11 slots shipped; remaining errors slot designed in block 6 of the execution doc).
+7. `docs/adapters/PROTOCOL.md` + `docs/adapters/protocols/<slot>-v1.md` — adapter contracts (12 slots shipped).
 
 ## What's done (shipped on this branch)
 
 | Area | State |
 |---|---|
-| Adapter system | **11 Tier-1 slots** (sandbox, storage, notifications, secrets, billing, multimodal, llm-chat, auth, logs, traces, metrics) + shared remote HTTP client + capability registry + conformance harness + reference Python adapters. |
+| Adapter system | **12 Tier-1 slots** (sandbox, storage, notifications, secrets, billing, multimodal, llm-chat, auth, logs, traces, metrics, errors) + shared remote HTTP client + capability registry + conformance harness + reference Python adapters. |
 | Tests | 61 packages pass. 0 failures. 2 E2E tests (sandbox via Python adapter; LLM via real OpenRouter Kimi via OpenAI-compat proxy). |
 | Dashboard shell | 48 routes registered with central navigation + catch-all renderer + seeded-fallback data loader pulling live runtime endpoints. |
 | Docs | ARCHITECTURE, PROTOCOL, AUTHORING, CONFORMANCE, per-slot specs, dashboard spec, design patterns, gap registry, contract audit. |
 
 ## What's done and what's next
 
-All outstanding work is consolidated in `development/execution-blocks-v1.md` — 9 ordered execution blocks. Blocks 1, 2, 3, 4, and 5 have shipped; Block 6 is the next to dispatch.
+All outstanding work is consolidated in `development/execution-blocks-v1.md` — 9 ordered execution blocks. Blocks 1, 2, 3, 4, 5, and 6 have shipped; Block 7 is the next to dispatch.
 
 | Order | Block | Status | Effort |
 |---|---|---|---|
@@ -33,14 +33,14 @@ All outstanding work is consolidated in `development/execution-blocks-v1.md` —
 | 3 | **`logs` adapter slot** — ring-buffer default; Loki backend; remote SSE shim | ✅ **DONE** | ~2.5 days |
 | 4 | **`traces` adapter slot** — empty default; Tempo backend; remote shim | ✅ **DONE** | ~2.5 days |
 | 5 | **`metrics` adapter slot** — none default; Prometheus backend; remote shim; Cost charts + Container subsection | ✅ **DONE** | ~2 days |
-| 6 | **`errors` adapter slot** — default GlitchTip backend (operator-deployed); log-filter fallback | ⏭️ **NEXT** | ~3 days |
-| 7 | Aggregation endpoints (reasoners analytics, tools usage, notifications channels CRUD, OAuth refresh history) | queued | ~3–4 days |
+| 6 | **`errors` adapter slot** — logfilter default; GlitchTip backend; remote shim; Sentry write wiring | ✅ **DONE** | ~3 days |
+| 7 | Aggregation endpoints (reasoners analytics, tools usage, notifications channels CRUD, OAuth refresh history) | ⏭️ **NEXT** | ~3–4 days |
 | 8 | Polish (adapter pills, Home Connected Services strip, capability-honest degradation) | queued | ~1 day |
 | 9 | Unmapped gap indicators (harnesses Disable, modules Migrations, SQL History) | queued | ~1 day |
 
-**Remaining: ~14–15 days.** Each block is independently shippable.
+**Remaining: ~11–12 days.** Each block is independently shippable.
 
-Blocks 3-6 follow the same adapter-slot scaffolding as the existing 8 slots (Go interface + per-slot HTTP protocol + remote-shim + registry row + conformance check). Block 2 (Foundation) introduces the shared machinery they all reuse. Full design for each in `development/execution-blocks-v1.md`.
+Blocks 3-6 follow the same adapter-slot scaffolding as the existing 8 slots (Go interface + per-slot HTTP protocol + remote-shim + registry row + conformance check). Block 2 (Foundation) introduced the shared machinery they all reuse. Full design for each in `development/execution-blocks-v1.md`.
 
 ## Locked decisions baked into the roadmap
 

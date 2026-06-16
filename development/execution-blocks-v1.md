@@ -388,7 +388,7 @@ features:
 
   errors:
     enabled: false            # Block 6 lights this up
-    backend: logfilter        # enum: logfilter | glitchtip | remote
+    adapter: logfilter        # enum: logfilter | glitchtip | remote
 ```
 
 **Preset definitions** (in `features_metadata.go`):
@@ -409,7 +409,7 @@ var presets = map[string]Features{
         Logs:                   LogsFeature{Enabled: false, Adapter: "ring"},
         Traces:                 TracesFeature{Enabled: false, Adapter: "empty"},
         Metrics:                MetricsFeature{Enabled: false, Adapter: "none"},
-        Errors:                 ErrorsFeature{Enabled: false, Backend: "logfilter"},
+        Errors:                 ErrorsFeature{Enabled: false, Adapter: "logfilter"},
     },
     "full-observability": {
         // lean + all four observability slots set to their first real backend.
@@ -417,7 +417,7 @@ var presets = map[string]Features{
         Logs:    LogsFeature{Enabled: true, Adapter: "loki"},
         Traces:  TracesFeature{Enabled: true, Adapter: "tempo"},
         Metrics: MetricsFeature{Enabled: true, Adapter: "prometheus", ContainerMetrics: true},
-        Errors:  ErrorsFeature{Enabled: true, Backend: "glitchtip"},
+        Errors:  ErrorsFeature{Enabled: true, Adapter: "glitchtip"},
     },
     "production": {
         // full-observability + virtual keys on. Assumes operator has LiteLLM with DB,
@@ -456,7 +456,7 @@ var featureRules = []FeatureRule{
         RequiresEnv: []string{"LITELLM_DATABASE_URL"},  // probe-confirmed at boot
     },
     {
-        Feature: "errors.backend=glitchtip",
+        Feature: "errors.adapter=glitchtip",
         RequiresEnv: []string{"SENTRY_DSN", "AF_STACK_ERRORS_GLITCHTIP_TOKEN"},
     },
     {
@@ -481,7 +481,7 @@ var featureRules = []FeatureRule{
         BackendOptions: []string{"none", "prometheus", "remote"},
     },
     {
-        Feature: "errors.backend",
+        Feature: "errors.adapter",
         BackendOptions: []string{"logfilter", "glitchtip", "remote"},
     },
 }
@@ -505,7 +505,7 @@ $ backai config validate
 
 - [x] `backai config validate` exits 0 on the shipped `backai.config.yaml.example`
 - [x] `backai config validate` exits 1 with a clear message when `metrics.container_metrics=true` and `metrics.enabled=false`
-- [x] `backai config validate` exits 1 when `errors.backend=glitchtip` and `SENTRY_DSN` is unset
+- [x] `backai config validate` exits 1 when `errors.adapter=glitchtip` and `SENTRY_DSN` is unset
 - [x] Renaming `db_health` to `dbHealth` in the YAML fails Layer 1 (unknown field)
 - [x] Setting `logs.adapter: "foo"` fails Layer 1 (enum)
 - [x] Preset `lean` produces a valid `Features` struct
@@ -1472,6 +1472,13 @@ MODIFIED:
 
 ## Block 6 — `errors` adapter slot · ~3 days
 
+**Status**: ✅ **DONE**. Shipped as the `errors` adapter slot with `logfilter`
+default, GlitchTip, remote shim, admin endpoints/OpenAPI, dashboard actions,
+Sentry SDK write-side wiring, conformance, protocol docs, and GlitchTip E2E
+testdata. GlitchTip read/write stays org-scoped; versions that return 405 for
+org-scoped detail `GET` are resolved through the org-scoped issue list instead
+of falling back to the global issue endpoint.
+
 **Why this slot**: today's "errors" page client-side filters logs by level (`apps/dashboard/src/lib/new-admin/data.ts:1158-1166`). There's no server-side deduplication, grouping, resolution state, or alerting. Operators need a Sentry-shaped error tracker.
 
 **Approach**: `errors` adapter slot. Default builtin is a log-filter aggregation **(new code — does not exist server-side today; today's behaviour is purely client-side)**. First real adapter is **GlitchTip** (Sentry-API-compatible, MIT licensed). Runtime + agents push events via the standard Sentry SDK; admin reads grouped issues via GlitchTip's REST API.
@@ -1481,7 +1488,7 @@ MODIFIED:
 - "Default builtin = log-filter aggregation" is net-new server code, not an existing fallback. Frame the work accordingly.
 - **GlitchTip license is MIT** (not AGPL/MIT).
 - **Sentry SDK is NOT in `go.mod` or python requirements.** Adding `github.com/getsentry/sentry-go` to the Go runtime + `sentry-sdk` to each Python agent is part of this block's cost — ~half a day across all containers.
-- GlitchTip mutation: canonical path is `PUT /api/0/issues/{id}/` (no org slug). Org-scoped variant works on some versions but isn't universal.
+- GlitchTip issue list/get/update are org-scoped: `GET /api/0/organizations/{org}/issues/`, `GET /api/0/organizations/{org}/issues/{id}/`, and `PUT /api/0/organizations/{org}/issues/{id}/`.
 - Status mapping: internal `"muted"` → GlitchTip/Sentry `"ignored"`. Make the translation explicit in code, not implicit.
 
 ### 5.1 Go interface
@@ -1530,17 +1537,22 @@ type Update struct {
 }
 
 type Capabilities struct {
-    SupportsMute      bool   `json:"supports_mute"`
-    SupportsResolve   bool   `json:"supports_resolve"`
-    SupportsIngestion bool   `json:"supports_ingestion"`   // adapter accepts events written by runtime/agents
-    SupportsAlerting  bool   `json:"supports_alerting"`
-    RetentionDays     int    `json:"retention_days"`
+    SupportsList     bool   `json:"supports_list"`
+    SupportsGet      bool   `json:"supports_get"`
+    SupportsMute     bool   `json:"supports_mute"`
+    SupportsResolve  bool   `json:"supports_resolve"`
+    SupportsIngest   bool   `json:"supports_ingest"` // adapter accepts events written by runtime/agents
+    SupportsAlerting bool   `json:"supports_alerting"`
+    NativeQueryLang  string `json:"native_query_lang"`
+    RetentionDays    int    `json:"retention_days"`
+    Persistence      string `json:"persistence"` // volatile|durable|remote
+    MaxGroupsPerPage int    `json:"max_groups_per_page"`
 }
 
 type Store interface {
     ListGroups(ctx context.Context, f ListFilter) (Page, error)
     GetGroup(ctx context.Context, id string) (Group, error)
-    UpdateGroup(ctx context.Context, id string, u Update) error
+    UpdateGroup(ctx context.Context, id string, u Update) (Group, error)
     Capabilities() Capabilities
 }
 ```
@@ -1560,13 +1572,13 @@ This keeps today's behaviour as the default, no regression.
 
 **File**: `services/runtime/internal/observability/errors/adapters/glitchtip/glitchtip.go` (new)
 
-GlitchTip's API (Sentry-compatible) — corrected to canonical Sentry paths:
+GlitchTip's API (Sentry-compatible) — org-scoped paths:
 
 | GlitchTip endpoint | Used by Store method |
 |---|---|
-| `GET /api/0/organizations/{org}/issues/?query=is:unresolved&statsPeriod=&limit=&cursor=` | `ListGroups` (org-scoped list IS necessary for filtering by org) |
-| `GET /api/0/issues/{id}/` | `GetGroup` (no org slug — canonical Sentry path) |
-| `PUT /api/0/issues/{id}/` | `UpdateGroup` (body: `{"status":"resolved"|"ignored"|"unresolved"}`) |
+| `GET /api/0/organizations/{org}/issues/?query=is:unresolved&statsPeriod=&limit=&cursor=` | `ListGroups` |
+| `GET /api/0/organizations/{org}/issues/{id}/` | `GetGroup` (with org-scoped list fallback when GlitchTip returns 405) |
+| `PUT /api/0/organizations/{org}/issues/{id}/` | `UpdateGroup` (body: `{"status":"resolved"|"ignored"|"unresolved"}`) |
 | `GET /api/0/projects/` | future autocomplete |
 
 Status translation in the GlitchTip adapter:
@@ -1647,7 +1659,7 @@ NEW:
   services/runtime/internal/observability/errors/adapters/glitchtip/glitchtip_test.go
   services/runtime/internal/observability/errors/adapters/remote/remote.go
   services/runtime/internal/observability/errors/adapters/remote/remote_test.go
-  services/runtime/internal/server/admin_errors.go
+  services/runtime/internal/server/errors_adapter.go
 MODIFIED:
   services/runtime/cmd/af-stack/main.go
   services/runtime/cmd/backai-adapter-conformance/main.go
@@ -1801,11 +1813,11 @@ Persist a per-operator history of SQL queries (currently UI-only local state in 
 | 3 — `logs` adapter slot | ✅ **DONE** | ~2.5 | Ring Subscribe/channel layer, Loki WebSocket tail, remote SSE shim, admin endpoints, dashboard wiring, conformance, and protocol docs shipped. |
 | 4 — `traces` adapter slot | ✅ **DONE** | ~2.5 | Empty default, Tempo backend, remote shim, admin endpoints, dashboard wiring, conformance, and protocol docs shipped. |
 | 5 — `metrics` adapter slot | ✅ **DONE** | ~2 | Env var + cAdvisor metric names; provider-health stays on Postgres path; none/Prometheus/remote shipped with Cost and Container charts. |
-| 6 — `errors` adapter slot | queued / next | ~3 | Sentry SDK wiring in runtime + each Python agent |
-| 7 — Aggregation endpoints | queued | ~3–4 | reasoner column + tools log table + OAuth refresh log are new migrations + write-path hooks |
+| 6 — `errors` adapter slot | ✅ **DONE** | ~3 | Logfilter default, GlitchTip adapter, remote shim, Sentry SDK wiring, dashboard actions |
+| 7 — Aggregation endpoints | queued / next | ~3–4 | reasoner column + tools log table + OAuth refresh log are new migrations + write-path hooks |
 | 8 — Polish | queued | ~1 | Adapter pills + Home strip + capability hook |
 | 9 — Unmapped gap indicators | queued | ~1 | 3 small gaps not covered by Blocks 1, 3-8 |
-| **Remaining** | | **~14–15** | (Blocks 1-5 already done) |
+| **Remaining** | | **~11–12** | (Blocks 1-6 already done) |
 
 Each block is one PR. Blocks 3–6 share the same adapter-slot scaffolding pattern (Go interface + builtin + first concrete adapter + remote shim + protocol doc + admin endpoint + conformance check + dashboard wiring).
 

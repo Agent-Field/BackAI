@@ -117,7 +117,10 @@ type MetricsFeature struct {
 
 type ErrorsFeature struct {
 	Enabled bool   `yaml:"enabled" json:"enabled"`
-	Backend string `yaml:"backend" json:"backend"`
+	Adapter string `yaml:"adapter" json:"adapter"`
+	// Backend is accepted for Block 2 config-file compatibility. Block 6
+	// standardises this slot on adapter to match the runtime env convention.
+	Backend string `yaml:"backend,omitempty" json:"-"`
 }
 
 // LoadFeatureConfig reads backai.config.yaml. Missing path returns the lean
@@ -217,6 +220,9 @@ func mergeFeatureOverrides(base Features, raw RawFeatures) Features {
 		base.Metrics = *raw.Metrics
 	}
 	if raw.Errors != nil {
+		if raw.Errors.Adapter == "" && raw.Errors.Backend != "" {
+			raw.Errors.Adapter = raw.Errors.Backend
+		}
 		base.Errors = *raw.Errors
 	}
 	return base

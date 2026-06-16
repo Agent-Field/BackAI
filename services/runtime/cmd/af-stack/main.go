@@ -58,6 +58,8 @@ import (
 	notificationsresend "github.com/Agent-Field/backai/services/runtime/internal/notifications/adapters/resend"
 	"github.com/Agent-Field/backai/services/runtime/internal/oauth"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
+	obserrors "github.com/Agent-Field/backai/services/runtime/internal/observability/errors"
+	"github.com/Agent-Field/backai/services/runtime/internal/observability/errors/errorselect"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability/logs"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability/logs/logselect"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability/metrics"
@@ -143,6 +145,15 @@ func defaulted(value, fallback string) string {
 	return value
 }
 
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func staticStatus(status adapterregistry.Status) adapterregistry.Probe {
 	return func(context.Context) (adapterregistry.Status, error) {
 		return status, nil
@@ -165,6 +176,7 @@ func buildAdapterRegistry(
 	logsStore logs.Store,
 	tracesStore traces.Store,
 	metricsStore metrics.Store,
+	errorsStore obserrors.Store,
 ) *adapterregistry.Registry {
 	r := adapterregistry.New()
 
@@ -373,6 +385,42 @@ func buildAdapterRegistry(
 		AdminUI:          cfg.Metrics.Prometheus.URL,
 		Capabilities:     caps(metricsCaps),
 		Probe:            staticStatus(metricsStatus),
+	})
+
+	errorsAdapter := errorselect.Adapter(cfg)
+	errorsKind := adapterregistry.KindBuiltin
+	if errorsAdapter == "remote" {
+		errorsKind = adapterregistry.KindRemote
+	}
+	errorsCaps := map[string]any{"contract_pending": true}
+	errorsStatus := adapterregistry.StatusUnhealthy
+	if errorsStore != nil {
+		errorsStatus = adapterregistry.StatusHealthy
+		c := errorsStore.Capabilities()
+		errorsCaps = map[string]any{
+			"supports_list":       c.SupportsList,
+			"supports_get":        c.SupportsGet,
+			"supports_mute":       c.SupportsMute,
+			"supports_resolve":    c.SupportsResolve,
+			"supports_ingest":     c.SupportsIngest,
+			"supports_alerting":   c.SupportsAlerting,
+			"native_query_lang":   c.NativeQueryLang,
+			"retention_days":      c.RetentionDays,
+			"persistence":         c.Persistence,
+			"max_groups_per_page": c.MaxGroupsPerPage,
+		}
+	}
+	r.Register(adapterregistry.Slot{
+		ID:               "errors",
+		Tier:             adapterregistry.Tier1,
+		Kind:             errorsKind,
+		Name:             errorselect.Name(cfg, errorsStore),
+		AvailableBuiltin: []string{"logfilter", "glitchtip", "remote"},
+		SwapMethod:       "env_var",
+		SwapEnv:          "AF_STACK_ERRORS_ADAPTER",
+		AdminUI:          cfg.Errors.GlitchTip.URL,
+		Capabilities:     caps(errorsCaps),
+		Probe:            staticStatus(errorsStatus),
 	})
 
 	notificationName := "none"
@@ -601,7 +649,18 @@ func main() {
 	// /operate/logs tab reads from. Strictly process-local; multi-process
 	// deployments need a real aggregator.
 	logRing := logger.NewRing(logger.RingSize, "af-stack")
-	log := logger.NewWithRing(cfg.Logging.Level, cfg.Logging.Format, logRing)
+	sentryIntegration, sentryErr := observability.SetupSentry(observability.SentryConfig{
+		DSN:         os.Getenv("SENTRY_DSN"),
+		Environment: firstNonEmpty(os.Getenv("SENTRY_ENVIRONMENT"), os.Getenv("AF_STACK_ENV")),
+		Release:     firstNonEmpty(os.Getenv("SENTRY_RELEASE"), version),
+		ServiceName: cfg.Observability.ServiceName,
+	})
+	if sentryErr != nil {
+		fmt.Fprintf(os.Stderr, "sentry setup error: %v\n", sentryErr)
+		os.Exit(1)
+	}
+	log := logger.NewWithRingAndWrapper(cfg.Logging.Level, cfg.Logging.Format, logRing, sentryIntegration.WrapHandler)
+	defer sentryIntegration.Flush()
 	log.Info("af-stack starting",
 		"version", version,
 		"http_addr", cfg.Server.HTTPAddr,
@@ -659,6 +718,16 @@ func main() {
 	log.Info("metrics adapter ready",
 		"adapter", metricselect.Adapter(cfg),
 		"name", metricselect.Name(cfg, metricsStore),
+	)
+
+	errorsStore, err := errorselect.Select(ctx, cfg, logsStore)
+	if err != nil {
+		log.Error("errors adapter init failed", "adapter", errorselect.Adapter(cfg), "error", err)
+		os.Exit(1)
+	}
+	log.Info("errors adapter ready",
+		"adapter", errorselect.Adapter(cfg),
+		"name", errorselect.Name(cfg, errorsStore),
 	)
 
 	// Observability: set up OTel + Prometheus. Failures are non-fatal —
@@ -1448,6 +1517,7 @@ func main() {
 		logsStore,
 		tracesStore,
 		metricsStore,
+		errorsStore,
 	)
 	probeReg.WithAdapterRegistry(adapterRegistry)
 
@@ -1495,6 +1565,7 @@ func main() {
 		LogsStore:       logsStore,
 		TracesStore:     tracesStore,
 		MetricsStore:    metricsStore,
+		ErrorsStore:     errorsStore,
 		Version:         version,
 	})
 

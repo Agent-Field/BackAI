@@ -51,7 +51,7 @@ OVERVIEW
 OPERATE  (default open)
   Runs                         ✅ — agent + handler execution stream
   Cost                         🟡 — primary data ✅; forecast / cache-savings are client-side compute
-  Errors                       🟡 — via /logs filtered; dedicated /errors endpoint not present
+  Errors                       ✅ — grouped /admin/errors endpoint with logfilter, GlitchTip, or remote adapter
   Traces                       🟡 — basic spans from OTel; deep trace explorer would link out
   Queue                        ✅ — job queue observability
   Cache                        ✅ — LLM cache effectiveness
@@ -216,13 +216,13 @@ Each entry: **purpose** · **data to show** (product terms) · **primary API(s)*
 - Detail drawer per error: full stack/payload · sample run or job id with drill · suggested fix link if recognized · audit references · mute / resolve
 
 **APIs**:
-- `GET /api/v1/logs?level=error,fatal` ✅
-- Filter / dedup logic client-side; pattern grouping client-side
-- (Future) dedicated `GET /api/v1/admin/errors` endpoint with backend grouping — currently logs do the job
+- `GET /api/v1/admin/errors` ✅
+- `GET /api/v1/admin/errors/{id}` ✅
+- `POST /api/v1/admin/errors/{id}/mute|resolve|reopen` ✅
 
 **Actions**: mute (with reason + expiry) · resolve · bulk mute · drill to source
 
-**Status**: 🟡 (works via logs filter; pattern grouping is client-side; dedicated errors endpoint not present)
+**Status**: ✅ (server-side grouping through the active errors adapter; logfilter state is volatile, GlitchTip state is durable)
 
 ---
 

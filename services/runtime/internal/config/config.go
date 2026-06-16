@@ -28,6 +28,7 @@ type Config struct {
 	Logs          LogsConfig          `yaml:"logs"`
 	Traces        TracesConfig        `yaml:"traces"`
 	Metrics       MetricsConfig       `yaml:"metrics"`
+	Errors        ErrorsConfig        `yaml:"errors"`
 }
 
 // SandboxConfig holds sandbox-adapter settings. The Adapter field picks
@@ -97,6 +98,26 @@ type MetricsPrometheusConfig struct {
 }
 
 type MetricsRemoteConfig struct {
+	URL   string `yaml:"url"`
+	Token string `yaml:"token"`
+}
+
+// ErrorsConfig selects the runtime errors adapter. The logfilter adapter is
+// the zero-config default; GlitchTip and remote activate only when configured.
+type ErrorsConfig struct {
+	Adapter   string                `yaml:"adapter"`
+	Backend   string                `yaml:"backend,omitempty"`
+	GlitchTip ErrorsGlitchTipConfig `yaml:"glitchtip"`
+	Remote    ErrorsRemoteConfig    `yaml:"remote"`
+}
+
+type ErrorsGlitchTipConfig struct {
+	URL   string `yaml:"url"`
+	Org   string `yaml:"org"`
+	Token string `yaml:"token"`
+}
+
+type ErrorsRemoteConfig struct {
 	URL   string `yaml:"url"`
 	Token string `yaml:"token"`
 }
@@ -214,6 +235,9 @@ func Default() Config {
 		},
 		Metrics: MetricsConfig{
 			Adapter: "none",
+		},
+		Errors: ErrorsConfig{
+			Adapter: "logfilter",
 		},
 	}
 }
@@ -384,6 +408,28 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("AF_STACK_METRICS_ADAPTER_TOKEN"); v != "" {
 		cfg.Metrics.Remote.Token = v
 	}
+
+	if cfg.Errors.Adapter == "" && cfg.Errors.Backend != "" {
+		cfg.Errors.Adapter = cfg.Errors.Backend
+	}
+	if v := os.Getenv("AF_STACK_ERRORS_ADAPTER"); v != "" {
+		cfg.Errors.Adapter = strings.ToLower(v)
+	}
+	if v := os.Getenv("AF_STACK_ERRORS_GLITCHTIP_URL"); v != "" {
+		cfg.Errors.GlitchTip.URL = v
+	}
+	if v := os.Getenv("AF_STACK_ERRORS_GLITCHTIP_ORG"); v != "" {
+		cfg.Errors.GlitchTip.Org = v
+	}
+	if v := os.Getenv("AF_STACK_ERRORS_GLITCHTIP_TOKEN"); v != "" {
+		cfg.Errors.GlitchTip.Token = v
+	}
+	if v := os.Getenv("AF_STACK_ERRORS_ADAPTER_URL"); v != "" {
+		cfg.Errors.Remote.URL = v
+	}
+	if v := os.Getenv("AF_STACK_ERRORS_ADAPTER_TOKEN"); v != "" {
+		cfg.Errors.Remote.Token = v
+	}
 }
 
 // validate returns an error if the config is in a non-runnable state.
@@ -442,6 +488,25 @@ func validate(cfg Config) error {
 		}
 	default:
 		return fmt.Errorf("metrics.adapter must be none|prometheus|remote, got %q", cfg.Metrics.Adapter)
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Errors.Adapter)) {
+	case "", "logfilter":
+	case "glitchtip":
+		if strings.TrimSpace(cfg.Errors.GlitchTip.URL) == "" {
+			return fmt.Errorf("errors.glitchtip.url is required when errors.adapter=glitchtip (set AF_STACK_ERRORS_GLITCHTIP_URL)")
+		}
+		if strings.TrimSpace(cfg.Errors.GlitchTip.Org) == "" {
+			return fmt.Errorf("errors.glitchtip.org is required when errors.adapter=glitchtip (set AF_STACK_ERRORS_GLITCHTIP_ORG)")
+		}
+		if strings.TrimSpace(cfg.Errors.GlitchTip.Token) == "" {
+			return fmt.Errorf("errors.glitchtip.token is required when errors.adapter=glitchtip (set AF_STACK_ERRORS_GLITCHTIP_TOKEN)")
+		}
+	case "remote":
+		if strings.TrimSpace(cfg.Errors.Remote.URL) == "" {
+			return fmt.Errorf("errors.remote.url is required when errors.adapter=remote (set AF_STACK_ERRORS_ADAPTER_URL)")
+		}
+	default:
+		return fmt.Errorf("errors.adapter must be logfilter|glitchtip|remote, got %q", cfg.Errors.Adapter)
 	}
 	return nil
 }

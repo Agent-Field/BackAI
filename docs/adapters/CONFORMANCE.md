@@ -42,7 +42,7 @@ Flags:
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--slot` | required | One of: `sandbox`, `storage`, `notifications`, `secrets`, `billing`, `multimodal`, `llm-chat`, `auth`, `logs` |
+| `--slot` | required | One of: `sandbox`, `storage`, `notifications`, `secrets`, `billing`, `multimodal`, `llm-chat`, `auth`, `logs`, `traces`, `metrics`, `errors` |
 | `--url` | required | The adapter's base URL (e.g. `http://localhost:8090`) |
 | `--token` | empty | Bearer token if the adapter requires one |
 | `--quiet` | `false` | Suppress per-check output; print only summary |
@@ -190,6 +190,17 @@ python3.12 -m venv .venv
 .venv/bin/uvicorn main:app --port 18093
 
 ./backai-adapter-conformance --slot metrics --url http://localhost:18093
+```
+
+Errors reference adapter:
+
+```bash
+cd examples/adapters/errors-echo-py
+python3.12 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/uvicorn main:app --port 18094
+
+./backai-adapter-conformance --slot errors --url http://localhost:18094
 ```
 
 ## Extending the harness

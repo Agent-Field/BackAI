@@ -106,8 +106,8 @@ func featureEnabled(f Features, name string) bool {
 		return f.Metrics.ContainerMetrics
 	case "errors.enabled":
 		return f.Errors.Enabled
-	case "errors.backend=glitchtip":
-		return f.Errors.Enabled && f.Errors.Backend == "glitchtip"
+	case "errors.adapter=glitchtip":
+		return f.Errors.Enabled && featureStringValue(f, "errors.adapter") == "glitchtip"
 	default:
 		return false
 	}
@@ -130,7 +130,10 @@ func featureStringValue(f Features, name string) string {
 			return f.Metrics.Adapter
 		}
 		return f.Metrics.Backend
-	case "errors.backend":
+	case "errors.adapter":
+		if f.Errors.Adapter != "" {
+			return f.Errors.Adapter
+		}
 		return f.Errors.Backend
 	default:
 		return ""

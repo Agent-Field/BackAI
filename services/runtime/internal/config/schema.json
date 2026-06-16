@@ -127,10 +127,15 @@
     "errors": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "backend"],
+      "required": ["enabled"],
+      "anyOf": [
+        { "required": ["adapter"] },
+        { "required": ["backend"] }
+      ],
       "properties": {
         "enabled": { "type": "boolean" },
-        "backend": { "type": "string", "enum": ["logfilter", "glitchtip", "remote"] }
+        "adapter": { "type": "string", "enum": ["logfilter", "glitchtip", "remote"] },
+        "backend": { "type": "string", "enum": ["logfilter", "glitchtip", "remote"], "deprecated": true }
       }
     }
   }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { api, type LogCapabilities, type MetricsCapabilities, type MetricsInstantResponse, type MetricsRangeResponse, type TraceCapabilities, type TraceDetail } from "@/lib/api"
+import { api, type ErrorCapabilities, type LogCapabilities, type MetricsCapabilities, type MetricsInstantResponse, type MetricsRangeResponse, type TraceCapabilities, type TraceDetail } from "@/lib/api"
 
 export type HealthSource = "live" | "seeded"
 
@@ -103,6 +103,7 @@ export type OperatorSnapshot = {
   logCapabilities: LogCapabilities
   traceCapabilities: TraceCapabilities
   metricsCapabilities: MetricsCapabilities
+  errorCapabilities: ErrorCapabilities
   costSeries: ConsoleRow[]
   containerMetrics: ConsoleRow[]
   features: ConsoleRow[]
@@ -550,6 +551,18 @@ export const seededSnapshot: OperatorSnapshot = {
     retention_hours: 0,
     max_series_per_query: 0,
   },
+  errorCapabilities: {
+    supports_list: true,
+    supports_get: true,
+    supports_mute: true,
+    supports_resolve: true,
+    supports_ingest: false,
+    supports_alerting: false,
+    native_query_lang: "log-filter",
+    retention_days: 0,
+    persistence: "volatile",
+    max_groups_per_page: 500,
+  },
   costSeries: [
     { id: "cost-series-none", primary: "Metrics backend", secondary: "configure a metrics backend to see time-series charts", status: "not configured", tone: "neutral", metric: "none", timestamp: "adapter" },
   ],
@@ -632,6 +645,8 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     approvals,
     logs,
     logCapabilities,
+    errorGroups,
+    errorCapabilities,
     traces,
     traceCapabilities,
     oauthConnections,
@@ -707,6 +722,8 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     settle(() => api.approvals.list({ limit: 20 })),
     settle(() => api.logs({ limit: 120 })),
     settle(() => api.logsCapabilities()),
+    settle(() => api.errors.list({ status: "open", limit: 50 })),
+    settle(() => api.errors.capabilities()),
     settle(() => api.traces.list({ limit: 20 })),
     settle(() => api.traces.capabilities()),
     settle(() => api.oauth.connections()),
@@ -1013,6 +1030,19 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
       href: `/operate/logs?ts=${encodeURIComponent(line.ts)}`,
       detail: JSON.stringify(line, null, 2),
     })) ?? seededSnapshot.logs
+
+  const errorRows: ConsoleRow[] =
+    errorGroups?.groups.map((group) => ({
+      id: group.id,
+      primary: group.title || "Runtime error",
+      secondary: `${group.service} · ${group.count.toLocaleString("en")} occurrence${group.count === 1 ? "" : "s"}${group.culprit ? ` · ${group.culprit}` : ""}`,
+      status: group.status,
+      tone: group.status === "open" ? "fail" : group.status === "muted" ? "warn" : "ok",
+      metric: group.last_seen ? `last ${shortTime(group.last_seen)}` : `${group.count} hits`,
+      timestamp: group.last_seen ? shortTime(group.last_seen) : "unknown",
+      href: `/operate/errors?group=${encodeURIComponent(group.id)}`,
+      detail: JSON.stringify(group, null, 2),
+    })) ?? []
 
   const firstTraceID = traces?.traces[0]?.trace_id
   const traceDetail: TraceDetail | null = firstTraceID
@@ -1552,15 +1582,17 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
           timestamp: shortTime(job.enqueued_at),
         })) ?? seededSnapshot.queue
     ),
-    errors: logRows
-      .filter((line) => line.status === "error")
-      .slice(0, 20)
-      .map((line) => ({
-        ...line,
-        primary: line.primary || "Runtime error",
-        secondary: `${line.secondary} · grouped client-side from logs`,
-        href: `/operate/errors?log=${encodeURIComponent(line.id)}`,
-      })),
+    errors: errorRows.length
+      ? errorRows
+      : logRows
+          .filter((line) => line.status === "error")
+          .slice(0, 20)
+          .map((line) => ({
+            ...line,
+            primary: line.primary || "Runtime error",
+            secondary: `${line.secondary} · grouped client-side from logs`,
+            href: `/operate/errors?log=${encodeURIComponent(line.id)}`,
+          })),
     traces: traceRows,
     logs: logRows,
     cache: cacheRows,
@@ -1633,6 +1665,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     logCapabilities: logCapabilities ?? seededSnapshot.logCapabilities,
     traceCapabilities: traceCapabilities ?? seededSnapshot.traceCapabilities,
     metricsCapabilities: metricsCapabilities ?? seededSnapshot.metricsCapabilities,
+    errorCapabilities: errorCapabilities ?? seededSnapshot.errorCapabilities,
     costSeries: costSeriesRows.length ? costSeriesRows : seededSnapshot.costSeries,
     containerMetrics: containerMetricRows.length ? containerMetricRows : seededSnapshot.containerMetrics,
     services: serviceRowsLive.length ? serviceRowsLive : seededSnapshot.services,
