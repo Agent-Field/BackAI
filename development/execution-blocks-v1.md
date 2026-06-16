@@ -584,7 +584,7 @@ func (r *Registry) Snapshot() map[string]Result      // dashboard reads this via
 
 | Probe ID | Slot | What it checks | Capability key written |
 |---|---|---|---|
-| `litellm-virtual-keys` | `llm-chat` | `POST /key/info` on LiteLLM with master key — `200` → active, `503 "DB not connected"` → unavailable | `llm_gateway.virtual_keys_active` (bool) |
+| `litellm-virtual-keys` | `llm-chat` | `GET /key/info` on LiteLLM with master key — `200`/`404` from the key-info surface → active, `503 "DB not connected"` → unavailable | `llm_gateway.virtual_keys_active` (bool) |
 | `litellm-spend-tracking` | `llm-chat` | `GET /spend/keys` returns 200 | `llm_gateway.spend_tracking_active` (bool) |
 | `pg-stat-statements-loaded` | `data` | `SELECT 1 FROM pg_stat_statements LIMIT 1` doesn't fail | `db.stat_statements_loaded` (bool) |
 | `pg-role-read-all-stats` | `data` | `SELECT has_role_privilege(current_user, 'pg_read_all_stats', 'USAGE')` returns true | `db.role_has_read_all_stats` (bool) |
