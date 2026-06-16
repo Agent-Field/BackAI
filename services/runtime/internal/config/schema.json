@@ -117,10 +117,10 @@
     "metrics": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "backend", "container_metrics"],
+      "required": ["enabled", "adapter", "container_metrics"],
       "properties": {
         "enabled": { "type": "boolean" },
-        "backend": { "type": "string", "enum": ["none", "prometheus", "remote"] },
+        "adapter": { "type": "string", "enum": ["none", "prometheus", "remote"] },
         "container_metrics": { "type": "boolean" }
       }
     },

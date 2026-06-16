@@ -45,7 +45,7 @@ Future slots declared in Block 2:
 
 - `logs.adapter`: `ring | loki | remote`
 - `traces.adapter`: `empty | tempo | remote`
-- `metrics.backend`: `none | prometheus | remote`
+- `metrics.adapter`: `none | prometheus | remote`
 - `errors.backend`: `logfilter | glitchtip | remote`
 
 Adapter selection env vars use `_ADAPTER`, not `_BACKEND`:

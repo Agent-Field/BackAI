@@ -20,7 +20,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/observability/traces"
 )
 
-const maxResultsPerQuery = 1000
+const maxResultsPerQuery = 5000
 
 type Config struct {
 	BaseURL    string
@@ -121,24 +121,10 @@ func (s *Store) Get(ctx context.Context, traceID string) (traces.Trace, error) {
 	if traceID == "" {
 		return traces.Trace{}, traces.ErrInvalidTraceID
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.baseURL+"/api/traces/"+url.PathEscape(traceID), nil)
-	if err != nil {
-		return traces.Trace{}, err
+	body, err := s.getTraceBody(ctx, "/api/v2/traces/"+url.PathEscape(traceID))
+	if errors.Is(err, traces.ErrTraceNotFound) {
+		body, err = s.getTraceBody(ctx, "/api/traces/"+url.PathEscape(traceID))
 	}
-	s.applyTenant(req)
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return traces.Trace{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return traces.Trace{}, traces.ErrTraceNotFound
-	}
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-		return traces.Trace{}, fmt.Errorf("tempo trace HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if err != nil {
 		return traces.Trace{}, err
 	}
@@ -147,6 +133,28 @@ func (s *Store) Get(ctx context.Context, traceID string) (traces.Trace, error) {
 		return traces.Trace{}, err
 	}
 	return trace, nil
+}
+
+func (s *Store) getTraceBody(ctx context.Context, path string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.baseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	s.applyTenant(req)
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, traces.ErrTraceNotFound
+	}
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		return nil, fmt.Errorf("tempo trace HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 }
 
 func (s *Store) Capabilities() traces.Capabilities {
@@ -456,7 +464,7 @@ func normalizeStatus(status string) string {
 
 func normalizeLimit(limit int) int {
 	if limit <= 0 {
-		return 50
+		return 200
 	}
 	if limit > maxResultsPerQuery {
 		return maxResultsPerQuery

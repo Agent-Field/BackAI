@@ -46,6 +46,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Agent-Field/backai/services/runtime/internal/appmetrics"
 	"github.com/Agent-Field/backai/services/runtime/internal/audit"
 	"github.com/Agent-Field/backai/services/runtime/internal/guardrails"
 	"github.com/Agent-Field/backai/services/runtime/internal/hooks"
@@ -150,6 +151,7 @@ type LLMPostCallPayload struct {
 	CostKnown        bool    `json:"cost_known"`
 	Cached           bool    `json:"cached"`
 	LatencyMS        int     `json:"latency_ms"`
+	TTFTSeconds      float64 `json:"ttft_seconds,omitempty"`
 	StatusCode       int     `json:"status_code"`
 	ErrorCode        string  `json:"error_code,omitempty"`
 	OccurredAt       string  `json:"occurred_at"`
@@ -500,6 +502,7 @@ func (s *Server) streamChatCompletion(
 	var lastUsage *llmgateway.Usage
 	completionChars := 0
 	streamErr := error(nil)
+	firstChunkAt := time.Time{}
 
 streamLoop:
 	for {
@@ -507,6 +510,9 @@ streamLoop:
 		case chunk, ok := <-chunkCh:
 			if !ok {
 				break streamLoop
+			}
+			if firstChunkAt.IsZero() {
+				firstChunkAt = time.Now()
 			}
 			if chunk.Usage != nil {
 				u := *chunk.Usage
@@ -579,6 +585,9 @@ streamLoop:
 		}
 	}
 	post := s.buildPostPayload(pre, nil, lastUsage, start, http.StatusOK)
+	if !firstChunkAt.IsZero() {
+		post.TTFTSeconds = firstChunkAt.Sub(start).Seconds()
+	}
 	s.fireLLMPostCallBest(r.Context(), post)
 }
 
@@ -1317,6 +1326,7 @@ func (s *Server) fireLLMPreCall(ctx context.Context, payload LLMPreCallPayload) 
 // "Best" = best-effort; a failing post-call hook must not affect the
 // response that's already been written.
 func (s *Server) fireLLMPostCallBest(ctx context.Context, payload LLMPostCallPayload) {
+	appmetrics.ObserveLLMRequest(payload.TenantID, payload.Model, payload.StatusCode, payload.TTFTSeconds)
 	if s.hooks == nil {
 		return
 	}

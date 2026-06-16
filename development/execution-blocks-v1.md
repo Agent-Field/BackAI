@@ -379,11 +379,11 @@ features:
 
   traces:
     enabled: false            # Block 4 lights this up
-    backend: empty            # enum: empty | tempo | remote
+    adapter: empty            # enum: empty | tempo | remote
 
   metrics:
     enabled: false            # Block 5 lights this up
-    backend: none             # enum: none | prometheus | remote
+    adapter: none             # enum: none | prometheus | remote
     container_metrics: false  # requires metrics.enabled (validator enforces)
 
   errors:
@@ -407,16 +407,16 @@ var presets = map[string]Features{
         APIKeyRotate:           FeatureBool{Enabled: true},
         LLMGateway:             LLMGatewayFeature{VirtualKeys: false, SpendTracking: false},
         Logs:                   LogsFeature{Enabled: false, Adapter: "ring"},
-        Traces:                 TracesFeature{Enabled: false, Backend: "empty"},
-        Metrics:                MetricsFeature{Enabled: false, Backend: "none"},
+        Traces:                 TracesFeature{Enabled: false, Adapter: "empty"},
+        Metrics:                MetricsFeature{Enabled: false, Adapter: "none"},
         Errors:                 ErrorsFeature{Enabled: false, Backend: "logfilter"},
     },
     "full-observability": {
         // lean + all four observability slots set to their first real backend.
         // ... (extends lean)
         Logs:    LogsFeature{Enabled: true, Adapter: "loki"},
-        Traces:  TracesFeature{Enabled: true, Backend: "tempo"},
-        Metrics: MetricsFeature{Enabled: true, Backend: "prometheus", ContainerMetrics: true},
+        Traces:  TracesFeature{Enabled: true, Adapter: "tempo"},
+        Metrics: MetricsFeature{Enabled: true, Adapter: "prometheus", ContainerMetrics: true},
         Errors:  ErrorsFeature{Enabled: true, Backend: "glitchtip"},
     },
     "production": {
@@ -477,7 +477,7 @@ var featureRules = []FeatureRule{
         BackendOptions: []string{"empty", "tempo", "remote"},
     },
     {
-        Feature: "metrics.backend",
+        Feature: "metrics.adapter",
         BackendOptions: []string{"none", "prometheus", "remote"},
     },
     {
@@ -719,7 +719,7 @@ crons.RegisterSystem("retention.daily", "0 3 * * *", func(ctx context.Context) e
     },
     "logs":    { "enabled": false, "adapter": "ring",       "capability_status": "not_configured" },
     "traces":  { "enabled": false, "backend": "empty",      "capability_status": "not_configured" },
-    "metrics": { "enabled": false, "backend": "none",       "capability_status": "not_configured" },
+    "metrics": { "enabled": false, "adapter": "none",       "capability_status": "not_configured" },
     "errors":  { "enabled": false, "backend": "logfilter",  "capability_status": "not_configured" }
   },
   "validator_warnings": []
@@ -1403,10 +1403,9 @@ Capabilities{
 - `backai_cost_usd_total{tenant,model,agent}` — counter, increments per cost event
 - `backai_llm_requests_total{tenant,model,status}` — counter
 - `backai_llm_ttft_seconds{model}` — histogram
-- `backai_runs_total{agent,status}` — counter
 - `backai_sandbox_runs_total{adapter,status}` — counter
 
-Wired in the existing observability hooks — small additions to `internal/cost/`, `internal/llmgateway/`, `internal/server/runs.go`, `internal/sandbox/`.
+Deferred: `backai_runs_total{agent,status}` waits for a single canonical run lifecycle event source. Wired in the existing observability hooks — small additions to `internal/cost/`, `internal/server/llm.go`, `internal/sandbox/`.
 
 ### 4.4 Remote-shim contract
 
@@ -1448,18 +1447,26 @@ NEW:
   services/runtime/internal/observability/metrics/none/none.go
   services/runtime/internal/observability/metrics/adapters/prometheus/prometheus.go
   services/runtime/internal/observability/metrics/adapters/prometheus/prometheus_test.go
+  services/runtime/internal/observability/metrics/adapters/prometheus/prometheus_e2e_test.go
+  services/runtime/internal/observability/metrics/adapters/prometheus/testdata/docker-compose.e2e.yml
   services/runtime/internal/observability/metrics/adapters/remote/remote.go
   services/runtime/internal/observability/metrics/adapters/remote/remote_test.go
-  services/runtime/internal/server/admin_metrics.go
+  services/runtime/internal/appmetrics/metrics.go
+  services/runtime/internal/server/metrics_adapter.go
+  examples/adapters/metrics-echo-py/main.py
 MODIFIED:
   services/runtime/cmd/af-stack/main.go
   services/runtime/cmd/backai-adapter-conformance/main.go
   docs/adapters/README.md
   docs/adapters/PROTOCOL.md (§14)
   apps/dashboard/src/lib/api.ts
+  apps/dashboard/src/lib/new-admin/data.ts
+  apps/dashboard/src/lib/new-admin/page-model.ts
 ```
 
 > **Note on write-side**: the runtime already exposes `/metrics` (`client_golang`). Prometheus is configured (in operator's deployment) to scrape `runtime:8080/metrics` + `cadvisor:8080/metrics`. The runtime doesn't push.
+
+**Status**: ✅ **DONE**. Shipped as `metrics` adapter slot with `none`, Prometheus, and remote implementations, OpenAPI/admin endpoints, runtime app metrics, dashboard Cost/Health wiring, conformance, protocol docs, and Prometheus+cAdvisor E2E testdata. `backai_runs_total{agent,status}` remains deferred until a canonical run lifecycle source exists.
 
 ---
 
@@ -1792,13 +1799,13 @@ Persist a per-operator history of SQL queries (currently UI-only local state in 
 | 1 — Endpoint additions | ✅ **DONE** | (~4) | Shipped with all audit corrections. Some ad-hoc patterns (LiteLLM virtual-key probe, provider-health retention) need consolidating into Block 2's generalised frameworks. |
 | 2 — **Foundation** (config + probes + retention + features API) | ✅ **DONE** | **~1.5** | Feature config, probe registry, retention helper, `/admin/features`, and Setup → Features shipped. |
 | 3 — `logs` adapter slot | ✅ **DONE** | ~2.5 | Ring Subscribe/channel layer, Loki WebSocket tail, remote SSE shim, admin endpoints, dashboard wiring, conformance, and protocol docs shipped. |
-| 4 — `traces` adapter slot | queued / next | ~2.5 | Tempo decoder shape variations; tags translator fix |
-| 5 — `metrics` adapter slot | queued | ~2 | Env var + cAdvisor metric names; provider-health stays on Postgres path |
-| 6 — `errors` adapter slot | queued | ~3 | Sentry SDK wiring in runtime + each Python agent |
+| 4 — `traces` adapter slot | ✅ **DONE** | ~2.5 | Empty default, Tempo backend, remote shim, admin endpoints, dashboard wiring, conformance, and protocol docs shipped. |
+| 5 — `metrics` adapter slot | ✅ **DONE** | ~2 | Env var + cAdvisor metric names; provider-health stays on Postgres path; none/Prometheus/remote shipped with Cost and Container charts. |
+| 6 — `errors` adapter slot | queued / next | ~3 | Sentry SDK wiring in runtime + each Python agent |
 | 7 — Aggregation endpoints | queued | ~3–4 | reasoner column + tools log table + OAuth refresh log are new migrations + write-path hooks |
 | 8 — Polish | queued | ~1 | Adapter pills + Home strip + capability hook |
 | 9 — Unmapped gap indicators | queued | ~1 | 3 small gaps not covered by Blocks 1, 3-8 |
-| **Remaining** | | **~16–17** | (Block 1 already done) |
+| **Remaining** | | **~14–15** | (Blocks 1-5 already done) |
 
 Each block is one PR. Blocks 3–6 share the same adapter-slot scaffolding pattern (Go interface + builtin + first concrete adapter + remote shim + protocol doc + admin endpoint + conformance check + dashboard wiring).
 

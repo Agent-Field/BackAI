@@ -27,7 +27,7 @@ import (
 
 func main() {
 	var (
-		slot    = flag.String("slot", "", "adapter slot: sandbox | storage | notifications | secrets | billing | multimodal | llm-chat | auth | logs | traces")
+		slot    = flag.String("slot", "", "adapter slot: sandbox | storage | notifications | secrets | billing | multimodal | llm-chat | auth | logs | traces | metrics")
 		baseURL = flag.String("url", "", "adapter base URL, e.g. http://localhost:8090")
 		token   = flag.String("token", "", "bearer token (optional)")
 		quiet   = flag.Bool("quiet", false, "suppress per-check output, print only summary")
@@ -78,6 +78,8 @@ func main() {
 		runLogsChecks(ctx, r, c)
 	case "traces":
 		runTracesChecks(ctx, r, c)
+	case "metrics":
+		runMetricsChecks(ctx, r, c)
 	default:
 		r.fail("unknown slot", fmt.Errorf("slot %q has no per-slot suite", *slot))
 	}
@@ -705,6 +707,76 @@ func runTracesChecks(ctx context.Context, r *runner, c *remote.Client) {
 			return fmt.Errorf("expected 404 trace_not_found, got %v", err)
 		}
 		return nil
+	})
+}
+
+// --- metrics ------------------------------------------------------------
+
+func runMetricsChecks(ctx context.Context, r *runner, c *remote.Client) {
+	var caps struct {
+		SupportsInstantQuery bool   `json:"supports_instant_query"`
+		SupportsRangeQuery   bool   `json:"supports_range_query"`
+		SupportsContainer    bool   `json:"supports_container_metrics"`
+		NativeQueryLang      string `json:"native_query_lang"`
+		MaxSeriesPerQuery    int    `json:"max_series_per_query"`
+	}
+
+	r.require("GET /v1/capabilities declares metrics capabilities", func() error {
+		env, err := c.Capabilities(ctx)
+		if err != nil {
+			return err
+		}
+		if env.Slot != "metrics" {
+			return fmt.Errorf("slot=%q; expected metrics", env.Slot)
+		}
+		if err := json.Unmarshal(env.Capabilities, &caps); err != nil {
+			return err
+		}
+		if !caps.SupportsInstantQuery && !caps.SupportsRangeQuery {
+			return fmt.Errorf("metrics adapter declares no query capability")
+		}
+		if caps.NativeQueryLang != "" && caps.NativeQueryLang != "promql" {
+			return fmt.Errorf("native_query_lang=%q; expected promql or empty", caps.NativeQueryLang)
+		}
+		if caps.MaxSeriesPerQuery < 0 {
+			return fmt.Errorf("max_series_per_query must be non-negative")
+		}
+		return nil
+	})
+
+	r.require("GET /v1/metrics/query returns an instant envelope", func() error {
+		resp, err := c.Do(ctx, remote.Request{
+			Method: http.MethodGet,
+			Path:   "/v1/metrics/query",
+			Query:  mapValues("promql", "up{}"),
+		})
+		if err != nil {
+			return err
+		}
+		var out struct {
+			Samples []map[string]any `json:"samples"`
+		}
+		return resp.DecodeJSON(&out)
+	})
+
+	r.require("GET /v1/metrics/range returns a range envelope", func() error {
+		now := time.Now().UTC()
+		q := mapValues("promql", "up{}")
+		q.Set("from", now.Add(-5*time.Minute).Format(time.RFC3339Nano))
+		q.Set("to", now.Format(time.RFC3339Nano))
+		q.Set("step", "1m")
+		resp, err := c.Do(ctx, remote.Request{
+			Method: http.MethodGet,
+			Path:   "/v1/metrics/range",
+			Query:  q,
+		})
+		if err != nil {
+			return err
+		}
+		var out struct {
+			Series []map[string]any `json:"series"`
+		}
+		return resp.DecodeJSON(&out)
 	})
 }
 

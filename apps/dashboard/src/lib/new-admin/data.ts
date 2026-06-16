@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { api, type LogCapabilities, type TraceCapabilities, type TraceDetail } from "@/lib/api"
+import { api, type LogCapabilities, type MetricsCapabilities, type MetricsInstantResponse, type MetricsRangeResponse, type TraceCapabilities, type TraceDetail } from "@/lib/api"
 
 export type HealthSource = "live" | "seeded"
 
@@ -102,6 +102,9 @@ export type OperatorSnapshot = {
   adapters: AdapterSlot[]
   logCapabilities: LogCapabilities
   traceCapabilities: TraceCapabilities
+  metricsCapabilities: MetricsCapabilities
+  costSeries: ConsoleRow[]
+  containerMetrics: ConsoleRow[]
   features: ConsoleRow[]
   featureWarnings: ConsoleRow[]
   budgets: BudgetRecord[]
@@ -158,6 +161,43 @@ function bytes(value?: number | null) {
   if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MiB`
   if (n >= 1024) return `${Math.round(n / 1024).toLocaleString("en")} KiB`
   return `${n.toLocaleString("en")} B`
+}
+
+function metricLabel(metric: Record<string, string>) {
+  return metric.name ?? metric.__name__ ?? metric.job ?? metric.container_label_com_docker_compose_service ?? metric.name ?? "series"
+}
+
+function metricRangeRows(range: MetricsRangeResponse | null | undefined, kind: "cost" | "cpu" | "restart"): ConsoleRow[] {
+  if (!range?.series.length) return []
+  return range.series.slice(0, 8).map((series, index) => {
+    const latest = series.values[series.values.length - 1]?.value ?? 0
+    const label = metricLabel(series.metric)
+    return {
+      id: `${kind}-${index}-${label}`,
+      primary: label,
+      secondary: Object.entries(series.metric).filter(([key]) => key !== "__name__").map(([key, value]) => `${key}=${value}`).join(" · ") || "promql series",
+      status: kind === "cost" ? "metrics" : "container",
+      tone: "running" as StatusTone,
+      metric: kind === "cost" ? money(latest) : kind === "cpu" ? `${latest.toFixed(3)} cores` : `${Math.round(latest).toLocaleString("en")} restarts`,
+      timestamp: series.values[series.values.length - 1]?.ts ? shortTime(series.values[series.values.length - 1].ts) : "current",
+    }
+  })
+}
+
+function metricInstantRows(response: MetricsInstantResponse | null | undefined, kind: "memory"): ConsoleRow[] {
+  if (!response?.samples.length) return []
+  return response.samples.slice(0, 8).map((sample, index) => {
+    const label = metricLabel(sample.metric)
+    return {
+      id: `${kind}-${index}-${label}`,
+      primary: label,
+      secondary: Object.entries(sample.metric).filter(([key]) => key !== "__name__").map(([key, value]) => `${key}=${value}`).join(" · ") || "promql sample",
+      status: "container",
+      tone: "running" as StatusTone,
+      metric: bytes(sample.value),
+      timestamp: shortTime(sample.ts),
+    }
+  })
 }
 
 function displayValue(value: unknown) {
@@ -502,6 +542,20 @@ export const seededSnapshot: OperatorSnapshot = {
     retention_hours: 0,
     max_results_per_query: 0,
   },
+  metricsCapabilities: {
+    supports_instant_query: false,
+    supports_range_query: false,
+    supports_container_metrics: false,
+    native_query_lang: "",
+    retention_hours: 0,
+    max_series_per_query: 0,
+  },
+  costSeries: [
+    { id: "cost-series-none", primary: "Metrics backend", secondary: "configure a metrics backend to see time-series charts", status: "not configured", tone: "neutral", metric: "none", timestamp: "adapter" },
+  ],
+  containerMetrics: [
+    { id: "container-metrics-none", primary: "Container metrics", secondary: "configure Prometheus with cAdvisor to inspect containers", status: "not configured", tone: "neutral", metric: "none", timestamp: "adapter" },
+  ],
   features: [
     { id: "feature-db-health", primary: "db_health", secondary: "Database health surface", status: "ok", tone: "ok", metric: "enabled", timestamp: "preset" },
     { id: "feature-logs", primary: "logs", secondary: "Future logs adapter slot", status: "not_configured", tone: "neutral", metric: "ring", timestamp: "preset" },
@@ -559,6 +613,11 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     sandboxPool,
     sandboxRuns,
     metrics,
+    metricsCapabilities,
+    costMetricRange,
+    containerCpuRange,
+    containerMemory,
+    containerRestarts,
     toolAdapters,
     nativeTools,
     mcpServers,
@@ -614,6 +673,26 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     settle(() => api.sandbox.pool()),
     settle(() => api.sandbox.list({ limit: 12 })),
     settle(() => api.metrics()),
+    settle(() => api.metrics.capabilities()),
+    settle(() => api.metrics.range({
+      promql: "increase(backai_cost_usd_total[1h])",
+      from: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      to: new Date().toISOString(),
+      step: "1h",
+    })),
+    settle(() => api.metrics.range({
+      promql: 'rate(container_cpu_usage_seconds_total{name=~"backai-.*"}[5m])',
+      from: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      to: new Date().toISOString(),
+      step: "5m",
+    })),
+    settle(() => api.metrics.query({ promql: 'container_memory_usage_bytes{name=~"backai-.*"}' })),
+    settle(() => api.metrics.range({
+      promql: 'changes(container_start_time_seconds{name=~"backai-.*"}[24h])',
+      from: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      to: new Date().toISOString(),
+      step: "1h",
+    })),
     settle(() => api.tools.adapters()),
     settle(() => api.tools.listNative()),
     settle(() => api.mcp.servers()),
@@ -681,6 +760,14 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
       metric: `${money(event.cost_usd)} · ${event.total_tokens.toLocaleString("en")} tok`,
       timestamp: shortTime(event.occurred_at),
     })) ?? costRows
+
+  const costSeriesRows = metricRangeRows(costMetricRange, "cost")
+  const containerMetricRows = [
+    ...metricRangeRows(containerCpuRange, "cpu"),
+    ...metricInstantRows(containerMemory, "memory"),
+    ...metricRangeRows(containerRestarts, "restart"),
+  ]
+  const costSparkline = costMetricRange?.series?.[0]?.values.map((value) => value.value)
 
   const jobRows: ConsoleRow[] =
     jobs?.jobs.map((job) => ({
@@ -1369,7 +1456,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
       {
         ...seededSnapshot.kpis[2],
         value: money(home?.cost_today_usd ?? cost?.period_total_usd),
-        sparkline: home?.cost_sparkline ?? seededSnapshot.kpis[2].sparkline,
+        sparkline: costSparkline?.length ? costSparkline : home?.cost_sparkline ?? seededSnapshot.kpis[2].sparkline,
       },
       {
         ...seededSnapshot.kpis[3],
@@ -1545,6 +1632,9 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
         : seededAdapters,
     logCapabilities: logCapabilities ?? seededSnapshot.logCapabilities,
     traceCapabilities: traceCapabilities ?? seededSnapshot.traceCapabilities,
+    metricsCapabilities: metricsCapabilities ?? seededSnapshot.metricsCapabilities,
+    costSeries: costSeriesRows.length ? costSeriesRows : seededSnapshot.costSeries,
+    containerMetrics: containerMetricRows.length ? containerMetricRows : seededSnapshot.containerMetrics,
     services: serviceRowsLive.length ? serviceRowsLive : seededSnapshot.services,
     brand: brandRows,
     features: featureRows,

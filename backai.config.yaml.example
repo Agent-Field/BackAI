@@ -44,7 +44,7 @@ features:
 
   metrics:
     enabled: false
-    backend: none
+    adapter: none
     container_metrics: false
 
   errors:

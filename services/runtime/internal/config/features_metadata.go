@@ -34,7 +34,7 @@ var featureRules = []FeatureRule{
 	{Feature: "search_index_stats", RequiresPGGrant: []string{"pg_read_all_stats"}},
 	{Feature: "logs.adapter", BackendOptions: []string{"ring", "loki", "remote"}},
 	{Feature: "traces.adapter", BackendOptions: []string{"empty", "tempo", "remote"}},
-	{Feature: "metrics.backend", BackendOptions: []string{"none", "prometheus", "remote"}},
+	{Feature: "metrics.adapter", BackendOptions: []string{"none", "prometheus", "remote"}},
 	{Feature: "errors.backend", BackendOptions: []string{"logfilter", "glitchtip", "remote"}},
 }
 
@@ -51,7 +51,7 @@ var presets = map[string]Features{
 		LLMGateway:            LLMGatewayFeature{VirtualKeys: false, SpendTracking: false},
 		Logs:                  LogsFeature{Enabled: false, Adapter: "ring"},
 		Traces:                TracesFeature{Enabled: false, Adapter: "empty"},
-		Metrics:               MetricsFeature{Enabled: false, Backend: "none", ContainerMetrics: false},
+		Metrics:               MetricsFeature{Enabled: false, Adapter: "none", ContainerMetrics: false},
 		Errors:                ErrorsFeature{Enabled: false, Backend: "logfilter"},
 	},
 }
@@ -60,7 +60,7 @@ func init() {
 	full := presets[PresetLean]
 	full.Logs = LogsFeature{Enabled: true, Adapter: "loki"}
 	full.Traces = TracesFeature{Enabled: true, Adapter: "tempo"}
-	full.Metrics = MetricsFeature{Enabled: true, Backend: "prometheus", ContainerMetrics: true}
+	full.Metrics = MetricsFeature{Enabled: true, Adapter: "prometheus", ContainerMetrics: true}
 	full.Errors = ErrorsFeature{Enabled: true, Backend: "glitchtip"}
 	presets[PresetFullObservability] = full
 

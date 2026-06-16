@@ -23,6 +23,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/Agent-Field/backai/services/runtime/internal/appmetrics"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -54,6 +55,7 @@ func NewRecorder(pool *pgxpool.Pool, log *slog.Logger) *Recorder {
 // /api/v1/llm/*. Failures are logged at Warn so operators still see
 // them; counters in observability/ will surface persistent drops.
 func (r *Recorder) Record(ctx context.Context, ev Event) error {
+	appmetrics.ObserveCostUSD(ev.TenantID, ev.Model, ev.Agent, ev.CostUSD)
 	if r == nil || r.pool == nil {
 		// No DB wired: silently drop. The dashboard renders zeros.
 		return nil

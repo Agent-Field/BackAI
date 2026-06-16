@@ -152,7 +152,7 @@ func TestGet_DecodesScopeAndInstrumentationSpans(t *testing.T) {
 		switch r.URL.Path {
 		case "/status/version":
 			_ = json.NewEncoder(w).Encode(map[string]string{"version": "2.4.0"})
-		case "/api/traces/abc":
+		case "/api/v2/traces/abc":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{
 				"traceID":"abc",
@@ -213,7 +213,7 @@ func TestGet_NotFoundMapsTraceNotFound(t *testing.T) {
 		switch r.URL.Path {
 		case "/status/version":
 			_ = json.NewEncoder(w).Encode(map[string]string{"version": "2.4.0"})
-		case "/api/traces/missing":
+		case "/api/v2/traces/missing", "/api/traces/missing":
 			http.NotFound(w, r)
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)

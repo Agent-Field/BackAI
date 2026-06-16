@@ -28,7 +28,7 @@ func TestFeatureConfigRejectsContainerMetricsWithoutMetrics(t *testing.T) {
 		Preset: PresetLean,
 		Features: RawFeatures{Metrics: &MetricsFeature{
 			Enabled:          false,
-			Backend:          "none",
+			Adapter:          "none",
 			ContainerMetrics: true,
 		}},
 	}
@@ -38,6 +38,22 @@ func TestFeatureConfigRejectsContainerMetricsWithoutMetrics(t *testing.T) {
 	}
 	if !containsIssue(issues, "metrics.container_metrics", "requires features.metrics.enabled") {
 		t.Fatalf("issues = %+v", issues)
+	}
+}
+
+func TestFeatureConfigAcceptsLegacyMetricsBackend(t *testing.T) {
+	cfg, _, err := ParseFeatureConfig([]byte(`
+preset: lean
+features:
+  metrics:
+    enabled: false
+    backend: prometheus
+`), nil)
+	if err != nil {
+		t.Fatalf("ParseFeatureConfig: %v", err)
+	}
+	if cfg.Features.Metrics.Adapter != "prometheus" {
+		t.Fatalf("metrics adapter=%q want prometheus", cfg.Features.Metrics.Adapter)
 	}
 }
 

@@ -41,6 +41,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/oauth"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability/logs"
+	"github.com/Agent-Field/backai/services/runtime/internal/observability/metrics"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability/traces"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
 	"github.com/Agent-Field/backai/services/runtime/internal/probe"
@@ -196,6 +197,9 @@ type Server struct {
 	// tracesStore is the active traces adapter slot. It defaults to the empty
 	// adapter and may be Tempo or remote when configured.
 	tracesStore traces.Store
+	// metricsStore is the active metrics adapter slot. It defaults to the none
+	// adapter and may be Prometheus or remote when configured.
+	metricsStore metrics.Store
 	// version is the runtime version label surfaced in
 	// /api/v1/metrics/summary. Defaults to "dev" when empty.
 	version string
@@ -358,6 +362,9 @@ type Deps struct {
 	// TracesStore is the active traces adapter. When nil, trace search serves
 	// an empty page and trace detail returns traces_no_backend.
 	TracesStore traces.Store
+	// MetricsStore is the active metrics adapter. When nil, admin metrics
+	// queries return metrics_no_backend.
+	MetricsStore metrics.Store
 	// Version is the runtime version string surfaced via
 	// /api/v1/metrics/summary. Defaults to "dev".
 	Version string
@@ -439,6 +446,7 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		logRing:         deps.LogRing,
 		logsStore:       deps.LogsStore,
 		tracesStore:     deps.TracesStore,
+		metricsStore:    deps.MetricsStore,
 		version:         deps.Version,
 	}
 	if s.rbac == nil {
@@ -802,6 +810,8 @@ func (s *Server) registerRoutes() {
 	// is available even without a DB.
 	s.registerMetricsRoutes()
 	s.registerMetricsOpenAPI()
+	s.registerAdminMetricsRoutes()
+	s.registerAdminMetricsOpenAPI()
 
 	// Logs (Phase 12.2). When no ring is wired the endpoint serves an
 	// empty array; otherwise returns the most-recent buffered lines.

@@ -28,6 +28,8 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	tracesdk "go.opentelemetry.io/otel/trace"
+
+	"github.com/Agent-Field/backai/services/runtime/internal/appmetrics"
 )
 
 // Config holds OTel + metrics settings.
@@ -78,6 +80,9 @@ func Setup(ctx context.Context, cfg Config) (*Telemetry, error) {
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
+	if err := appmetrics.Register(reg); err != nil {
+		return nil, fmt.Errorf("observability: app metrics: %w", err)
+	}
 
 	return &Telemetry{TracerProvider: tp, Registry: reg}, nil
 }

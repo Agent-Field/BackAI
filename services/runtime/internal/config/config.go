@@ -27,6 +27,7 @@ type Config struct {
 	Sandbox       SandboxConfig       `yaml:"sandbox"`
 	Logs          LogsConfig          `yaml:"logs"`
 	Traces        TracesConfig        `yaml:"traces"`
+	Metrics       MetricsConfig       `yaml:"metrics"`
 }
 
 // SandboxConfig holds sandbox-adapter settings. The Adapter field picks
@@ -78,6 +79,24 @@ type TracesTempoConfig struct {
 }
 
 type TracesRemoteConfig struct {
+	URL   string `yaml:"url"`
+	Token string `yaml:"token"`
+}
+
+// MetricsConfig selects the runtime metrics-store adapter. The none adapter is
+// the zero-config default; Prometheus and remote adapters activate only when
+// the operator sets AF_STACK_METRICS_ADAPTER and the corresponding URL.
+type MetricsConfig struct {
+	Adapter    string                  `yaml:"adapter"`
+	Prometheus MetricsPrometheusConfig `yaml:"prometheus"`
+	Remote     MetricsRemoteConfig     `yaml:"remote"`
+}
+
+type MetricsPrometheusConfig struct {
+	URL string `yaml:"url"`
+}
+
+type MetricsRemoteConfig struct {
 	URL   string `yaml:"url"`
 	Token string `yaml:"token"`
 }
@@ -192,6 +211,9 @@ func Default() Config {
 		},
 		Traces: TracesConfig{
 			Adapter: "empty",
+		},
+		Metrics: MetricsConfig{
+			Adapter: "none",
 		},
 	}
 }
@@ -349,6 +371,19 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("AF_STACK_TRACES_ADAPTER_TOKEN"); v != "" {
 		cfg.Traces.Remote.Token = v
 	}
+
+	if v := os.Getenv("AF_STACK_METRICS_ADAPTER"); v != "" {
+		cfg.Metrics.Adapter = strings.ToLower(v)
+	}
+	if v := os.Getenv("AF_STACK_METRICS_PROMETHEUS_URL"); v != "" {
+		cfg.Metrics.Prometheus.URL = v
+	}
+	if v := os.Getenv("AF_STACK_METRICS_ADAPTER_URL"); v != "" {
+		cfg.Metrics.Remote.URL = v
+	}
+	if v := os.Getenv("AF_STACK_METRICS_ADAPTER_TOKEN"); v != "" {
+		cfg.Metrics.Remote.Token = v
+	}
 }
 
 // validate returns an error if the config is in a non-runnable state.
@@ -394,6 +429,19 @@ func validate(cfg Config) error {
 		}
 	default:
 		return fmt.Errorf("traces.adapter must be empty|tempo|remote, got %q", cfg.Traces.Adapter)
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Metrics.Adapter)) {
+	case "", "none":
+	case "prometheus":
+		if strings.TrimSpace(cfg.Metrics.Prometheus.URL) == "" {
+			return fmt.Errorf("metrics.prometheus.url is required when metrics.adapter=prometheus (set AF_STACK_METRICS_PROMETHEUS_URL)")
+		}
+	case "remote":
+		if strings.TrimSpace(cfg.Metrics.Remote.URL) == "" {
+			return fmt.Errorf("metrics.remote.url is required when metrics.adapter=remote (set AF_STACK_METRICS_ADAPTER_URL)")
+		}
+	default:
+		return fmt.Errorf("metrics.adapter must be none|prometheus|remote, got %q", cfg.Metrics.Adapter)
 	}
 	return nil
 }

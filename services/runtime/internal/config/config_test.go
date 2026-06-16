@@ -181,3 +181,31 @@ func TestTracesAdapterRequiresURL(t *testing.T) {
 		t.Fatal("expected traces.adapter=remote without url to fail")
 	}
 }
+
+func TestMetricsEnvOverrides(t *testing.T) {
+	t.Setenv("AF_STACK_METRICS_ADAPTER", "PROMETHEUS")
+	t.Setenv("AF_STACK_METRICS_PROMETHEUS_URL", "http://prometheus:9090")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Metrics.Adapter != "prometheus" {
+		t.Fatalf("adapter=%q want prometheus", cfg.Metrics.Adapter)
+	}
+	if cfg.Metrics.Prometheus.URL != "http://prometheus:9090" {
+		t.Fatalf("prometheus config=%+v", cfg.Metrics.Prometheus)
+	}
+}
+
+func TestMetricsAdapterRequiresURL(t *testing.T) {
+	cfg := Default()
+	cfg.Metrics.Adapter = "prometheus"
+	if err := validate(cfg); err == nil {
+		t.Fatal("expected metrics.adapter=prometheus without url to fail")
+	}
+	cfg = Default()
+	cfg.Metrics.Adapter = "remote"
+	if err := validate(cfg); err == nil {
+		t.Fatal("expected metrics.adapter=remote without url to fail")
+	}
+}

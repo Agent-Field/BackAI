@@ -1760,6 +1760,40 @@ export const MetricsSummarySchema = z.object({
 })
 export type MetricsSummary = z.infer<typeof MetricsSummarySchema>
 
+export const MetricsInstantSampleSchema = z.object({
+  metric: z.record(z.string(), z.string()),
+  value: z.number(),
+  ts: z.string(),
+})
+
+export const MetricsRangeSampleSchema = z.object({
+  metric: z.record(z.string(), z.string()),
+  values: z.array(z.object({ ts: z.string(), value: z.number() })),
+})
+
+export const MetricsInstantResponseSchema = z.object({
+  samples: z.array(MetricsInstantSampleSchema),
+  total: z.number().optional(),
+})
+
+export const MetricsRangeResponseSchema = z.object({
+  series: z.array(MetricsRangeSampleSchema),
+  total: z.number().optional(),
+})
+
+export const MetricsCapabilitiesSchema = z.object({
+  supports_instant_query: z.boolean().default(false),
+  supports_range_query: z.boolean().default(false),
+  supports_container_metrics: z.boolean().default(false),
+  native_query_lang: z.string().default(""),
+  retention_hours: z.number().default(0),
+  max_series_per_query: z.number().default(0),
+})
+
+export type MetricsInstantResponse = z.infer<typeof MetricsInstantResponseSchema>
+export type MetricsRangeResponse = z.infer<typeof MetricsRangeResponseSchema>
+export type MetricsCapabilities = z.infer<typeof MetricsCapabilitiesSchema>
+
 // ─── Plugin manifest (Phase 12.3) ────────────────────────────────────────
 //
 // Dashboard plugins are TS files dropped into apps/dashboard/plugins/.
@@ -2630,9 +2664,28 @@ export const api = {
       ),
   },
 
-  // ─── Metrics (Phase 12.2) ───
-  metrics: () =>
-    request("/api/v1/metrics/summary", undefined, MetricsSummarySchema),
+  // ─── Metrics (Phase 12.2 + Block 5 adapter) ───
+  metrics: Object.assign(
+    () => request("/api/v1/metrics/summary", undefined, MetricsSummarySchema),
+    {
+      summary: () => request("/api/v1/metrics/summary", undefined, MetricsSummarySchema),
+      capabilities: () => request("/api/v1/admin/metrics/capabilities", undefined, MetricsCapabilitiesSchema),
+      query: (params: { promql: string; at?: string }) => {
+        const qs = new URLSearchParams({ promql: params.promql })
+        if (params.at) qs.set("at", params.at)
+        return request(`/api/v1/admin/metrics/query?${qs}`, undefined, MetricsInstantResponseSchema)
+      },
+      range: (params: { promql: string; from: string; to: string; step?: string }) => {
+        const qs = new URLSearchParams({
+          promql: params.promql,
+          from: params.from,
+          to: params.to,
+        })
+        if (params.step) qs.set("step", params.step)
+        return request(`/api/v1/admin/metrics/range?${qs}`, undefined, MetricsRangeResponseSchema)
+      },
+    },
+  ),
 
   // ─── Plugins (Phase 12.3) ───
   plugins: () => request("/api/v1/plugins", undefined, PluginListSchema),

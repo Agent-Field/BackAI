@@ -107,8 +107,11 @@ type TracesRemoteFeature struct {
 }
 
 type MetricsFeature struct {
-	Enabled          bool   `yaml:"enabled" json:"enabled"`
-	Backend          string `yaml:"backend" json:"backend"`
+	Enabled bool   `yaml:"enabled" json:"enabled"`
+	Adapter string `yaml:"adapter" json:"adapter"`
+	// Backend is accepted for Block 2 config-file compatibility. Block 5
+	// standardises this slot on adapter to match the runtime env convention.
+	Backend          string `yaml:"backend,omitempty" json:"-"`
 	ContainerMetrics bool   `yaml:"container_metrics" json:"container_metrics"`
 }
 
@@ -208,6 +211,9 @@ func mergeFeatureOverrides(base Features, raw RawFeatures) Features {
 		base.Traces = *raw.Traces
 	}
 	if raw.Metrics != nil {
+		if raw.Metrics.Adapter == "" && raw.Metrics.Backend != "" {
+			raw.Metrics.Adapter = raw.Metrics.Backend
+		}
 		base.Metrics = *raw.Metrics
 	}
 	if raw.Errors != nil {

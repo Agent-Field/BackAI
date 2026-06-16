@@ -125,7 +125,10 @@ func featureStringValue(f Features, name string) string {
 			return f.Traces.Adapter
 		}
 		return f.Traces.Backend
-	case "metrics.backend":
+	case "metrics.adapter":
+		if f.Metrics.Adapter != "" {
+			return f.Metrics.Adapter
+		}
 		return f.Metrics.Backend
 	case "errors.backend":
 		return f.Errors.Backend

@@ -173,6 +173,14 @@ function tracesAdapterLabel(snapshot: OperatorSnapshot) {
   return "empty"
 }
 
+function metricsAdapterLabel(snapshot: OperatorSnapshot) {
+  const registryRow = snapshot.adapters.find((row) => row.slot.toLowerCase() === "metrics")
+  if (registryRow?.adapter) return registryRow.adapter
+  const caps = snapshot.metricsCapabilities
+  if (caps.native_query_lang === "promql") return "Prometheus"
+  return "none"
+}
+
 const definitions: Record<string, PageDefinition> = {
   "/": {
     primaryAction: "Open command center",
@@ -222,6 +230,7 @@ const definitions: Record<string, PageDefinition> = {
     tableDescription: "Cost events and derived spend views grouped by the selected control.",
     secondaryTitle: "Budget and cache",
     secondary: (snapshot) => [
+      card("Spend time series", "Metrics-backed spend movement from Prometheus when configured.", selectedRows(snapshot.costSeries, 6)),
       card("Budget pressure", "Caps remain visible while the spend ledger updates.", snapshot.budgets.map((budget) => ({
         label: budget.tenant,
         value: `${budget.used}%`,
@@ -382,6 +391,7 @@ const definitions: Record<string, PageDefinition> = {
     secondaryTitle: "Health caveats",
     secondary: (snapshot) => [
       card("Runtime metrics", "HTTP, heap, goroutine, and route rollups.", selectedRows(snapshot.observability, 5)),
+      card("Containers", "CPU, memory, and restart signals from the active metrics adapter.", selectedRows(snapshot.containerMetrics, 6)),
       card("Database health", "Postgres stats include connections, cache ratio, slow queries, table size, vacuum, and locks.", selectedRows(snapshot.dbHealth, 5)),
       card("Provider health", "LLM provider availability comes from the runtime poller.", selectedRows(snapshot.providerHealth, 5)),
     ],
@@ -823,7 +833,13 @@ export function buildPageModel(pathname: string, snapshot: OperatorSnapshot): Pa
       : path === "/operate/traces"
         ? undefined
         : navItem.apiGap,
-    adapter: path === "/operate/logs" ? logsAdapterLabel(snapshot) : path === "/operate/traces" ? tracesAdapterLabel(snapshot) : navItem.adapter,
+    adapter: path === "/operate/logs"
+      ? logsAdapterLabel(snapshot)
+      : path === "/operate/traces"
+        ? tracesAdapterLabel(snapshot)
+        : path === "/operate/cost" || path === "/operate/health"
+          ? metricsAdapterLabel(snapshot)
+          : navItem.adapter,
   }
 
   return {

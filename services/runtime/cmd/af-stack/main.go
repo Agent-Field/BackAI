@@ -60,6 +60,8 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability/logs"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability/logs/logselect"
+	"github.com/Agent-Field/backai/services/runtime/internal/observability/metrics"
+	"github.com/Agent-Field/backai/services/runtime/internal/observability/metrics/metricselect"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability/traces"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability/traces/traceselect"
 	"github.com/Agent-Field/backai/services/runtime/internal/probe"
@@ -162,6 +164,7 @@ func buildAdapterRegistry(
 	billingSvc *billing.Service,
 	logsStore logs.Store,
 	tracesStore traces.Store,
+	metricsStore metrics.Store,
 ) *adapterregistry.Registry {
 	r := adapterregistry.New()
 
@@ -300,7 +303,7 @@ func buildAdapterRegistry(
 		Tier:             adapterregistry.Tier1,
 		Kind:             logsKind,
 		Name:             logselect.Name(cfg, logsStore),
-		AvailableBuiltin: []string{"ring", "loki"},
+		AvailableBuiltin: []string{"ring", "loki", "remote"},
 		SwapMethod:       "env_var",
 		SwapEnv:          "AF_STACK_LOGS_ADAPTER",
 		AdminUI:          cfg.Logs.Loki.URL,
@@ -331,12 +334,45 @@ func buildAdapterRegistry(
 		Tier:             adapterregistry.Tier1,
 		Kind:             tracesKind,
 		Name:             traceselect.Name(cfg, tracesStore),
-		AvailableBuiltin: []string{"empty", "tempo"},
+		AvailableBuiltin: []string{"empty", "tempo", "remote"},
 		SwapMethod:       "env_var",
 		SwapEnv:          "AF_STACK_TRACES_ADAPTER",
 		AdminUI:          cfg.Traces.Tempo.URL,
 		Capabilities:     caps(tracesCaps),
 		Probe:            staticStatus(tracesStatus),
+	})
+
+	metricsAdapter := metricselect.Adapter(cfg)
+	metricsKind := adapterregistry.KindBuiltin
+	if metricsAdapter == "remote" {
+		metricsKind = adapterregistry.KindRemote
+	}
+	metricsCaps := map[string]any{"contract_pending": true}
+	metricsStatus := adapterregistry.StatusUnhealthy
+	if metricsStore != nil {
+		metricsStatus = adapterregistry.StatusHealthy
+		c := metricsStore.Capabilities()
+		metricsCaps = map[string]any{
+			"supports_instant_query":     c.SupportsInstantQuery,
+			"supports_range_query":       c.SupportsRangeQuery,
+			"supports_container":         c.SupportsContainer,
+			"supports_container_metrics": c.SupportsContainer,
+			"native_query_lang":          c.NativeQueryLang,
+			"retention_hours":            c.RetentionHours,
+			"max_series_per_query":       c.MaxSeriesPerQuery,
+		}
+	}
+	r.Register(adapterregistry.Slot{
+		ID:               "metrics",
+		Tier:             adapterregistry.Tier1,
+		Kind:             metricsKind,
+		Name:             metricselect.Name(cfg, metricsStore),
+		AvailableBuiltin: []string{"none", "prometheus", "remote"},
+		SwapMethod:       "env_var",
+		SwapEnv:          "AF_STACK_METRICS_ADAPTER",
+		AdminUI:          cfg.Metrics.Prometheus.URL,
+		Capabilities:     caps(metricsCaps),
+		Probe:            staticStatus(metricsStatus),
 	})
 
 	notificationName := "none"
@@ -613,6 +649,16 @@ func main() {
 	log.Info("traces adapter ready",
 		"adapter", traceselect.Adapter(cfg),
 		"name", traceselect.Name(cfg, tracesStore),
+	)
+
+	metricsStore, err := metricselect.Select(ctx, cfg)
+	if err != nil {
+		log.Error("metrics adapter init failed", "adapter", metricselect.Adapter(cfg), "error", err)
+		os.Exit(1)
+	}
+	log.Info("metrics adapter ready",
+		"adapter", metricselect.Adapter(cfg),
+		"name", metricselect.Name(cfg, metricsStore),
 	)
 
 	// Observability: set up OTel + Prometheus. Failures are non-fatal —
@@ -1401,6 +1447,7 @@ func main() {
 		billingSvc,
 		logsStore,
 		tracesStore,
+		metricsStore,
 	)
 	probeReg.WithAdapterRegistry(adapterRegistry)
 
@@ -1447,6 +1494,7 @@ func main() {
 		LogRing:         logRing,
 		LogsStore:       logsStore,
 		TracesStore:     tracesStore,
+		MetricsStore:    metricsStore,
 		Version:         version,
 	})
 

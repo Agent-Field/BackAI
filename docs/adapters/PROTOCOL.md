@@ -328,6 +328,7 @@ This protocol is the v1 contract. The slots that ship with it:
 - **Auth** (`docs/adapters/protocols/auth-v1.md`)
 - **Logs** (`docs/adapters/protocols/logs-v1.md`)
 - **Traces** (`docs/adapters/protocols/traces-v1.md`)
+- **Metrics** (`docs/adapters/protocols/metrics-v1.md`)
 
 Job queue, outbound webhooks, and the reasoning layer are not covered
 by this protocol in v1 — they remain hardcoded to their respective
