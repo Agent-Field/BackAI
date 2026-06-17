@@ -2,8 +2,7 @@
 
 "use client"
 
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { FilterChip, FilterChipGroup } from "@/components/ui/filter-chip"
 import {
   countsByKind,
   countsBySeverity,
@@ -15,9 +14,14 @@ import type {
   InboxSeverity,
 } from "@/lib/inbox/types"
 
-// Two chip rows — severity and kind — both URL-persistent. Selecting "all"
-// drops the param so a clean URL means default state. The counts live on
-// the chip so the operator can see the distribution at a glance.
+// Two chip rows — severity and kind — both URL-persistent through the
+// parent shell. Selecting "all" drops the param so a clean URL means
+// default state. The counts live on each chip so the operator can see
+// the distribution at a glance.
+//
+// Visual semantics come from the FilterChip primitive
+// (components/ui/filter-chip.tsx) — this file maps inbox-domain options
+// onto it without re-styling.
 
 interface FilterChipsProps {
   filters: InboxFilters
@@ -47,31 +51,31 @@ export function FilterChips({ filters, items, onChange }: FilterChipsProps) {
       aria-label="Inbox filters"
       className="flex flex-wrap items-center gap-stack"
     >
-      <ChipGroup label="Severity">
+      <FilterChipGroup label="Severity">
         {SEVERITY_OPTIONS.map((opt) => (
-          <Chip
+          <FilterChip
             key={opt.value}
             label={opt.label}
-            active={filters.severity === opt.value}
             count={countForSeverity(opt.value, severityCounts, items.length)}
+            active={filters.severity === opt.value}
             onSelect={() => onChange({ severity: opt.value })}
           />
         ))}
-      </ChipGroup>
+      </FilterChipGroup>
       <span aria-hidden className="text-meta text-muted-foreground">
         ·
       </span>
-      <ChipGroup label="Kind">
+      <FilterChipGroup label="Kind">
         {KIND_OPTIONS.map((opt) => (
-          <Chip
+          <FilterChip
             key={opt.value}
             label={opt.label}
-            active={filters.kind === opt.value}
             count={countForKind(opt.value, kindCounts, items.length)}
+            active={filters.kind === opt.value}
             onSelect={() => onChange({ kind: opt.value })}
           />
         ))}
-      </ChipGroup>
+      </FilterChipGroup>
     </div>
   )
 }
@@ -90,51 +94,4 @@ function countForKind(
   total: number,
 ): number {
   return v === "all" ? total : counts[v]
-}
-
-function ChipGroup({
-  label,
-  children,
-}: {
-  label: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="flex items-center gap-inline">
-      <span className="text-eyebrow uppercase tracking-wide text-muted-foreground">
-        {label}
-      </span>
-      <div className="flex items-center gap-inline">{children}</div>
-    </div>
-  )
-}
-
-function Chip({
-  label,
-  count,
-  active,
-  onSelect,
-}: {
-  label: string
-  count: number
-  active: boolean
-  onSelect: () => void
-}) {
-  return (
-    <Button
-      type="button"
-      size="sm"
-      variant={active ? "default" : "outline"}
-      onClick={onSelect}
-      className="h-7 gap-inline text-meta"
-    >
-      <span>{label}</span>
-      <Badge
-        variant="secondary"
-        className="h-4 px-1.5 font-mono text-meta tabular-nums"
-      >
-        {count}
-      </Badge>
-    </Button>
-  )
 }
