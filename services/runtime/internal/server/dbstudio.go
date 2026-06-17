@@ -62,6 +62,8 @@ func (s *Server) registerDBStudioRoutes() {
 	s.mux.HandleFunc("GET /api/v1/db/tables/{schema}/{name}", s.handleGetDBTable)
 	s.mux.HandleFunc("GET /api/v1/db/rows", s.handleDBRows)
 	s.mux.HandleFunc("POST /api/v1/db/sql", s.handleDBRunSQL)
+	s.mux.HandleFunc("GET /api/v1/db/sql/history", s.handleSQLHistory)
+	s.mux.HandleFunc("POST /api/v1/db/sql/history", s.handleSQLHistoryRecord)
 }
 
 // dbStudioUnavailable returns true (and writes a 503) if the Studio
@@ -198,6 +200,9 @@ func (s *Server) handleDBRunSQL(w http.ResponseWriter, r *http.Request) {
 		writeDBStudioError(w, s, err, "sql exec failed")
 		return
 	}
+	if err := s.recordSQLHistory(r.Context(), in.Statement); err != nil {
+		s.log.Warn("dbstudio: sql history record failed", "error", err)
+	}
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -264,6 +269,14 @@ func (s *Server) registerDBStudioOpenAPI() {
 	})
 	b.Register("POST", "/api/v1/db/sql", openapi.RouteMeta{
 		Summary: "Run a SQL statement (read-only by default)",
+		Tags:    []string{"db"},
+	})
+	b.Register("GET", "/api/v1/db/sql/history", openapi.RouteMeta{
+		Summary: "List the current operator's SQL history",
+		Tags:    []string{"db"},
+	})
+	b.Register("POST", "/api/v1/db/sql/history", openapi.RouteMeta{
+		Summary: "Record a SQL history entry",
 		Tags:    []string{"db"},
 	})
 }

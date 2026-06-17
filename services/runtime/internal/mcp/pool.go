@@ -29,6 +29,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/Agent-Field/backai/services/runtime/internal/toolstats"
 )
 
 // AdapterFactory builds the per-transport adapter for one row. Injected
@@ -57,6 +59,7 @@ type Pool struct {
 	adapters map[string]*entry // by server name
 	tools    map[string][]Tool // by server name; refreshed on connect + tick
 	servers  map[string]Server // cached row snapshot by name
+	stats    *toolstats.Recorder
 }
 
 type entry struct {
@@ -76,6 +79,8 @@ type PoolConfig struct {
 	// DefaultFactory at boot; the mcp package itself can't reference
 	// its own adapter sub-packages without an import cycle.
 	Factory AdapterFactory
+	// Stats records best-effort call telemetry. Nil disables recording.
+	Stats *toolstats.Recorder
 }
 
 // NewPool constructs a Pool. store must not be nil (use a Store backed
@@ -100,6 +105,7 @@ func NewPool(store *Store, vault SecretReader, cfg PoolConfig) *Pool {
 		adapters:        map[string]*entry{},
 		tools:           map[string][]Tool{},
 		servers:         map[string]Server{},
+		stats:           cfg.Stats,
 	}
 }
 
@@ -176,7 +182,17 @@ func (p *Pool) Tools(_ context.Context, server, tenantID string) ([]Tool, error)
 
 // Call proxies a tool invocation to the named server. The call inherits
 // ctx's deadline; when ctx has none, DefaultCallTimeoutSec applies.
-func (p *Pool) Call(ctx context.Context, server, tool string, args map[string]any, tenantID string) (CallResult, error) {
+func (p *Pool) Call(ctx context.Context, server, tool string, args map[string]any, tenantID string) (res CallResult, err error) {
+	start := time.Now()
+	defer func() {
+		if p != nil && p.stats != nil {
+			name := server
+			if tool != "" {
+				name = server + "." + tool
+			}
+			p.stats.RecordResult(ctx, tenantID, name, toolstats.TransportMCP, start, err)
+		}
+	}()
 	if p == nil {
 		return CallResult{}, ErrNotConfigured
 	}
@@ -202,8 +218,7 @@ func (p *Pool) Call(ctx context.Context, server, tool string, args map[string]an
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(DefaultCallTimeoutSec)*time.Second)
 		defer cancel()
 	}
-	start := time.Now()
-	res, err := e.adapter.Call(ctx, tool, args)
+	res, err = e.adapter.Call(ctx, tool, args)
 	res.DurationMS = time.Since(start).Milliseconds()
 	return res, err
 }

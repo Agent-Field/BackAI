@@ -611,6 +611,14 @@ func (s *Server) registerRoutes() {
 	s.openapi.Register("GET", "/api/v1/reasoners/analytics", openapi.RouteMeta{
 		Summary: "Reasoner cost, latency, and error analytics", Tags: []string{"dashboard"},
 	})
+	s.mux.HandleFunc("GET /api/v1/tools/usage", s.handleToolsUsage)
+	s.openapi.Register("GET", "/api/v1/tools/usage", openapi.RouteMeta{
+		Summary: "Native and MCP tool usage analytics", Tags: []string{"dashboard"},
+	})
+	s.mux.HandleFunc("GET /api/v1/oauth/refresh-history", s.handleOAuthRefreshHistory)
+	s.openapi.Register("GET", "/api/v1/oauth/refresh-history", openapi.RouteMeta{
+		Summary: "OAuth refresh attempt history", Tags: []string{"oauth"},
+	})
 	s.mux.HandleFunc("GET /api/v1/runs/{id}/events", s.handleRunEvents)
 	s.openapi.Register("GET", "/api/v1/runs/{id}/events", openapi.RouteMeta{
 		Summary: "Subscribe to AgentField run events", Tags: []string{"agents"},

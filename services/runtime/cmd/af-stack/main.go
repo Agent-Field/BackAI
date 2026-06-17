@@ -84,6 +84,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/tenancy"
 	"github.com/Agent-Field/backai/services/runtime/internal/tooladapters"
 	"github.com/Agent-Field/backai/services/runtime/internal/tools"
+	"github.com/Agent-Field/backai/services/runtime/internal/toolstats"
 	"github.com/Agent-Field/backai/services/runtime/internal/webhooks"
 )
 
@@ -1256,6 +1257,11 @@ func main() {
 		log.Info("tool adapters not configured (no database); /api/v1/tools/* will return empty/503")
 	}
 
+	var toolStats *toolstats.Recorder
+	if database != nil && database.Pool != nil {
+		toolStats = toolstats.NewRecorder(database.Pool, log)
+	}
+
 	// Strict-interface native tool registry (#16 — internal/tools/).
 	// Sits alongside the legacy tooladapters service. The factory reads
 	// env (AF_STACK_TOOL_BROWSER, AF_STACK_TOOL_SEARCH, BROWSER_USE_URL,
@@ -1275,6 +1281,7 @@ func main() {
 		if regErr != nil {
 			log.Error("native tools: registry build failed", "error", regErr)
 		} else {
+			reg.SetStatsRecorder(toolStats)
 			toolsRegistry = reg
 			log.Info("native tools ready", "count", len(reg.All()))
 		}
@@ -1463,6 +1470,7 @@ func main() {
 		mcpPool = mcp.NewPool(mcpStore, secretReader, mcp.PoolConfig{
 			Logger:  log,
 			Factory: newMCPAdapterFactory(),
+			Stats:   toolStats,
 		})
 		reconCtx, reconCancel := context.WithTimeout(ctx, 30*time.Second)
 		if err := mcpPool.Reconcile(reconCtx); err != nil {
