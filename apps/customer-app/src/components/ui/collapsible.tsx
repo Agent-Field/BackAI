@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: Apache-2.0
-
 "use client"
 
 import { Collapsible as CollapsiblePrimitive } from "@base-ui/react/collapsible"
