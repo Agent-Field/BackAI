@@ -19,6 +19,7 @@ func TestRegisterAndObserve(t *testing.T) {
 	ObserveLLMRequest("tenant-1", "openrouter/gpt-4o-mini", 200, 0.12)
 	ObserveLLMRequest("tenant-1", "openrouter/gpt-4o-mini", 502, 0)
 	ObserveSandboxRun("docker", "done")
+	ObserveRun("sample.echo", "succeeded")
 
 	families, err := reg.Gather()
 	if err != nil {
@@ -44,6 +45,7 @@ func TestRegisterAndObserve(t *testing.T) {
 		"backai_llm_requests_total",
 		"backai_llm_ttft_seconds",
 		"backai_sandbox_runs_total",
+		"backai_runs_total",
 	} {
 		if !seen[name] {
 			t.Fatalf("missing metric family %s in %+v", name, seen)

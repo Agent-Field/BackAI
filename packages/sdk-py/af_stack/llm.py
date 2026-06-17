@@ -89,6 +89,7 @@ async def chat(
     messages: list[dict[str, Any]],
     *,
     stream: bool = False,
+    reasoner: str | None = None,
     **kwargs: Any,
 ) -> Any:
     """Call an LLM via the OpenAI-compatible chat completions endpoint.
@@ -114,18 +115,26 @@ async def chat(
         if v is not None:
             payload[k] = v
 
+    headers = {"X-AF-Reasoner": reasoner} if reasoner else None
+
     if stream:
         payload["stream"] = True
-        return _stream_chat(payload)
+        return _stream_chat(payload, headers=headers)
 
-    body = await _http.request_json("POST", "/llm/chat/completions", json=payload)
+    body = await _http.request_json(
+        "POST", "/llm/chat/completions", json=payload, headers=headers
+    )
     return body or {}
 
 
-async def _stream_chat(payload: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
+async def _stream_chat(
+    payload: dict[str, Any],
+    *,
+    headers: dict[str, str] | None = None,
+) -> AsyncIterator[dict[str, Any]]:
     """Internal: iterate streaming chat deltas as JSON dicts."""
     async for event in _http.stream_sse(
-        "POST", "/llm/chat/completions", json=payload
+        "POST", "/llm/chat/completions", json=payload, headers=headers
     ):
         data = event.get("data")
         # OpenAI streams emit a terminal "[DONE]" sentinel — surface it
@@ -140,6 +149,8 @@ async def _stream_chat(payload: dict[str, Any]) -> AsyncIterator[dict[str, Any]]
 async def embed(
     model: str,
     input: str | list[str],  # noqa: A002 — mirrors OpenAI's ``input`` parameter
+    *,
+    reasoner: str | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """Compute embeddings via the OpenAI-compatible embeddings endpoint.
@@ -155,7 +166,10 @@ async def embed(
     for k, v in kwargs.items():
         if v is not None:
             payload[k] = v
-    body = await _http.request_json("POST", "/llm/embeddings", json=payload)
+    headers = {"X-AF-Reasoner": reasoner} if reasoner else None
+    body = await _http.request_json(
+        "POST", "/llm/embeddings", json=payload, headers=headers
+    )
     return body or {}
 
 

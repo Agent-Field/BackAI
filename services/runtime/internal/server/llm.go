@@ -110,6 +110,8 @@ type LLMPreCallPayload struct {
 	Model            string  `json:"model"`
 	Provider         string  `json:"provider"`
 	RequestID        string  `json:"request_id"`
+	Agent            string  `json:"agent,omitempty"`
+	Reasoner         string  `json:"reasoner,omitempty"`
 	Operation        string  `json:"operation"` // "chat" | "embeddings" | "images" | "audio_speech" | "audio_transcriptions" | "audio_translations" | "images_edits" | "images_variations"
 	Stream           bool    `json:"stream"`
 	EstimatedCostUSD float64 `json:"estimated_cost_usd"`
@@ -142,6 +144,8 @@ type LLMPostCallPayload struct {
 	Model            string  `json:"model"`
 	Provider         string  `json:"provider"`
 	RequestID        string  `json:"request_id"`
+	Agent            string  `json:"agent,omitempty"`
+	Reasoner         string  `json:"reasoner,omitempty"`
 	Operation        string  `json:"operation"`
 	Stream           bool    `json:"stream"`
 	PromptTokens     int     `json:"prompt_tokens"`
@@ -258,6 +262,58 @@ func llmRequestID(r *http.Request) string {
 		return v
 	}
 	return "req-" + time.Now().UTC().Format("20060102T150405.000000000")
+}
+
+func llmCallerLabels(r *http.Request) (agent string, reasoner string) {
+	if r == nil {
+		return "", ""
+	}
+	raw := strings.TrimSpace(r.Header.Get("X-AF-Reasoner"))
+	if raw == "" {
+		return "", ""
+	}
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == '.' || r == '/' || r == ':'
+	})
+	clean := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if v := sanitizeLLMLabel(part); v != "" {
+			clean = append(clean, v)
+		}
+	}
+	if len(clean) == 0 {
+		return "", ""
+	}
+	reasoner = clean[len(clean)-1]
+	if len(clean) > 1 {
+		agent = sanitizeLLMLabel(strings.Join(clean[:len(clean)-1], "."))
+	}
+	return agent, reasoner
+}
+
+func sanitizeLLMLabel(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(v))
+	for _, r := range v {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '_' || r == '-' || r == '.':
+			b.WriteRune(r)
+		}
+		if b.Len() >= 160 {
+			break
+		}
+	}
+	return strings.Trim(b.String(), ".-_")
 }
 
 // writeOpenAIError emits an OpenAI-style error envelope, which the
@@ -417,10 +473,11 @@ func (s *Server) handleLLMChatCompletions(w http.ResponseWriter, r *http.Request
 
 	tenantID := tenantctx.TenantID(r.Context())
 	apiKeyID := tenantctx.APIKeyID(r.Context())
+	agent, reasoner := llmCallerLabels(r)
 	if s.guardrails != nil {
 		next, changed, err := s.guardrails.ProcessChatRequest(r.Context(), req)
 		if err != nil {
-			s.writeGuardrailRejection(w, err, requestID, start, tenantID, apiKeyID, req.Model, "chat", req.Stream)
+			s.writeGuardrailRejection(w, err, requestID, start, tenantID, apiKeyID, agent, reasoner, req.Model, "chat", req.Stream)
 			return
 		}
 		if changed {
@@ -440,13 +497,15 @@ func (s *Server) handleLLMChatCompletions(w http.ResponseWriter, r *http.Request
 		Model:            req.Model,
 		Provider:         s.llmGateway.ProviderName(),
 		RequestID:        requestID,
+		Agent:            agent,
+		Reasoner:         reasoner,
 		Operation:        "chat",
 		Stream:           req.Stream,
 		EstimatedCostUSD: estCost,
 		PromptCharsHint:  promptChars,
 	}
 	if err := s.fireLLMPreCall(r.Context(), pre); err != nil {
-		s.writeHookRejection(w, err, requestID, start, tenantID, apiKeyID, req.Model, "chat", req.Stream)
+		s.writeHookRejection(w, err, pre, start)
 		return
 	}
 
@@ -627,10 +686,11 @@ func (s *Server) handleLLMEmbeddings(w http.ResponseWriter, r *http.Request) {
 
 	tenantID := tenantctx.TenantID(r.Context())
 	apiKeyID := tenantctx.APIKeyID(r.Context())
+	agent, reasoner := llmCallerLabels(r)
 	if s.guardrails != nil {
 		next, changed, err := s.guardrails.ProcessEmbeddingsRequest(r.Context(), req)
 		if err != nil {
-			s.writeGuardrailRejection(w, err, requestID, start, tenantID, apiKeyID, req.Model, "embeddings", false)
+			s.writeGuardrailRejection(w, err, requestID, start, tenantID, apiKeyID, agent, reasoner, req.Model, "embeddings", false)
 			return
 		}
 		if changed {
@@ -643,10 +703,12 @@ func (s *Server) handleLLMEmbeddings(w http.ResponseWriter, r *http.Request) {
 		Model:     req.Model,
 		Provider:  s.llmGateway.ProviderName(),
 		RequestID: requestID,
+		Agent:     agent,
+		Reasoner:  reasoner,
 		Operation: "embeddings",
 	}
 	if err := s.fireLLMPreCall(r.Context(), pre); err != nil {
-		s.writeHookRejection(w, err, requestID, start, tenantID, apiKeyID, req.Model, "embeddings", false)
+		s.writeHookRejection(w, err, pre, start)
 		return
 	}
 
@@ -692,10 +754,11 @@ func (s *Server) handleLLMImages(w http.ResponseWriter, r *http.Request) {
 
 	tenantID := tenantctx.TenantID(r.Context())
 	apiKeyID := tenantctx.APIKeyID(r.Context())
+	agent, reasoner := llmCallerLabels(r)
 	if s.guardrails != nil {
 		next, changed, err := s.guardrails.ProcessImagesRequest(r.Context(), req)
 		if err != nil {
-			s.writeGuardrailRejection(w, err, requestID, start, tenantID, apiKeyID, req.Model, "images", false)
+			s.writeGuardrailRejection(w, err, requestID, start, tenantID, apiKeyID, agent, reasoner, req.Model, "images", false)
 			return
 		}
 		if changed {
@@ -708,11 +771,13 @@ func (s *Server) handleLLMImages(w http.ResponseWriter, r *http.Request) {
 		Model:     req.Model,
 		Provider:  s.llmGateway.ProviderName(),
 		RequestID: requestID,
+		Agent:     agent,
+		Reasoner:  reasoner,
 		Operation: "images",
 		Modality:  ModalityImage,
 	}
 	if err := s.fireLLMPreCall(r.Context(), pre); err != nil {
-		s.writeHookRejection(w, err, requestID, start, tenantID, apiKeyID, req.Model, "images", false)
+		s.writeHookRejection(w, err, pre, start)
 		return
 	}
 
@@ -816,17 +881,20 @@ func (s *Server) handleLLMImageMultipart(w http.ResponseWriter, r *http.Request,
 
 	tenantID := tenantctx.TenantID(r.Context())
 	apiKeyID := tenantctx.APIKeyID(r.Context())
+	agent, reasoner := llmCallerLabels(r)
 	pre := LLMPreCallPayload{
 		TenantID:  tenantID,
 		APIKeyID:  apiKeyID,
 		Model:     meta.Model,
 		Provider:  s.llmGateway.ProviderName(),
 		RequestID: requestID,
+		Agent:     agent,
+		Reasoner:  reasoner,
 		Operation: operation,
 		Modality:  ModalityImage,
 	}
 	if err := s.fireLLMPreCall(r.Context(), pre); err != nil {
-		s.writeHookRejection(w, err, requestID, start, tenantID, apiKeyID, meta.Model, operation, false)
+		s.writeHookRejection(w, err, pre, start)
 		return
 	}
 
@@ -907,10 +975,11 @@ func (s *Server) handleLLMAudioSpeech(w http.ResponseWriter, r *http.Request) {
 
 	tenantID := tenantctx.TenantID(r.Context())
 	apiKeyID := tenantctx.APIKeyID(r.Context())
+	agent, reasoner := llmCallerLabels(r)
 	if s.guardrails != nil {
 		next, changed, err := s.guardrails.ProcessStringMap(r.Context(), raw, "input", "user")
 		if err != nil {
-			s.writeGuardrailRejection(w, err, requestID, start, tenantID, apiKeyID, model, "audio_speech", false)
+			s.writeGuardrailRejection(w, err, requestID, start, tenantID, apiKeyID, agent, reasoner, model, "audio_speech", false)
 			return
 		}
 		if changed {
@@ -927,11 +996,13 @@ func (s *Server) handleLLMAudioSpeech(w http.ResponseWriter, r *http.Request) {
 		Model:     model,
 		Provider:  s.llmGateway.ProviderName(),
 		RequestID: requestID,
+		Agent:     agent,
+		Reasoner:  reasoner,
 		Operation: "audio_speech",
 		Modality:  ModalityAudioSpeech,
 	}
 	if err := s.fireLLMPreCall(r.Context(), pre); err != nil {
-		s.writeHookRejection(w, err, requestID, start, tenantID, apiKeyID, model, "audio_speech", false)
+		s.writeHookRejection(w, err, pre, start)
 		return
 	}
 
@@ -1018,17 +1089,20 @@ func (s *Server) handleLLMTranscribe(w http.ResponseWriter, r *http.Request, tra
 
 	tenantID := tenantctx.TenantID(r.Context())
 	apiKeyID := tenantctx.APIKeyID(r.Context())
+	agent, reasoner := llmCallerLabels(r)
 	pre := LLMPreCallPayload{
 		TenantID:  tenantID,
 		APIKeyID:  apiKeyID,
 		Model:     model,
 		Provider:  s.llmGateway.ProviderName(),
 		RequestID: requestID,
+		Agent:     agent,
+		Reasoner:  reasoner,
 		Operation: operation,
 		Modality:  modality,
 	}
 	if err := s.fireLLMPreCall(r.Context(), pre); err != nil {
-		s.writeHookRejection(w, err, requestID, start, tenantID, apiKeyID, model, operation, false)
+		s.writeHookRejection(w, err, pre, start)
 		return
 	}
 
@@ -1347,26 +1421,26 @@ func (s *Server) fireLLMPostCallBest(ctx context.Context, payload LLMPostCallPay
 func (s *Server) writeHookRejection(
 	w http.ResponseWriter,
 	err error,
-	requestID string,
+	pre LLMPreCallPayload,
 	start time.Time,
-	tenantID, apiKeyID, model, operation string,
-	stream bool,
 ) {
 	code, msg, status := classifyHookError(err)
 	writeOpenAIError(w, status, code, msg, nil)
 	post := LLMPostCallPayload{
-		TenantID:   tenantID,
-		APIKeyID:   apiKeyID,
-		Model:      model,
-		Provider:   s.llmGateway.ProviderName(),
-		RequestID:  requestID,
-		Operation:  operation,
-		Stream:     stream,
+		TenantID:   pre.TenantID,
+		APIKeyID:   pre.APIKeyID,
+		Model:      pre.Model,
+		Provider:   pre.Provider,
+		RequestID:  pre.RequestID,
+		Agent:      pre.Agent,
+		Reasoner:   pre.Reasoner,
+		Operation:  pre.Operation,
+		Stream:     pre.Stream,
 		LatencyMS:  int(time.Since(start).Milliseconds()),
 		StatusCode: status,
 		ErrorCode:  code,
 		OccurredAt: time.Now().UTC().Format(time.RFC3339Nano),
-		Modality:   modalityFromOperation(operation),
+		Modality:   normalizeModality(pre.Modality),
 	}
 	s.fireLLMPostCallBest(context.Background(), post)
 }
@@ -1435,7 +1509,7 @@ func (s *Server) writeGuardrailRejection(
 	err error,
 	requestID string,
 	start time.Time,
-	tenantID, apiKeyID, model, operation string,
+	tenantID, apiKeyID, agent, reasoner, model, operation string,
 	stream bool,
 ) {
 	writeGuardrailError(w, err)
@@ -1445,6 +1519,8 @@ func (s *Server) writeGuardrailRejection(
 		Model:      model,
 		Provider:   s.llmGateway.ProviderName(),
 		RequestID:  requestID,
+		Agent:      agent,
+		Reasoner:   reasoner,
 		Operation:  operation,
 		Stream:     stream,
 		LatencyMS:  int(time.Since(start).Milliseconds()),
@@ -1463,6 +1539,8 @@ func (s *Server) guardrailPost(pre LLMPreCallPayload, err error, start time.Time
 		Model:      pre.Model,
 		Provider:   pre.Provider,
 		RequestID:  pre.RequestID,
+		Agent:      pre.Agent,
+		Reasoner:   pre.Reasoner,
 		Operation:  pre.Operation,
 		Stream:     pre.Stream,
 		LatencyMS:  int(time.Since(start).Milliseconds()),
@@ -1514,6 +1592,8 @@ func (s *Server) buildPostPayload(
 		Model:      pre.Model,
 		Provider:   pre.Provider,
 		RequestID:  pre.RequestID,
+		Agent:      pre.Agent,
+		Reasoner:   pre.Reasoner,
 		Operation:  pre.Operation,
 		Stream:     pre.Stream,
 		LatencyMS:  int(time.Since(start).Milliseconds()),
@@ -1556,6 +1636,8 @@ func (s *Server) buildPostPayloadEmbeddings(
 		Model:      pre.Model,
 		Provider:   pre.Provider,
 		RequestID:  pre.RequestID,
+		Agent:      pre.Agent,
+		Reasoner:   pre.Reasoner,
 		Operation:  pre.Operation,
 		LatencyMS:  int(time.Since(start).Milliseconds()),
 		StatusCode: http.StatusOK,
@@ -1584,6 +1666,8 @@ func (s *Server) simplePostPayload(pre LLMPreCallPayload, start time.Time, statu
 		Model:      pre.Model,
 		Provider:   pre.Provider,
 		RequestID:  pre.RequestID,
+		Agent:      pre.Agent,
+		Reasoner:   pre.Reasoner,
 		Operation:  pre.Operation,
 		Stream:     pre.Stream,
 		LatencyMS:  int(time.Since(start).Milliseconds()),
@@ -1608,6 +1692,8 @@ func (s *Server) errorPost(pre LLMPreCallPayload, err error, start time.Time) LL
 		Model:      pre.Model,
 		Provider:   pre.Provider,
 		RequestID:  pre.RequestID,
+		Agent:      pre.Agent,
+		Reasoner:   pre.Reasoner,
 		Operation:  pre.Operation,
 		Stream:     pre.Stream,
 		LatencyMS:  int(time.Since(start).Milliseconds()),

@@ -76,7 +76,7 @@ func (r *Recorder) Record(ctx context.Context, ev Event) error {
 	// Empty strings become NULL via *string. tenantPtr / apiKeyPtr go
 	// to the FK columns; both have ON DELETE SET NULL so a deleted
 	// tenant/key doesn't break aggregation of historical events.
-	var requestPtr, tenantPtr, apiKeyPtr, agentPtr *string
+	var requestPtr, tenantPtr, apiKeyPtr, agentPtr, reasonerPtr, errorCodePtr *string
 	if ev.RequestID != "" {
 		rid := ev.RequestID
 		requestPtr = &rid
@@ -93,6 +93,14 @@ func (r *Recorder) Record(ctx context.Context, ev Event) error {
 		ag := ev.Agent
 		agentPtr = &ag
 	}
+	if ev.Reasoner != "" {
+		reasoner := ev.Reasoner
+		reasonerPtr = &reasoner
+	}
+	if ev.ErrorCode != "" {
+		errorCode := ev.ErrorCode
+		errorCodePtr = &errorCode
+	}
 
 	// Use a short-lived write context so a slow PG can't tie up the
 	// LLM gateway's response goroutine.
@@ -106,10 +114,10 @@ func (r *Recorder) Record(ctx context.Context, ev Event) error {
 
 	_, err := r.pool.Exec(writeCtx, `
         insert into suite_cost_events
-            (request_id, tenant_id, api_key_id, model, provider, agent,
+            (request_id, tenant_id, api_key_id, model, provider, agent, reasoner,
              prompt_tokens, completion_tokens, total_tokens,
-             cost_usd, cached, latency_ms, occurred_at, modality)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+             cost_usd, cached, latency_ms, occurred_at, modality, status_code, error_code)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
     `,
 		requestPtr,
 		tenantPtr,
@@ -117,6 +125,7 @@ func (r *Recorder) Record(ctx context.Context, ev Event) error {
 		ev.Model,
 		ev.Provider,
 		agentPtr,
+		reasonerPtr,
 		ev.PromptTokens,
 		ev.CompletionTokens,
 		total,
@@ -125,6 +134,8 @@ func (r *Recorder) Record(ctx context.Context, ev Event) error {
 		ev.LatencyMS,
 		occurredAt,
 		modality,
+		ev.StatusCode,
+		errorCodePtr,
 	)
 	if err != nil {
 		r.log.Warn("cost: ledger write failed",

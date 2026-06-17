@@ -64,6 +64,9 @@ type Event struct {
 	// the call. Empty when the call came from the raw LLM gateway path
 	// rather than via an agent invocation.
 	Agent string
+	// Reasoner is the leaf reasoner id captured from X-AF-Reasoner.
+	// Empty for raw gateway calls and older SDKs that do not send it.
+	Reasoner string
 	// PromptTokens / CompletionTokens are the provider's reported
 	// usage. TotalTokens is derived (prompt + completion) but stored
 	// because some providers report total separately from sums.
@@ -80,6 +83,10 @@ type Event struct {
 	Cached bool
 	// LatencyMS is end-to-end gateway-observed latency.
 	LatencyMS int
+	// StatusCode and ErrorCode capture terminal gateway status for
+	// reasoner analytics. ErrorCode is empty on success.
+	StatusCode int
+	ErrorCode  string
 	// OccurredAt is the call timestamp. Zero -> the recorder uses now().
 	OccurredAt time.Time
 	// Modality classifies the call: "text" (default for chat), "embedding",

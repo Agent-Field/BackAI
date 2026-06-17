@@ -43,11 +43,13 @@ var (
 		Help: "Total sandbox runs by adapter and terminal status.",
 	}, []string{"adapter", "status"})
 
+	runsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "backai_runs_total",
+		Help: "Total AgentField execute runs by agent and terminal status.",
+	}, []string{"agent", "status"})
+
 	initOnce sync.Once
 )
-
-// TODO(block-5-followup): add backai_runs_total{agent,status} once the run
-// lifecycle has a single canonical event source.
 
 func Register(reg *prometheus.Registry) error {
 	if reg == nil {
@@ -59,6 +61,7 @@ func Register(reg *prometheus.Registry) error {
 		llmRequestsTotal,
 		llmTTFTSeconds,
 		sandboxRunsTotal,
+		runsTotal,
 	} {
 		if err := reg.Register(collector); err != nil {
 			if _, ok := err.(prometheus.AlreadyRegisteredError); ok {
@@ -93,6 +96,10 @@ func ObserveSandboxRun(adapter, status string) {
 	sandboxRunsTotal.WithLabelValues(normalizeLabel(adapter, defaultAgent), normalizeLabel(status, "unknown")).Inc()
 }
 
+func ObserveRun(agent, status string) {
+	runsTotal.WithLabelValues(normalizeLabel(agent, defaultAgent), normalizeLabel(status, "unknown")).Inc()
+}
+
 func initZeroSeries() {
 	costUSDTotal.WithLabelValues(defaultTenant, defaultModel, defaultAgent).Add(0)
 	llmRequestsTotal.WithLabelValues(defaultTenant, defaultModel, "success").Add(0)
@@ -100,6 +107,8 @@ func initZeroSeries() {
 	llmTTFTSeconds.WithLabelValues(defaultModel)
 	sandboxRunsTotal.WithLabelValues(defaultAgent, "done").Add(0)
 	sandboxRunsTotal.WithLabelValues(defaultAgent, "failed").Add(0)
+	runsTotal.WithLabelValues(defaultAgent, "succeeded").Add(0)
+	runsTotal.WithLabelValues(defaultAgent, "failed").Add(0)
 }
 
 func normalizeTenant(v string) string {
@@ -126,5 +135,6 @@ func ResetForTest() {
 	llmRequestsTotal.Reset()
 	llmTTFTSeconds.Reset()
 	sandboxRunsTotal.Reset()
+	runsTotal.Reset()
 	initZeroSeries()
 }

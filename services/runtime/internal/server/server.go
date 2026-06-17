@@ -20,6 +20,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/activity"
 	adapterregistry "github.com/Agent-Field/backai/services/runtime/internal/adapters/registry"
 	"github.com/Agent-Field/backai/services/runtime/internal/agentfield"
+	"github.com/Agent-Field/backai/services/runtime/internal/appmetrics"
 	"github.com/Agent-Field/backai/services/runtime/internal/audit"
 	"github.com/Agent-Field/backai/services/runtime/internal/billing"
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
@@ -606,6 +607,10 @@ func (s *Server) registerRoutes() {
 	s.openapi.Register("GET", "/api/v1/runs", openapi.RouteMeta{
 		Summary: "List recent agent runs", Tags: []string{"dashboard"},
 	})
+	s.mux.HandleFunc("GET /api/v1/reasoners/analytics", s.handleReasonersAnalytics)
+	s.openapi.Register("GET", "/api/v1/reasoners/analytics", openapi.RouteMeta{
+		Summary: "Reasoner cost, latency, and error analytics", Tags: []string{"dashboard"},
+	})
 	s.mux.HandleFunc("GET /api/v1/runs/{id}/events", s.handleRunEvents)
 	s.openapi.Register("GET", "/api/v1/runs/{id}/events", openapi.RouteMeta{
 		Summary: "Subscribe to AgentField run events", Tags: []string{"agents"},
@@ -1127,6 +1132,17 @@ func (s *Server) logGatewayRequest(
 	executionID string,
 	startedAt time.Time,
 ) {
+	// backai_runs_total intentionally uses this hook because /api/v1/runs
+	// is also sourced from suite_gateway_requests filtered to agent execute
+	// endpoints. This keeps the metric and dashboard on one terminal source.
+	if strings.HasPrefix(endpoint, "/api/v1/execute/") {
+		metricStatus := "failed"
+		if status >= 200 && status < 400 {
+			metricStatus = "succeeded"
+		}
+		appmetrics.ObserveRun(agentFromEndpoint(endpoint), metricStatus)
+	}
+
 	if s.db == nil || s.db.Pool == nil {
 		return
 	}
