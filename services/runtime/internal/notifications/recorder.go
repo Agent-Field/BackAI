@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -229,6 +230,86 @@ func (r *Recorder) DeleteMute(ctx context.Context, id string) error {
 	return nil
 }
 
+func (r *Recorder) ListChannels(ctx context.Context) ([]Channel, error) {
+	if !r.HasPool() {
+		return []Channel{}, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+        select id::text, kind, config_json, enabled, created_at, updated_at
+        from suite_notification_channels
+        order by kind asc
+    `)
+	if err != nil {
+		return nil, fmt.Errorf("notifications: list channels: %w", err)
+	}
+	defer rows.Close()
+	out := []Channel{}
+	for rows.Next() {
+		ch, err := scanChannel(rows)
+		if err != nil {
+			return nil, err
+		}
+		ch.Source = "db"
+		out = append(out, ch)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (r *Recorder) UpsertChannel(ctx context.Context, in ChannelInput) (Channel, error) {
+	if !r.HasPool() {
+		return Channel{}, ErrNotConfigured
+	}
+	raw, err := json.Marshal(in.Config)
+	if err != nil {
+		return Channel{}, fmt.Errorf("%w: config must be JSON-serializable", ErrInvalidInput)
+	}
+	rows, err := r.pool.Query(ctx, `
+        insert into suite_notification_channels (kind, config_json, enabled, created_at, updated_at)
+        values ($1, $2, $3, now(), now())
+        on conflict (kind) do update set
+          config_json = excluded.config_json,
+          enabled = excluded.enabled,
+          updated_at = now()
+        returning id::text, kind, config_json, enabled, created_at, updated_at
+    `, string(in.Kind), raw, in.Enabled)
+	if err != nil {
+		return Channel{}, fmt.Errorf("notifications: upsert channel: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return Channel{}, fmt.Errorf("notifications: upsert channel: no row returned")
+	}
+	ch, err := scanChannel(rows)
+	if err != nil {
+		return Channel{}, err
+	}
+	ch.Source = "db"
+	return ch, nil
+}
+
+func (r *Recorder) DeleteChannel(ctx context.Context, id, kind string) error {
+	if !r.HasPool() {
+		return ErrNotConfigured
+	}
+	var tag pgconn.CommandTag
+	var err error
+	if strings.TrimSpace(id) != "" {
+		tag, err = r.pool.Exec(ctx, `delete from suite_notification_channels where id = $1`, strings.TrimSpace(id))
+	} else {
+		tag, err = r.pool.Exec(ctx, `delete from suite_notification_channels where kind = $1`, strings.TrimSpace(kind))
+	}
+	if err != nil {
+		return fmt.Errorf("notifications: delete channel: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *Recorder) MatchingMute(ctx context.Context, in SendInput) (*Mute, error) {
 	if !r.HasPool() {
 		return nil, nil
@@ -300,6 +381,23 @@ func scanMute(rows pgx.Rows) (*Mute, error) {
 		CreatedBy: createdBy,
 		CreatedAt: createdAt.UTC().Format(time.RFC3339Nano),
 	}, nil
+}
+
+func scanChannel(rows pgx.Rows) (Channel, error) {
+	var (
+		ch                   Channel
+		kind                 string
+		raw                  []byte
+		createdAt, updatedAt time.Time
+	)
+	if err := rows.Scan(&ch.ID, &kind, &raw, &ch.Enabled, &createdAt, &updatedAt); err != nil {
+		return Channel{}, fmt.Errorf("notifications: scan channel: %w", err)
+	}
+	ch.Kind = Kind(kind)
+	ch.Config = decodeMap(raw)
+	ch.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
+	ch.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
+	return ch, nil
 }
 
 // UpdateStatus writes a lifecycle transition. providerMessageID and
@@ -693,6 +791,17 @@ func cloneData(data map[string]any) map[string]any {
 	out := make(map[string]any, len(data))
 	for k, v := range data {
 		out[k] = v
+	}
+	return out
+}
+
+func decodeMap(raw []byte) map[string]any {
+	out := map[string]any{}
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &out)
+	}
+	if out == nil {
+		out = map[string]any{}
 	}
 	return out
 }

@@ -41,11 +41,83 @@ type Service struct {
 	muteMu    sync.Mutex
 	muteCache map[string]muteCacheEntry
 	muteTTL   time.Duration
+
+	channelMu       sync.RWMutex
+	channelDefaults []Channel
+	channels        []Channel
 }
 
 type muteCacheEntry struct {
 	expiresAt time.Time
 	mutes     []Mute
+}
+
+func (s *Service) SetChannelDefaults(defaults []Channel) {
+	if s == nil {
+		return
+	}
+	s.channelMu.Lock()
+	defer s.channelMu.Unlock()
+	s.channelDefaults = cloneChannels(defaults)
+	s.channels = cloneChannels(defaults)
+}
+
+func (s *Service) ReloadChannels(ctx context.Context) error {
+	if s == nil {
+		return ErrNotConfigured
+	}
+	merged := mergeChannels(s.channelDefaults, nil)
+	if s.recorder != nil && s.recorder.HasPool() {
+		dbRows, err := s.recorder.ListChannels(ctx)
+		if err != nil {
+			return err
+		}
+		merged = mergeChannels(s.channelDefaults, dbRows)
+	}
+	s.channelMu.Lock()
+	s.channels = cloneChannels(merged)
+	s.channelMu.Unlock()
+	return nil
+}
+
+func (s *Service) Channels(ctx context.Context) ([]Channel, error) {
+	if s == nil {
+		return []Channel{}, nil
+	}
+	if err := s.ReloadChannels(ctx); err != nil {
+		return nil, err
+	}
+	s.channelMu.RLock()
+	defer s.channelMu.RUnlock()
+	return cloneChannels(s.channels), nil
+}
+
+func (s *Service) UpsertChannel(ctx context.Context, in ChannelInput) (Channel, error) {
+	if s == nil || s.recorder == nil || !s.recorder.HasPool() {
+		return Channel{}, ErrNotConfigured
+	}
+	if err := validateChannelInput(in); err != nil {
+		return Channel{}, err
+	}
+	out, err := s.recorder.UpsertChannel(ctx, in)
+	if err == nil {
+		_ = s.ReloadChannels(ctx)
+	}
+	return out, err
+}
+
+func (s *Service) DeleteChannel(ctx context.Context, id, kind string) error {
+	if s == nil || s.recorder == nil || !s.recorder.HasPool() {
+		return ErrNotConfigured
+	}
+	if strings.TrimSpace(id) == "" && strings.TrimSpace(kind) == "" {
+		return fmt.Errorf("%w: id or kind is required", ErrInvalidInput)
+	}
+	err := s.recorder.DeleteChannel(ctx, id, kind)
+	if err == nil {
+		_ = s.ReloadChannels(ctx)
+	}
+	return err
 }
 
 // NewService constructs a Service. adapter is required (use the log
@@ -248,6 +320,63 @@ func firstMatchingMute(mutes []Mute, in SendInput, now time.Time, preferTenantSp
 		}
 	}
 	return nil
+}
+
+func validateChannelInput(in ChannelInput) error {
+	switch in.Kind {
+	case KindEmail, KindSMS, KindPush, KindLog:
+	default:
+		return fmt.Errorf("%w: kind must be email|sms|push|log", ErrInvalidInput)
+	}
+	if in.Config == nil {
+		in.Config = map[string]any{}
+	}
+	return nil
+}
+
+func mergeChannels(defaults, overrides []Channel) []Channel {
+	byKind := map[Kind]Channel{}
+	order := []Kind{}
+	for _, ch := range defaults {
+		if _, ok := byKind[ch.Kind]; !ok {
+			order = append(order, ch.Kind)
+		}
+		ch.Source = "env"
+		byKind[ch.Kind] = cloneChannel(ch)
+	}
+	for _, ch := range overrides {
+		if _, ok := byKind[ch.Kind]; !ok {
+			order = append(order, ch.Kind)
+		}
+		ch.Source = "db"
+		byKind[ch.Kind] = cloneChannel(ch)
+	}
+	out := make([]Channel, 0, len(order))
+	for _, kind := range order {
+		out = append(out, byKind[kind])
+	}
+	return out
+}
+
+func cloneChannels(in []Channel) []Channel {
+	out := make([]Channel, 0, len(in))
+	for _, ch := range in {
+		out = append(out, cloneChannel(ch))
+	}
+	return out
+}
+
+func cloneChannel(ch Channel) Channel {
+	if ch.Config == nil {
+		ch.Config = map[string]any{}
+	} else {
+		next := map[string]any{}
+		for k, v := range ch.Config {
+			next[k] = v
+		}
+		ch.Config = next
+	}
+	return ch
 }
 
 func muteMatches(m *Mute, in SendInput, now time.Time) bool {

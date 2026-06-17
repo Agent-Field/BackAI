@@ -157,6 +157,22 @@ type AdapterCount struct {
 	Count   int    `json:"count"`
 }
 
+type Channel struct {
+	ID        string         `json:"id"`
+	Kind      Kind           `json:"kind"`
+	Config    map[string]any `json:"config_json"`
+	Enabled   bool           `json:"enabled"`
+	Source    string         `json:"source"`
+	CreatedAt string         `json:"created_at"`
+	UpdatedAt string         `json:"updated_at"`
+}
+
+type ChannelInput struct {
+	Kind    Kind
+	Config  map[string]any
+	Enabled bool
+}
+
 // Adapter is the wire-level contract every notification backend must
 // implement. Implementations should be safe for concurrent use; the
 // worker calls Send from up to 16 goroutines at once.

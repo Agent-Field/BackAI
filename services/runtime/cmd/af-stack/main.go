@@ -1320,6 +1320,11 @@ func main() {
 			notificationsSvc = notifications.NewService(nil, adapter, log)
 			log.Info("notifications: running without DB; rows will not persist")
 		}
+		notificationsSvc.SetChannelDefaults(notificationChannelDefaults(adapter))
+		if err := notificationsSvc.ReloadChannels(ctx); err != nil {
+			log.Warn("notifications: channel reload failed", "error", err)
+		}
+		startNotificationChannelReload(ctx, notificationsSvc, log)
 		// Worker drains queued rows every 2s. It no-ops gracefully when
 		// the adapter or DB are missing — Run() reports its own state.
 		worker := notifications.NewWorker(notificationsSvc, log)
@@ -1792,6 +1797,53 @@ func buildNotificationsAdapter(log *slog.Logger) notifications.Adapter {
 			"choice", choice)
 		return notificationslog.New(log)
 	}
+}
+
+func notificationChannelDefaults(adapter notifications.Adapter) []notifications.Channel {
+	name := "log"
+	if adapter != nil && adapter.Name() != "" {
+		name = adapter.Name()
+	}
+	kind := notifications.KindLog
+	config := map[string]any{"adapter": name}
+	if name == "resend" {
+		kind = notifications.KindEmail
+		config["from"] = os.Getenv("AF_STACK_NOTIFICATIONS_FROM")
+		config["has_api_key"] = strings.TrimSpace(os.Getenv("RESEND_API_KEY")) != ""
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	return []notifications.Channel{{
+		ID:        "env-" + string(kind),
+		Kind:      kind,
+		Config:    config,
+		Enabled:   true,
+		Source:    "env",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}}
+}
+
+func startNotificationChannelReload(ctx context.Context, svc *notifications.Service, log *slog.Logger) {
+	if svc == nil {
+		return
+	}
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGHUP)
+	go func() {
+		defer signal.Stop(ch)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ch:
+				if err := svc.ReloadChannels(ctx); err != nil {
+					log.Warn("notifications: SIGHUP channel reload failed", "error", err)
+				} else {
+					log.Info("notifications: channel rows reloaded")
+				}
+			}
+		}
+	}()
 }
 
 // buildGuardrails constructs the gateway-local PII/moderation layer.
