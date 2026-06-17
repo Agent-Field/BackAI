@@ -2334,10 +2334,11 @@ export const api = {
         RunActionResultSchema,
       ),
   },
-  cost: (params?: { from?: string; to?: string }) => {
+  cost: (params?: { from?: string; to?: string; tenant?: string }) => {
     const qs = new URLSearchParams()
     if (params?.from) qs.set("from", params.from)
     if (params?.to) qs.set("to", params.to)
+    if (params?.tenant) qs.set("tenant", params.tenant)
     const q = qs.toString()
     return request(`/api/v1/cost${q ? "?" + q : ""}`, undefined, CostSummarySchema)
   },

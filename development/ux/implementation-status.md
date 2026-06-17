@@ -216,4 +216,119 @@ match the brief's explicit "partial scope" plan.
 
 ---
 
-_Last updated: 2026-06-17. Next page brief to groom: Cost._
+---
+
+## Cost — DONE (v1)
+
+**Branch**: `feat/ui-redesign`
+**Page Brief**: `development/ux/pages/cost.md`
+**Route**: `/cost` (dashboard)
+**Scope (per brief §24)**: Zone 1 (anomaly strip + forecast) + Zone 2
+(Tenant → Model hierarchy, 2 levels) + Zone 3 (stacked area + top-N) +
+Zone 4 (cache donut + model bars + budgets + edit dialog) + adapter
+footer. Gaps 12–19 deferred per brief's v0.2 plan.
+
+### Decisions locked
+
+- **Live data**: 10s polling (theme.polling.services) — cost numbers move
+  slower than KPIs but the page benefits from background freshness.
+- **Range chips**: Today / 7d / 30d / 90d, URL-persistent (`?range=`).
+  Reuses the standardised `FilterChip` primitive so contrast + density
+  match the Inbox chips.
+- **Anomaly heuristic** (Gap 12 mitigation): top-share-spike detection
+  client-side (≥2× expected share triggers a callout) + forecast >
+  budget overrun. v0.2 swaps for backend emitters.
+- **Zone 2 v1 depth**: Tenant → Model only. Agent + Reasoner levels
+  surface a v0.2 chip inline. Per-tenant data reused from Zone 3
+  fan-out so the zone costs zero extra requests.
+- **Zone 3 series**: Top 5 tenants stacked + "other"; per-tenant `/cost`
+  calls fan out client-side (Gap 16 mitigation).
+- **Budgets edit**: shadcn Dialog + Sonner toast on save. Validates
+  positive cap + 0–100% threshold before submit.
+- **Adapter footer**: LiteLLM pill + DropdownMenu (Open LiteLLM admin,
+  Change adapter). Per framework Part 9.
+
+### Frontend — built
+
+| Surface | File | Notes |
+|---|---|---|
+| Server-rendered snapshot | `apps/dashboard/src/lib/cost/data.ts` | `Promise.allSettled` over cost + budgets + cache + tenants |
+| Range helpers | `apps/dashboard/src/lib/cost/range.ts` | `today/7d/30d/90d` → UTC ISO range |
+| Types | `apps/dashboard/src/lib/cost/types.ts` | `CostSnapshot`, `CostAnomaly`, `TenantSeriesPoint` |
+| Derivations | `apps/dashboard/src/lib/cost/derive.ts` | Anomaly heuristic, top-N tenants, stacked-area series builder, model rows, formatters |
+| Shell | `apps/dashboard/src/components/cost/cost-shell.tsx` | Polling, URL-state range, per-tenant fan-out for Zone 3 |
+| Range chips | `apps/dashboard/src/components/cost/range-chips.tsx` | Reuses `FilterChip` primitive |
+| Degraded banner | `apps/dashboard/src/components/cost/degraded-banner.tsx` | Same shape as Inbox banner |
+| Adapter footer | `apps/dashboard/src/components/cost/adapter-footer.tsx` | LiteLLM pill + dropdown |
+| Zone 1 | `apps/dashboard/src/components/cost/zone1-anomaly-strip.tsx` | Period-total tile + forecast tile + AnomalyCard list |
+| AnomalyCard | `apps/dashboard/src/components/cost/anomaly-card.tsx` | Severity-bordered card + sparkline + 1-2 action buttons |
+| Zone 2 | `apps/dashboard/src/components/cost/zone2-hierarchy.tsx` | Tenant rows with model-leaf expand |
+| Zone 3 | `apps/dashboard/src/components/cost/zone3-explorer.tsx` | Stacked area (top-5 + other) + top-N tenant list |
+| Zone 4 | `apps/dashboard/src/components/cost/zone4-economics.tsx` | Cache donut + cost-by-model bars + budgets table |
+| Budget edit dialog | `apps/dashboard/src/components/cost/budget-edit-dialog.tsx` | shadcn Dialog + Sonner toast |
+| Page entry | `apps/dashboard/src/app/(dashboard)/cost/page.tsx` | Server component, `force-dynamic` |
+| Top-bar anchor | `apps/dashboard/src/components/layout/top-bar.tsx` | Cost AnchorPill now points at `/cost` |
+
+### Primitives introduced (in `components/ui/`)
+
+These are tokenised, theme-aware, and reused across pages. All colour
+goes through semantic CSS variables — no raw hex, no per-component
+overrides.
+
+| Primitive | File | Reused on |
+|---|---|---|
+| `Sparkline` | `apps/dashboard/src/components/ui/sparkline.tsx` | Cost zones, AnomalyCard, future Errors/Tenant detail |
+| `DeltaIndicator` | `apps/dashboard/src/components/ui/delta-indicator.tsx` | Cost Period-total tile, future KPIs |
+| `ForecastBar` | `apps/dashboard/src/components/ui/forecast-bar.tsx` | Cost Forecast tile, future Budgets page |
+| `GaugeBar` | `apps/dashboard/src/components/ui/gauge-bar.tsx` | Cost budgets rows, Cost hierarchy share bars, future Quota strips |
+| `FilterChip` / `FilterChipGroup` | `apps/dashboard/src/components/ui/filter-chip.tsx` | Inbox filters, Cost range chips |
+
+### Backend — no new endpoints
+
+Existing endpoints are sufficient for v1:
+
+| Endpoint | Powers | Status |
+|---|---|---|
+| `GET /api/v1/cost?from=&to=&tenant=` | All zones | ✅ existing |
+| `GET /api/v1/admin/budgets` | Zone 4 budgets table | ✅ existing |
+| `PUT /api/v1/admin/budgets` | Budget edit dialog | ✅ existing |
+| `GET /api/v1/llm/cache/stats` | Zone 4 cache donut | ✅ existing |
+
+`api.cost(params)` extended with optional `tenant` (was already
+backend-supported; the client wrapper just didn't expose it).
+
+### Deferred / out of scope (v1)
+
+Per brief §24 and §20:
+
+- **Hierarchy Agent + Reasoner levels** — Gap 14 blocking; surfaced
+  inline as "v0.2".
+- **Per-node sparkline + delta in hierarchy** — Gap 15.
+- **Group-by chips on Zone 3** (agent/model/tool/day) — needs
+  ByDayByDimension (Gap 16) to be tractable for more than tenant.
+- **Cost ÷ MRR scatter** — Gap 17 (no billing adapter MRR).
+- **$/1k tokens bars** — Gap 18 (token totals not in summary).
+- **Per-tool $/call** — Gap 19 (tools not tagged on cost events).
+- **WebSocket subscription** — page brief §11 calls for WS but v1 polls;
+  v0.2 will upgrade.
+- **Mobile** — desktop-primary; mobile budget alerts land in Inbox
+  (page brief §16).
+
+---
+
+## Backend gaps — status after Cost
+
+| Gap | Description | Status after Cost v1 |
+|---|---|---|
+| **12** | Anomaly detection inputs | ⏸ **Deferred to v0.2** — v1 ships client-side top-share-spike + forecast-vs-budget heuristics. Honest about limitations in code comments |
+| **13** | Nested hierarchy endpoint | ⏸ **Deferred to v0.2** — v1 fan-outs per-tenant `/cost?tenant=X` (max 5 calls); shared with Zone 3 |
+| **14** | Reasoner-tagged cost | ⏸ **Blocking for full hierarchy; deferred to v0.2** — v1 ships Tenant → Model only and surfaces the v0.2 note inline |
+| **15** | Per-node sparkline / delta | ⏸ **Deferred to v0.2** — Zone 2 rows currently render a share bar instead |
+| **16** | ByDayByDimension for stacked area | ⏸ **Deferred to v0.2** — v1 fan-outs per top-N tenant (acceptable for N=5) |
+| **17** | MRR per tenant | ⏸ **Deferred to v0.2** — break-even scatter not shipped in v1 |
+| **18** | Token totals per model | ⏸ **Deferred to v0.2** — v1 ships `$/share` bars instead of `$/1k tokens` |
+| **19** | Tool-tagged cost | ⏸ **Deferred to v0.2** — per-tool ROI not shipped in v1 |
+
+---
+
+_Last updated: 2026-06-17. Next page brief to groom: Health._

@@ -120,6 +120,7 @@ export function TopBar({
           />
           <AnchorPill
             label="Cost"
+            href="/cost"
             value={
               anchors === null ? "—" : formatAnchorUSD(anchors.cost_today_usd)
             }

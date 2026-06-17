@@ -34,6 +34,15 @@ cross-tenant). Gaps **8, 9, 10, 11** explicitly deferred to v0.2 per the
 brief's partial-scope plan, with v1 mitigations recorded in each entry
 below.
 
+## Snapshot after Cost v1 (2026-06-17)
+
+Gaps **12–19** explicitly deferred to v0.2 per the Cost brief's
+partial-scope plan. Each is recorded below with the v1 mitigation
+(client-side heuristic, per-tenant fan-out, "v0.2 note inline", or
+hidden surface). No new endpoints introduced; the existing
+`/api/v1/cost`, `/api/v1/admin/budgets`, and `/api/v1/llm/cache/stats`
+were sufficient.
+
 ---
 
 ## Gaps discovered
@@ -219,6 +228,118 @@ below.
 - **Severity**: **Blocking** for Journey 6 mobile path.
 - **Suggested fix**: Either `GET /api/v1/admin/inbox/{kind}/{id}` or
   per-type GETs. Pairs with Gap 8.
+
+### Gap 12 — Anomaly detection inputs for Cost page ⏸ Deferred (Cost v1 ships client-side heuristic)
+- **v1 mitigation shipped**: `apps/dashboard/src/lib/cost/derive.ts`
+  computes top-share-spike (tenant whose share ≥2× expected) +
+  forecast-vs-budget overrun client-side. AnomalyCard rows surface in
+  Zone 1 with primary/secondary action buttons.
+- **Surfaced by**: Page Brief — Cost (Zone 1)
+- **What we need**: Backend emits anomaly events (X is N× its baseline)
+  ready for surfacing in Zone 1 anomaly strip and Inbox.
+- **What we have**: Client computes anomalies from `/cost` `by_tenant` ×
+  `by_day` arrays. Coarse, no per-hour resolution.
+- **Data is computable**: YES (heuristic v1).
+- **Severity**: Inefficient
+- **Suggested fix**: v1 client computes; v0.2 add server-side anomaly
+  emitter that writes to `suite_anomaly_events` and surfaces in Inbox.
+
+### Gap 13 — Nested hierarchy endpoint for Cost ⏸ Deferred (Cost v1 fan-outs per-tenant)
+- **v1 mitigation shipped**: CostShell calls `/api/v1/cost?tenant=X` for
+  each of the top-5 tenants and caches the result; Zone 2 (Tenant →
+  Model) and Zone 3 (stacked area) both reuse the same dictionary so we
+  pay the fan-out cost once.
+- **Surfaced by**: Cost (Zone 2)
+- **What we need**: Single endpoint returning Tenant → Agent → Reasoner
+  → Model breakdown in one nested response.
+- **What we have**: Flat `by_tenant` / `by_agent` / `by_model` arrays;
+  per-tenant drill via separate `/cost?tenant=X` call.
+- **Severity**: Inefficient (v1 makes N+1 calls; acceptable up to top-5).
+- **Suggested fix**: `GET /api/v1/cost/breakdown?root=...&depth=N` v0.2.
+
+### Gap 14 — Reasoner-tagged cost ⏸ Deferred (Cost v1 ships Tenant → Model only)
+- **v1 mitigation shipped**: Zone 2 ships a 2-level hierarchy (Tenant →
+  Model) and surfaces "Agent + Reasoner in v0.2" inline so the operator
+  knows the depth is intentional, not broken.
+- **Surfaced by**: Cost (Zone 2 reasoner level, future Reasoners page)
+- **What we need**: Cost events tagged with `reasoner_name` so we can
+  attribute spend to specific reasoners within an agent.
+- **What we have**: `suite_cost_events` has `tenant`, `model`, `agent`
+  (when run-tied), but no `reasoner`.
+- **Severity**: **Blocking** for hierarchy completeness + Reasoners page.
+- **Suggested fix**: Add `reasoner_name` column to `suite_cost_events`.
+  AgentField SDK must pass reasoner identifier to the LLM gateway call so
+  the cost ledger picks it up.
+
+### Gap 15 — Per-hierarchy-node sparkline + delta ⏸ Deferred (Cost v1 ships share-bar only)
+- **v1 mitigation shipped**: Zone 2 tenant + model rows render a
+  GaugeBar (share of parent) instead of a per-node sparkline + delta.
+  Sparklines + deltas land alongside the nested-hierarchy endpoint.
+- **Surfaced by**: Cost (Zone 2 hierarchy rows)
+- **What we need**: 24h time-series + prior-period total for EACH node
+  in the tenant/agent/reasoner/model hierarchy.
+- **What we have**: Only top-level prior period and aggregate by_day.
+- **Severity**: Inefficient (v1 ships without; row shows aggregate only).
+- **Suggested fix**: Per-node breakdown endpoint (pairs with Gap 13).
+  v0.2.
+
+### Gap 16 — ByDayByDimension for stacked area chart ⏸ Deferred (Cost v1 fan-outs for tenant only)
+- **v1 mitigation shipped**: Zone 3 stacks the top-5 tenants over time
+  by reusing the per-tenant fan-out from Gap 13. Group-by chips
+  (agent/model/tool/day) are not shipped in v1 — they wait on the
+  composite endpoint so we don't fan out unbounded calls.
+- **Surfaced by**: Cost (Zone 3)
+- **What we need**: For a given group-by dimension (tenant/agent/model),
+  return `[{date, [{dimension_id, cost}]}]` so the stacked area chart can
+  render directly.
+- **What we have**: `by_day` (total) and `by_tenant` (totals) — but not
+  combined.
+- **Severity**: **Blocking for Zone 3 quality** (multi-call workaround is
+  expensive at >5 dimensions).
+- **Suggested fix**: `GET /api/v1/cost/timeseries?groupBy=tenant&top=10`
+  returning the composite. v0.2.
+
+### Gap 17 — MRR per tenant for Cost÷MRR unit economics ⏸ Deferred (Cost v1 hides the scatter)
+- **v1 mitigation shipped**: Zone 4 ships without the Cost÷MRR scatter
+  per brief §24. Cache donut + cost-by-model bars + budgets carry the
+  zone in v1.
+- **Surfaced by**: Cost (Zone 4 break-even scatter)
+- **What we need**: Per-tenant MRR from billing adapter to plot vs cost.
+- **What we have**: Billing adapter interface exists; Stripe/Lago
+  adapters exist; MRR extraction not surfaced in
+  `/api/v1/billing/customers`.
+- **Severity**: **Blocking** for the killer Zone 4 chart.
+- **Suggested fix**: Extend `GET /api/v1/billing/customers/{tenantId}`
+  to return `monthly_recurring_usd` field. Compute from billing adapter's
+  subscription state. v0.2.
+
+### Gap 18 — Token totals per model in cost summary ⏸ Deferred (Cost v1 ships $/share bars)
+- **v1 mitigation shipped**: Zone 4 model row renders share-of-spend
+  bars instead of $/1k token bars. Honest in copy ("v0.2: $/1k tokens
+  once token totals land").
+- **Surfaced by**: Cost (Zone 4 $/1k tokens bars; future Models page)
+- **What we need**: For each model in `by_model`, include
+  `{tokens_in_total, tokens_out_total, calls_total}` so we can render
+  $/1k tokens and $/call alongside total cost.
+- **What we have**: `suite_cost_events` has token columns per event;
+  summary `/cost` only sums cost.
+- **Severity**: Inefficient (v1 shows $/call as substitute).
+- **Suggested fix**: Add token totals to `by_model` entries in `/cost`
+  response. Cheap aggregation. v0.2.
+
+### Gap 19 — Tool-tagged cost ⏸ Deferred (Cost v1 hides per-tool ROI)
+- **v1 mitigation shipped**: Per-tool ROI panel is not rendered in v1
+  per brief §24. The page footer adapter pill still links operators to
+  the LiteLLM admin where raw tool calls are visible.
+- **Surfaced by**: Cost (Zone 4 per-tool ROI), future Tools page
+- **What we need**: Cost events tagged with `tool_name` when the cost is
+  attributable to a tool call (MCP or native tool with external API
+  cost).
+- **What we have**: No tool tagging on cost events.
+- **Severity**: **Blocking** for per-tool ROI.
+- **Suggested fix**: Add `tool_name` column to `suite_cost_events`. Tool
+  adapters must register costs with the cost ledger when they hit
+  external paid APIs. v0.2.
 
 ### Gap 7 — Backing services strip "admin URL" field ✅ Closed (verified, 2026-06-17)
 - **Verified shipped**: `adminService.AdminURL *string` already exists in
