@@ -15,13 +15,22 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Agent-Field/backai/services/runtime/internal/approvals"
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
 )
 
 type adminAnchorsResponse struct {
-	InboxPending int     `json:"inbox_pending"`
-	CostTodayUSD float64 `json:"cost_today_usd"`
+	// InboxPending counts every item that would land in /inbox: pending HITL
+	// approvals + active system alerts. The top-bar badge renders this
+	// directly, so the badge value matches what the operator sees on Inbox.
+	InboxPending int `json:"inbox_pending"`
+	// InboxHasCritical flips the badge to its critical (red) variant when
+	// at least one inbox item is critical-severity. Today the critical
+	// signal comes from the AgentField/DB unhealthy probes — approvals are
+	// "watch", not "act".
+	InboxHasCritical bool    `json:"inbox_has_critical"`
+	CostTodayUSD     float64 `json:"cost_today_usd"`
 	// Health: "healthy" when both AF and DB respond; "degraded" when one
 	// is failing; "down" when both fail. Mirrors the alerts logic in
 	// handleHomeOverview so the top-bar dot and the KPI strip never disagree.
@@ -45,18 +54,20 @@ func (s *Server) handleAdminAnchors(w http.ResponseWriter, r *http.Request) {
 
 	resp := adminAnchorsResponse{Health: "healthy"}
 
-	// Inbox: pending approvals across all tenants. Other inbox-able items
-	// (budget alerts, error spikes) ship with Gap 9 — until then approvals
-	// are the only signal.
-	if s.approvals != nil {
-		list, err := s.approvals.List(ctx, approvals.ListInput{
-			Status: "pending",
-			Limit:  1,
-		})
+	// Inbox count: pending approvals across all tenants + active system
+	// alerts (added below once we know the probe outcomes). The approvals
+	// store is tenant-scoped, so we query the table directly with
+	// app.bypass_rls=on to get the true cross-tenant total — same pattern
+	// other admin aggregations use (see aggregation_endpoints.go). Other
+	// emitter classes — budget thresholds, error spikes, queue
+	// backpressure — arrive with Gap 9.
+	approvalsTotal := 0
+	if s.db != nil && s.db.Pool != nil {
+		count, err := countPendingApprovalsCrossTenant(ctx, s.db.Pool)
 		if err == nil {
-			resp.InboxPending = list.Total
+			approvalsTotal = count
 		} else {
-			s.log.Warn("anchors: approvals query failed", "error", err)
+			s.log.Warn("anchors: pending approvals count failed", "error", err)
 			span.RecordError(err)
 		}
 	}
@@ -102,5 +113,41 @@ func (s *Server) handleAdminAnchors(w http.ResponseWriter, r *http.Request) {
 		resp.Health = "degraded"
 	}
 
+	// System alerts in the inbox tally. Mirrors the alerts emitted by
+	// handleHomeOverview so the badge and the Inbox page agree on count.
+	systemAlerts := 0
+	if !afOK {
+		systemAlerts++
+	}
+	if !dbOK {
+		systemAlerts++
+	}
+	resp.InboxPending = approvalsTotal + systemAlerts
+	resp.InboxHasCritical = systemAlerts > 0
+
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// countPendingApprovalsCrossTenant returns the total number of pending
+// approval rows across every tenant. RLS would otherwise restrict the
+// query to whatever app.tenant_id is set on the connection (empty here);
+// we open a short transaction and flip app.bypass_rls so the admin badge
+// reflects the platform-wide count.
+func countPendingApprovalsCrossTenant(ctx context.Context, pool *pgxpool.Pool) (int, error) {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return 0, err
+	}
+	var n int
+	err = tx.QueryRow(ctx,
+		"select count(*) from suite_approvals where status = 'pending'",
+	).Scan(&n)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
 }

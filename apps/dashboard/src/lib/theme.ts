@@ -62,6 +62,8 @@ export const polling = {
   anchors: 5_000,
   /** Backing services strip (per home.md §11). */
   services: 10_000,
+  /** Inbox list — slower because items are decision-shaped, not metrics. */
+  inbox: 30_000,
 } as const
 
 /** Density / layout constants the grid can't express through tokens alone. */

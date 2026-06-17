@@ -119,4 +119,101 @@ Not numbered in the gap ledger but addressed inline: `home/overview.recent_webho
 
 ---
 
-_Last updated: 2026-06-17. Next page brief to groom: Inbox._
+---
+
+## Inbox — DONE (v1)
+
+**Branch**: `feat/ui-redesign`
+**Page Brief**: `development/ux/pages/inbox.md`
+**Route**: `/inbox` (dashboard) — middleware-gated, sidebar-08 shell
+**Scope (per brief §20)**: Approvals + 2 system alerts only. Gaps 9/10/11
+deferred to v0.2.
+
+### Decisions locked in this round
+
+- **Live data**: 30s polling (no WebSocket v1). Token at
+  `theme.polling.inbox`.
+- **Filter chips**: severity + kind, URL-persistent (`?severity=`, `?kind=`).
+- **Badge rule**: total pending count; red when any inbox item is
+  critical-severity.
+- **Detail surface**: right-side shadcn Sheet drawer, URL state
+  `?item=approval:<id>`.
+- **Sort**: severity-tiered (critical → warning → info), newest first
+  within tier.
+- **Card density**: expanded (title + context + meta), brief
+  recommendation.
+- **Empty state**: affirmative "All clear" panel; never a sad "no items"
+  message.
+
+### Frontend — built
+
+| Surface | File | Notes |
+|---|---|---|
+| Server-rendered snapshot | `apps/dashboard/src/lib/inbox/data.ts` | `Promise.allSettled` over approvals + home/overview |
+| Types | `apps/dashboard/src/lib/inbox/types.ts` | `InboxItem` discriminated union, `InboxFilters` |
+| Merge + sort + filter helpers | `apps/dashboard/src/lib/inbox/derive.ts` | Severity-tiered sort, by-kind counts |
+| Shell | `apps/dashboard/src/components/inbox/inbox-shell.tsx` | Polling, URL-state filters + drawer, decide handler |
+| Filter chips | `apps/dashboard/src/components/inbox/filter-chips.tsx` | Severity + kind, counts on each chip |
+| Severity-grouped list | `apps/dashboard/src/components/inbox/item-group.tsx` | One group per severity tier with item rows |
+| Approval drawer | `apps/dashboard/src/components/inbox/approval-drawer.tsx` | shadcn Sheet, approve/deny/cancel with optional note |
+| All-clear state | `apps/dashboard/src/components/inbox/all-clear.tsx` | Affirmative empty state |
+| Degraded banner | `apps/dashboard/src/components/inbox/inbox-banner.tsx` | Surfaces partial-source failures |
+| Page entry | `apps/dashboard/src/app/(dashboard)/inbox/page.tsx` | Server component, `force-dynamic` |
+| Top-bar anchor | `apps/dashboard/src/components/layout/top-bar.tsx` | `AnchorPill` now optionally renders as a `<Link>`; Inbox pill points at `/inbox`; critical → red dot, pending → yellow, else green |
+
+### Backend — built or extended
+
+| Endpoint | Status | File |
+|---|---|---|
+| `GET /api/v1/admin/anchors` | **Extended**: added `inbox_has_critical`; `inbox_pending` now folds system alerts into the tally and counts approvals cross-tenant via `app.bypass_rls=on` (the prior store call returned 0 because the store enforces tenant scope). | `services/runtime/internal/server/admin_anchors.go` |
+| `GET /api/v1/approvals?status=pending` | Already shipped — consumed for both initial fetch and polling | `services/runtime/internal/server/approvals.go` |
+| `GET /api/v1/home/overview.alerts` | Already shipped — source for system-alert inbox items | `services/runtime/internal/server/dashboard.go` |
+| `POST /api/v1/approvals/{id}/decide` | Already shipped — wired through the drawer's Approve/Deny/Cancel buttons | `services/runtime/internal/server/approvals.go` |
+
+### Schema mirroring (zod)
+
+`apps/dashboard/src/lib/api.ts`:
+- `AdminAnchorsSchema` gained `inbox_has_critical: z.boolean()`
+
+### Test coverage
+
+| Test | File | Status |
+|---|---|---|
+| `TestAdminAnchorsEmptyDeps` | `services/runtime/internal/server/admin_anchors_test.go` | passing — locks down the `inbox_has_critical` boolean field, healthy default health, and well-formed zero values |
+
+Full server suite: **266 tests, all passing**.
+
+### Deferred / out of scope (v1)
+
+- **Mobile route** (`/inbox/<id>`) — Gap 11. Inbox is desktop-only in v1.
+- **Acknowledge mutation** for non-approval items — Gap 10. System alerts
+  vanish only when the underlying probe recovers; rows in v1 carry the
+  copy "resolves when condition clears".
+- **Rich Inbox sources** (budget / error / provider / queue alerts) —
+  Gap 9. Approvals + AF/DB probes are the only v1 signals.
+- **Unified inbox endpoint** — Gap 8. v1 merges client-side; the merge
+  helper lives in `lib/inbox/derive.ts` and is ready to be replaced by a
+  server response when Gap 8 ships.
+- **WebSocket subscription** — page brief §11 calls it out as a v0.2
+  enhancement; 30s polling carries v1.
+
+---
+
+## Backend gaps — status after Inbox
+
+See `development/ux/required-backend-gaps.md` for the originating list.
+
+| Gap | Description | Status after Inbox v1 |
+|---|---|---|
+| **6** | Anchor unified endpoint | ✅ **Closed in scope.** Extended with `inbox_has_critical`; counts now reflect approvals + system alerts cross-tenant |
+| **8** | Unified Inbox endpoint | ⏸ **Deferred** — merged client-side in `lib/inbox/derive.ts`. Acceptable per brief; revisit in v0.2 |
+| **9** | Inbox-emitted events | ⏸ **Deferred to v0.2** — v1 ships with approvals + 2 system alerts only, per brief §20 |
+| **10** | Acknowledge/dismiss non-approval items | ⏸ **Deferred to v0.2** — v1 makes system-alert rows non-interactive with copy explaining they resolve when the condition clears |
+| **11** | Mobile single-item fetch | ⏸ **Deferred to v0.2** — Inbox is desktop-only in v1 |
+
+**Net result for Inbox**: 0 gaps blocking the v1 surface; remaining gaps
+match the brief's explicit "partial scope" plan.
+
+---
+
+_Last updated: 2026-06-17. Next page brief to groom: Cost._

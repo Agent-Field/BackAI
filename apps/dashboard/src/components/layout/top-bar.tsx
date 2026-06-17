@@ -4,6 +4,7 @@
 
 import { Bell, ChevronDown, MoonStar, Search, Sun } from "lucide-react"
 import { useTheme } from "next-themes"
+import Link from "next/link"
 import { useEffect, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
@@ -98,6 +99,7 @@ export function TopBar({
         <div className="flex items-center gap-inline">
           <AnchorPill
             label="Inbox"
+            href="/inbox"
             value={
               anchors === null
                 ? "—"
@@ -108,11 +110,13 @@ export function TopBar({
             status={
               anchors === null
                 ? "idle"
-                : anchors.inbox_pending > 0
-                  ? "watch"
-                  : "ok"
+                : anchors.inbox_has_critical
+                  ? "act"
+                  : anchors.inbox_pending > 0
+                    ? "watch"
+                    : "ok"
             }
-            helpText="Pending approvals across all tenants"
+            helpText="Pending approvals + active system alerts"
           />
           <AnchorPill
             label="Cost"
@@ -190,20 +194,25 @@ function AnchorPill({
   value,
   status,
   helpText,
+  href,
 }: {
   label: string
   value: string
   status: StatusState
   helpText: string
+  href?: string
 }) {
+  const pillClass =
+    "inline-flex h-8 items-center gap-inline rounded-md px-pill-x text-meta transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <button
-            type="button"
-            className="inline-flex h-8 items-center gap-inline rounded-md px-pill-x text-meta transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          />
+          href ? (
+            <Link href={href} className={pillClass} />
+          ) : (
+            <button type="button" className={pillClass} />
+          )
         }
       >
         <span

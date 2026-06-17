@@ -27,6 +27,13 @@ Gaps **1, 2, 3, 4, 5, 7** closed by the Home implementation. Webhook
 deliveries on `home/overview` also wired (was the "Phase 10" placeholder).
 Detail in `implementation-status.md`.
 
+## Snapshot after Inbox v1 (2026-06-17)
+
+Gap **6** closed (anchors extended with `inbox_has_critical`, count now
+cross-tenant). Gaps **8, 9, 10, 11** explicitly deferred to v0.2 per the
+brief's partial-scope plan, with v1 mitigations recorded in each entry
+below.
+
 ---
 
 ## Gaps discovered
@@ -117,9 +124,15 @@ Detail in `implementation-status.md`.
   dedicated `GET /api/v1/admin/events?limit=20` endpoint with a typed
   union of event shapes. (b) is more reusable.
 
-### Gap 6 — Anchor live values unified endpoint ⏸ Deferred (out of Home v1 scope)
-- **Why deferred**: Top-bar anchors belong to the layout shell, not the
-  Home page brief. Home v1 ships without anchors; the three sources
+### Gap 6 — Anchor live values unified endpoint ✅ Closed (Inbox v1, 2026-06-17)
+- **Shipped**: `GET /api/v1/admin/anchors` returns
+  `{inbox_pending, inbox_has_critical, cost_today_usd, health}`.
+  `inbox_pending` now folds active system alerts into the tally and
+  counts pending approvals cross-tenant via a short `app.bypass_rls=on`
+  transaction (prior store call was tenant-scoped and silently returned
+  zero). `inbox_has_critical` drives the badge colour.
+- **Originally deferred**: Top-bar anchors belong to the layout shell,
+  not the Home page brief. Home v1 ships without anchors; the three sources
   remain separate calls until the layout brief is groomed.
 - **Surfaced by**: Home (top-bar anchor values: Inbox count, Cost daily,
   Health dot)
@@ -135,7 +148,12 @@ Detail in `implementation-status.md`.
   `{inbox_pending: int, cost_today_usd: float, health: "healthy"|"degraded"|"down"}`.
   WebSocket-pushable.
 
-### Gap 8 — Unified Inbox endpoint
+### Gap 8 — Unified Inbox endpoint ⏸ Deferred (Inbox v1 ships client-side merge)
+- **v1 mitigation shipped**: Dashboard merges approvals +
+  `home/overview.alerts` in `apps/dashboard/src/lib/inbox/derive.ts`. The
+  shape is ready to be replaced by a server response when a
+  `GET /api/v1/admin/inbox` endpoint lands — no client work required
+  beyond swapping the merge call for a fetch.
 - **Surfaced by**: Page Brief — Inbox
 - **What we need**: A single endpoint returning all pending-decision items
   across types (approvals, system alerts, budget alerts, error spikes,
@@ -148,7 +166,11 @@ Detail in `implementation-status.md`.
 - **Suggested fix**: `GET /api/v1/admin/inbox` returning typed union
   `{kind, id, severity, title, context, age, actions, source}`. v0.2.
 
-### Gap 9 — Inbox-emitted events (budget / error / provider / queue)
+### Gap 9 — Inbox-emitted events (budget / error / provider / queue) ⏸ Deferred (Inbox v1 ships partial scope)
+- **v1 mitigation shipped**: Inbox renders approvals + AF/DB unhealthy
+  probes only, per the brief's "partial v1 ship without" plan. The
+  filter chips and severity-grouped list already accommodate richer
+  sources when emitters land.
 - **Surfaced by**: Page Brief — Inbox
 - **What we need**: Runtime emitters that surface as Inbox items:
   - Budget threshold crossed (80% / 90% / 100%) per tenant
@@ -166,7 +188,10 @@ Detail in `implementation-status.md`.
 - **v1 mitigation**: Ship Inbox with approvals + 2 system alerts only;
   brief notes the partial scope.
 
-### Gap 10 — Acknowledge / dismiss mutation for non-approval items
+### Gap 10 — Acknowledge / dismiss mutation for non-approval items ⏸ Deferred (Inbox v1 documents the constraint)
+- **v1 mitigation shipped**: System-alert rows in Inbox are
+  non-interactive and carry the inline copy "resolves when condition
+  clears" so the operator knows there's no ack action available yet.
 - **Surfaced by**: Page Brief — Inbox
 - **What we need**: `POST /api/v1/admin/inbox/{id}/acknowledge` so
   operator can dismiss a system alert without taking remedial action.
@@ -180,7 +205,10 @@ Detail in `implementation-status.md`.
   vanish only when the underlying condition resolves. UI must communicate
   this.
 
-### Gap 11 — Mobile single-item fetch by composite id
+### Gap 11 — Mobile single-item fetch by composite id ⏸ Deferred (Inbox v1 is desktop-only)
+- **v1 mitigation shipped**: Inbox v1 is desktop-only; the mobile push
+  Journey 6 path waits on v0.2 along with the mobile route. No
+  regression to existing surfaces.
 - **Surfaced by**: Page Brief — Inbox (Journey 6 mobile push deep link)
 - **What we need**: Push notification deep-links to `/inbox/<item_id>`
   where `item_id` could be `approval:abc123` or `alert:xyz`. The mobile

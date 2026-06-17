@@ -313,8 +313,13 @@ export type AdminEventList = z.infer<typeof AdminEventListSchema>
 
 // Top-bar anchors — single round-trip for Inbox count + Cost today +
 // Health dot, polled on every page. Closes Gap 6.
+//
+// `inbox_has_critical` lights the badge red when at least one inbox item
+// is critical severity. Today only the AgentField/DB unhealthy probes
+// raise critical; approvals are watch-level.
 export const AdminAnchorsSchema = z.object({
   inbox_pending: z.number(),
+  inbox_has_critical: z.boolean(),
   cost_today_usd: z.number(),
   health: z.enum(["healthy", "degraded", "down"]),
 })
