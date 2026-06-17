@@ -1,2 +1,3 @@
 agentfield
 pydantic>=2.7
+sentry-sdk>=2.0,<3.0

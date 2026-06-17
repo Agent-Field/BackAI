@@ -1,6 +1,7 @@
 # Pinned-loose: the dev gets latest patches inside a tested major.
 agentfield>=0.1
 pydantic>=2.0
+sentry-sdk>=2.0,<3.0
 # httpx ships transitively with agentfield, but pinning it keeps the
 # memory/billing SDK fetches behaving deterministically on rebuilds.
 httpx>=0.27

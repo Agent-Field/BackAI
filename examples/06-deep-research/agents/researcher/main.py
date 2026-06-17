@@ -63,6 +63,27 @@ logging.basicConfig(
 )
 
 
+def _init_sentry() -> None:
+    dsn = os.getenv("SENTRY_DSN", "").strip()
+    if not dsn:
+        return
+    import sentry_sdk
+    from sentry_sdk.integrations.logging import LoggingIntegration
+
+    sentry_sdk.init(
+        dsn=dsn,
+        environment=os.getenv("SENTRY_ENVIRONMENT") or os.getenv("AF_STACK_ENV") or "development",
+        release=os.getenv("SENTRY_RELEASE") or os.getenv("AGENT_VERSION") or "dev",
+        traces_sample_rate=0.0,
+        integrations=[
+            LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
+        ],
+    )
+
+
+_init_sentry()
+
+
 # ─── Model selection ──────────────────────────────────────────────────────
 #
 # Qwen 2.5 72B on OpenRouter: ~$0.35/$0.40 per 1M tokens. The whole

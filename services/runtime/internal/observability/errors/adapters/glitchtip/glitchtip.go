@@ -127,6 +127,10 @@ func (s *Store) GetGroup(ctx context.Context, groupID string) (obserrors.Group, 
 	if err != nil {
 		var methodNotAllowed methodNotAllowedError
 		if errors.As(err, &methodNotAllowed) {
+			// GlitchTip 6.1.8 returns 405 for org-scoped issue detail GET
+			// while accepting the same org-scoped issue PUT path. Keep
+			// lookup org-scoped by scanning issue pages instead of using
+			// Sentry's unscoped detail API.
 			return s.getGroupFromOrgList(ctx, groupID)
 		}
 		return obserrors.Group{}, err

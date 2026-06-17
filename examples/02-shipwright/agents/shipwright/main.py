@@ -15,12 +15,35 @@ swe-af. Keep `Agent(node_id="shipwright-v2")` and `@app.reasoner` name `run`.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import shutil
 from typing import Any
 
 from agentfield import Agent
 from pydantic import BaseModel
+
+
+def _init_sentry() -> None:
+    dsn = os.getenv("SENTRY_DSN", "").strip()
+    if not dsn:
+        return
+    import sentry_sdk
+    from sentry_sdk.integrations.logging import LoggingIntegration
+
+    sentry_sdk.init(
+        dsn=dsn,
+        environment=os.getenv("SENTRY_ENVIRONMENT") or os.getenv("AF_STACK_ENV") or "development",
+        release=os.getenv("SENTRY_RELEASE") or os.getenv("AGENT_VERSION") or "dev",
+        traces_sample_rate=0.0,
+        integrations=[
+            LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
+        ],
+    )
+
+
+_init_sentry()
+
 
 app = Agent(node_id="shipwright-v2")
 
