@@ -24,7 +24,9 @@ import type { AdminEvent } from "@/lib/api"
 // after that newer events arrive at the top and older ones disappear
 // below the fold.
 
-const FEED_HEIGHT_PX = 480
+// Shared with home-shell so the right column matches this exactly.
+export const ACTIVITY_FEED_HEIGHT_PX = 480
+const FEED_HEIGHT_PX = ACTIVITY_FEED_HEIGHT_PX
 
 const SEVERITY_ORDER: Record<AdminEvent["severity"], number> = {
   critical: 0,

@@ -137,7 +137,7 @@ const GROUPS: NavGroup[] = [
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const pathname = usePathname()
   return (
-    <Sidebar variant="inset" {...props}>
+    <Sidebar variant="sidebar" {...props}>
       <SidebarHeader className="px-row-x py-stack">
         <SidebarMenu>
           <SidebarMenuItem>

@@ -9,26 +9,29 @@ import { deriveKpiTiles } from "@/lib/home/derive"
 import type { HomeSnapshot } from "@/lib/home/types"
 import { polling } from "@/lib/theme"
 
-import { ActivityFeed } from "./activity-feed"
+import { ActivityFeed, ACTIVITY_FEED_HEIGHT_PX } from "./activity-feed"
 import { BackingServicesStrip } from "./backing-services-strip"
 import { KpiStrip } from "./kpi-strip"
 import { QuickActions } from "./quick-actions"
 import { RuntimeUnreachable } from "./states/runtime-unreachable"
 import { WelcomeBlock } from "./welcome-block"
 
-// Composition follows the page brief's logical zones but with the
-// density the operator console demands:
+// Layout:
 //
-//   Welcome block            (dismissible)
-//   KPI strip (8 dense tiles)
-//   ┌───────────────────────────┬──────────────────┐
-//   │ Activity feed (fixed h)   │ Quick actions    │
-//   │                           ├──────────────────┤
-//   │                           │ Backing services │
-//   └───────────────────────────┴──────────────────┘
+//   Welcome (full width, dismissible)
+//   KPI strip (full width)
+//   ┌──────────────────────────┬──────────────────────────┐
+//   │ Activity feed            │ Quick actions            │
+//   │ (fixed h, scroll inside) │ (compact)                │
+//   │                          ├──────────────────────────┤
+//   │                          │ Backing services         │
+//   │                          │ (fills remaining height) │
+//   └──────────────────────────┴──────────────────────────┘
 //
-// The activity feed's height is locked so navigation never shifts as the
-// feed grows; the right column hosts the two secondary chrome strips.
+// The right column matches the activity feed's locked height — quick
+// actions takes its natural size, backing services fills the rest with
+// an internal scroll fallback. Result: a single visual row, no ragged
+// bottom edge.
 
 export function HomeShell({ snapshot: initial }: { snapshot: HomeSnapshot }) {
   const [snapshot, setSnapshot] = useState(initial)
@@ -82,7 +85,10 @@ export function HomeShell({ snapshot: initial }: { snapshot: HomeSnapshot }) {
         <div className="lg:col-span-2">
           <ActivityFeed events={events} />
         </div>
-        <div className="flex flex-col gap-section">
+        <div
+          className="flex flex-col gap-section"
+          style={{ height: ACTIVITY_FEED_HEIGHT_PX }}
+        >
           <QuickActions />
           <BackingServicesStrip services={snapshot.services} />
         </div>

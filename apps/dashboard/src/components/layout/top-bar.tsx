@@ -16,7 +16,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import {
   Tooltip,
@@ -29,31 +28,26 @@ import type { AdminAnchors } from "@/lib/api"
 import type { StatusState } from "@/lib/home/types"
 import { polling } from "@/lib/theme"
 
-// Top bar shell — pinned across every admin page.
+// Sticky top bar. Three regions, separated by spacing only — no vertical
+// dividers, no profile chrome. The intent: a clear left → right reading
+// flow (identity · what needs attention · what to do).
 //
-// Sticky to the top of the SidebarInset so it never scrolls away. Three
-// explicit groups separated by visible dividers:
+//   [trigger]  BackAI  [tenant badge]
+//        ──────────  flex spacer  ──────────
+//                              [● inbox] [● cost] [● health]   [⌘K search]  [☼] [🔔]
 //
-//   left:   trigger · wordmark · tenant switcher
-//   right1: anchor pills (inbox / cost / health)
-//   right2: chrome (search · theme · bell · profile)
-//
-// All anchor values come from /api/v1/admin/anchors; the bar polls every
-// `polling.anchors` ms so the values are always fresh regardless of which
-// page the operator is on.
+// Anchors come from /api/v1/admin/anchors, polled every polling.anchors ms.
 
 interface TopBarProps {
   initialAnchors: AdminAnchors | null
   tenants: { id: string; name: string }[]
   activeTenantId?: string
-  user: { name: string; email: string }
 }
 
 export function TopBar({
   initialAnchors,
   tenants,
   activeTenantId,
-  user,
 }: TopBarProps) {
   const [anchors, setAnchors] = useState<AdminAnchors | null>(initialAnchors)
 
@@ -77,11 +71,10 @@ export function TopBar({
   const activeTenant = tenants.find((t) => t.id === activeTenantId) ?? tenants[0]
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-stack border-b bg-background/95 px-page-x backdrop-blur supports-[backdrop-filter]:bg-background/80">
-      {/* Left group */}
+    <header className="sticky top-0 z-30 flex h-12 shrink-0 items-center border-b bg-background/95 px-page-x backdrop-blur supports-[backdrop-filter]:bg-background/80">
+      {/* Left: identity */}
       <div className="flex items-center gap-stack">
         <SidebarTrigger className="-ml-1" />
-        <Separator orientation="vertical" className="data-vertical:h-5" />
         <span className="text-body font-semibold tracking-tight text-foreground">
           BackAI
         </span>
@@ -100,64 +93,61 @@ export function TopBar({
       {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Right group — anchors */}
-      <div className="flex items-center gap-inline">
-        <AnchorPill
-          label="Inbox"
-          value={
-            anchors === null
-              ? "—"
-              : anchors.inbox_pending > 0
-                ? String(anchors.inbox_pending)
-                : "0"
-          }
-          status={
-            anchors === null
-              ? "idle"
-              : anchors.inbox_pending > 0
-                ? "watch"
-                : "ok"
-          }
-          helpText="Pending approvals across all tenants"
-        />
-        <AnchorPill
-          label="Cost"
-          value={
-            anchors === null ? "—" : formatAnchorUSD(anchors.cost_today_usd)
-          }
-          status="idle"
-          helpText="Total spend today (UTC)"
-        />
-        <AnchorPill
-          label="Health"
-          value={anchors === null ? "—" : anchors.health}
-          status={anchors === null ? "idle" : healthStatus(anchors.health)}
-          helpText="Runtime dependencies (AgentField, Postgres)"
-        />
-      </div>
-
-      <Separator orientation="vertical" className="data-vertical:h-5" />
-
-      {/* Right group — chrome */}
-      <div className="flex items-center gap-inline">
-        <CmdKTrigger />
-        <ThemeToggle />
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Notifications"
-                className="size-8"
-              />
+      {/* Right: anchors + chrome — no vertical dividers, spacing only */}
+      <div className="flex items-center gap-stack">
+        <div className="flex items-center gap-inline">
+          <AnchorPill
+            label="Inbox"
+            value={
+              anchors === null
+                ? "—"
+                : anchors.inbox_pending > 0
+                  ? String(anchors.inbox_pending)
+                  : "0"
             }
-          >
-            <Bell className="size-icon-inline text-muted-foreground" aria-hidden />
-          </TooltipTrigger>
-          <TooltipContent>Notifications</TooltipContent>
-        </Tooltip>
-        <ProfileMenu user={user} />
+            status={
+              anchors === null
+                ? "idle"
+                : anchors.inbox_pending > 0
+                  ? "watch"
+                  : "ok"
+            }
+            helpText="Pending approvals across all tenants"
+          />
+          <AnchorPill
+            label="Cost"
+            value={
+              anchors === null ? "—" : formatAnchorUSD(anchors.cost_today_usd)
+            }
+            status="idle"
+            helpText="Total spend today (UTC)"
+          />
+          <AnchorPill
+            label="Health"
+            value={anchors === null ? "—" : anchors.health}
+            status={anchors === null ? "idle" : healthStatus(anchors.health)}
+            helpText="Runtime dependencies (AgentField, Postgres)"
+          />
+        </div>
+        <div className="flex items-center gap-inline pl-stack">
+          <CmdKTrigger />
+          <ThemeToggle />
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Notifications"
+                  className="size-8"
+                />
+              }
+            >
+              <Bell className="size-icon-inline text-muted-foreground" aria-hidden />
+            </TooltipTrigger>
+            <TooltipContent>Notifications</TooltipContent>
+          </Tooltip>
+        </div>
       </div>
     </header>
   )
@@ -278,51 +268,6 @@ function ThemeToggle() {
       </TooltipTrigger>
       <TooltipContent>{dark ? "Light theme" : "Dark theme"}</TooltipContent>
     </Tooltip>
-  )
-}
-
-function ProfileMenu({ user }: { user: { name: string; email: string } }) {
-  const initials = user.name
-    .split(/\s+/)
-    .map((s) => s[0])
-    .filter(Boolean)
-    .slice(0, 2)
-    .join("")
-    .toUpperCase()
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Profile menu"
-            className="size-8"
-          />
-        }
-      >
-        <span className="inline-flex size-7 items-center justify-center rounded-pill bg-muted text-meta font-medium text-muted-foreground">
-          {initials || "OP"}
-        </span>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-48">
-        <DropdownMenuLabel className="flex flex-col">
-          <span className="text-body">{user.name}</span>
-          <span className="text-meta text-muted-foreground">{user.email}</span>
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem>Profile</DropdownMenuItem>
-        <DropdownMenuItem>Settings</DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onClick={() => {
-            window.location.href = "/api/auth/sign-out"
-          }}
-        >
-          Sign out
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
   )
 }
 

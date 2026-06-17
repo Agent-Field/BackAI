@@ -2,6 +2,7 @@
 
 import { ArrowUpRight } from "lucide-react"
 
+import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Tooltip,
   TooltipContent,
@@ -11,10 +12,9 @@ import {
 import type { AdminServiceList } from "@/lib/api"
 import type { StatusState } from "@/lib/home/types"
 
-// Single-row strip of compact pills, one per backing service. Each pill
-// has: status dot · short name · trimmed version · ↗ (only when an
-// admin_url exists). Hover shows full name, full version, purpose, and
-// the admin_url destination.
+// Compact pills, one per backing service. The shell fills any remaining
+// vertical space in the home right-column; pills wrap and the wrap
+// container scrolls internally if there are more services than fit.
 
 const DOT: Record<StatusState, string> = {
   ok: "bg-success",
@@ -32,9 +32,9 @@ export function BackingServicesStrip({
   return (
     <section
       aria-labelledby="services-heading"
-      className="rounded-md border bg-card"
+      className="flex min-h-0 flex-1 flex-col rounded-md border bg-card"
     >
-      <header className="flex items-center justify-between border-b px-row-x py-row-y">
+      <header className="flex shrink-0 items-center justify-between border-b px-row-x py-row-y">
         <h2
           id="services-heading"
           className="text-body font-medium text-foreground"
@@ -50,20 +50,22 @@ export function BackingServicesStrip({
           No backing services reported by the runtime.
         </p>
       ) : (
-        <div className="flex flex-wrap gap-strip px-row-x py-tile">
-          {rows.map((svc) => (
-            <ServicePill
-              key={svc.id}
-              id={svc.id}
-              name={svc.name}
-              status={classifyServiceStatus(svc.status)}
-              statusLabel={svc.status}
-              version={svc.version}
-              purpose={svc.purpose}
-              adminURL={svc.admin_url ?? undefined}
-            />
-          ))}
-        </div>
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="flex flex-wrap gap-inline px-row-x py-tile">
+            {rows.map((svc) => (
+              <ServicePill
+                key={svc.id}
+                id={svc.id}
+                name={svc.name}
+                status={classifyServiceStatus(svc.status)}
+                statusLabel={svc.status}
+                version={svc.version}
+                purpose={svc.purpose}
+                adminURL={svc.admin_url ?? undefined}
+              />
+            ))}
+          </div>
+        </ScrollArea>
       )}
     </section>
   )
@@ -76,8 +78,6 @@ function classifyServiceStatus(raw: string): StatusState {
     case "degraded":
       return "watch"
     case "configured":
-      // Configured but not actively probed — we don't know it's healthy.
-      // Per the critique: green dot when we haven't checked is misleading.
       return "idle"
     case "offline":
     case "down":
@@ -173,8 +173,6 @@ function ServicePill({
   )
 }
 
-// trimVersion: keep just the major.minor (or major) part — drop Postgres
-// vendor suffixes like "(Debian 16.14-1.pgdg12+1)".
 function trimVersion(raw?: string): string | null {
   if (!raw) return null
   const match = raw.match(/(\d+(?:\.\d+)?)/)

@@ -5,7 +5,6 @@ import { TopBar } from "@/components/layout/top-bar"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 
 import { api } from "@/lib/api"
-import { brand } from "@/lib/brand"
 import { layout } from "@/lib/theme"
 
 // Shared shell for every authenticated dashboard route. Lives at the
@@ -41,7 +40,6 @@ export default async function DashboardLayout({
         <TopBar
           initialAnchors={initialAnchors}
           tenants={tenantList}
-          user={{ name: brand.displayName, email: "operator@local" }}
         />
         {children}
       </SidebarInset>

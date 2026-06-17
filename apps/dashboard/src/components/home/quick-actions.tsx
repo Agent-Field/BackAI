@@ -26,7 +26,7 @@ export function QuickActions() {
   return (
     <section
       aria-labelledby="quick-actions-heading"
-      className="rounded-md border bg-card"
+      className="shrink-0 rounded-md border bg-card"
     >
       <header className="flex items-center justify-between border-b px-row-x py-row-y">
         <h2
