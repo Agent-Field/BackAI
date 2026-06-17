@@ -91,6 +91,7 @@ export type OperatorSnapshot = {
   billing: ConsoleRow[]
   secrets: ConsoleRow[]
   notifications: ConsoleRow[]
+  notificationChannels: ConsoleRow[]
   notificationMutes: ConsoleRow[]
   llmProviders: ConsoleRow[]
   providerHealth: ConsoleRow[]
@@ -499,6 +500,9 @@ export const seededSnapshot: OperatorSnapshot = {
     { id: "notif_budget", primary: "budget-warning", secondary: "email · ops@beta.test · resend", status: "sent", tone: "ok", metric: "attempt 1", timestamp: "08:44:10" },
     { id: "notif_invite", primary: "tenant-invite", secondary: "log · sara@acme.test", status: "queued", tone: "running", metric: "attempt 0", timestamp: "09:12:01" },
   ],
+  notificationChannels: [
+    { id: "channel-log", primary: "log", secondary: "adapter=log · source env", status: "enabled", tone: "ok", metric: "log", timestamp: "env" },
+  ],
   notificationMutes: [
     { id: "mute-default", primary: "*", secondary: "* · * · *", status: "available", tone: "neutral", metric: "no active mute", timestamp: "policy" },
   ],
@@ -623,6 +627,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     notificationStats,
     notifications,
     notificationMutes,
+    notificationChannels,
     sandboxPool,
     sandboxRuns,
     metrics,
@@ -633,6 +638,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     containerRestarts,
     toolAdapters,
     nativeTools,
+    toolUsage,
     mcpServers,
     mcpTools,
     harnesses,
@@ -651,6 +657,9 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     traceCapabilities,
     oauthConnections,
     oauthProviders,
+    oauthRefreshHistory,
+    reasonerAnalytics,
+    sqlHistory,
     features,
   ] = await Promise.all([
     settle(() => api.health()),
@@ -685,6 +694,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     settle(() => api.notifications.stats()),
     settle(() => api.notifications.list({ limit: 20 })),
     settle(() => api.notifications.mutes.list()),
+    settle(() => api.notifications.channels.list()),
     settle(() => api.sandbox.pool()),
     settle(() => api.sandbox.list({ limit: 12 })),
     settle(() => api.metrics()),
@@ -710,6 +720,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     })),
     settle(() => api.tools.adapters()),
     settle(() => api.tools.listNative()),
+    settle(() => api.tools.usage()),
     settle(() => api.mcp.servers()),
     settle(() => api.mcp.tools()),
     settle(() => api.harnesses.list()),
@@ -728,6 +739,9 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     settle(() => api.traces.capabilities()),
     settle(() => api.oauth.connections()),
     settle(() => api.oauth.providers()),
+    settle(() => api.oauth.refreshHistory({ limit: 10 })),
+    settle(() => api.reasoners.analytics()),
+    settle(() => api.db.sqlHistory()),
     settle(() => api.admin.features.get()),
   ])
 
@@ -1132,19 +1146,77 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     })) ?? []),
   ]
 
+  const toolUsageRows: ConsoleRow[] =
+    toolUsage?.tools.map((row) => ({
+      id: `usage:${row.transport}:${row.tool_name}`,
+      primary: row.tool_name,
+      secondary: `${row.transport} · top caller ${row.top_caller_agent ?? "system"}`,
+      status: row.errors ? "errors" : "healthy",
+      tone: row.errors ? "warn" : "ok" as StatusTone,
+      metric: `${row.calls.toLocaleString("en")} calls`,
+      timestamp: row.last_called_at ? shortTime(row.last_called_at) : "window",
+      detail: `${Math.round(row.avg_duration_ms)} ms avg · ${(row.error_rate * 100).toFixed(1)}% error`,
+    })) ?? []
+
   const reasonerRows: ConsoleRow[] =
-    agents?.agents.flatMap((agent) =>
-      (agent.reasoners?.length ? agent.reasoners : ["default"]).map((reasoner) => ({
-        id: `${agent.node_id}:${reasoner}`,
-        primary: `${agent.node_id}/${reasoner}`,
-        secondary: `${agent.version ?? "runtime"} · source agent ${agent.node_id}`,
-        status: "declared",
-        tone: "ok" as StatusTone,
-        metric: agent.tags?.slice(0, 2).join(", ") || "schema",
-        timestamp: "runtime",
-        href: `/build/agents?agent=${encodeURIComponent(agent.node_id)}&reasoner=${encodeURIComponent(reasoner)}`,
-      })),
-    ) ?? seededSnapshot.reasoners
+    reasonerAnalytics?.reasoners.length
+      ? reasonerAnalytics.reasoners.map((row) => ({
+          id: `${row.agent}:${row.reasoner}`,
+          primary: `${row.agent}/${row.reasoner}`,
+          secondary: `${row.calls.toLocaleString("en")} calls · ${money(row.cost_usd)} · ${Math.round(row.avg_latency_ms)} ms avg`,
+          status: row.errors ? "errors" : "active",
+          tone: row.errors ? "warn" : "ok" as StatusTone,
+          metric: `${(row.error_rate * 100).toFixed(1)}% errors`,
+          timestamp: row.last_called_at ? shortTime(row.last_called_at) : "window",
+          href: `/build/reasoners?agent=${encodeURIComponent(row.agent)}&reasoner=${encodeURIComponent(row.reasoner)}`,
+        }))
+      : (agents?.agents.flatMap((agent) =>
+          (agent.reasoners?.length ? agent.reasoners : ["default"]).map((reasoner) => ({
+            id: `${agent.node_id}:${reasoner}`,
+            primary: `${agent.node_id}/${reasoner}`,
+            secondary: `${agent.version ?? "runtime"} · source agent ${agent.node_id}`,
+            status: "declared",
+            tone: "ok" as StatusTone,
+            metric: agent.tags?.slice(0, 2).join(", ") || "schema",
+            timestamp: "runtime",
+            href: `/build/agents?agent=${encodeURIComponent(agent.node_id)}&reasoner=${encodeURIComponent(reasoner)}`,
+          })),
+        ) ?? seededSnapshot.reasoners)
+
+  const notificationChannelRows: ConsoleRow[] =
+    notificationChannels?.channels.map((channel) => ({
+      id: channel.id,
+      primary: channel.kind,
+      secondary: `source ${channel.source} · ${Object.entries(channel.config_json).map(([key, value]) => `${key}=${String(value)}`).join(" · ") || "no config"}`,
+      status: channel.enabled ? "enabled" : "disabled",
+      tone: channel.enabled ? "ok" : "warn" as StatusTone,
+      metric: channel.source,
+      timestamp: shortTime(channel.updated_at),
+      detail: JSON.stringify(channel.config_json, null, 2),
+    })) ?? seededSnapshot.notificationChannels
+
+  const oauthRefreshRows: ConsoleRow[] =
+    oauthRefreshHistory?.events.map((event) => ({
+      id: `refresh:${event.id}`,
+      primary: `${event.provider} refresh`,
+      secondary: `${event.tenant_id} · ${event.user_id ?? "system"}`,
+      status: event.status,
+      tone: event.status === "success" ? "ok" : "warn" as StatusTone,
+      metric: event.error_code ?? "ok",
+      timestamp: shortTime(event.attempted_at),
+    })) ?? []
+
+  const sqlHistoryRows: ConsoleRow[] =
+    sqlHistory?.history.map((entry) => ({
+      id: `sql:${entry.id}`,
+      primary: entry.query.split(/\s+/).slice(0, 8).join(" "),
+      secondary: entry.user_id,
+      status: "recorded",
+      tone: "neutral" as StatusTone,
+      metric: `${entry.query.length.toLocaleString("en")} chars`,
+      timestamp: shortTime(entry.executed_at),
+      detail: entry.query,
+    })) ?? []
 
   const harnessRows: ConsoleRow[] =
     harnesses?.harnesses.map((harness) => ({
@@ -1570,7 +1642,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
         metric: `${table.estimated_rows.toLocaleString("en")} rows`,
         timestamp: "schema",
       })) ?? seededSnapshot.tables,
-    dbHealth: dbHealthRows,
+    dbHealth: [...dbHealthRows, ...sqlHistoryRows],
     queue: jobRows.length ? jobRows : (
       queue?.recent.map((job) => ({
           id: job.id,
@@ -1620,7 +1692,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
         href: `/customers/audit?entry=${encodeURIComponent(entry.id)}`,
         detail: JSON.stringify(entry.metadata, null, 2),
       })) ?? seededSnapshot.audit,
-    oauth: oauthRows,
+    oauth: [...oauthRows, ...oauthRefreshRows].length ? [...oauthRows, ...oauthRefreshRows] : seededSnapshot.oauth,
     sessions: sessionRows.length ? sessionRows : seededSnapshot.sessions,
     budgets:
       budgets?.budgets.map((budget) => ({
@@ -1641,7 +1713,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     searchIndexes: searchIndexRows,
     modules: moduleRows,
     skills: skillRows.length ? skillRows : seededSnapshot.skills,
-    tools: toolRows.length ? toolRows : seededSnapshot.tools,
+    tools: [...toolRows, ...toolUsageRows].length ? [...toolRows, ...toolUsageRows] : seededSnapshot.tools,
     reasoners: reasonerRows,
     harnesses: harnessRows,
     crons: cronRows,
@@ -1649,6 +1721,7 @@ export async function getOperatorSnapshot(): Promise<OperatorSnapshot> {
     billing: billingRows,
     secrets: secretRows,
     notifications: notificationRows,
+    notificationChannels: notificationChannelRows,
     notificationMutes: notificationMuteRows,
     llmProviders: providerHealthRows.length ? [...providerHealthRows, ...llmRows].slice(0, 20) : llmRows,
     providerHealth: providerHealthRows,

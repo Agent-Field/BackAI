@@ -1814,7 +1814,7 @@ Persist a per-operator history of SQL queries (currently UI-only local state in 
 | 4 — `traces` adapter slot | ✅ **DONE** | ~2.5 | Empty default, Tempo backend, remote shim, admin endpoints, dashboard wiring, conformance, and protocol docs shipped. |
 | 5 — `metrics` adapter slot | ✅ **DONE** | ~2 | Env var + cAdvisor metric names; provider-health stays on Postgres path; none/Prometheus/remote shipped with Cost and Container charts. |
 | 6 — `errors` adapter slot | ✅ **DONE** | ~3 | Logfilter default, GlitchTip adapter, remote shim, Sentry SDK wiring, dashboard actions |
-| 7 — Aggregation endpoints | queued / next | ~3–4 | reasoner column + tools log table + OAuth refresh log are new migrations + write-path hooks |
+| 7 — Aggregation endpoints | ✅ **DONE** | ~3–4 | Shipped Combined Block A: reasoner analytics, tool usage, notification channels CRUD/reload, OAuth refresh history, SQL history, and `backai_runs_total`. |
 | 8 — Polish | queued | ~1 | Adapter pills + Home strip + capability hook |
 | 9 — Unmapped gap indicators | queued | ~1 | 3 small gaps not covered by Blocks 1, 3-8 |
 | **Remaining** | | **~11–12** | (Blocks 1-6 already done) |

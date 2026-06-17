@@ -49,7 +49,7 @@ Blocks 3-6 follow the same adapter-slot scaffolding as the existing 8 slots (Go 
 - **Per-page deep links only for specific entities** (e.g., Operate → Runs row → "Open in AgentField" for that run id).
 - **Every new observability layer is an adapter slot.** Same scaffolding as existing 8 — protocol doc, Go interface, remote shim, registry row, conformance check. Third parties can swap backends.
 - **Observability backends are operator-deployed and env-var-bound.** The runtime adapts to whatever the operator stands up (Loki at `AF_STACK_LOGS_LOKI_URL`, Tempo at `AF_STACK_TRACES_TEMPO_URL`, Prometheus at `AF_STACK_METRICS_PROMETHEUS_URL`, GlitchTip at `AF_STACK_ERRORS_GLITCHTIP_URL`). When unset, each slot stays on its default builtin.
-- **Metrics v1 intentionally ships 4 app metrics.** `backai_runs_total{agent,status}` is deferred until there is one canonical run lifecycle source; do not synthesize it from partial signals.
+- **Metrics v1 now includes 5 app metrics.** `backai_runs_total{agent,status}` is emitted from `logGatewayRequest`, the same durable `suite_gateway_requests` source used by `/api/v1/runs`.
 - **LLM-specific observability (Langfuse / Helicone / OpenLIT) is NOT in v1.** Covered by generic Logs + Traces + Errors.
 - **River UI / pgHero / Sentry self-hosted: NOT in v1.** Existing queue page + DB Health tab + GlitchTip cover the same ground.
 

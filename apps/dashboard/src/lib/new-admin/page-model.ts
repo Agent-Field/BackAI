@@ -461,27 +461,27 @@ const definitions: Record<string, PageDefinition> = {
   "/build/reasoners": {
     primaryAction: "Open agent",
     controls: () => [select("Agent", "all", ["all", "support.triage", "coder.review"]), input("Search", "Search reasoner, schema, tool...")],
-    kpis: () => [kpi("Listing", "derived", "from agents", "ok", "ok"), kpi("Analytics", "deferred", "cost/latency", "gap", "warn"), kpi("Schema", "preview", "input/output", "ready", "running"), kpi("Tools", "declared", "agent-level", "runtime", "ok")],
+    kpis: () => [kpi("Listing", "derived", "from agents", "ok", "ok"), kpi("Analytics", "backed", "cost/latency", "ready", "ok"), kpi("Schema", "preview", "input/output", "ready", "running"), kpi("Tools", "declared", "agent-level", "runtime", "ok")],
     rows: (snapshot) => snapshot.reasoners,
     tableTitle: "Reasoner inventory",
     tableDescription: "Cross-agent list of reasoning steps derived from the agent registry.",
     secondaryTitle: "Source links",
     secondary: (snapshot) => [
       card("Parent agents", "Every reasoner links back to its owning agent.", selectedRows(snapshot.agents, 5)),
-      card("Deferred analytics", "Cost and latency stay on Cost until backend grouping is first-class.", [{ label: "Gap", value: "reasoner analytics endpoint", tone: "warn" }]),
+      card("Analytics", "Cost, latency, call count, and errors come from `/api/v1/reasoners/analytics`.", selectedRows(snapshot.reasoners, 5)),
     ],
   },
   "/build/tools": {
     primaryAction: "Invoke tool",
     controls: () => [tabs("Type", "all", ["all", "native", "adapter", "mcp"]), input("Search", "Search tool, adapter, schema...")],
-    kpis: () => [kpi("Native", "live", "strict tools", "ready", "ok"), kpi("MCP", "live", "servers/tools", "ready", "ok"), kpi("Invoke", "drawer", "schema form", "ready", "running"), kpi("Usage", "deferred", "analytics", "gap", "warn")],
+    kpis: () => [kpi("Native", "live", "strict tools", "ready", "ok"), kpi("MCP", "live", "servers/tools", "ready", "ok"), kpi("Invoke", "drawer", "schema form", "ready", "running"), kpi("Usage", "backed", "analytics", "ready", "ok")],
     rows: (snapshot) => snapshot.tools,
     tableTitle: "Tool inventory",
     tableDescription: "Native tools, adapter tools, and MCP tools with schemas and invoke entry points.",
     secondaryTitle: "Invoke context",
     secondary: (snapshot) => [
       card("Available tools", "Rows open a schema-generated invoke drawer.", selectedRows(snapshot.tools, 6)),
-      card("Usage analytics", "Tool usage analytics are deferred in v1.", [{ label: "Gap", value: "tool usage endpoint", tone: "warn" }]),
+      card("Usage analytics", "Native and MCP calls are summarized from `/api/v1/tools/usage`.", selectedRows(snapshot.tools.filter((row) => row.id.startsWith("usage:")), 6)),
     ],
   },
   "/build/skills": {
@@ -689,7 +689,7 @@ const definitions: Record<string, PageDefinition> = {
   "/customers/oauth": {
     primaryAction: "Authorize provider",
     controls: () => [select("Provider", "all", ["all", "google", "slack", "github"]), tabs("Status", "all", ["all", "active", "expired", "revoked", "failed"]), input("Search", "Search user, tenant, scope...")],
-    kpis: () => [kpi("Connections", "backed", "OAuth list", "ready", "ok"), kpi("Providers", "backed", "provider list", "ready", "ok"), kpi("Refresh history", "missing", "endpoint", "gap", "warn"), kpi("Revoke", "backed", "provider delete", "guarded", "ok")],
+    kpis: () => [kpi("Connections", "backed", "OAuth list", "ready", "ok"), kpi("Providers", "backed", "provider list", "ready", "ok"), kpi("Refresh history", "backed", "endpoint", "ready", "ok"), kpi("Revoke", "backed", "provider delete", "guarded", "ok")],
     rows: (snapshot) => snapshot.oauth,
     tableTitle: "OAuth connections",
     tableDescription: "Tenant-scoped external grants used when agents act on behalf of users.",
@@ -782,12 +782,12 @@ const definitions: Record<string, PageDefinition> = {
   "/setup/notifications": {
     primaryAction: "Send test",
     controls: () => setupControls("Search channel, template, adapter..."),
-    kpis: () => [kpi("Channels", "env", "display only", "thin", "warn"), kpi("Test send", "backed", "notifications", "ready", "ok"), kpi("CRUD", "deferred", "endpoint", "gap", "warn"), kpi("Audit", "linked", "delivery page", "ready", "running")],
-    rows: (snapshot) => snapshot.notifications,
+    kpis: () => [kpi("Channels", "backed", "env + DB", "ready", "ok"), kpi("Test send", "backed", "notifications", "ready", "ok"), kpi("CRUD", "backed", "endpoint", "ready", "ok"), kpi("Audit", "linked", "delivery page", "ready", "running")],
+    rows: (snapshot) => snapshot.notificationChannels,
     tableTitle: "Notification channels",
     tableDescription: "Channel configuration, key status, and test send. Delivery audit is separate.",
     secondaryTitle: "Config caveat",
-    secondary: () => [card("Missing CRUD", "Full channel CRUD is deferred; v1 displays env config and sends tests.", [{ label: "Gap", value: "notification channel CRUD endpoint", tone: "warn" }])],
+    secondary: (snapshot) => [card("Channel config", "Env defaults load first; DB rows override by kind and reload on SIGHUP.", selectedRows(snapshot.notificationChannels, 5))],
   },
   "/setup/secrets": {
     primaryAction: "Add secret",

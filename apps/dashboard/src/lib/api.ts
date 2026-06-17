@@ -690,6 +690,22 @@ export const NotificationMuteListSchema = z.object({
 })
 export type NotificationMuteList = z.infer<typeof NotificationMuteListSchema>
 
+export const NotificationChannelSchema = z.object({
+  id: z.string(),
+  kind: NotificationKindSchema,
+  config_json: z.record(z.string(), z.unknown()),
+  enabled: z.boolean(),
+  source: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+})
+export type NotificationChannel = z.infer<typeof NotificationChannelSchema>
+
+export const NotificationChannelListSchema = z.object({
+  channels: z.array(NotificationChannelSchema),
+})
+export type NotificationChannelList = z.infer<typeof NotificationChannelListSchema>
+
 export const CreateNotificationMuteInputSchema = z.object({
   tenant_id: z.string().optional(),
   pattern: NotificationMutePatternSchema,
@@ -1441,6 +1457,69 @@ export const CostEventListSchema = z.object({
   has_more: z.boolean(),
 })
 export type CostEventList = z.infer<typeof CostEventListSchema>
+
+export const AnalyticsWindowSchema = z.object({
+  from: z.string(),
+  to: z.string(),
+})
+
+export const ReasonerAnalyticsRowSchema = z.object({
+  agent: z.string(),
+  reasoner: z.string(),
+  calls: z.number(),
+  errors: z.number(),
+  error_rate: z.number(),
+  avg_latency_ms: z.number(),
+  cost_usd: z.number(),
+  last_called_at: z.string().optional(),
+  top_caller_agent: z.string().optional(),
+})
+export const ReasonerAnalyticsSchema = z.object({
+  reasoners: z.array(ReasonerAnalyticsRowSchema),
+  window: AnalyticsWindowSchema,
+})
+export type ReasonerAnalytics = z.infer<typeof ReasonerAnalyticsSchema>
+
+export const ToolUsageRowSchema = z.object({
+  tool_name: z.string(),
+  transport: z.string(),
+  calls: z.number(),
+  errors: z.number(),
+  error_rate: z.number(),
+  avg_duration_ms: z.number(),
+  top_caller_agent: z.string().optional(),
+  last_called_at: z.string().optional(),
+})
+export const ToolUsageSchema = z.object({
+  tools: z.array(ToolUsageRowSchema),
+  window: AnalyticsWindowSchema,
+})
+export type ToolUsage = z.infer<typeof ToolUsageSchema>
+
+export const OAuthRefreshHistoryEventSchema = z.object({
+  id: z.string(),
+  tenant_id: z.string(),
+  provider: z.string(),
+  user_id: z.string().nullable(),
+  status: z.string(),
+  error_code: z.string().nullable(),
+  attempted_at: z.string(),
+})
+export const OAuthRefreshHistorySchema = z.object({
+  events: z.array(OAuthRefreshHistoryEventSchema),
+})
+export type OAuthRefreshHistory = z.infer<typeof OAuthRefreshHistorySchema>
+
+export const SQLHistoryEntrySchema = z.object({
+  id: z.string(),
+  user_id: z.string(),
+  query: z.string(),
+  executed_at: z.string(),
+})
+export const SQLHistorySchema = z.object({
+  history: z.array(SQLHistoryEntrySchema),
+})
+export type SQLHistory = z.infer<typeof SQLHistorySchema>
 
 export const BudgetSchema = z.object({
   tenant_id: z.string(),
@@ -2437,6 +2516,14 @@ export const api = {
           z.object({ deleted: z.boolean() }),
         ),
     },
+    channels: {
+      list: () =>
+        request(
+          "/api/v1/notifications/channels",
+          undefined,
+          NotificationChannelListSchema,
+        ),
+    },
   },
 
   // ─── Webhooks (Phase 10.2 + 10.3) ───
@@ -2506,6 +2593,18 @@ export const api = {
       request("/api/v1/oauth/connections", undefined, OAuthConnectionListSchema),
     providers: () =>
       request("/api/v1/oauth/providers", undefined, OAuthProviderListSchema),
+    refreshHistory: (params?: { provider?: string; tenant_id?: string; limit?: number }) => {
+      const qs = new URLSearchParams()
+      if (params?.provider) qs.set("provider", params.provider)
+      if (params?.tenant_id) qs.set("tenant_id", params.tenant_id)
+      if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+      const q = qs.toString()
+      return request(
+        `/api/v1/oauth/refresh-history${q ? "?" + q : ""}`,
+        undefined,
+        OAuthRefreshHistorySchema,
+      )
+    },
     authorize: (provider: string) =>
       request(
         `/api/v1/oauth/${encodeURIComponent(provider)}/authorize`,
@@ -2596,6 +2695,8 @@ export const api = {
         { method: "POST", json: input },
         InvokeNativeToolResultSchema,
       ),
+    usage: () =>
+      request("/api/v1/tools/usage", undefined, ToolUsageSchema),
   },
 
   // ─── MCP servers + tools (Phase 11.1) ───
@@ -2779,6 +2880,12 @@ export const api = {
     },
     sql: (input: SQLRunRequest) =>
       request("/api/v1/db/sql", { method: "POST", json: input }, SQLRunResultSchema),
+    sqlHistory: () =>
+      request("/api/v1/db/sql/history", undefined, SQLHistorySchema),
+  },
+  reasoners: {
+    analytics: () =>
+      request("/api/v1/reasoners/analytics", undefined, ReasonerAnalyticsSchema),
   },
   memory: {
     list: (params?: {
