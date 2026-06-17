@@ -15,11 +15,23 @@
   but a single endpoint would be cleaner. Defer if needed.
 - **Cosmetic** — minor improvement. Backlog.
 
+## Status legend
+
+- ✅ **Closed** — backend shipped, frontend consuming.
+- ⏸ **Deferred** — surfaces with a different page brief.
+- ⬜ **Open** — still on the backlog.
+
+## Snapshot after Home v1 (2026-06-17)
+
+Gaps **1, 2, 3, 4, 5, 7** closed by the Home implementation. Webhook
+deliveries on `home/overview` also wired (was the "Phase 10" placeholder).
+Detail in `implementation-status.md`.
+
 ---
 
 ## Gaps discovered
 
-### Gap 1 — Live queue depth scalar
+### Gap 1 — Live queue depth scalar ✅ Closed (Home v1, 2026-06-17)
 - **Surfaced by**: Page Brief — Home (KPI tile "Queue depth")
 - **What we need**: A single integer for current queue depth (jobs queued
   right now).
@@ -30,17 +42,34 @@
 - **Severity**: Inefficient
 - **Suggested fix**: Add `QueueDepth int` field to `homeOverviewResponse`
   (cheap query: `select count(*) from suite_jobs where status='queued'`).
+- **Shipped**: `homeOverviewResponse.QueueDepth` was already declared but
+  unused; now populated from `s.jobs.Summary(ctx, 0).Pending` in
+  `dashboard.go:handleHomeOverview`.
 
-### Gap 2 — Live running runs scalar
+### Gap 2 — Live running runs scalar ✅ Closed (Home v1, 2026-06-17)
+- **Shipped**: `homeOverviewResponse.LiveRuns` populated from
+  `s.jobs.Summary().Running`. Field name is `live_runs` (not `live_jobs`)
+  so the JSON shape matches the tile semantics.
 - **Surfaced by**: Home (KPI tile "Live runs")
-- **What we need**: Current count of runs in `running` status.
-- **What we have**: `GET /api/v1/runs?status=running` returns a list with
-  total but requires a separate call.
-- **Data is computable**: YES.
+- **What we need**: Current count of background work actively executing.
+- **DECISION (2026-06-16)**: Tile tracks **River background jobs in running
+  state** (`s.jobs.Summary().Running`). Sync traffic is captured by
+  Requests/min; queued async by Queue depth. Live runs = running async.
+  Tooltip: "Background jobs currently being processed. For sync traffic
+  see Requests/min."
+- **What we have**: `s.jobs.Summary()` is callable internally; not exposed
+  on `home/overview` as a scalar today.
+- **Data is computable**: YES — `s.jobs.Summary().Running` is the source.
 - **Severity**: Inefficient
-- **Suggested fix**: Add `LiveRuns int` field to `homeOverviewResponse`.
+- **Suggested fix**: Add `LiveJobs int` field to `homeOverviewResponse`
+  sourced from `s.jobs.Summary().Running`. Tile displays this as "Live
+  runs" with the tooltip above.
 
-### Gap 3 — Failed runs in last 24h scalar
+### Gap 3 — Failed runs in last 24h scalar ✅ Closed (Home v1, 2026-06-17)
+- **Shipped**: `homeOverviewResponse.FailedRunsLast24h` populated by a
+  direct count query on `suite_gateway_requests` scoped to
+  `endpoint LIKE '/api/v1/execute/%'` so admin traffic doesn't pollute
+  the run-failure signal.
 - **Surfaced by**: Home (KPI tile "Failed 24h")
 - **What we need**: Count of runs that failed in the last 24h.
 - **What we have**: `ErrorSparkline` (24-hour buckets) sums to this; or
@@ -50,7 +79,11 @@
 - **Suggested fix**: Add `FailedRunsLast24h int` field to
   `homeOverviewResponse`, OR document that client sums `ErrorSparkline`.
 
-### Gap 4 — Budget consumed % across all tenants
+### Gap 4 — Budget consumed % across all tenants ✅ Closed (Home v1, 2026-06-17)
+- **Shipped**: `homeOverviewResponse.BudgetsAggregate { tenants_at_risk,
+  avg_consumed_pct, tenant_count }` computed by `computeBudgetsAggregate`
+  in `dashboard.go`. "At risk" = `spent / monthly_usd * 100 >= alert_threshold_pct`,
+  matching the gateway's own definition.
 - **Surfaced by**: Home (KPI tile "Budget consumed %")
 - **What we need**: Single percentage representing aggregate budget
   consumption across tenants (or a clear "tenants near cap" signal).
@@ -63,7 +96,13 @@
   AvgConsumedPct float }` to `homeOverviewResponse`; "at risk" = consumed
   >= alert_threshold.
 
-### Gap 5 — Unified activity feed merge
+### Gap 5 — Unified activity feed merge ✅ Closed (Home v1, 2026-06-17)
+- **Shipped**: New `GET /api/v1/admin/events?limit=N&kind=...` endpoint
+  (`admin_events.go`). Server-side-merges runs, webhook deliveries,
+  system alerts, and the activity log into a typed union sorted by
+  `occurred_at DESC`. Decision: separate endpoint (option **b**) over
+  extending `home/overview` (option a) so other surfaces (Activity page,
+  Tenant detail) can reuse the same merged stream.
 - **Surfaced by**: Home (Activity feed section)
 - **What we need**: A chronologically-ordered feed mixing: run completions,
   errors, tenant.created, budget alerts, config changes, deploys.
@@ -78,7 +117,10 @@
   dedicated `GET /api/v1/admin/events?limit=20` endpoint with a typed
   union of event shapes. (b) is more reusable.
 
-### Gap 6 — Anchor live values unified endpoint
+### Gap 6 — Anchor live values unified endpoint ⏸ Deferred (out of Home v1 scope)
+- **Why deferred**: Top-bar anchors belong to the layout shell, not the
+  Home page brief. Home v1 ships without anchors; the three sources
+  remain separate calls until the layout brief is groomed.
 - **Surfaced by**: Home (top-bar anchor values: Inbox count, Cost daily,
   Health dot)
 - **What we need**: Single endpoint serving the three persistent top-bar
@@ -150,7 +192,11 @@
 - **Suggested fix**: Either `GET /api/v1/admin/inbox/{kind}/{id}` or
   per-type GETs. Pairs with Gap 8.
 
-### Gap 7 — Backing services strip "admin URL" field
+### Gap 7 — Backing services strip "admin URL" field ✅ Closed (verified, 2026-06-17)
+- **Verified shipped**: `adminService.AdminURL *string` already exists in
+  `services.go:27` and is populated by both `serviceFromSlot` (slot
+  adapters) and `appendEnvService` (observability services). No code
+  change required; gap was a documentation gap.
 - **Surfaced by**: Home (Backing services strip click → opens OSS UI)
 - **What we need**: Each `adminService` row needs an `admin_url` so the
   dashboard knows where to send the operator on click.

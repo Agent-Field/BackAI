@@ -326,17 +326,35 @@ func parsePaging(limitStr, offsetStr string) (int, int) {
 
 // homeOverviewResponse matches HomeOverviewSchema.
 type homeOverviewResponse struct {
-	RequestsPerMinute       float64                  `json:"requests_per_minute"`
-	ErrorRate               float64                  `json:"error_rate"`
-	CostTodayUSD            float64                  `json:"cost_today_usd"`
-	QueueDepth              int                      `json:"queue_depth"`
-	RequestSparkline        []float64                `json:"request_sparkline"`
-	ErrorSparkline          []float64                `json:"error_sparkline"`
-	CostSparkline           []float64                `json:"cost_sparkline"`
-	QueueSparkline          []float64                `json:"queue_sparkline"`
-	RecentRuns              []runRecord              `json:"recent_runs"`
-	RecentWebhookDeliveries []webhookDelivery        `json:"recent_webhook_deliveries"`
-	Alerts                  []dashboardAlert         `json:"alerts"`
+	// KPI scalars rendered on the Home strip. See development/ux/pages/home.md §7
+	// for the per-tile audit. The four scalars below close Gaps 1–4 from
+	// development/ux/required-backend-gaps.md.
+	RequestsPerMinute float64          `json:"requests_per_minute"`
+	ErrorRate         float64          `json:"error_rate"`
+	CostTodayUSD      float64          `json:"cost_today_usd"`
+	QueueDepth        int              `json:"queue_depth"`
+	LiveRuns          int              `json:"live_runs"`
+	FailedRunsLast24h int              `json:"failed_runs_last_24h"`
+	BudgetsAggregate  budgetsAggregate `json:"budgets_aggregate"`
+	// 24-hour hourly buckets backing each KPI's sparkline.
+	RequestSparkline        []float64         `json:"request_sparkline"`
+	ErrorSparkline          []float64         `json:"error_sparkline"`
+	CostSparkline           []float64         `json:"cost_sparkline"`
+	QueueSparkline          []float64         `json:"queue_sparkline"`
+	RecentRuns              []runRecord       `json:"recent_runs"`
+	RecentWebhookDeliveries []webhookDelivery `json:"recent_webhook_deliveries"`
+	Alerts                  []dashboardAlert  `json:"alerts"`
+}
+
+// budgetsAggregate summarises tenant budgets for the Home "Budget consumed %"
+// tile (Gap 4). TenantsAtRisk counts budgets whose spend has already crossed
+// the alert threshold; AvgConsumedPct is the mean spent/monthly ratio across
+// all budgets (0..100). TenantCount is the denominator so the dashboard can
+// render "— · 0 of 0 tenants" empty states without divide-by-zero.
+type budgetsAggregate struct {
+	TenantsAtRisk  int     `json:"tenants_at_risk"`
+	AvgConsumedPct float64 `json:"avg_consumed_pct"`
+	TenantCount    int     `json:"tenant_count"`
 }
 
 type webhookDelivery struct {
@@ -433,6 +451,61 @@ func (s *Server) handleHomeOverview(w http.ResponseWriter, r *http.Request) {
 			span.RecordError(err)
 		} else {
 			resp.RecentRuns = runs.Runs
+		}
+
+		// Failed runs in the last 24 hours (Gap 3). Counts gateway requests
+		// whose status_code is null or non-2xx, scoped to agent-execute
+		// endpoints so we don't conflate admin traffic with run failures.
+		var failed24 int64
+		err = s.db.Pool.QueryRow(ctx,
+			"select count(*) from suite_gateway_requests "+
+				"where endpoint like '/api/v1/execute/%' "+
+				"and (status_code is null or status_code < 200 or status_code >= 300) "+
+				"and created_at >= $1",
+			now.Add(-24*time.Hour)).Scan(&failed24)
+		if err != nil {
+			s.log.Warn("failed runs 24h query failed", "error", err)
+			span.RecordError(err)
+		} else {
+			resp.FailedRunsLast24h = int(failed24)
+		}
+
+		// Recent webhook deliveries: top 10. Reads suite_webhook_deliveries
+		// across all tenants; maps DB enums to the dashboard's smaller
+		// HomeOverviewSchema vocabulary (delivered/failed/pending, in/out).
+		if hooks, err := s.fetchRecentWebhookDeliveries(ctx, 10); err == nil {
+			resp.RecentWebhookDeliveries = hooks
+		} else {
+			s.log.Warn("recent webhook deliveries query failed", "error", err)
+			span.RecordError(err)
+		}
+	}
+
+	// Queue depth + live runs (Gaps 1 & 2). Both come from River via the
+	// jobs Manager. The Home tile labelled "Live runs" counts River jobs in
+	// the running state — this is the platform-wide async work signal, kept
+	// distinct from RequestsPerMinute (sync gateway traffic).
+	if s.jobs != nil {
+		summary, err := s.jobs.Summary(ctx, 0)
+		if err != nil {
+			s.log.Warn("jobs summary failed", "error", err)
+			span.RecordError(err)
+		} else {
+			resp.QueueDepth = summary.Pending
+			resp.LiveRuns = summary.Running
+		}
+	}
+
+	// Budgets aggregate (Gap 4). Walks every per-tenant budget once and
+	// folds them into (TenantsAtRisk, AvgConsumedPct, TenantCount). Tolerates
+	// the no-budget case — TenantCount=0 lets the dashboard render an empty
+	// tile rather than a misleading 0%.
+	if s.budgets != nil {
+		if agg, err := computeBudgetsAggregate(ctx, s.budgets); err == nil {
+			resp.BudgetsAggregate = agg
+		} else {
+			s.log.Warn("budgets aggregate failed", "error", err)
+			span.RecordError(err)
 		}
 	}
 
@@ -854,6 +927,120 @@ func mapJobStateForSummary(state string) string {
 	default:
 		return "pending"
 	}
+}
+
+// ─── Home overview helpers (Gaps 3, 4 + webhook deliveries) ───────────────
+
+// fetchRecentWebhookDeliveries reads the most-recent N webhook delivery rows
+// across all tenants and maps each to the Home overview's narrower vocabulary
+// (HomeOverviewSchema in apps/dashboard/src/lib/api.ts).
+//
+// Direction:
+//
+//	"inbound"  -> "in"
+//	"outbound" -> "out"
+//
+// Status:
+//
+//	"succeeded"             -> "delivered"
+//	"failed"                -> "failed"
+//	anything else (queued,
+//	   retrying, dropped*)  -> "pending"
+//
+// The URL field falls back to suite_webhook_deliveries.destination, which
+// is set for outbound deliveries; for inbound rows it's the endpoint we
+// received from. Both are useful for activity feed rendering.
+func (s *Server) fetchRecentWebhookDeliveries(ctx context.Context, limit int) ([]webhookDelivery, error) {
+	out := []webhookDelivery{}
+	if s.db == nil || s.db.Pool == nil {
+		return out, nil
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := s.db.Pool.Query(ctx, `
+		select id::text, destination, direction, status, created_at
+		  from suite_webhook_deliveries
+		 order by created_at desc
+		 limit $1
+	`, limit)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			id          string
+			destination string
+			direction   string
+			status      string
+			createdAt   time.Time
+		)
+		if err := rows.Scan(&id, &destination, &direction, &status, &createdAt); err != nil {
+			return out, err
+		}
+		out = append(out, webhookDelivery{
+			ID:         id,
+			URL:        destination,
+			Direction:  mapWebhookDirection(direction),
+			Status:     mapWebhookStatus(status),
+			OccurredAt: createdAt.UTC().Format(time.RFC3339Nano),
+		})
+	}
+	return out, rows.Err()
+}
+
+// mapWebhookDirection collapses suite_webhook_deliveries.direction into the
+// short enum the dashboard schema expects.
+func mapWebhookDirection(s string) string {
+	if s == "inbound" {
+		return "in"
+	}
+	return "out"
+}
+
+// mapWebhookStatus collapses suite_webhook_deliveries.status into the short
+// enum the dashboard schema expects. Unknown / in-flight values fall back to
+// "pending" so the activity feed always has a renderable badge.
+func mapWebhookStatus(s string) string {
+	switch s {
+	case "succeeded":
+		return "delivered"
+	case "failed":
+		return "failed"
+	default:
+		return "pending"
+	}
+}
+
+// computeBudgetsAggregate folds every per-tenant budget into the scalar
+// summary the Home strip's "Budget consumed %" tile renders. "At risk" is
+// the canonical condition the gateway uses elsewhere — once a tenant's
+// consumed_pct crosses their configured alert_threshold_pct they show up in
+// this count.
+func computeBudgetsAggregate(ctx context.Context, budgets *cost.Budgets) (budgetsAggregate, error) {
+	agg := budgetsAggregate{}
+	list, err := budgets.List(ctx)
+	if err != nil {
+		return agg, err
+	}
+	agg.TenantCount = len(list)
+	if len(list) == 0 {
+		return agg, nil
+	}
+	var totalPct float64
+	for _, b := range list {
+		if b.MonthlyUSD <= 0 {
+			continue
+		}
+		pct := (b.SpentThisPeriodUSD / b.MonthlyUSD) * 100
+		totalPct += pct
+		if pct >= float64(b.AlertThresholdPct) {
+			agg.TenantsAtRisk++
+		}
+	}
+	agg.AvgConsumedPct = totalPct / float64(len(list))
+	return agg, nil
 }
 
 // ─── Compile-time safety net ──────────────────────────────────────────────

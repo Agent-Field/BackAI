@@ -5,47 +5,64 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ──────────────────────────────────────────────────────────────────────────
+   Theme bindings — every JSX class consumes a token from this block.
+   New tokens belong here, not in component files.
+   See lib/theme.ts for the TypeScript mirror (non-className consumption).
+   ────────────────────────────────────────────────────────────────────── */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  /* Wire Geist (loaded by next/font in app/layout.tsx). The CSS variables
-     --font-geist-sans / --font-geist-mono are set on <html> at runtime.
-     We expose them through Tailwind's font-sans / font-mono / font-heading
-     tokens with safe system fallbacks. */
+  /* Fonts — Geist set on <html> by next/font in app/layout.tsx */
   --font-sans:
     var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji";
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --font-heading: var(--font-sans);
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
-  --color-destructive: var(--destructive);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
+
+  /* shadcn surface palette (monochrome zinc) */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
   --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* shadcn semantic + chart */
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  /* sidebar (sidebar-08 block) */
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Status tokens — intentional, semantic. Monochrome elsewhere. */
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+
+  /* Radius scale derived from --radius. Tailwind: rounded-{sm,md,lg,xl,2xl,3xl,4xl} */
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -53,9 +70,43 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  /* Semantic radii — JSX writes rounded-tile / rounded-pill */
+  --radius-tile: calc(var(--radius) * 0.8);
+  --radius-pill: 9999px;
+
+  /* Semantic spacing scale. JSX writes p-tile, gap-section, px-page, etc. */
+  --spacing-page-x: 1.5rem;     /* 24px — page horizontal padding */
+  --spacing-page-y: 1.5rem;     /* 24px — page vertical padding */
+  --spacing-section: 1.5rem;    /* 24px — between top-level sections */
+  --spacing-stack: 0.75rem;     /* 12px — between stacked elements within a section */
+  --spacing-inline: 0.5rem;     /* 8px — between inline elements (icon + label) */
+  --spacing-tile: 1rem;         /* 16px — tile inner padding */
+  --spacing-tile-tight: 0.625rem; /* 10px — compact tile inner padding */
+  --spacing-pill-x: 0.625rem;   /* 10px — pill horizontal */
+  --spacing-pill-y: 0.25rem;    /* 4px — pill vertical */
+
+  /* Type scale — semantic, not size-named. JSX writes text-eyebrow / text-kpi-value */
+  --text-eyebrow: 0.6875rem;
+  --text-eyebrow--line-height: 1rem;
+  --text-eyebrow--letter-spacing: 0.04em;
+  --text-meta: 0.75rem;
+  --text-meta--line-height: 1rem;
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.25rem;
+  --text-kpi-value: 1.5rem;
+  --text-kpi-value--line-height: 2rem;
+
+  /* Motion durations are not className-eligible — consume from
+     lib/theme.ts (theme.motion.*) when they need to flow into a style
+     prop or framer-motion config. Keeping them out of @theme inline
+     prevents the class surface from leaking values that JSX can't bind. */
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+   Light theme values
+   ────────────────────────────────────────────────────────────────────── */
 :root {
+  /* shadcn defaults — monochrome zinc */
   --background: #fafafa;
   --foreground: #18181b;
   --card: #ffffff;
@@ -71,6 +122,7 @@
   --accent: rgba(24, 24, 27, 0.06);
   --accent-foreground: #18181b;
   --destructive: #dc2626;
+  --destructive-foreground: #fafafa;
   --border: #e4e4e7;
   --input: #d4d4d8;
   --ring: rgba(24, 24, 27, 0.4);
@@ -88,12 +140,17 @@
   --sidebar-accent-foreground: #18181b;
   --sidebar-border: #e4e4e7;
   --sidebar-ring: rgba(24, 24, 27, 0.4);
-  --status-ok: #16a34a;
-  --status-fail: #dc2626;
-  --status-warn: #d97706;
-  --status-running: #52525b;
+
+  /* Semantic status — only place non-zinc color is allowed */
+  --success: #16a34a;
+  --success-foreground: #ffffff;
+  --warning: #d97706;
+  --warning-foreground: #ffffff;
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+   Dark theme values
+   ────────────────────────────────────────────────────────────────────── */
 .dark {
   --background: #09090b;
   --foreground: #fafafa;
@@ -110,6 +167,7 @@
   --accent: rgba(250, 250, 250, 0.07);
   --accent-foreground: #fafafa;
   --destructive: #f87171;
+  --destructive-foreground: #18181b;
   --border: #27272a;
   --input: #3f3f46;
   --ring: rgba(250, 250, 250, 0.4);
@@ -126,12 +184,16 @@
   --sidebar-accent-foreground: #fafafa;
   --sidebar-border: #27272a;
   --sidebar-ring: rgba(250, 250, 250, 0.4);
-  --status-ok: #4ade80;
-  --status-fail: #f87171;
-  --status-warn: #fbbf24;
-  --status-running: #e4e4e7;
+
+  --success: #4ade80;
+  --success-foreground: #052e16;
+  --warning: #fbbf24;
+  --warning-foreground: #451a03;
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+   Base layer
+   ────────────────────────────────────────────────────────────────────── */
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -149,43 +211,6 @@
     outline: 2px solid var(--ring);
     outline-offset: 2px;
   }
-  .admin-interactive {
-    transition:
-      background-color 120ms ease-out,
-      border-color 120ms ease-out,
-      color 120ms ease-out,
-      transform 120ms ease-out;
-  }
-  .admin-interactive:hover {
-    background: color-mix(in srgb, var(--foreground) 3.5%, transparent);
-  }
-  .admin-interactive:active {
-    transform: scale(0.98);
-  }
-  .admin-selected {
-    background: color-mix(in srgb, var(--foreground) 7%, transparent);
-    box-shadow: inset 2px 0 0 var(--foreground);
-  }
-  .admin-skeleton {
-    position: relative;
-    overflow: hidden;
-    background: var(--muted);
-  }
-  @media (prefers-reduced-motion: no-preference) {
-    .admin-skeleton::after {
-      position: absolute;
-      inset: 0;
-      content: "";
-      transform: translateX(-100%);
-      background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--foreground) 8%, transparent), transparent);
-      animation: admin-skeleton-shimmer 1.2s ease-out infinite;
-    }
-    @keyframes admin-skeleton-shimmer {
-      to {
-        transform: translateX(100%);
-      }
-    }
-  }
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
@@ -196,24 +221,4 @@
       transition-duration: 0.01ms !important;
     }
   }
-}
-
-.backai-driver-popover {
-  max-width: 360px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--popover);
-  color: var(--popover-foreground);
-  box-shadow: 0 18px 50px rgb(0 0 0 / 35%);
-}
-
-.backai-driver-popover .driver-popover-title {
-  font-size: 0.95rem;
-  line-height: 1.35;
-}
-
-.backai-driver-popover .driver-popover-description {
-  color: var(--muted-foreground);
-  font-size: 0.86rem;
-  line-height: 1.5;
 }

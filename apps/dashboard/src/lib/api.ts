@@ -240,11 +240,27 @@ export const CostSummarySchema = z.object({
 })
 export type CostSummary = z.infer<typeof CostSummarySchema>
 
+// Per-tenant budgets folded into a single scalar summary for the Home
+// "Budget consumed %" tile. Closes Gap 4 from
+// development/ux/required-backend-gaps.md.
+export const BudgetsAggregateSchema = z.object({
+  tenants_at_risk: z.number(),
+  avg_consumed_pct: z.number(),
+  tenant_count: z.number(),
+})
+export type BudgetsAggregate = z.infer<typeof BudgetsAggregateSchema>
+
 export const HomeOverviewSchema = z.object({
   requests_per_minute: z.number(),
   error_rate: z.number(),
   cost_today_usd: z.number(),
   queue_depth: z.number(),
+  // live_runs + failed_runs_last_24h + budgets_aggregate close Gaps 1–4
+  // from development/ux/required-backend-gaps.md. See dashboard.go for the
+  // server-side sources.
+  live_runs: z.number(),
+  failed_runs_last_24h: z.number(),
+  budgets_aggregate: BudgetsAggregateSchema,
   request_sparkline: z.array(z.number()),
   error_sparkline: z.array(z.number()),
   cost_sparkline: z.array(z.number()),
@@ -269,6 +285,26 @@ export const HomeOverviewSchema = z.object({
   ),
 })
 export type HomeOverview = z.infer<typeof HomeOverviewSchema>
+
+// Unified admin events feed (Gap 5). One row per event across runs,
+// webhook deliveries, system alerts, and the customer-facing activity log,
+// chronologically sorted server-side.
+export const AdminEventSchema = z.object({
+  kind: z.string(),
+  id: z.string(),
+  severity: z.enum(["info", "warning", "critical"]),
+  title: z.string(),
+  description: z.string().optional(),
+  source: z.enum(["runs", "webhooks", "activity", "alerts"]),
+  resource_id: z.string().optional(),
+  occurred_at: z.string(),
+})
+export type AdminEvent = z.infer<typeof AdminEventSchema>
+
+export const AdminEventListSchema = z.object({
+  events: z.array(AdminEventSchema),
+})
+export type AdminEventList = z.infer<typeof AdminEventListSchema>
 
 export const LogLineSchema = z.object({
   ts: z.string(),
@@ -3006,6 +3042,22 @@ export const api = {
     services: {
       list: () =>
         request("/api/v1/admin/services", undefined, AdminServiceListSchema),
+    },
+    // Unified activity feed across runs, webhooks, system alerts and the
+    // customer-facing activity log. Closes Gap 5 from
+    // development/ux/required-backend-gaps.md. Server-side merge + sort.
+    events: {
+      list: (params?: { limit?: number; kind?: string }) => {
+        const qs = new URLSearchParams()
+        if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+        if (params?.kind) qs.set("kind", params.kind)
+        const q = qs.toString()
+        return request(
+          `/api/v1/admin/events${q ? "?" + q : ""}`,
+          undefined,
+          AdminEventListSchema,
+        )
+      },
     },
     features: {
       get: () =>

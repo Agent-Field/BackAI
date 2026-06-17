@@ -1,11 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { AppSidebar } from "@/components/app-sidebar"
+import { HomeShell } from "@/components/home/home-shell"
 import {
   Breadcrumb,
   BreadcrumbItem,
-  BreadcrumbLink,
   BreadcrumbList,
   BreadcrumbPage,
-  BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
 import { Separator } from "@/components/ui/separator"
 import {
@@ -14,41 +15,41 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar"
 
-export default function Page() {
+import { getHomeSnapshot } from "@/lib/home/data"
+
+// Home page (route "/").
+//
+// Server-renders the initial HomeSnapshot then hands it to the Home shell
+// for presentation. The page is fully dynamic — middleware-gated routes
+// can't be statically cached anyway. WebSocket upgrade for live ticks
+// is tracked separately (home.md §11) and not blocking v1; for now the
+// browser refreshes on navigation.
+
+export const dynamic = "force-dynamic"
+
+export default async function HomePage() {
+  const snapshot = await getHomeSnapshot()
   return (
     <SidebarProvider>
       <AppSidebar />
       <SidebarInset>
-        <header className="flex h-16 shrink-0 items-center gap-2">
-          <div className="flex items-center gap-2 px-4">
-            <SidebarTrigger className="-ml-1" />
-            <Separator
-              orientation="vertical"
-              className="mr-2 data-vertical:h-4 data-vertical:self-auto"
-            />
-            <Breadcrumb>
-              <BreadcrumbList>
-                <BreadcrumbItem className="hidden md:block">
-                  <BreadcrumbLink href="#">
-                    Build Your Application
-                  </BreadcrumbLink>
-                </BreadcrumbItem>
-                <BreadcrumbSeparator className="hidden md:block" />
-                <BreadcrumbItem>
-                  <BreadcrumbPage>Data Fetching</BreadcrumbPage>
-                </BreadcrumbItem>
-              </BreadcrumbList>
-            </Breadcrumb>
-          </div>
+        <header className="flex h-16 shrink-0 items-center gap-inline px-page-x">
+          <SidebarTrigger className="-ml-1" />
+          <Separator
+            orientation="vertical"
+            className="mr-2 data-vertical:h-4 data-vertical:self-auto"
+          />
+          <Breadcrumb>
+            <BreadcrumbList>
+              <BreadcrumbItem>
+                <BreadcrumbPage>Home</BreadcrumbPage>
+              </BreadcrumbItem>
+            </BreadcrumbList>
+          </Breadcrumb>
         </header>
-        <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
-          <div className="grid auto-rows-min gap-4 md:grid-cols-3">
-            <div className="aspect-video rounded-xl bg-muted/50" />
-            <div className="aspect-video rounded-xl bg-muted/50" />
-            <div className="aspect-video rounded-xl bg-muted/50" />
-          </div>
-          <div className="min-h-screen flex-1 rounded-xl bg-muted/50 md:min-h-min" />
-        </div>
+        <main className="flex flex-1 flex-col gap-section px-page-x py-page-y">
+          <HomeShell snapshot={snapshot} />
+        </main>
       </SidebarInset>
     </SidebarProvider>
   )

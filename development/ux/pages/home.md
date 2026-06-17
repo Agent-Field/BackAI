@@ -103,7 +103,7 @@ feed. Done in 3 seconds.
 | Cost today | `home/overview.CostTodayUSD` | ✅ direct |
 | Cost MTD | `cost.PeriodTotalUSD` (default range = start of UTC month) | ✅ direct (separate call) |
 | Queue depth | `home/overview.QueueSparkline` last bucket OR `queues/summary` | ⚠️ Inefficient — see **Gap 1** |
-| Live runs | derive from `runs?status=running` (separate call) | ⚠️ Inefficient — see **Gap 2** |
+| Live runs | `s.jobs.Summary().Running` (River background jobs running) — tooltip clarifies "sync traffic is in Requests/min" | ⚠️ Inefficient — see **Gap 2** (decision logged) |
 | Failed runs 24h | sum `home/overview.ErrorSparkline` OR `runs?status=failed&from=24h` | ⚠️ Inefficient — see **Gap 3** |
 | Budget consumed % | derive from `admin/budgets` (aggregate client-side) | ⚠️ Inefficient — see **Gap 4** |
 

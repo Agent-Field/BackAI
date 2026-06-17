@@ -726,6 +726,8 @@ func (s *Server) registerRoutes() {
 	s.registerAdminAdapterOpenAPI()
 	s.registerAdminServicesRoutes()
 	s.registerAdminServicesOpenAPI()
+	s.registerAdminEventsRoutes()
+	s.registerAdminEventsOpenAPI()
 	s.registerAdminFeaturesRoutes()
 	s.registerAdminFeaturesOpenAPI()
 	s.registerDBHealthRoutes()
