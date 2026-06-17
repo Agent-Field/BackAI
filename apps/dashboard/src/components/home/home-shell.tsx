@@ -16,14 +16,19 @@ import { QuickActions } from "./quick-actions"
 import { RuntimeUnreachable } from "./states/runtime-unreachable"
 import { WelcomeBlock } from "./welcome-block"
 
-// Composition order follows the page brief's suggested zones, but with
-// the visual density the critique demands: dense strips, hairline-
-// divided cards, no padded-card-in-void.
+// Composition follows the page brief's logical zones but with the
+// density the operator console demands:
 //
-// Live ticks: the shell polls /api/v1/home/overview and /admin/events
-// every `polling.home` ms, updating the snapshot in place. KPI value
-// changes pick up the `motion.tick` fade because the tile is the same
-// component; React just re-renders with new numbers.
+//   Welcome block            (dismissible)
+//   KPI strip (8 dense tiles)
+//   ┌───────────────────────────┬──────────────────┐
+//   │ Activity feed (fixed h)   │ Quick actions    │
+//   │                           ├──────────────────┤
+//   │                           │ Backing services │
+//   └───────────────────────────┴──────────────────┘
+//
+// The activity feed's height is locked so navigation never shifts as the
+// feed grows; the right column hosts the two secondary chrome strips.
 
 export function HomeShell({ snapshot: initial }: { snapshot: HomeSnapshot }) {
   const [snapshot, setSnapshot] = useState(initial)
@@ -32,9 +37,10 @@ export function HomeShell({ snapshot: initial }: { snapshot: HomeSnapshot }) {
     let cancelled = false
     const tick = async () => {
       try {
-        const [overview, events] = await Promise.allSettled([
+        const [overview, events, services] = await Promise.allSettled([
           api.home(),
           api.admin.events.list({ limit: 20 }),
+          api.admin.services.list(),
         ])
         if (cancelled) return
         setSnapshot((prev) => ({
@@ -42,14 +48,17 @@ export function HomeShell({ snapshot: initial }: { snapshot: HomeSnapshot }) {
           overview:
             overview.status === "fulfilled" ? overview.value : prev.overview,
           events: events.status === "fulfilled" ? events.value : prev.events,
+          services:
+            services.status === "fulfilled" ? services.value : prev.services,
           fetchedAt: new Date().toISOString(),
           runtimeReachable:
             overview.status === "fulfilled" ||
             events.status === "fulfilled" ||
+            services.status === "fulfilled" ||
             prev.runtimeReachable,
         }))
       } catch {
-        // Polling errors are silent — they just leave stale data up.
+        // Silent — leave stale data up.
       }
     }
     const id = setInterval(tick, polling.home)

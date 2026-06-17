@@ -10,19 +10,22 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 
-import { motion } from "@/lib/theme"
 import type { KpiTileModel, StatusState } from "@/lib/home/types"
+
 import { KpiSparkline } from "./kpi-sparkline"
 
 // One tile in the KPI strip.
 //
-// Layout (one row, all signals visible at a glance):
-//   [dot] LABEL                    [stale?]
-//   VALUE          DELTA           [sparkline]
+// Layout is vertical so the sparkline always gets the tile's full width
+// — fixing the prior version's horizontal-flex overflow where sparkline
+// pixels leaked across the divide-x dividers into adjacent cells.
 //
-// Identical structure across all data states — only the value swaps to "—"
-// and a stale chip appears when degraded. Density is the goal: tiles are
-// thin horizontal cells, hairline-divided in the strip, no cards.
+// Rows top-to-bottom:
+//   1. dot · LABEL  · (optional state chip right-aligned)
+//   2. VALUE        (text-kpi-value, semibold, tabular-nums)
+//   3. delta arrow + percent (or "flat" / "—")
+//   4. sparkline    (full container width, fixed pixel height)
+//   5. sub-label    (optional muted text)
 
 const DOT_CLASS: Record<StatusState, string> = {
   ok: "bg-success",
@@ -31,7 +34,7 @@ const DOT_CLASS: Record<StatusState, string> = {
   idle: "bg-muted-foreground/40",
 }
 
-const DELTA_HELP: Partial<Record<KpiTileModel["id"], string>> = {
+const TILE_HELP: Partial<Record<KpiTileModel["id"], string>> = {
   "live-runs":
     "Background jobs currently executing. For sync traffic see Requests/min.",
   "budget-consumed":
@@ -44,24 +47,20 @@ const DELTA_HELP: Partial<Record<KpiTileModel["id"], string>> = {
 
 export interface KpiTileProps {
   tile: KpiTileModel
-  /**
-   * Direction of "good": when an increasing value is desirable (e.g. RPM)
-   * pass "up". When increase is bad (errors, cost, failures) pass "down".
-   * Drives delta arrow colour.
-   */
   goodDirection?: "up" | "down" | "neutral"
 }
 
 export function KpiTile({ tile, goodDirection = "neutral" }: KpiTileProps) {
   const formatted = formatValue(tile)
   const stateBadge = stateBadgeText(tile.state)
-  const help = DELTA_HELP[tile.id]
+  const help = TILE_HELP[tile.id]
   return (
-    <div className="flex h-full flex-col justify-between gap-tile-tight px-tile py-tile">
-      <div className="flex items-center gap-inline">
+    <div className="flex h-full min-w-0 flex-col gap-tile-tight px-tile py-tile">
+      {/* Row 1: dot + label + (optional state chip) */}
+      <div className="flex min-w-0 items-center gap-inline">
         <span
           aria-hidden
-          className={`inline-block size-icon-dot rounded-pill ${DOT_CLASS[tile.status]}`}
+          className={`inline-block size-icon-dot shrink-0 rounded-pill ${DOT_CLASS[tile.status]}`}
         />
         {help ? (
           <Tooltip>
@@ -69,7 +68,7 @@ export function KpiTile({ tile, goodDirection = "neutral" }: KpiTileProps) {
               render={
                 <button
                   type="button"
-                  className="cursor-help bg-transparent p-0 text-left text-eyebrow font-medium uppercase tracking-wide text-muted-foreground"
+                  className="min-w-0 cursor-help truncate bg-transparent p-0 text-left text-eyebrow font-medium uppercase tracking-wide text-muted-foreground"
                 />
               }
             >
@@ -78,33 +77,33 @@ export function KpiTile({ tile, goodDirection = "neutral" }: KpiTileProps) {
             <TooltipContent>{help}</TooltipContent>
           </Tooltip>
         ) : (
-          <span className="text-eyebrow font-medium uppercase tracking-wide text-muted-foreground">
+          <span className="min-w-0 truncate text-eyebrow font-medium uppercase tracking-wide text-muted-foreground">
             {tile.label}
           </span>
         )}
         {stateBadge ? (
-          <span className="ml-auto rounded-md border px-1.5 py-0.5 text-meta text-muted-foreground">
+          <span className="ml-auto shrink-0 rounded-md border px-1.5 py-0.5 text-meta text-muted-foreground">
             {stateBadge}
           </span>
         ) : null}
       </div>
-      <div className="flex items-end justify-between gap-inline">
-        <div className="flex flex-col gap-0.5">
-          <span
-            className="text-kpi-value font-semibold tabular-nums text-foreground transition-opacity"
-            style={{ transitionDuration: `${motion.tick}ms` }}
-          >
-            {formatted}
-          </span>
-          <DeltaBadge
-            deltaPct={tile.deltaPct}
-            goodDirection={goodDirection}
-          />
-        </div>
-        <KpiSparkline data={tile.sparkline} status={tile.status} />
-      </div>
+
+      {/* Row 2: value */}
+      <span className="truncate text-kpi-value font-semibold tabular-nums text-foreground">
+        {formatted}
+      </span>
+
+      {/* Row 3: delta */}
+      <DeltaBadge deltaPct={tile.deltaPct} goodDirection={goodDirection} />
+
+      {/* Row 4: sparkline — full container width */}
+      <KpiSparkline data={tile.sparkline} status={tile.status} />
+
+      {/* Row 5: sub-label */}
       {tile.subLabel ? (
-        <span className="text-meta text-muted-foreground">{tile.subLabel}</span>
+        <span className="truncate text-meta text-muted-foreground">
+          {tile.subLabel}
+        </span>
       ) : null}
     </div>
   )
@@ -118,7 +117,11 @@ function DeltaBadge({
   goodDirection: "up" | "down" | "neutral"
 }) {
   if (deltaPct === null || !Number.isFinite(deltaPct)) {
-    return <span className="text-meta text-muted-foreground">—</span>
+    return (
+      <span className="inline-flex items-center gap-0.5 text-meta text-muted-foreground">
+        —
+      </span>
+    )
   }
   const abs = Math.abs(deltaPct)
   if (abs < 0.5) {
@@ -131,9 +134,6 @@ function DeltaBadge({
   }
   const up = deltaPct > 0
   const Icon = up ? ArrowUpRight : ArrowDownRight
-  // Colour semantics: green when delta moves in the direction we want;
-  // muted-yellow when neutral metric (e.g. cost — operator decides);
-  // destructive only when delta moves in the bad direction by >25%.
   let toneClass = "text-muted-foreground"
   if (goodDirection !== "neutral") {
     const directionMatchesGood =

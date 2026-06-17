@@ -11,11 +11,20 @@ import {
   type LucideIcon,
 } from "lucide-react"
 
+import { ScrollArea } from "@/components/ui/scroll-area"
+
 import type { AdminEvent } from "@/lib/api"
 
-// Recent activity — dense one-line rows. Severity-bubbled, severity dot
-// on the left, monospace timestamp, single-line message, drill arrow on
-// hover. No card per row; one outer surface frames the whole feed.
+// Recent activity — fixed total height with internal scroll.
+//
+// The card height is locked so the page layout never shifts as new events
+// arrive; the events themselves scroll inside a shadcn ScrollArea. This
+// matches the framework's "anchor surfaces stay anchored" rule — the
+// activity card is allowed to grow vertically only on its first render,
+// after that newer events arrive at the top and older ones disappear
+// below the fold.
+
+const FEED_HEIGHT_PX = 480
 
 const SEVERITY_ORDER: Record<AdminEvent["severity"], number> = {
   critical: 0,
@@ -47,15 +56,15 @@ export function ActivityFeed({ events }: { events: AdminEvent[] }) {
     const sa = SEVERITY_ORDER[a.severity]
     const sb = SEVERITY_ORDER[b.severity]
     if (sa !== sb) return sa - sb
-    // Within a severity, newest first.
     return a.occurred_at < b.occurred_at ? 1 : -1
   })
   return (
     <section
       aria-labelledby="activity-heading"
-      className="rounded-md border bg-card"
+      className="flex flex-col rounded-md border bg-card"
+      style={{ height: FEED_HEIGHT_PX }}
     >
-      <header className="flex items-center justify-between border-b px-row-x py-row-y">
+      <header className="flex shrink-0 items-center justify-between border-b px-row-x py-row-y">
         <h2 id="activity-heading" className="text-body font-medium text-foreground">
           Activity
         </h2>
@@ -67,16 +76,18 @@ export function ActivityFeed({ events }: { events: AdminEvent[] }) {
         <p className="px-row-x py-tile text-meta text-muted-foreground">
           No activity yet. Make a call or run{" "}
           <code className="rounded bg-muted px-1 py-0.5 font-mono text-meta">
-            ./scripts/demo-traffic.sh all
+            ./scripts/demo-traffic.sh seed
           </code>{" "}
           to see events appear here.
         </p>
       ) : (
-        <ul role="list" className="divide-y">
-          {sorted.map((event) => (
-            <ActivityRow key={event.id} event={event} />
-          ))}
-        </ul>
+        <ScrollArea className="min-h-0 flex-1">
+          <ul role="list" className="divide-y">
+            {sorted.map((event) => (
+              <ActivityRow key={event.id} event={event} />
+            ))}
+          </ul>
+        </ScrollArea>
       )}
     </section>
   )
@@ -86,21 +97,16 @@ function ActivityRow({ event }: { event: AdminEvent }) {
   const Icon =
     SOURCE_ICON[event.source] ?? SOURCE_ICON_FALLBACK[event.severity]
   return (
-    <li
-      className="group flex items-center gap-stack px-row-x py-row-y text-body transition-colors hover:bg-accent/40"
-    >
+    <li className="group flex items-center gap-stack px-row-x py-row-y text-body transition-colors hover:bg-accent/40">
       <span
         aria-hidden
-        className={`inline-block size-icon-dot rounded-pill ${SEVERITY_DOT[event.severity]}`}
+        className={`inline-block size-icon-dot shrink-0 rounded-pill ${SEVERITY_DOT[event.severity]}`}
       />
-      <span className="font-mono text-meta text-muted-foreground tabular-nums">
+      <span className="shrink-0 font-mono text-meta tabular-nums text-muted-foreground">
         {formatRelative(event.occurred_at)}
       </span>
-      <Icon
-        className="size-3.5 shrink-0 text-muted-foreground"
-        aria-hidden
-      />
-      <span className="font-mono text-meta uppercase tracking-wide text-muted-foreground">
+      <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+      <span className="shrink-0 font-mono text-meta uppercase tracking-wide text-muted-foreground">
         {event.kind}
       </span>
       <span className="min-w-0 flex-1 truncate text-foreground">
@@ -114,7 +120,6 @@ function ActivityRow({ event }: { event: AdminEvent }) {
   )
 }
 
-// Compact relative-time labels per page-design-framework §8.
 function formatRelative(iso: string): string {
   const ts = Date.parse(iso)
   if (Number.isNaN(ts)) return iso

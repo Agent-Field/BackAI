@@ -31,13 +31,16 @@ import { polling } from "@/lib/theme"
 
 // Top bar shell — pinned across every admin page.
 //
-// Left rail: SidebarTrigger · Wordmark · Tenant switcher.
-// Right rail: Anchors (Inbox · Cost · Health) · Cmd+K · Theme · Bell · Profile.
+// Sticky to the top of the SidebarInset so it never scrolls away. Three
+// explicit groups separated by visible dividers:
 //
-// Anchors are polled every `polling.anchors` ms from the unified
-// /api/v1/admin/anchors endpoint (Gap 6 close). Each anchor is a clickable
-// drill into its full page when those routes land — for now the click is
-// a no-op so the visual contract is established without dead links.
+//   left:   trigger · wordmark · tenant switcher
+//   right1: anchor pills (inbox / cost / health)
+//   right2: chrome (search · theme · bell · profile)
+//
+// All anchor values come from /api/v1/admin/anchors; the bar polls every
+// `polling.anchors` ms so the values are always fresh regardless of which
+// page the operator is on.
 
 interface TopBarProps {
   initialAnchors: AdminAnchors | null
@@ -61,7 +64,7 @@ export function TopBar({
         const next = await api.admin.anchors.get()
         if (!cancelled) setAnchors(next)
       } catch {
-        // Anchor failures shouldn't crash the page — leave stale values up.
+        // Silent — leave stale values up.
       }
     }
     const id = setInterval(tick, polling.anchors)
@@ -74,78 +77,88 @@ export function TopBar({
   const activeTenant = tenants.find((t) => t.id === activeTenantId) ?? tenants[0]
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-stack border-b px-page-x">
-      {/* Left rail */}
-      <SidebarTrigger className="-ml-1" />
-      <Separator orientation="vertical" className="mx-inline data-vertical:h-4" />
-      <span className="text-body font-semibold tracking-tight">BackAI</span>
-      {tenants.length > 0 ? (
-        <TenantSwitcher
-          tenants={tenants}
-          activeTenant={activeTenant}
-        />
-      ) : null}
+    <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-stack border-b bg-background/95 px-page-x backdrop-blur supports-[backdrop-filter]:bg-background/80">
+      {/* Left group */}
+      <div className="flex items-center gap-stack">
+        <SidebarTrigger className="-ml-1" />
+        <Separator orientation="vertical" className="data-vertical:h-5" />
+        <span className="text-body font-semibold tracking-tight text-foreground">
+          BackAI
+        </span>
+        {tenants.length > 0 ? (
+          <TenantSwitcher tenants={tenants} activeTenant={activeTenant} />
+        ) : (
+          <Badge
+            variant="outline"
+            className="h-6 gap-inline px-pill-x text-meta font-normal text-muted-foreground"
+          >
+            default tenant
+          </Badge>
+        )}
+      </div>
 
       {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Right rail — anchors */}
-      <AnchorPill
-        label="Inbox"
-        value={
-          anchors === null
-            ? "—"
-            : anchors.inbox_pending > 0
-              ? String(anchors.inbox_pending)
-              : "0"
-        }
-        status={
-          anchors === null
-            ? "idle"
-            : anchors.inbox_pending > 0
-              ? "watch"
-              : "ok"
-        }
-        helpText="Pending approvals across all tenants"
-      />
-      <AnchorPill
-        label="Cost"
-        value={
-          anchors === null
-            ? "—"
-            : formatAnchorUSD(anchors.cost_today_usd)
-        }
-        status="idle"
-        helpText="Total spend today (UTC)"
-      />
-      <AnchorPill
-        label="Health"
-        value={anchors === null ? "—" : anchors.health}
-        status={anchors === null ? "idle" : healthStatus(anchors.health)}
-        helpText="Runtime dependencies (AgentField, Postgres)"
-      />
-
-      <Separator orientation="vertical" className="mx-inline data-vertical:h-4" />
-
-      <CmdKTrigger />
-      <ThemeToggle />
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Notifications"
-              className="size-8"
-            />
+      {/* Right group — anchors */}
+      <div className="flex items-center gap-inline">
+        <AnchorPill
+          label="Inbox"
+          value={
+            anchors === null
+              ? "—"
+              : anchors.inbox_pending > 0
+                ? String(anchors.inbox_pending)
+                : "0"
           }
-        >
-          <Bell className="size-icon-inline text-muted-foreground" aria-hidden />
-        </TooltipTrigger>
-        <TooltipContent>Notifications</TooltipContent>
-      </Tooltip>
+          status={
+            anchors === null
+              ? "idle"
+              : anchors.inbox_pending > 0
+                ? "watch"
+                : "ok"
+          }
+          helpText="Pending approvals across all tenants"
+        />
+        <AnchorPill
+          label="Cost"
+          value={
+            anchors === null ? "—" : formatAnchorUSD(anchors.cost_today_usd)
+          }
+          status="idle"
+          helpText="Total spend today (UTC)"
+        />
+        <AnchorPill
+          label="Health"
+          value={anchors === null ? "—" : anchors.health}
+          status={anchors === null ? "idle" : healthStatus(anchors.health)}
+          helpText="Runtime dependencies (AgentField, Postgres)"
+        />
+      </div>
 
-      <ProfileMenu user={user} />
+      <Separator orientation="vertical" className="data-vertical:h-5" />
+
+      {/* Right group — chrome */}
+      <div className="flex items-center gap-inline">
+        <CmdKTrigger />
+        <ThemeToggle />
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Notifications"
+                className="size-8"
+              />
+            }
+          >
+            <Bell className="size-icon-inline text-muted-foreground" aria-hidden />
+          </TooltipTrigger>
+          <TooltipContent>Notifications</TooltipContent>
+        </Tooltip>
+        <ProfileMenu user={user} />
+      </div>
     </header>
   )
 }
@@ -164,7 +177,7 @@ function TenantSwitcher({
           <Button
             variant="ghost"
             size="sm"
-            className="h-8 gap-inline text-body font-normal text-muted-foreground"
+            className="h-7 gap-inline text-body font-normal text-muted-foreground"
           />
         }
       >
