@@ -171,7 +171,7 @@ func seedDemoRows(ctx context.Context, pool *pgxpool.Pool) (demoSeedInserted, er
 	agents := []string{"supportdesk.reply_plan", "supportdesk.classify_issue", "demo.echo", "demo.summarise"}
 	for i := 0; i < demoGatewayRows; i++ {
 		// Spread across 24h, denser near "now" so the rpm tile is non-zero.
-		ageSecs := int(rand.Float64() * 24 * 3600)
+		ageSecs := int(rand.Float64() * 48 * 3600)
 		created := now.Add(-time.Duration(ageSecs) * time.Second)
 		agent := agents[rand.IntN(len(agents))]
 		endpoint := "/api/v1/execute/" + agent
@@ -209,7 +209,7 @@ func seedDemoRows(ctx context.Context, pool *pgxpool.Pool) (demoSeedInserted, er
 		"openrouter/google/gemini-flash-1.5",
 	}
 	for i := 0; i < demoCostRows; i++ {
-		ageSecs := int(rand.Float64() * 24 * 3600)
+		ageSecs := int(rand.Float64() * 48 * 3600)
 		occurred := now.Add(-time.Duration(ageSecs) * time.Second)
 		model := models[rand.IntN(len(models))]
 		// Cost values: realistic per-call spend (~$0.0001..$0.01).
@@ -233,7 +233,7 @@ func seedDemoRows(ctx context.Context, pool *pgxpool.Pool) (demoSeedInserted, er
 	eventTypes := []string{"run.completed", "tenant.created", "budget.threshold_crossed", "support.reply", "demo.ping", "audit.recorded"}
 	dirs := []string{"outbound", "outbound", "inbound", "outbound", "inbound", "outbound"}
 	for i := 0; i < demoWebhookRows; i++ {
-		ageSecs := int(rand.Float64() * 24 * 3600)
+		ageSecs := int(rand.Float64() * 48 * 3600)
 		created := now.Add(-time.Duration(ageSecs) * time.Second)
 		_, err := pool.Exec(ctx, `
 			insert into suite_webhook_deliveries
@@ -255,7 +255,7 @@ func seedDemoRows(ctx context.Context, pool *pgxpool.Pool) (demoSeedInserted, er
 	actions := []string{"tenant.created", "user.signed_in", "api_key.issued", "budget.set", "config.updated", "feature.toggled", "audit.exported"}
 	resourceTypes := []string{"tenant", "user", "api_key", "budget", "config", "feature", "audit"}
 	for i := 0; i < demoActivityRows; i++ {
-		ageSecs := int(rand.Float64() * 24 * 3600)
+		ageSecs := int(rand.Float64() * 48 * 3600)
 		occurred := now.Add(-time.Duration(ageSecs) * time.Second)
 		idx := rand.IntN(len(actions))
 		_, err := pool.Exec(ctx, `

@@ -321,6 +321,9 @@ export const AdminAnchorsSchema = z.object({
   inbox_pending: z.number(),
   inbox_has_critical: z.boolean(),
   cost_today_usd: z.number(),
+  // Same-wall-clock-window spend yesterday so the Cost anchor can render
+  // a delta indicator without a second round trip.
+  cost_yesterday_same_window_usd: z.number(),
   health: z.enum(["healthy", "degraded", "down"]),
 })
 export type AdminAnchors = z.infer<typeof AdminAnchorsSchema>

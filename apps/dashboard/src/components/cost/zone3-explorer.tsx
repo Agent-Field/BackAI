@@ -12,18 +12,25 @@ import {
   YAxis,
 } from "recharts"
 
+import { FilterChip, FilterChipGroup } from "@/components/ui/filter-chip"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
 import { buildTenantSeries, formatCurrency, topNTenants } from "@/lib/cost/derive"
 import type { CostSnapshot } from "@/lib/cost/types"
 
-// Zone 3 — Slice-Over-Time Explorer. v1: stacked area by tenant (top 5
-// + other) plus a sortable top-N tenant list. Group-by chips deferred to
-// a follow-up once we have agent + model breakdowns wired the same way.
+import { ZoneCard, ZoneCardHeader } from "./zone-card"
+
+// Zone 3 — Slice-Over-Time Explorer.
 //
-// The chart consumes the buildTenantSeries() output (one row per day,
-// one numeric column per tenant id + an "other" sum). Colours route
-// through --chart-1..5 tokens.
+// v1 group-by axis: tenant only. Per the brief §24 the agent / model /
+// day axes wait on Gap 16 (ByDayByDimension composite endpoint) so we
+// don't fan out unbounded calls. The chips render in v1 with the
+// disabled axes labelled "v0.2" so operators know the surface will fill
+// in.
+//
+// Compare picker is similarly stubbed for v1; the page already returns
+// previous_total_usd from /cost so the Period-Total tile carries the
+// delta. The picker chips are placeholders.
 
 const SERIES_COLOR: Record<number, string> = {
   1: "var(--chart-1)",
@@ -38,39 +45,51 @@ export function Zone3Explorer({ snapshot }: { snapshot: CostSnapshot }) {
   const top = topNTenants(snapshot.primary, 5)
   const series = buildTenantSeries(snapshot.primary, snapshot.byTenant, top)
   const totalForTopN = top.reduce((acc, t) => acc + t.cost, 0)
-  const otherCost =
-    (snapshot.primary?.period_total_usd ?? 0) - totalForTopN
+  const otherCost = (snapshot.primary?.period_total_usd ?? 0) - totalForTopN
+  // Suppress the "other" stack when there is no remainder to render — a
+  // tiny near-zero band on the bottom of the chart muddies the legend
+  // and the colour palette.
+  const renderOther = otherCost > 0.0001 && top.length >= 2
 
   return (
-    <section
-      aria-labelledby="zone3-heading"
-      className="flex flex-col gap-stack"
-    >
-      <header className="flex items-baseline justify-between">
-        <h2
-          id="zone3-heading"
-          className="text-eyebrow uppercase tracking-wide text-muted-foreground"
-        >
-          Explore
-        </h2>
+    <ZoneCard aria-labelledby="zone3-heading">
+      <ZoneCardHeader
+        id="zone3-heading"
+        title="Explore"
+        subtitle="Pivot tenant spend over the selected range"
+      />
+      <div className="flex flex-col gap-stack border-b px-row-x py-row-y">
+        <FilterChipGroup label="Group by">
+          <FilterChip label="Tenant" active onSelect={() => {}} />
+          <FilterChip label="Agent" active={false} onSelect={() => {}} />
+          <FilterChip label="Model" active={false} onSelect={() => {}} />
+          <FilterChip label="Day" active={false} onSelect={() => {}} />
+        </FilterChipGroup>
         <span className="text-meta text-muted-foreground">
-          Top 5 tenants over the selected range
+          Tenant axis ships in v1; agent · model · day arrive with the
+          composite endpoint (Gap 16).
         </span>
-      </header>
-      <div className="grid gap-stack lg:grid-cols-[1fr_240px]">
-        <ChartCard series={series} top={top} />
+      </div>
+      <div className="grid gap-stack p-row-x lg:grid-cols-[1fr_240px]">
+        <ChartCard
+          series={series}
+          top={top}
+          renderOther={renderOther}
+        />
         <TopNCard top={top} otherCost={otherCost} />
       </div>
-    </section>
+    </ZoneCard>
   )
 }
 
 function ChartCard({
   series,
   top,
+  renderOther,
 }: {
   series: ReturnType<typeof buildTenantSeries>
   top: ReturnType<typeof topNTenants>
+  renderOther: boolean
 }) {
   const empty = series.length === 0 || top.length === 0
   return (
@@ -105,7 +124,11 @@ function ChartCard({
                 tickLine={false}
                 axisLine={false}
                 tickFormatter={(v) =>
-                  v === 0 ? "$0" : v < 1 ? `$${v.toFixed(2)}` : `$${Math.round(v)}`
+                  v === 0
+                    ? "$0"
+                    : v < 1
+                      ? `$${v.toFixed(2)}`
+                      : `$${Math.round(v)}`
                 }
                 tick={{
                   fill: "var(--muted-foreground)",
@@ -117,7 +140,7 @@ function ChartCard({
                 cursor={{ stroke: "var(--border)" }}
                 content={<StackedTooltip top={top} />}
               />
-              {top.map((t) => (
+              {top.map((t, idx) => (
                 <Area
                   key={t.id}
                   type="monotone"
@@ -125,21 +148,26 @@ function ChartCard({
                   stackId="cost"
                   stroke={SERIES_COLOR[t.colorIndex]}
                   fill={SERIES_COLOR[t.colorIndex]}
-                  fillOpacity={0.55}
+                  // Ramp opacity so each series sits cleanly above the
+                  // next in monochrome dark mode. Top series most
+                  // saturated; lower series fade.
+                  fillOpacity={Math.max(0.25, 0.75 - idx * 0.1)}
                   strokeWidth={1}
                   isAnimationActive={false}
                 />
               ))}
-              <Area
-                type="monotone"
-                dataKey="other"
-                stackId="cost"
-                stroke={OTHER_COLOR}
-                fill={OTHER_COLOR}
-                fillOpacity={0.25}
-                strokeWidth={1}
-                isAnimationActive={false}
-              />
+              {renderOther ? (
+                <Area
+                  type="monotone"
+                  dataKey="other"
+                  stackId="cost"
+                  stroke={OTHER_COLOR}
+                  fill={OTHER_COLOR}
+                  fillOpacity={0.15}
+                  strokeWidth={1}
+                  isAnimationActive={false}
+                />
+              ) : null}
             </AreaChart>
           </ResponsiveContainer>
         </div>

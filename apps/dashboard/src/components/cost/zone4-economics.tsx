@@ -2,6 +2,7 @@
 
 "use client"
 
+import { LineChart as ScatterIcon } from "lucide-react"
 import { useState } from "react"
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts"
 
@@ -13,11 +14,14 @@ import { formatCurrency, modelCostRows, sortedBudgetRows } from "@/lib/cost/deri
 import type { CostSnapshot } from "@/lib/cost/types"
 
 import { BudgetEditDialog } from "./budget-edit-dialog"
+import { ZoneCard, ZoneCardHeader } from "./zone-card"
 
-// Zone 4 — Inference economics: cache hit donut + $/call by model bars +
-// budgets table with edit. Per the brief, $/1k tokens bars and Cost÷MRR
-// scatter are v0.2 (Gap 17/18/19). v1 surfaces a $/share-of-spend bar so
-// the page still teaches operators about model mix.
+// Zone 4 — Inference economics: cache hit donut + cost-by-model bars +
+// break-even scatter placeholder + budgets table with edit. Per the
+// brief, $/1k tokens bars and Cost÷MRR scatter are v0.2 (Gap 17/18/19).
+// v1 still renders the SHAPE of those panels (placeholders + chart
+// frames) so the page reads "real platform without your data" rather
+// than "half-built".
 
 export function Zone4Economics({
   snapshot,
@@ -27,33 +31,27 @@ export function Zone4Economics({
   onBudgetSaved: () => Promise<void> | void
 }) {
   return (
-    <section
-      aria-labelledby="zone4-heading"
-      className="flex flex-col gap-stack"
-    >
-      <header className="flex items-baseline justify-between">
-        <h2
-          id="zone4-heading"
-          className="text-eyebrow uppercase tracking-wide text-muted-foreground"
-        >
-          Inference economics
-        </h2>
-        <span className="text-meta text-muted-foreground">
-          Cache · Models · Budgets
-        </span>
-      </header>
-      <div className="grid gap-stack lg:grid-cols-[320px_1fr]">
+    <ZoneCard aria-labelledby="zone4-heading">
+      <ZoneCardHeader
+        id="zone4-heading"
+        title="Inference economics"
+        subtitle="Cache · Models · Break-even · Budgets"
+      />
+      <div className="grid gap-stack p-row-x lg:grid-cols-[280px_1fr_280px]">
         <CacheCard cache={snapshot.cache} />
         <ModelMixCard snapshot={snapshot} />
+        <BreakEvenPlaceholder />
       </div>
-      <BudgetsCard
-        budgets={snapshot.budgets}
-        tenantLookup={Object.fromEntries(
-          snapshot.tenants.map((t) => [t.id, t.name] as const),
-        )}
-        onBudgetSaved={onBudgetSaved}
-      />
-    </section>
+      <div className="border-t bg-card/40 p-row-x">
+        <BudgetsCard
+          budgets={snapshot.budgets}
+          tenantLookup={Object.fromEntries(
+            snapshot.tenants.map((t) => [t.id, t.name] as const),
+          )}
+          onBudgetSaved={onBudgetSaved}
+        />
+      </div>
+    </ZoneCard>
   )
 }
 
@@ -62,24 +60,20 @@ export function Zone4Economics({
 // ──────────────────────────────────────────────────────────────────────
 
 function CacheCard({ cache }: { cache: CacheStats | null }) {
-  if (!cache || cache.total_calls === 0) {
-    return (
-      <div className="flex h-44 flex-col items-center justify-center rounded-md border bg-card p-tile text-meta text-muted-foreground">
-        <span>No cache traffic yet.</span>
-      </div>
-    )
-  }
-  const data = [
-    { name: "hit", value: cache.cache_hits },
-    { name: "miss", value: cache.cache_misses },
-  ]
-  const hitPct = Math.round(cache.hit_rate * 100)
+  const hasData = cache !== null && cache.total_calls > 0
+  const data = hasData
+    ? [
+        { name: "hit", value: cache.cache_hits },
+        { name: "miss", value: cache.cache_misses },
+      ]
+    : [{ name: "placeholder", value: 1 }]
+  const hitPct = hasData ? Math.round(cache.hit_rate * 100) : 0
   return (
     <div className="rounded-md border bg-card p-tile">
       <header className="mb-tile flex items-baseline justify-between">
         <span className="text-body font-medium text-foreground">Cache</span>
         <span className="text-meta text-muted-foreground">
-          {cache.total_calls.toLocaleString()} calls
+          {hasData ? `${cache.total_calls.toLocaleString()} calls` : "no traffic"}
         </span>
       </header>
       <div className="relative h-32 w-full">
@@ -101,7 +95,11 @@ function CacheCard({ cache }: { cache: CacheStats | null }) {
                 <Cell
                   key={d.name}
                   fill={
-                    idx === 0 ? "var(--color-foreground)" : "var(--color-muted)"
+                    !hasData
+                      ? "var(--color-muted)"
+                      : idx === 0
+                        ? "var(--color-foreground)"
+                        : "var(--color-muted)"
                   }
                 />
               ))}
@@ -110,7 +108,7 @@ function CacheCard({ cache }: { cache: CacheStats | null }) {
         </ResponsiveContainer>
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
           <span className="text-lg font-semibold tabular-nums text-foreground">
-            {hitPct}%
+            {hasData ? `${hitPct}%` : "—"}
           </span>
           <span className="text-meta text-muted-foreground">hit rate</span>
         </div>
@@ -118,7 +116,7 @@ function CacheCard({ cache }: { cache: CacheStats | null }) {
       <div className="mt-tile flex items-center justify-between text-meta">
         <span className="text-muted-foreground">Saved</span>
         <span className="font-mono tabular-nums text-foreground">
-          {formatCurrency(cache.savings_usd)}
+          {hasData ? formatCurrency(cache.savings_usd) : "—"}
         </span>
       </div>
     </div>
@@ -146,22 +144,27 @@ function ModelMixCard({ snapshot }: { snapshot: CostSnapshot }) {
           No model usage in this range.
         </p>
       ) : (
-        <ul role="list" className="flex flex-col gap-tile-tight">
+        <ul role="list" className="flex flex-col gap-stack">
           {rows.map((row) => (
             <li
               key={row.model}
-              className="grid grid-cols-[minmax(0,1fr)_minmax(120px,2fr)_72px] items-center gap-stack text-meta"
+              className="grid grid-cols-[minmax(0,1fr)_minmax(140px,2fr)_80px] items-center gap-stack text-meta"
             >
-              <span className="min-w-0 truncate font-mono text-foreground">
-                {row.model}
-              </span>
+              <div className="flex min-w-0 flex-col gap-tile-tight">
+                <span className="truncate font-medium text-foreground">
+                  {friendlyModelName(row.model)}
+                </span>
+                <span className="truncate font-mono text-meta text-muted-foreground">
+                  {modelProvider(row.model)}
+                </span>
+              </div>
               <div
                 aria-hidden
-                className="h-1.5 w-full overflow-hidden rounded-pill bg-muted"
+                className="h-3 w-full overflow-hidden rounded-pill bg-muted"
               >
                 <div
                   className="h-full bg-foreground/80"
-                  style={{ width: `${row.share}%` }}
+                  style={{ width: `${Math.max(row.share, 2)}%` }}
                 />
               </div>
               <span className="text-right font-mono tabular-nums text-muted-foreground">
@@ -171,6 +174,54 @@ function ModelMixCard({ snapshot }: { snapshot: CostSnapshot }) {
           ))}
         </ul>
       )}
+    </div>
+  )
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Break-even scatter — placeholder card (Gap 17 deferred)
+// ──────────────────────────────────────────────────────────────────────
+
+function BreakEvenPlaceholder() {
+  return (
+    <div className="flex flex-col gap-tile rounded-md border bg-card p-tile">
+      <header className="flex items-baseline justify-between">
+        <span className="text-body font-medium text-foreground">
+          Cost ÷ MRR
+        </span>
+        <span className="text-meta text-muted-foreground">v0.2</span>
+      </header>
+      <div
+        aria-label="Break-even scatter placeholder"
+        role="img"
+        className="relative h-32 w-full overflow-hidden rounded-md border border-dashed border-muted-foreground/40 bg-background/40"
+      >
+        {/* Stylised break-even diagonal so the frame reads as a chart, not a void. */}
+        <svg
+          className="absolute inset-0 h-full w-full text-muted-foreground/60"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+        >
+          <line
+            x1="0"
+            y1="100"
+            x2="100"
+            y2="0"
+            stroke="currentColor"
+            strokeDasharray="4 4"
+            strokeWidth="0.6"
+          />
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <ScatterIcon
+            className="size-icon-inline text-muted-foreground/50"
+            aria-hidden
+          />
+        </div>
+      </div>
+      <p className="text-meta text-muted-foreground">
+        Connect a billing adapter to see unit economics per tenant.
+      </p>
     </div>
   )
 }
@@ -199,10 +250,12 @@ function BudgetsCard({
         </span>
       </header>
       {rows.length === 0 ? (
-        <p className="px-row-x py-tile text-meta text-muted-foreground">
-          No tenant budgets configured yet. Set one to surface budget
-          alerts in the Inbox.
-        </p>
+        <div className="flex flex-col items-start gap-stack px-row-x py-tile">
+          <p className="text-meta text-muted-foreground">
+            No tenant budgets configured yet. Setting a budget surfaces
+            alerts in the Inbox when consumption crosses the threshold.
+          </p>
+        </div>
       ) : (
         <ul role="list" className="divide-y">
           {rows.map((b) => (
@@ -218,7 +271,9 @@ function BudgetsCard({
       <BudgetEditDialog
         budget={editing}
         tenantName={
-          editing ? tenantLookup[editing.tenant_id] ?? editing.tenant_id.slice(0, 8) : ""
+          editing
+            ? (tenantLookup[editing.tenant_id] ?? editing.tenant_id.slice(0, 8))
+            : ""
         }
         onClose={() => setEditing(null)}
         onSaved={async () => {
@@ -267,4 +322,29 @@ function BudgetRow({
       </Button>
     </li>
   )
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Model name formatting
+// ──────────────────────────────────────────────────────────────────────
+
+function friendlyModelName(raw: string): string {
+  const lastSlash = raw.lastIndexOf("/")
+  const leaf = lastSlash >= 0 ? raw.slice(lastSlash + 1) : raw
+  return leaf
+    .replace(/^claude[-_]/i, "Claude ")
+    .replace(/^qwen[-_]/i, "Qwen ")
+    .replace(/^gemini[-_]/i, "Gemini ")
+    .replace(/^gpt[-_]/i, "GPT-")
+    .replace(/-/g, " ")
+}
+
+function modelProvider(raw: string): string {
+  const parts = raw.split("/")
+  if (parts.length >= 2) return parts.slice(0, -1).join(" · ")
+  if (raw.startsWith("claude")) return "anthropic"
+  if (raw.startsWith("gpt") || raw.startsWith("o1")) return "openai"
+  if (raw.startsWith("gemini")) return "google"
+  if (raw.startsWith("qwen")) return "qwen"
+  return "—"
 }

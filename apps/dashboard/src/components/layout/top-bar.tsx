@@ -9,6 +9,7 @@ import { useEffect, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { DeltaIndicator } from "@/components/ui/delta-indicator"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -125,7 +126,17 @@ export function TopBar({
               anchors === null ? "—" : formatAnchorUSD(anchors.cost_today_usd)
             }
             status="idle"
-            helpText="Total spend today (UTC)"
+            helpText="Total spend today (UTC) vs same window yesterday"
+            trailing={
+              anchors !== null &&
+              anchors.cost_yesterday_same_window_usd > 0 ? (
+                <DeltaIndicator
+                  current={anchors.cost_today_usd}
+                  previous={anchors.cost_yesterday_same_window_usd}
+                  semantic="cost"
+                />
+              ) : null
+            }
           />
           <AnchorPill
             label="Health"
@@ -165,6 +176,9 @@ function TenantSwitcher({
   tenants: { id: string; name: string }[]
   activeTenant?: { id: string; name: string }
 }) {
+  const friendlyLabel = activeTenant
+    ? friendlyTenantName(activeTenant.name)
+    : "All tenants"
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -172,22 +186,47 @@ function TenantSwitcher({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 gap-inline text-body font-normal text-muted-foreground"
+            className="h-7 max-w-[180px] gap-inline text-body font-normal text-muted-foreground"
           />
         }
       >
-        {activeTenant?.name ?? "All tenants"}
-        <ChevronDown className="size-3" aria-hidden />
+        <span className="truncate">{friendlyLabel}</span>
+        <ChevronDown className="size-3 shrink-0" aria-hidden />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-48">
+      <DropdownMenuContent align="start" className="min-w-64">
         <DropdownMenuLabel>Switch tenant</DropdownMenuLabel>
         <DropdownMenuSeparator />
         {tenants.map((t) => (
-          <DropdownMenuItem key={t.id}>{t.name}</DropdownMenuItem>
+          <DropdownMenuItem key={t.id}>
+            <div className="flex min-w-0 flex-1 flex-col gap-tile-tight">
+              <span className="truncate text-body text-foreground">
+                {friendlyTenantName(t.name)}
+              </span>
+              <span className="truncate font-mono text-meta text-muted-foreground">
+                {t.name}
+              </span>
+            </div>
+          </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
   )
+}
+
+// Trim auto-generated slugs (e.g. "Block2 Review block2-review-1781634521674")
+// down to just the human-readable prefix. Anything past the first
+// kebab-cased slug or numeric suffix is hidden in the chip; the full
+// string lives in the dropdown row.
+function friendlyTenantName(raw: string): string {
+  const trimmed = raw.trim()
+  if (!trimmed) return "Tenant"
+  // Strip trailing slug ("foo bar foo-bar-12345" -> "foo bar")
+  const slugMatch = trimmed.match(/^(.*?)\s+[a-z0-9][a-z0-9-]*-?\d{4,}$/i)
+  if (slugMatch && slugMatch[1].trim()) return slugMatch[1].trim()
+  // Strip kebab-case suffix that mirrors the prefix in slug form.
+  const dupeMatch = trimmed.match(/^(.*?)\s+[a-z0-9][a-z0-9-]+$/)
+  if (dupeMatch && dupeMatch[1].trim().length > 3) return dupeMatch[1].trim()
+  return trimmed.length > 24 ? `${trimmed.slice(0, 22)}…` : trimmed
 }
 
 function AnchorPill({
@@ -196,12 +235,14 @@ function AnchorPill({
   status,
   helpText,
   href,
+  trailing,
 }: {
   label: string
   value: string
   status: StatusState
   helpText: string
   href?: string
+  trailing?: React.ReactNode
 }) {
   const pillClass =
     "inline-flex h-8 items-center gap-inline rounded-md px-pill-x text-meta transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -224,6 +265,7 @@ function AnchorPill({
           {label}
         </span>
         <span className="font-medium tabular-nums text-foreground">{value}</span>
+        {trailing}
       </TooltipTrigger>
       <TooltipContent>{helpText}</TooltipContent>
     </Tooltip>

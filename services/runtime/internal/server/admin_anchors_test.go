@@ -42,6 +42,9 @@ func TestAdminAnchorsEmptyDeps(t *testing.T) {
 	if _, ok := body["cost_today_usd"].(float64); !ok {
 		t.Fatalf("expected cost_today_usd number, got %T", body["cost_today_usd"])
 	}
+	if _, ok := body["cost_yesterday_same_window_usd"].(float64); !ok {
+		t.Fatalf("expected cost_yesterday_same_window_usd number, got %T", body["cost_yesterday_same_window_usd"])
+	}
 	if health, ok := body["health"].(string); !ok {
 		t.Fatalf("expected health string, got %T", body["health"])
 	} else if health != "healthy" {

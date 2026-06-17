@@ -31,6 +31,12 @@ type adminAnchorsResponse struct {
 	// "watch", not "act".
 	InboxHasCritical bool    `json:"inbox_has_critical"`
 	CostTodayUSD     float64 `json:"cost_today_usd"`
+	// CostYesterdaySameWindowUSD is the spend over the same wall-clock
+	// window yesterday — used by the top-bar Cost anchor to render a
+	// delta indicator without a second round trip. "Same window" means
+	// "midnight UTC up to the same hour-minute as right now", so the
+	// comparison stays apples-to-apples as the day progresses.
+	CostYesterdaySameWindowUSD float64 `json:"cost_yesterday_same_window_usd"`
 	// Health: "healthy" when both AF and DB respond; "degraded" when one
 	// is failing; "down" when both fail. Mirrors the alerts logic in
 	// handleHomeOverview so the top-bar dot and the KPI strip never disagree.
@@ -72,20 +78,32 @@ func (s *Server) handleAdminAnchors(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Cost today: same query as handleHomeOverview so the anchor and the
-	// KPI strip always agree.
+	// Cost today + cost yesterday over the same wall-clock window. The
+	// top-bar Cost anchor renders a DeltaIndicator from these two values
+	// so operators can assess "is today running hotter than yesterday?"
+	// without a second round trip. Same-window comparison keeps the
+	// delta apples-to-apples as the day progresses.
 	if s.db != nil && s.db.Pool != nil {
 		now := time.Now().UTC()
 		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+		yesterdayStart := todayStart.AddDate(0, 0, -1)
+		yesterdaySameNow := now.AddDate(0, 0, -1)
 		var costToday float64
-		err := s.db.Pool.QueryRow(ctx,
+		if err := s.db.Pool.QueryRow(ctx,
 			"select coalesce(sum(cost_usd), 0) from suite_cost_events where occurred_at >= $1",
-			todayStart).Scan(&costToday)
-		if err != nil {
+			todayStart).Scan(&costToday); err != nil {
 			s.log.Warn("anchors: cost today query failed", "error", err)
 			span.RecordError(err)
 		}
 		resp.CostTodayUSD = costToday
+		var costYesterday float64
+		if err := s.db.Pool.QueryRow(ctx,
+			"select coalesce(sum(cost_usd), 0) from suite_cost_events where occurred_at >= $1 and occurred_at < $2",
+			yesterdayStart, yesterdaySameNow).Scan(&costYesterday); err != nil {
+			s.log.Warn("anchors: cost yesterday query failed", "error", err)
+			span.RecordError(err)
+		}
+		resp.CostYesterdaySameWindowUSD = costYesterday
 	}
 
 	// Health: probe AF + DB with the same short timeout as the alerts
