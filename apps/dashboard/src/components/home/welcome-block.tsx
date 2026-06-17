@@ -67,6 +67,17 @@ export function WelcomeBlock() {
           tenant_id: "00000000-0000-0000-0000-000000000000",
         }),
       })
+      // 401 here means the dashboard middleware passed the request through
+      // (it only checks the cookie EXISTS) but the runtime rejected the
+      // session token — typically because the cookie is stale across a
+      // dashboard restart or a manual session-table wipe. Direct the
+      // operator to log in again rather than burying the cause.
+      if (res.status === 401) {
+        throw new Error(
+          "SESSION_STALE: dashboard cookie no longer matches a session " +
+            "in the runtime. Sign out and back in to refresh.",
+        )
+      }
       if (!res.ok) {
         const text = await res.text()
         throw new Error(`HTTP ${res.status}: ${text || res.statusText}`)
@@ -148,13 +159,24 @@ export function WelcomeBlock() {
         <div className="flex items-start gap-inline border-b bg-destructive/5 px-row-x py-row-y text-meta text-destructive">
           <AlertCircle className="size-3.5 shrink-0" aria-hidden />
           <span className="min-w-0 flex-1">{error}</span>
-          <button
-            type="button"
-            className="text-meta underline hover:no-underline"
-            onClick={() => setError(null)}
-          >
-            dismiss
-          </button>
+          {error.startsWith("SESSION_STALE") ? (
+            <a
+              href={`/api/auth/sign-out?redirect_to=${encodeURIComponent(
+                "/login?next=/",
+              )}`}
+              className="text-meta underline hover:no-underline"
+            >
+              Sign out & back in
+            </a>
+          ) : (
+            <button
+              type="button"
+              className="text-meta underline hover:no-underline"
+              onClick={() => setError(null)}
+            >
+              dismiss
+            </button>
+          )}
         </div>
       ) : null}
 
