@@ -48,9 +48,11 @@ export function FilterChip({
       data-state={active ? "on" : "off"}
       onClick={onSelect}
       className={cn(
-        // Geometry shared by both states. Keep size + radius here so
-        // active/inactive can't accidentally diverge.
-        "inline-flex h-7 shrink-0 items-center gap-inline rounded-md border px-pill-x text-meta font-medium transition-colors",
+        // Geometry shared by both states. Tight height + meta font keeps
+        // chips visually subordinate to the list rows below — chips are
+        // navigation, not content. Keep size + radius here so active and
+        // inactive can't accidentally diverge.
+        "inline-flex h-6 shrink-0 items-center gap-inline rounded-md border px-pill-x text-meta leading-none transition-colors",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         active
           ? // Active: invert the surface. text-background reads dark on
@@ -67,16 +69,14 @@ export function FilterChip({
         <span
           aria-hidden
           className={cn(
-            // Count chip sits inside the chip. Active state needs to
-            // contrast against the inverted background, not the page.
-            "inline-flex h-4 min-w-4 items-center justify-center rounded-pill px-1.5 font-mono text-meta tabular-nums",
+            // Count chip sits inside the chip. Smaller than the label
+            // so it reads as metadata, not as the primary affordance.
+            // Active state contrasts against the inverted background.
+            "inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-pill px-1 font-mono text-eyebrow tabular-nums leading-none",
             active
-              ? // On the inverted active surface: use background+foreground
-                // swapped from the chip itself. That gives a small "halo"
-                // pill the same colour as the page chrome — readable
-                // against the active chip background by definition.
-                "bg-background/20 text-background"
-              : // On the calm inactive surface: a quiet muted pill.
+              ? // On the inverted active surface: a translucent halo.
+                "bg-background/25 text-background"
+              : // On the calm inactive surface: quiet muted pill.
                 "bg-muted text-muted-foreground",
           )}
         >
