@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ExternalLink } from "lucide-react"
+import { ArrowUpRight } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
 import {
   Tooltip,
   TooltipContent,
@@ -12,9 +11,10 @@ import {
 import type { AdminServiceList } from "@/lib/api"
 import type { StatusState } from "@/lib/home/types"
 
-// One pill per backing service. Each is a Link when admin_url is set; a
-// plain badge otherwise. The status dot is the only non-monochrome
-// element — three semantic colours from globals.css.
+// Single-row strip of compact pills, one per backing service. Each pill
+// has: status dot · short name · trimmed version · ↗ (only when an
+// admin_url exists). Hover shows full name, full version, purpose, and
+// the admin_url destination.
 
 const DOT: Record<StatusState, string> = {
   ok: "bg-success",
@@ -32,20 +32,25 @@ export function BackingServicesStrip({
   return (
     <section
       aria-labelledby="services-heading"
-      className="flex flex-col gap-stack"
+      className="rounded-md border bg-card"
     >
-      <h2
-        id="services-heading"
-        className="text-eyebrow uppercase text-muted-foreground"
-      >
-        Backing services
-      </h2>
+      <header className="flex items-center justify-between border-b px-row-x py-row-y">
+        <h2
+          id="services-heading"
+          className="text-body font-medium text-foreground"
+        >
+          Backing services
+        </h2>
+        <span className="text-meta text-muted-foreground">
+          {rows.length} configured
+        </span>
+      </header>
       {rows.length === 0 ? (
-        <p className="text-meta text-muted-foreground">
+        <p className="px-row-x py-tile text-meta text-muted-foreground">
           No backing services reported by the runtime.
         </p>
       ) : (
-        <div className="flex flex-wrap gap-inline">
+        <div className="flex flex-wrap gap-strip px-row-x py-tile">
           {rows.map((svc) => (
             <ServicePill
               key={svc.id}
@@ -54,6 +59,7 @@ export function BackingServicesStrip({
               status={classifyServiceStatus(svc.status)}
               statusLabel={svc.status}
               version={svc.version}
+              purpose={svc.purpose}
               adminURL={svc.admin_url ?? undefined}
             />
           ))}
@@ -68,8 +74,11 @@ function classifyServiceStatus(raw: string): StatusState {
     case "healthy":
       return "ok"
     case "degraded":
-    case "configured":
       return "watch"
+    case "configured":
+      // Configured but not actively probed — we don't know it's healthy.
+      // Per the critique: green dot when we haven't checked is misleading.
+      return "idle"
     case "offline":
     case "down":
       return "act"
@@ -84,6 +93,7 @@ interface ServicePillProps {
   status: StatusState
   statusLabel: string
   version?: string
+  purpose: string
   adminURL?: string
 }
 
@@ -93,37 +103,45 @@ function ServicePill({
   status,
   statusLabel,
   version,
+  purpose,
   adminURL,
 }: ServicePillProps) {
-  const body = (
-    <Badge
-      variant="outline"
-      className="inline-flex items-center gap-inline px-pill-x py-pill-y"
-    >
-      <span
-        aria-hidden
-        className={`inline-block h-2 w-2 rounded-pill ${DOT[status]}`}
-      />
-      <span>{name}</span>
-      {version ? (
-        <span className="text-meta text-muted-foreground">v{version}</span>
-      ) : null}
-      {adminURL ? (
-        <ExternalLink aria-hidden className="size-3 text-muted-foreground" />
-      ) : null}
-    </Badge>
+  const trimmed = trimVersion(version)
+  const pillClasses =
+    "inline-flex h-7 items-center gap-inline rounded-md border px-pill-x text-meta text-foreground transition-colors hover:bg-accent/40"
+  const dotEl = (
+    <span
+      aria-hidden
+      className={`inline-block size-icon-dot rounded-pill ${DOT[status]}`}
+    />
   )
   const tooltip = (
     <TooltipContent>
-      <div className="flex flex-col gap-inline">
-        <span>{statusLabel}</span>
+      <div className="flex flex-col gap-1 text-meta">
+        <span className="font-medium text-foreground">
+          {name} · {statusLabel}
+        </span>
+        {version ? (
+          <span className="font-mono text-muted-foreground">{version}</span>
+        ) : null}
+        <span className="text-muted-foreground">{purpose}</span>
         {adminURL ? (
-          <span className="text-meta text-muted-foreground">
-            Opens {adminURL}
-          </span>
+          <span className="font-mono text-muted-foreground">{adminURL}</span>
         ) : null}
       </div>
     </TooltipContent>
+  )
+  const inner = (
+    <>
+      {dotEl}
+      <span className="font-medium">{name}</span>
+      {trimmed ? (
+        <span className="font-mono text-muted-foreground">{trimmed}</span>
+      ) : null}
+      {adminURL ? (
+        <ArrowUpRight aria-hidden className="size-3 text-muted-foreground" />
+      ) : null}
+    </>
   )
   if (adminURL) {
     return (
@@ -131,10 +149,15 @@ function ServicePill({
         <TooltipTrigger
           key={id}
           render={
-            <a href={adminURL} target="_blank" rel="noopener noreferrer" />
+            <a
+              href={adminURL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={pillClasses}
+            />
           }
         >
-          {body}
+          {inner}
         </TooltipTrigger>
         {tooltip}
       </Tooltip>
@@ -142,10 +165,19 @@ function ServicePill({
   }
   return (
     <Tooltip>
-      <TooltipTrigger key={id} render={<span />}>
-        {body}
+      <TooltipTrigger key={id} render={<span className={pillClasses} />}>
+        {inner}
       </TooltipTrigger>
       {tooltip}
     </Tooltip>
   )
+}
+
+// trimVersion: keep just the major.minor (or major) part — drop Postgres
+// vendor suffixes like "(Debian 16.14-1.pgdg12+1)".
+function trimVersion(raw?: string): string | null {
+  if (!raw) return null
+  const match = raw.match(/(\d+(?:\.\d+)?)/)
+  if (!match) return null
+  return `v${match[1]}`
 }

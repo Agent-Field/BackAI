@@ -74,16 +74,26 @@
   --radius-tile: calc(var(--radius) * 0.8);
   --radius-pill: 9999px;
 
-  /* Semantic spacing scale. JSX writes p-tile, gap-section, px-page, etc. */
-  --spacing-page-x: 1.5rem;     /* 24px — page horizontal padding */
-  --spacing-page-y: 1.5rem;     /* 24px — page vertical padding */
-  --spacing-section: 1.5rem;    /* 24px — between top-level sections */
-  --spacing-stack: 0.75rem;     /* 12px — between stacked elements within a section */
-  --spacing-inline: 0.5rem;     /* 8px — between inline elements (icon + label) */
-  --spacing-tile: 1rem;         /* 16px — tile inner padding */
-  --spacing-tile-tight: 0.625rem; /* 10px — compact tile inner padding */
-  --spacing-pill-x: 0.625rem;   /* 10px — pill horizontal */
-  --spacing-pill-y: 0.25rem;    /* 4px — pill vertical */
+  /* Semantic spacing scale. Tight by default — the operator should
+     never feel like the page is half-empty. Page padding is intentionally
+     small (16px); section gap is 16px; rows are denser still.
+     JSX writes p-tile / gap-section / px-page / px-row / etc. */
+  --spacing-page-x: 1rem;       /* 16px — page horizontal padding */
+  --spacing-page-y: 1rem;       /* 16px — page vertical padding */
+  --spacing-section: 1rem;      /* 16px — between top-level sections */
+  --spacing-stack: 0.5rem;      /* 8px — between stacked elements within a section */
+  --spacing-inline: 0.375rem;   /* 6px — between inline elements (icon + label) */
+  --spacing-tile: 0.625rem;     /* 10px — tile inner padding (was 16px — denser) */
+  --spacing-tile-tight: 0.375rem; /* 6px — compact tile inner padding */
+  --spacing-row-y: 0.375rem;    /* 6px — vertical padding for dense list rows */
+  --spacing-row-x: 0.625rem;    /* 10px — horizontal padding for dense list rows */
+  --spacing-strip: 0.75rem;     /* 12px — gap between strip items (KPI tiles, service pills) */
+  --spacing-pill-x: 0.5rem;     /* 8px — pill horizontal */
+  --spacing-pill-y: 0.125rem;   /* 2px — pill vertical (tighter than the shadcn default) */
+
+  /* Inline icon sizing. JSX writes size-icon-inline / size-icon-dot. */
+  --spacing-icon-inline: 1rem;  /* 16px — line-height-aligned icon */
+  --spacing-icon-dot: 0.5rem;   /* 8px — status dot */
 
   /* Type scale — semantic, not size-named. JSX writes text-eyebrow / text-kpi-value */
   --text-eyebrow: 0.6875rem;
@@ -93,8 +103,11 @@
   --text-meta--line-height: 1rem;
   --text-body: 0.875rem;
   --text-body--line-height: 1.25rem;
-  --text-kpi-value: 1.5rem;
-  --text-kpi-value--line-height: 2rem;
+  --text-kpi-value: 1.125rem;
+  --text-kpi-value--line-height: 1.5rem;
+  --text-kpi-value--font-weight: 600;
+  --text-mono-meta: 0.75rem;
+  --text-mono-meta--line-height: 1rem;
 
   /* Motion durations are not className-eligible — consume from
      lib/theme.ts (theme.motion.*) when they need to flow into a style

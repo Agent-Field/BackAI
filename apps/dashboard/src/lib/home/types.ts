@@ -65,6 +65,12 @@ export interface KpiTileModel {
   status: StatusState
   /** Optional sub-label rendered under the value. */
   subLabel?: string
+  /**
+   * Percent change vs prior window. Null when no prior data.
+   * Server-side computed for the three sparkline-backed tiles; for the
+   * rest the derive layer leaves this null (no delta surfacable).
+   */
+  deltaPct: number | null
 }
 
 export type KpiTileId =

@@ -15,6 +15,9 @@
 #   status         Print current Home tile values from /api/v1/home/overview.
 #   events [N]     Print the latest N events from /api/v1/admin/events.
 #   services       Print backing services and their status.
+#   anchors        Print the top-bar anchor snapshot.
+#   seed           One-shot demo seeder — populates 24h of realistic
+#                  rows so sparklines/feed/KPIs have shape. Re-runnable.
 #   setup          Sign in + issue an LLM API key, cache both locally.
 #   llm [PROMPT]   POST a chat completion -> req/min, cost, sparklines.
 #   fail           Hit a bogus execute endpoint -> failed runs 24h.
@@ -292,10 +295,27 @@ usage() {
   /usr/bin/sed -n '4,40p' "$0"
 }
 
+cmd_seed() {
+  ensure_session
+  local body
+  body=$(/usr/bin/curl -sS -b "$COOKIE_JAR" \
+    -H 'Content-Type: application/json' \
+    -d '{"reset": true}' \
+    "${DASHBOARD_URL}/api/v1/admin/demo/seed")
+  ok "seeded: $(echo "$body" | jq -c '.inserted')"
+  log "removed prior: $(echo "$body" | jq -c '.removed')"
+}
+
+cmd_anchors() {
+  /usr/bin/curl -sS "${RUNTIME_URL}/api/v1/admin/anchors" | jq .
+}
+
 case "${1:-}" in
   status)    shift; cmd_status "$@" ;;
   events)    shift; cmd_events "$@" ;;
   services)  shift; cmd_services "$@" ;;
+  anchors)   shift; cmd_anchors ;;
+  seed)      shift; cmd_seed ;;
   setup)     shift; cmd_setup ;;
   login)     shift; cmd_login ;;
   reset)     shift; cmd_reset ;;

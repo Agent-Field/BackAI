@@ -261,6 +261,11 @@ export const HomeOverviewSchema = z.object({
   live_runs: z.number(),
   failed_runs_last_24h: z.number(),
   budgets_aggregate: BudgetsAggregateSchema,
+  // Server-side computed delta-vs-prior-window (4h vs 4h prior). Direction-
+  // semantics (good vs bad) are tile-specific and handled in the dashboard.
+  request_delta_pct: z.number(),
+  error_delta_pct: z.number(),
+  cost_delta_pct: z.number(),
   request_sparkline: z.array(z.number()),
   error_sparkline: z.array(z.number()),
   cost_sparkline: z.array(z.number()),
@@ -305,6 +310,29 @@ export const AdminEventListSchema = z.object({
   events: z.array(AdminEventSchema),
 })
 export type AdminEventList = z.infer<typeof AdminEventListSchema>
+
+// Top-bar anchors — single round-trip for Inbox count + Cost today +
+// Health dot, polled on every page. Closes Gap 6.
+export const AdminAnchorsSchema = z.object({
+  inbox_pending: z.number(),
+  cost_today_usd: z.number(),
+  health: z.enum(["healthy", "degraded", "down"]),
+})
+export type AdminAnchors = z.infer<typeof AdminAnchorsSchema>
+
+// Demo-data seeder response. Inserts/Removes are per-table counts so the
+// dashboard can render "seeded N rows" toasts.
+export const DemoSeedCountsSchema = z.object({
+  gateway_requests: z.number(),
+  cost_events: z.number(),
+  webhook_deliveries: z.number(),
+  activity_entries: z.number(),
+})
+export const DemoSeedResponseSchema = z.object({
+  inserted: DemoSeedCountsSchema,
+  removed: DemoSeedCountsSchema,
+})
+export type DemoSeedResponse = z.infer<typeof DemoSeedResponseSchema>
 
 export const LogLineSchema = z.object({
   ts: z.string(),
@@ -3042,6 +3070,25 @@ export const api = {
     services: {
       list: () =>
         request("/api/v1/admin/services", undefined, AdminServiceListSchema),
+    },
+    // Top-bar anchors (Inbox / Cost / Health). One round-trip per page
+    // navigation. Closes Gap 6 from required-backend-gaps.md.
+    anchors: {
+      get: () =>
+        request("/api/v1/admin/anchors", undefined, AdminAnchorsSchema),
+    },
+    // Demo-mode seeder. POST inserts ~200 gateway requests, ~20 cost
+    // events, ~6 webhook deliveries and ~30 activity entries spread
+    // across the last 24h so a fresh fork's Home page renders with shape
+    // instead of zeros. All rows are flagged so re-seeding wipes prior
+    // demo data cleanly.
+    demo: {
+      seed: (params?: { reset?: boolean }) =>
+        request(
+          "/api/v1/admin/demo/seed",
+          { method: "POST", json: params ?? {} },
+          DemoSeedResponseSchema,
+        ),
     },
     // Unified activity feed across runs, webhooks, system alerts and the
     // customer-facing activity log. Closes Gap 5 from

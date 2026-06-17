@@ -2,54 +2,70 @@
 
 "use client"
 
-import { Area, AreaChart } from "recharts"
+import { Line, LineChart } from "recharts"
 
 import { ChartContainer, type ChartConfig } from "@/components/ui/chart"
 import { chart } from "@/lib/theme"
+import type { StatusState } from "@/lib/home/types"
 
-// Minimal 24-bucket sparkline rendered inside a KPI tile. The data array
-// is treated as opaque time-series — we don't render axes, gridlines, or
-// labels. Stroke and fill colours come from chart-1 (monochrome).
+const STROKE: Record<StatusState, string> = {
+  ok: "var(--color-foreground)",
+  watch: "var(--color-warning)",
+  act: "var(--color-destructive)",
+  idle: "var(--color-muted-foreground)",
+}
+
 const config = {
-  v: {
-    label: "value",
-    color: "var(--color-chart-1)",
-  },
+  v: { label: "value", color: "var(--color-foreground)" },
 } satisfies ChartConfig
 
 interface KpiSparklineProps {
-  /** 24 hourly buckets. Empty array hides the chart. */
   data: number[]
+  status: StatusState
 }
 
-export function KpiSparkline({ data }: KpiSparklineProps) {
-  if (data.length === 0) return null
+export function KpiSparkline({ data, status }: KpiSparklineProps) {
+  if (data.length === 0) {
+    // Empty-state frame so the layout doesn't shift between tiles that
+    // have a sparkline and tiles that don't. Hairline ghost line.
+    return (
+      <div
+        aria-hidden
+        className="w-20 shrink-0 border-b border-dashed border-muted-foreground/30"
+        style={{ height: chart.sparklineHeight }}
+      />
+    )
+  }
+  const meaningful = data.some((v) => v > 0)
+  if (!meaningful) {
+    return (
+      <div
+        aria-hidden
+        className="w-20 shrink-0 border-b border-dashed border-muted-foreground/30"
+        style={{ height: chart.sparklineHeight }}
+      />
+    )
+  }
   const series = data.map((v, idx) => ({ idx, v }))
   return (
     <ChartContainer
       config={config}
-      className="aspect-auto w-full"
+      className="w-20 shrink-0"
       style={{ height: chart.sparklineHeight }}
     >
-      <AreaChart
+      <LineChart
         data={series}
-        margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
+        margin={{ top: 2, right: 0, bottom: 2, left: 0 }}
       >
-        <defs>
-          <linearGradient id="kpi-sparkline-fill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--color-chart-1)" stopOpacity={0.18} />
-            <stop offset="100%" stopColor="var(--color-chart-1)" stopOpacity={0} />
-          </linearGradient>
-        </defs>
-        <Area
+        <Line
           dataKey="v"
           type="monotone"
-          stroke="var(--color-chart-1)"
+          stroke={STROKE[status]}
           strokeWidth={chart.sparklineStroke}
-          fill="url(#kpi-sparkline-fill)"
+          dot={false}
           isAnimationActive={false}
         />
-      </AreaChart>
+      </LineChart>
     </ChartContainer>
   )
 }

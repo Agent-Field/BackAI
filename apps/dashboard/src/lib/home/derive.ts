@@ -1,16 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Client-side derivations from the raw HomeSnapshot.
-//
-// Most of the home page is pure presentation — the only intelligence here
-// is mapping numeric KPI values to a StatusState (ok / watch / act) and
-// constructing the 8 KPI tile models the strip renders. Keeping this
-// logic in a separate module makes it testable and stops it from leaking
-// into JSX.
-
 import type { HomeSnapshot, KpiTileModel, StatusState } from "./types"
 
-/** Build the 8 KPI tile models that drive the strip. */
+// Decorate HomeSnapshot into the eight KpiTileModel rows the strip
+// renders. All status thresholds, sub-labels, and delta sourcing live
+// here so the JSX is purely presentational.
+
 export function deriveKpiTiles(snapshot: HomeSnapshot): KpiTileModel[] {
   const o = snapshot.overview
   const cost = snapshot.costMTD
@@ -20,64 +15,80 @@ export function deriveKpiTiles(snapshot: HomeSnapshot): KpiTileModel[] {
   return [
     {
       id: "requests-per-minute",
-      label: "Requests / min",
+      label: "RPM",
       value: haveOverview ? o.requests_per_minute : null,
       unit: "rate",
       sparkline: haveOverview ? o.request_sparkline : [],
       state: haveOverview ? "live" : "degraded",
-      status: "idle",
+      status: classifyByValue(
+        haveOverview ? o.requests_per_minute : null,
+        "non-zero-is-ok",
+      ),
+      deltaPct: haveOverview ? safeDelta(o.request_delta_pct) : null,
     },
     {
       id: "error-rate",
-      label: "Error rate (60m)",
+      label: "ERR%",
       value: haveOverview ? o.error_rate : null,
       unit: "percent",
       sparkline: haveOverview ? o.error_sparkline : [],
       state: haveOverview ? "live" : "degraded",
-      // Thresholds from development/ux/page-design-framework.md §8:
-      // 2% watch, 5% act. Rate is 0..1 from the backend.
+      // Threshold per page-design-framework §8: 2% watch, 5% act.
       status: haveOverview ? classifyErrorRate(o.error_rate) : "idle",
+      deltaPct: haveOverview ? safeDelta(o.error_delta_pct) : null,
     },
     {
       id: "cost-today",
-      label: "Cost today",
+      label: "COST",
       value: haveOverview ? o.cost_today_usd : null,
       unit: "currency-usd",
       sparkline: haveOverview ? o.cost_sparkline : [],
       state: haveOverview ? "live" : "degraded",
       status: "idle",
+      subLabel:
+        haveOverview && o.cost_today_usd > 0 ? "today (UTC)" : undefined,
+      deltaPct: haveOverview ? safeDelta(o.cost_delta_pct) : null,
     },
     {
       id: "cost-mtd",
-      label: "Cost MTD",
+      label: "MTD",
       value: haveCost ? cost.period_total_usd : null,
       unit: "currency-usd",
       sparkline: [],
       state: haveCost ? "live" : "degraded",
       status: "idle",
+      deltaPct: null,
+      subLabel: haveCost ? "month-to-date" : undefined,
     },
     {
       id: "queue-depth",
-      label: "Queue depth",
+      label: "QUEUE",
       value: haveOverview ? o.queue_depth : null,
       unit: "count",
       sparkline: haveOverview ? o.queue_sparkline : [],
       state: haveOverview ? "live" : "degraded",
-      status: "idle",
+      status: classifyByValue(
+        haveOverview ? o.queue_depth : null,
+        "zero-is-ok",
+      ),
+      deltaPct: null,
     },
     {
       id: "live-runs",
-      label: "Live runs",
+      label: "LIVE",
       value: haveOverview ? o.live_runs : null,
       unit: "count",
       sparkline: [],
       state: haveOverview ? "live" : "degraded",
-      status: "idle",
-      subLabel: "Background jobs running",
+      status: classifyByValue(
+        haveOverview ? o.live_runs : null,
+        "non-zero-is-ok",
+      ),
+      deltaPct: null,
     },
     {
       id: "failed-24h",
-      label: "Failed 24h",
+      label: "FAIL24",
       value: haveOverview ? o.failed_runs_last_24h : null,
       unit: "count",
       sparkline: haveOverview ? o.error_sparkline : [],
@@ -85,10 +96,11 @@ export function deriveKpiTiles(snapshot: HomeSnapshot): KpiTileModel[] {
       status: haveOverview
         ? classifyFailedRuns(o.failed_runs_last_24h)
         : "idle",
+      deltaPct: null,
     },
     {
       id: "budget-consumed",
-      label: "Budget consumed",
+      label: "BUDGET",
       value: haveOverview ? o.budgets_aggregate.avg_consumed_pct : null,
       unit: "percent-as-whole",
       sparkline: [],
@@ -96,6 +108,7 @@ export function deriveKpiTiles(snapshot: HomeSnapshot): KpiTileModel[] {
       status: haveOverview
         ? classifyBudgetConsumed(o.budgets_aggregate.avg_consumed_pct)
         : "idle",
+      deltaPct: null,
       subLabel: haveOverview
         ? budgetSubLabel(o.budgets_aggregate)
         : undefined,
@@ -103,25 +116,59 @@ export function deriveKpiTiles(snapshot: HomeSnapshot): KpiTileModel[] {
   ]
 }
 
-/** Error rate thresholds in 0..1. */
+/**
+ * Drives the delta colour direction per tile. RPM up = good; error/cost/
+ * fail24 up = bad; everything else neutral.
+ */
+export const KPI_GOOD_DIRECTION: Record<
+  KpiTileModel["id"],
+  "up" | "down" | "neutral"
+> = {
+  "requests-per-minute": "up",
+  "error-rate": "down",
+  "cost-today": "neutral",
+  "cost-mtd": "neutral",
+  "queue-depth": "down",
+  "live-runs": "neutral",
+  "failed-24h": "down",
+  "budget-consumed": "down",
+}
+
+function safeDelta(n: number): number | null {
+  if (!Number.isFinite(n)) return null
+  return n
+}
+
+function classifyByValue(
+  v: number | null,
+  rule: "zero-is-ok" | "non-zero-is-ok",
+): StatusState {
+  if (v === null) return "idle"
+  if (rule === "zero-is-ok") return v === 0 ? "ok" : "watch"
+  return v > 0 ? "ok" : "idle"
+}
+
 function classifyErrorRate(rate: number): StatusState {
   if (rate >= 0.05) return "act"
   if (rate >= 0.02) return "watch"
-  return "ok"
+  if (rate > 0) return "ok"
+  return "idle"
 }
 
-/** Failed run count classifier (24h). Conservative thresholds for v1. */
 function classifyFailedRuns(count: number): StatusState {
   if (count >= 50) return "act"
   if (count >= 10) return "watch"
-  return "ok"
+  if (count > 0) return "watch"
+  // Zero failures is genuinely "idle" — no signal — not "green-go". Per the
+  // critique, a green dot on Failed 24h: 0 is misleading.
+  return "idle"
 }
 
-/** Budget consumed % thresholds per framework §8. */
 function classifyBudgetConsumed(pct: number): StatusState {
   if (pct >= 100) return "act"
   if (pct >= 90) return "watch"
-  return "ok"
+  if (pct > 0) return "ok"
+  return "idle"
 }
 
 function deriveBudgetState(snapshot: HomeSnapshot) {
@@ -136,7 +183,7 @@ function budgetSubLabel(agg: {
   tenants_at_risk: number
   tenant_count: number
 }): string | undefined {
-  if (agg.tenant_count === 0) return "No budgets set"
+  if (agg.tenant_count === 0) return "no budgets set"
   const tenants =
     agg.tenant_count === 1 ? "1 tenant" : `${agg.tenant_count} tenants`
   if (agg.tenants_at_risk > 0) {

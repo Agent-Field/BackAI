@@ -336,6 +336,14 @@ type homeOverviewResponse struct {
 	LiveRuns          int              `json:"live_runs"`
 	FailedRunsLast24h int              `json:"failed_runs_last_24h"`
 	BudgetsAggregate  budgetsAggregate `json:"budgets_aggregate"`
+	// Delta-vs-prior-window percentages, computed server-side from the
+	// sparkline buckets (avg of last 4 buckets vs avg of buckets [-8:-4]).
+	// Positive = increasing. Direction-semantics (good vs bad) are tile-specific
+	// and handled by the dashboard renderer. NaN-safe: emitted as 0 when the
+	// prior window has no signal.
+	RequestDeltaPct float64 `json:"request_delta_pct"`
+	ErrorDeltaPct   float64 `json:"error_delta_pct"`
+	CostDeltaPct    float64 `json:"cost_delta_pct"`
 	// 24-hour hourly buckets backing each KPI's sparkline.
 	RequestSparkline        []float64         `json:"request_sparkline"`
 	ErrorSparkline          []float64         `json:"error_sparkline"`
@@ -439,6 +447,12 @@ func (s *Server) handleHomeOverview(w http.ResponseWriter, r *http.Request) {
 			resp.RequestSparkline = buckets.requests
 			resp.ErrorSparkline = buckets.errors
 			resp.CostSparkline = buckets.cost
+			// Deltas: most-recent 4-hour window vs preceding 4-hour window.
+			// Server-side so the dashboard never has to interpret the
+			// sparkline shape itself.
+			resp.RequestDeltaPct = sparklineDeltaPct(buckets.requests)
+			resp.ErrorDeltaPct = sparklineDeltaPct(buckets.errors)
+			resp.CostDeltaPct = sparklineDeltaPct(buckets.cost)
 		} else {
 			s.log.Warn("sparkline query failed", "error", err)
 			span.RecordError(err)
@@ -1041,6 +1055,33 @@ func computeBudgetsAggregate(ctx context.Context, budgets *cost.Budgets) (budget
 	}
 	agg.AvgConsumedPct = totalPct / float64(len(list))
 	return agg, nil
+}
+
+// sparklineDeltaPct returns the percent change between the average of the
+// last 4 buckets and the average of buckets [-8:-4]. Used to render the
+// "▲ 12%" annotation next to each KPI value on the Home strip.
+//
+// Returns 0 (not NaN, not Inf) when either window has no samples or the
+// prior average is zero — the dashboard expects a renderable number always.
+func sparklineDeltaPct(buckets []float64) float64 {
+	if len(buckets) < 8 {
+		return 0
+	}
+	recent := buckets[len(buckets)-4:]
+	prior := buckets[len(buckets)-8 : len(buckets)-4]
+	var ra, pa float64
+	for _, v := range recent {
+		ra += v
+	}
+	for _, v := range prior {
+		pa += v
+	}
+	ra /= float64(len(recent))
+	pa /= float64(len(prior))
+	if pa == 0 {
+		return 0
+	}
+	return ((ra - pa) / pa) * 100
 }
 
 // ─── Compile-time safety net ──────────────────────────────────────────────
