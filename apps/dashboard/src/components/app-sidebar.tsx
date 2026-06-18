@@ -103,7 +103,7 @@ const GROUPS: NavGroup[] = [
     id: "activity",
     label: "Activity",
     items: [
-      { id: "runs", label: "Runs", href: "/activity/runs", icon: Activity, comingSoon: true },
+      { id: "runs", label: "Runs", href: "/activity/runs", icon: Activity },
       { id: "errors", label: "Errors", href: "/activity/errors", icon: AlertTriangle, comingSoon: true },
       { id: "logs", label: "Logs", href: "/activity/logs", icon: BarChart3, comingSoon: true },
       { id: "traces", label: "Traces", href: "/activity/traces", icon: Network, comingSoon: true },

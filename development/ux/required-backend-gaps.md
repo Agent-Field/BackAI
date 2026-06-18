@@ -52,6 +52,14 @@ or "—" placeholders). No new endpoints — `/api/v1/admin/services`,
 `/api/v1/admin/llm/provider-health`, `/api/v1/admin/db/health`, and
 `/api/v1/metrics/summary` were all in place.
 
+## Snapshot after Runs v1 (2026-06-17)
+
+Gaps **27–31** deferred to v0.2 per the Runs brief's v1-SHIPS list.
+v1 mitigation for each gap recorded below (client-side time range +
+search filters, single-select status chips, intentionally absent
+trigger column). No new endpoints — `GET /api/v1/runs` and the
+run-actions surface were sufficient.
+
 ---
 
 ## Gaps discovered
@@ -430,6 +438,67 @@ or "—" placeholders). No new endpoints — `/api/v1/admin/services`,
   `/runs/{id}` per drill.
 - **Severity**: Inefficient (v1 ships client merge; v0.2 single endpoint).
 - **Suggested fix**: Add composed error detail endpoint v0.2.
+
+### Gap 27 — Runs endpoint `from`/`to` time range filter ⏸ Deferred (Runs v1 filters client-side)
+- **v1 mitigation shipped**: Runs filter bar exposes 1h / 24h / 7d /
+  30d / All chips backed by `applyClientFilters()` in
+  `lib/runs/derive.ts`. Backend still serves up to 200 rows per fetch.
+- **Surfaced by**: Page Brief — Runs
+- **What we need**: `from` and `to` RFC3339 params on `GET /api/v1/runs`
+  so the operator can pick "last 7d" / "last 30d" / custom range and
+  receive only those rows server-side.
+- **What we have**: No time range params; relies on default 50-row LIMIT.
+- **Severity**: **Blocking** for time-windowed views.
+- **Suggested fix**: Add `from` / `to` query params (already used on
+  /cost; mirror the implementation).
+
+### Gap 28 — Runs server-side search by id/error ⏸ Deferred (Runs v1 substring on rendered rows)
+- **v1 mitigation shipped**: Filter bar search input matches against
+  id / agent / tenant_id / error client-side via
+  `applyClientFilters()`.
+- **Surfaced by**: Runs
+- **What we need**: `search` query param matching against run id (prefix
+  match) and error summary (substring).
+- **What we have**: No search.
+- **Severity**: Inefficient (v1 ships client-filter on rendered rows).
+- **Suggested fix**: Add `search` param using `ILIKE` on id + error
+  summary.
+
+### Gap 29 — Runs multi-select status filter ⏸ Deferred (Runs v1 single-select)
+- **v1 mitigation shipped**: Status chips render as single-select to
+  match the backend contract; counts on each chip make the
+  distribution legible.
+- **Surfaced by**: Runs
+- **What we need**: Accept comma-separated `status` (e.g.,
+  `status=failed,running`).
+- **What we have**: Single value, only "succeeded" / "failed".
+- **Severity**: Inefficient (v1 UI shows multi, issues OR-composed calls).
+- **Suggested fix**: Accept comma-list; expand WHERE clause.
+
+### Gap 30 — Richer status enum on runs ⏸ Deferred (Runs v1 shows whatever the backend returns)
+- **v1 mitigation shipped**: Filter chips include running/queued/
+  cancelled options so the UI is ready; backend enum will fill them in.
+- **Surfaced by**: Runs (filter for `running` / `queued` / `cancelled`
+  / `timeout`)
+- **What we need**: Status enum beyond binary 2xx/non-2xx — needs
+  per-run lifecycle tracking (queued → running → finished / cancelled
+  / timeout).
+- **What we have**: `status_code` HTTP int; "running" derives from
+  open executions, not list.
+- **Severity**: **Blocking** for live runs filter.
+- **Suggested fix**: Add `lifecycle_status` column on the run record;
+  populate from executions service. v0.2.
+
+### Gap 31 — Runs server-side trigger source filter ⏸ Deferred (Runs v1 doesn't surface trigger)
+- **v1 mitigation shipped**: Trigger column intentionally absent from
+  v1 row layout; ships once `trigger_source` lands on the run schema.
+- **Surfaced by**: Runs
+- **What we need**: Filter by trigger source (`http`, `webhook`, `job`,
+  `cron`, `playground`).
+- **What we have**: Trigger derived client-side from endpoint path.
+- **Severity**: Inefficient (v1 client-filters on visible rows).
+- **Suggested fix**: Add `trigger_source` column or derive on query
+  via regex on endpoint path.
 
 ### Gap 7 — Backing services strip "admin URL" field ✅ Closed (verified, 2026-06-17)
 - **Verified shipped**: `adminService.AdminURL *string` already exists in

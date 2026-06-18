@@ -425,4 +425,83 @@ All four sources existed in Block 1:
 
 ---
 
-_Last updated: 2026-06-17. Next: drawer primitive design._
+---
+
+## Runs — DONE (v1)
+
+**Branch**: `feat/ui-redesign`
+**Page Brief**: `development/ux/pages/runs.md`
+**Route**: `/activity/runs` (dashboard)
+**Scope (per brief §"v1 SHIPS")**: Table + sticky filter bar
+(status + time + search) + RunDrawer with input/output/error +
+URL-persistent filter + drawer state + polling. Group-by, bulk-cancel,
+and saved views deferred to v0.2.
+
+### Decisions locked
+
+- **Live data**: 5s polling (theme.polling.home) — the closest the
+  dashboard gets to a live feed without WS. Brief calls for WebSocket;
+  defers to v0.2 alongside the framework-wide WS upgrade.
+- **Status chips**: All / OK / Failed / Running / Queued / Cancelled
+  reuse the standardised `FilterChip` primitive with live counts. Single
+  selection — backend takes one status string (Gap 29 covers multi).
+- **Time range**: 1h / 24h / 7d / 30d / All chips, applied **client-side**
+  to whatever the backend returned (Gap 27 defers server-side `from`/`to`).
+- **Search**: client-side substring match across id / agent / tenant /
+  error (Gap 28 defers server-side search).
+- **Drawer**: shadcn Sheet on the right with status dot + meta tiles +
+  error block + Input/Output JSON + Cancel / Pause / Resume / "Open in
+  AgentField" actions. URL state via `?drawer=<runId>`.
+- **Empty states**: table header always renders; loading shows skeleton
+  rows in the same column shell; degraded shows a "Runs ledger
+  unavailable" copy.
+- **Failed/running row accent**: 4-px left border (destructive / warning)
+  per brief §18.
+
+### Frontend — built
+
+| Surface | File | Notes |
+|---|---|---|
+| Server-rendered snapshot | `apps/dashboard/src/lib/runs/data.ts` | Honours the `status` URL param so the first paint matches the filter |
+| Types | `apps/dashboard/src/lib/runs/types.ts` | `RunsFilters`, `RunsSnapshot`, `RunStatusFilter`, `RunTimeRange` |
+| Derivations | `apps/dashboard/src/lib/runs/derive.ts` | Status classifier, client-side filter, status counts, formatters (age / cost / duration / friendly agent) |
+| Shell | `apps/dashboard/src/components/runs/runs-shell.tsx` | URL-state filters + drawer, 5s polling, manual Refresh, header |
+| Filter bar | `apps/dashboard/src/components/runs/filter-bar.tsx` | Sticky chip row + search input |
+| Table | `apps/dashboard/src/components/runs/runs-table.tsx` | Sticky header, skeleton loader, empty + degraded copy |
+| Row | `apps/dashboard/src/components/runs/run-row.tsx` | Status dot + accent + cells; chevron on hover |
+| Drawer | `apps/dashboard/src/components/runs/run-drawer.tsx` | Sheet with meta grid + Error block + Input/Output JSON + actions |
+| Page entry | `apps/dashboard/src/app/(dashboard)/activity/runs/page.tsx` | Server component, `force-dynamic` |
+| Sidebar | `apps/dashboard/src/components/app-sidebar.tsx` | Runs removed from the v0.2 dim set |
+
+### Backend — no new endpoints
+
+`GET /api/v1/runs?status=&limit=&offset=` and the run-actions endpoints
+were all in place. Future Gaps 27–31 add time-range filtering, search,
+multi-status, richer status enum, and trigger-source filtering.
+
+### Deferred / out of scope (v1)
+
+- **Group-by tenant / agent / status / hour** — needs Gap 27 + client
+  bucketing; v1 keeps a flat table.
+- **Bulk cancel / Pause / Resume** — single-row only in v1.
+- **Saved filter views**, **Compare runs side-by-side** — v0.2.
+- **Trigger source pill** — `trigger_source` isn't on the row schema
+  yet (Gap 31).
+- **Model + tokens columns** — RunSchema doesn't surface them today.
+- **WebSocket subscription** — v1 polls at 5s.
+
+---
+
+## Backend gaps — status after Runs
+
+| Gap | Description | Status after Runs v1 |
+|---|---|---|
+| **27** | Runs `from`/`to` time range filter | ⏸ Deferred — v1 filters client-side; chips visible |
+| **28** | Runs search by id / error | ⏸ Deferred — v1 substring filter on rendered rows |
+| **29** | Multi-select status | ⏸ Deferred — v1 single-select per backend contract |
+| **30** | Richer status enum (running/queued/cancelled/timeout) | ⏸ Deferred — chips show enum values but backend returns only existing rows |
+| **31** | Trigger source filter | ⏸ Deferred — trigger column not surfaced in v1 |
+
+---
+
+_Last updated: 2026-06-17. Next: drawer primitive design + Tenant detail._
