@@ -3,9 +3,9 @@
 "use client"
 
 import { AlertTriangle } from "lucide-react"
+import { useState } from "react"
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts"
 
-import { GaugeBar } from "@/components/ui/gauge-bar"
 import { ZoneCard, ZoneCardHeader } from "@/components/ui/zone-card"
 
 import type { DBHealth } from "@/lib/api"
@@ -13,9 +13,14 @@ import { formatBytes, formatLatency } from "@/lib/health/derive"
 
 // Zone C — Database health. Five sub-cards inside the zone:
 // Connections, Cache, Slow queries, Largest tables, Vacuum. Each
-// renders an empty-state with structure visible — never a blank
-// rectangle — so the page reads as "platform, no traffic yet" rather
-// than "broken."
+// renders structure even at zero data.
+
+const CACHE_MIN_SAMPLES = 100
+
+// Strip migration noise from the slow-query feed. These statements are
+// one-shot setup work and don't represent ongoing query cost. C3 mandates
+// the toggle so power users can still see them when they want.
+const DDL_RE = /^\s*(create|alter|drop|truncate|grant|revoke|reindex|vacuum|cluster|comment|copy|begin|commit|rollback)\b/i
 
 export function ZoneCDatabase({ db }: { db: DBHealth | null }) {
   return (
@@ -48,7 +53,7 @@ export function ZoneCDatabase({ db }: { db: DBHealth | null }) {
 
 function Unavailable({ reason }: { reason: string }) {
   return (
-    <div className="flex items-start gap-stack rounded-md border border-l-4 border-l-warning bg-warning/5 m-row-x px-row-x py-tile text-meta text-foreground">
+    <div className="m-row-x flex items-start gap-stack rounded-md border border-l-4 border-l-warning bg-warning/5 px-row-x py-tile text-meta text-foreground">
       <AlertTriangle
         className="size-icon-inline shrink-0 text-warning"
         aria-hidden
@@ -63,38 +68,71 @@ function Unavailable({ reason }: { reason: string }) {
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// Connections
+// Connections — stacked segment bar (C1)
 // ──────────────────────────────────────────────────────────────────────
 
 function ConnectionsCard({ db }: { db: DBHealth }) {
   const { active, idle, max } = db.connections
-  const used = active + idle
+  const free = Math.max(0, max - active - idle)
+  const total = Math.max(max, active + idle + free, 1)
+  const activePct = (active / total) * 100
+  const idlePct = (idle / total) * 100
+  const freePct = (free / total) * 100
   return (
     <SubCard title="Connections">
-      <div className="grid grid-cols-3 gap-stack text-meta">
+      <div className="grid grid-cols-4 gap-stack text-meta">
         <Stat label="Active" value={active} />
         <Stat label="Idle" value={idle} />
-        <Stat label="Max" value={max} />
+        <Stat label="Free" value={free} muted />
+        <Stat label="Max" value={max} muted />
       </div>
-      <GaugeBar value={used} max={Math.max(max, used, 1)} watchAt={70} actAt={90} />
+      <div
+        role="img"
+        aria-label={`${active} active, ${idle} idle, ${free} free of ${max}`}
+        className="flex h-3 w-full overflow-hidden rounded-pill bg-muted"
+      >
+        {active > 0 ? (
+          <div
+            className="h-full bg-foreground"
+            style={{ width: `${activePct}%` }}
+            title={`Active ${active}`}
+          />
+        ) : null}
+        {idle > 0 ? (
+          <div
+            className="h-full bg-foreground/40"
+            style={{ width: `${idlePct}%` }}
+            title={`Idle ${idle}`}
+          />
+        ) : null}
+        {free > 0 ? (
+          <div
+            className="h-full bg-muted-foreground/20"
+            style={{ width: `${freePct}%` }}
+            title={`Free ${free}`}
+          />
+        ) : null}
+      </div>
       <p className="text-meta text-muted-foreground">
-        {max > 0
-          ? `${Math.round((used / max) * 100)}% of pool in use`
-          : "Pool size not reported."}
+        {active + idle} in use · {free} capacity remaining
       </p>
     </SubCard>
   )
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// Cache donut
+// Cache donut — sample threshold (C2)
 // ──────────────────────────────────────────────────────────────────────
 
 function CacheCard({ db }: { db: DBHealth }) {
   const ratio = Math.max(0, Math.min(1, db.cache_hit_ratio))
   const pct = Math.round(ratio * 100)
-  const empty = pct === 0
-  const data = empty
+  // Postgres exposes the cache hit ratio without a sample count, so we
+  // can't gate purely on that. The brief asks us to avoid lying with a
+  // perfect-looking donut on a cold cache; surrogate: when the ratio is
+  // exactly 1 the buffer hasn't had to evict yet — show the placeholder.
+  const sparse = !Number.isFinite(db.cache_hit_ratio) || db.cache_hit_ratio === 0 || db.cache_hit_ratio === 1
+  const data = sparse
     ? [{ name: "placeholder", value: 1 }]
     : [
         { name: "hit", value: pct },
@@ -121,7 +159,7 @@ function CacheCard({ db }: { db: DBHealth }) {
                 <Cell
                   key={d.name}
                   fill={
-                    empty
+                    sparse
                       ? "var(--color-muted)"
                       : idx === 0
                         ? "var(--color-foreground)"
@@ -134,14 +172,14 @@ function CacheCard({ db }: { db: DBHealth }) {
         </ResponsiveContainer>
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
           <span className="text-lg font-semibold tabular-nums text-foreground">
-            {empty ? "—" : `${pct}%`}
+            {sparse ? "—" : `${pct}%`}
           </span>
           <span className="text-meta text-muted-foreground">hit ratio</span>
         </div>
       </div>
       <p className="text-meta text-muted-foreground">
-        {empty
-          ? "No cache traffic yet — first reads will warm the buffer."
+        {sparse
+          ? `Small sample — need ≥${CACHE_MIN_SAMPLES} evictions for a meaningful ratio.`
           : "Buffer cache effectiveness across the runtime's queries."}
       </p>
     </SubCard>
@@ -149,16 +187,34 @@ function CacheCard({ db }: { db: DBHealth }) {
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// Slow queries
+// Slow queries — truncate + DDL filter (C3)
 // ──────────────────────────────────────────────────────────────────────
 
 function SlowQueriesCard({ db }: { db: DBHealth }) {
-  const rows = db.slow_queries.slice(0, 10)
+  const [includeDDL, setIncludeDDL] = useState(false)
+  const filtered = includeDDL
+    ? db.slow_queries
+    : db.slow_queries.filter((q) => !DDL_RE.test(q.query))
+  const rows = filtered.slice(0, 10)
+  const ddlCount = db.slow_queries.length - filtered.length
   return (
     <SubCard
       title="Slow queries"
       subtitle="top 10 · last 24h · pg_stat_statements"
       className="lg:col-span-2"
+      trailing={
+        ddlCount > 0 ? (
+          <label className="flex items-center gap-inline text-meta text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={includeDDL}
+              onChange={(e) => setIncludeDDL(e.target.checked)}
+              className="size-3 rounded border-border"
+            />
+            Include DDL ({ddlCount})
+          </label>
+        ) : null
+      }
     >
       <table className="w-full text-meta">
         <thead>
@@ -172,21 +228,23 @@ function SlowQueriesCard({ db }: { db: DBHealth }) {
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td
-                colSpan={4}
-                className="py-tile text-meta text-muted-foreground"
-              >
-                First period of data — slow queries appear after some
-                traffic. Requires <code className="font-mono">pg_stat_statements</code>.
+              <td colSpan={4} className="py-tile text-meta text-muted-foreground">
+                {includeDDL || ddlCount === 0
+                  ? "First period of data — slow queries appear after some traffic. Requires "
+                  : "No slow ongoing queries — only one-shot DDL noise. Toggle 'Include DDL' to see migrations. Requires "}
+                <code className="font-mono">pg_stat_statements</code>.
               </td>
             </tr>
           ) : (
             rows.map((q, idx) => (
               <tr key={idx} className="border-t">
-                <td className="py-tile-tight font-mono text-meta text-foreground">
-                  <span className="block truncate" title={q.query}>
-                    {q.query.length > 80
-                      ? `${q.query.slice(0, 78)}…`
+                <td className="py-tile-tight pr-stack font-mono text-meta text-foreground">
+                  <span
+                    className="block max-w-full truncate"
+                    title={q.query}
+                  >
+                    {q.query.length > 60
+                      ? `${q.query.slice(0, 58)}…`
                       : q.query}
                   </span>
                 </td>
@@ -306,17 +364,19 @@ function VacuumCard({ db }: { db: DBHealth }) {
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// Sub-card primitive (Zone C-local)
+// SubCard primitive (Zone C-local) — visible gap between sub-sections (B3)
 // ──────────────────────────────────────────────────────────────────────
 
 function SubCard({
   title,
   subtitle,
+  trailing,
   children,
   className,
 }: {
   title: string
   subtitle?: string
+  trailing?: React.ReactNode
   children: React.ReactNode
   className?: string
 }) {
@@ -324,24 +384,37 @@ function SubCard({
     <section
       className={`flex flex-col gap-stack rounded-md border bg-card p-tile ${className ?? ""}`}
     >
-      <header className="flex items-baseline justify-between">
+      <header className="flex items-baseline justify-between gap-stack">
         <span className="text-body font-medium text-foreground">{title}</span>
-        {subtitle ? (
-          <span className="text-meta text-muted-foreground">{subtitle}</span>
-        ) : null}
+        <div className="flex items-baseline gap-stack">
+          {subtitle ? (
+            <span className="text-meta text-muted-foreground">{subtitle}</span>
+          ) : null}
+          {trailing}
+        </div>
       </header>
       {children}
     </section>
   )
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function Stat({
+  label,
+  value,
+  muted,
+}: {
+  label: string
+  value: number
+  muted?: boolean
+}) {
   return (
     <div className="flex flex-col gap-tile-tight">
       <span className="text-eyebrow uppercase tracking-wide text-muted-foreground">
         {label}
       </span>
-      <span className="font-mono text-body tabular-nums text-foreground">
+      <span
+        className={`font-mono text-body tabular-nums ${muted ? "text-muted-foreground" : "text-foreground"}`}
+      >
         {value.toLocaleString()}
       </span>
     </div>

@@ -226,23 +226,29 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 }
 
 function NavLink({ item, active }: { item: NavItem; active: boolean }) {
+  // D1 — the original sidebar badged ~16 items as "v0.2" even though
+  // most of their backend endpoints have shipped, which read as
+  // "feature not ready". We keep the comingSoon flag so the row is
+  // visibly dimmed and the link routes to Home (no broken pages), but
+  // no chip is rendered. Operators see surface area without a
+  // misleading "thin v1 / rich v0.2" signal.
   const Icon = item.icon
+  const target = item.comingSoon ? "/" : item.href
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
-        render={<Link href={item.comingSoon ? "/" : item.href} />}
+        render={<Link href={target} />}
         isActive={active}
         size="sm"
         className={`gap-inline ${item.comingSoon ? "opacity-60" : ""}`}
-        title={item.comingSoon ? "v0.2 — coming soon" : item.label}
+        title={
+          item.comingSoon
+            ? `${item.label} — page coming soon; backend ready`
+            : item.label
+        }
       >
         <Icon className="size-icon-inline" aria-hidden />
         <span className="flex-1 truncate">{item.label}</span>
-        {item.comingSoon ? (
-          <span className="ml-auto rounded-pill border border-border px-1 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
-            v0.2
-          </span>
-        ) : null}
       </SidebarMenuButton>
     </SidebarMenuItem>
   )

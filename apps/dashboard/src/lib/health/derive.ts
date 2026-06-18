@@ -84,11 +84,14 @@ function countByStatus(
 
 // Service grouping ---------------------------------------------------------
 
+// Group order is the rendering order for Zone B. Critical infra first
+// (Runtime / Data), then Intelligence (LLM gateway + agent runtime),
+// then storage / queue / delivery, then observability, then anything
+// uncategorised. AgentField belongs in INTELLIGENCE per brief A3.
 const KIND_GROUP_ORDER = [
   "runtime",
   "data",
-  "llm-gateway",
-  "agent-runtime",
+  "intelligence",
   "storage",
   "queue",
   "delivery",
@@ -101,8 +104,7 @@ export type ServiceGroupKey = (typeof KIND_GROUP_ORDER)[number]
 const KIND_GROUP_LABELS: Record<ServiceGroupKey, string> = {
   runtime: "Runtime",
   data: "Data",
-  "llm-gateway": "Intelligence",
-  "agent-runtime": "Intelligence",
+  intelligence: "Intelligence",
   storage: "Storage",
   queue: "Queue",
   delivery: "Delivery",
@@ -121,21 +123,38 @@ export function groupServicesByKind(
   }
   return KIND_GROUP_ORDER.filter((k) => buckets.has(k)).map((k) => ({
     key: k,
-    // Two kinds share the "Intelligence" label so dedupe by label.
     label: KIND_GROUP_LABELS[k],
     services: buckets.get(k)!,
   }))
 }
 
+// Backend service `kind` strings come from `kindBySlot` in
+// services.go: "llm-gateway", "reasoning", "storage", "webhooks",
+// "notifications", "billing", "queue". Mapping below collapses them
+// into the brief's eight-group taxonomy.
 function mapKindToGroup(kind: string): ServiceGroupKey {
   if (kind.startsWith("observability")) return "observability"
   if (kind === "runtime") return "runtime"
   if (kind === "data" || kind === "database") return "data"
-  if (kind === "llm-gateway" || kind === "llm") return "llm-gateway"
-  if (kind === "agent-runtime" || kind === "agentfield") return "agent-runtime"
+  if (
+    kind === "llm-gateway" ||
+    kind === "llm" ||
+    kind === "reasoning" ||
+    kind === "agent-runtime" ||
+    kind === "agentfield"
+  ) {
+    return "intelligence"
+  }
   if (kind === "storage" || kind === "object-storage") return "storage"
-  if (kind === "queue" || kind === "jobs") return "queue"
-  if (kind === "delivery" || kind === "webhooks") return "delivery"
+  if (kind === "queue" || kind === "jobs" || kind === "job-queue") return "queue"
+  if (
+    kind === "delivery" ||
+    kind === "webhooks" ||
+    kind === "notifications" ||
+    kind === "billing"
+  ) {
+    return "delivery"
+  }
   return "other"
 }
 
@@ -149,6 +168,26 @@ export function providerSparkline(p: ProviderHealth): number[] {
   if (entries.length === 0) return []
   entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
   return entries.map(([, v]) => v)
+}
+
+// Threshold-based status override. The brief A2 mandates that the
+// rendered status reflect BOTH uptime AND p95 latency — a green pill
+// next to red latency is the worst possible visual contradiction.
+//
+//   healthy  → uptime ≥ 99% AND p95 ≤ 1s
+//   degraded → uptime ≥ 90% OR  p95 ≤ 5s   (one signal slipping)
+//   down     → both signals failed
+//
+// We layer this over whatever the backend says so the dashboard never
+// disagrees with itself, even when the runtime hasn't shipped the same
+// threshold table yet.
+export function deriveProviderStatus(p: ProviderHealth): "healthy" | "degraded" | "down" | "unknown" {
+  if (p.observations === 0) return "unknown"
+  const uptime = p.availability_pct / 100
+  const p95 = p.p95_latency_ms
+  if (uptime >= 0.99 && p95 > 0 && p95 <= 1000) return "healthy"
+  if (uptime >= 0.9 || (p95 > 0 && p95 <= 5000)) return "degraded"
+  return "down"
 }
 
 // Formatting helpers -------------------------------------------------------
@@ -182,14 +221,18 @@ export function formatDuration(seconds: number): string {
   return `${Math.round(seconds)}s`
 }
 
+// Single timestamp convention for the Health page (C5). "now" is
+// reserved for genuinely sub-second age; everything else uses
+// "Ns / Nm / Nh ago" so providers and services agree on tense.
 export function formatRelative(iso: string | null): string {
   if (!iso) return "—"
   const ts = Date.parse(iso)
   if (Number.isNaN(ts)) return iso
-  const diffSec = Math.max(0, Math.round((Date.now() - ts) / 1000))
-  if (diffSec < 5) return "now"
-  if (diffSec < 60) return `${diffSec}s ago`
-  if (diffSec < 3600) return `${Math.round(diffSec / 60)}m ago`
-  if (diffSec < 86_400) return `${Math.round(diffSec / 3600)}h ago`
+  const diffMs = Math.max(0, Date.now() - ts)
+  if (diffMs < 1000) return "now"
+  const sec = Math.floor(diffMs / 1000)
+  if (sec < 60) return `${sec}s ago`
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`
+  if (sec < 86_400) return `${Math.floor(sec / 3600)}h ago`
   return new Date(ts).toISOString().slice(5, 10)
 }

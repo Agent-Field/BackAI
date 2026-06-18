@@ -141,7 +141,16 @@ export function TopBar({
           <AnchorPill
             label="Health"
             href="/health"
-            value={anchors === null ? "—" : anchors.health}
+            // C6 — color is signal, not decoration. When healthy the dot
+            // already conveys "all good"; hide the word "healthy" and
+            // only show status text when something needs attention.
+            value={
+              anchors === null
+                ? "—"
+                : anchors.health === "healthy"
+                  ? ""
+                  : anchors.health
+            }
             status={anchors === null ? "idle" : healthStatus(anchors.health)}
             helpText="Runtime dependencies (AgentField, Postgres)"
           />
@@ -265,7 +274,9 @@ function AnchorPill({
         <span className="text-muted-foreground uppercase tracking-wide">
           {label}
         </span>
-        <span className="font-medium tabular-nums text-foreground">{value}</span>
+        {value ? (
+          <span className="font-medium tabular-nums text-foreground">{value}</span>
+        ) : null}
         {trailing}
       </TooltipTrigger>
       <TooltipContent>{helpText}</TooltipContent>

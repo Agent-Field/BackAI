@@ -410,6 +410,27 @@ or "—" placeholders). No new endpoints — `/api/v1/admin/services`,
 - **Suggested fix**: Periodic snapshot table `suite_db_health_snapshot`
   rolling 30d. v0.2.
 
+### Gap 25 — Inbound webhook detail GET endpoint ⬜ Open
+- **Surfaced by**: Drawer primitive (inbound webhook drill)
+- **What we need**: `GET /api/v1/admin/webhooks/inbound/{id}` returning a
+  single received inbound webhook with payload, headers, HMAC status,
+  dedup status, downstream action.
+- **What we have**: The receiving endpoint `POST /webhooks/in/{slug}`
+  exists; observability for received inbound webhooks doesn't.
+- **Severity**: **Blocking** for inbound webhook drawer.
+- **Suggested fix**: Persist inbound webhooks to
+  `suite_webhook_inbound_log` + expose list + detail endpoints. v0.2.
+- **v1 mitigation**: Substitute via Logs filter; no drawer.
+
+### Gap 26 — Error drawer composite endpoint ⬜ Open
+- **Surfaced by**: Drawer primitive (error drill)
+- **What we need**: `GET /api/v1/admin/errors/{id}` returning stack,
+  sample run/job, pattern matches, audit — pre-composed for the drawer.
+- **What we have**: Client merges `/api/v1/logs?correlation_id=X` +
+  `/runs/{id}` per drill.
+- **Severity**: Inefficient (v1 ships client merge; v0.2 single endpoint).
+- **Suggested fix**: Add composed error detail endpoint v0.2.
+
 ### Gap 7 — Backing services strip "admin URL" field ✅ Closed (verified, 2026-06-17)
 - **Verified shipped**: `adminService.AdminURL *string` already exists in
   `services.go:27` and is populated by both `serviceFromSlot` (slot

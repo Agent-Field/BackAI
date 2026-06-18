@@ -58,7 +58,11 @@ export function ZoneAProviders({
           }`}
         >
           {providers.map((p) => (
-            <ProviderHealthCard key={p.provider} provider={p} />
+            <ProviderHealthCard
+              key={p.provider}
+              provider={p}
+              layout={providers.length === 1 ? "wide" : "compact"}
+            />
           ))}
         </div>
       )}

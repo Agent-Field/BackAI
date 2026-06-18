@@ -40,12 +40,18 @@ export function ZoneCardHeader({
   subtitle,
   trailing,
 }: ZoneCardHeaderProps) {
+  // Three-tier hierarchy (Health brief B2 / Cost critique recurrence):
+  //   - Zone heading (this component): text-lg font-semibold
+  //   - Sub-card title: text-body font-medium (rendered by the zone)
+  //   - Tertiary labels / eyebrows: text-eyebrow uppercase
+  // Sub-cards inside the zone use the smaller weight; this header is
+  // intentionally bolder so the operator's eye reads BIG → medium → small.
   return (
     <header className="flex items-baseline justify-between gap-stack border-b px-row-x py-row-y">
       <div className="flex min-w-0 items-baseline gap-stack">
         <h2
           id={id}
-          className="text-body font-medium tracking-tight text-foreground"
+          className="text-lg font-semibold tracking-tight text-foreground"
         >
           {title}
         </h2>

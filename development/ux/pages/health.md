@@ -1111,4 +1111,369 @@ All boxes checked.
 
 ---
 
+---
+
+# v0.1 → v1 Corrections (from implementation review)
+
+After v0.1 ship + screenshot review, the following corrections must land
+for v1. Each maps to a brief section above and is grouped by severity.
+
+## A. Critical data-accuracy fixes (must ship in v1)
+
+### A1. Zone A shows UPSTREAM providers, not adapter
+
+**v0.1**: card labeled "litellm" with 91.8% uptime, 55s p95.
+
+**Problem**: LiteLLM is the **gateway adapter** that routes to many
+upstream providers. Zone A must show the upstream providers
+(`openrouter`, `anthropic`, `openai`, `google`, etc.) — not the adapter.
+The adapter "LiteLLM" lives in Zone B (Connected services).
+
+**Fix path**:
+- Verify `/api/v1/admin/llm/provider-health` is grouping by upstream
+  provider, not by adapter. If currently returning per-adapter rows,
+  this is a backend bug.
+- The `health_poller.go` must poll EACH configured upstream
+  (`OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.)
+  and record per-provider rows in `suite_provider_health_log`.
+
+### A2. Status threshold logic (semantic correctness)
+
+**v0.1**: status pill says "healthy" while p95 latency is red 55s and
+uptime is 91.8%. Contradictory.
+
+**Fix — explicit threshold table** (apply both server-side and client-side):
+
+```ts
+function deriveStatus(uptime: number, p95_ms: number): Status {
+  if (uptime >= 0.99 && p95_ms <= 1000)  return "healthy"
+  if (uptime >= 0.90 || p95_ms <= 5000)  return "degraded"
+  return "down"
+}
+```
+
+- `healthy` requires BOTH high uptime AND low latency
+- `degraded` is OR — either signal slipping is enough
+- `down` is both signals failed
+
+Status pill color MUST match (no green pill when latency is red).
+
+### A3. AgentField belongs in INTELLIGENCE group, not OTHER
+
+**v0.1**: AgentField appears under "OTHER" group at the bottom.
+
+**Fix**: in `services.go` `kindBySlot` map, ensure `"reasoning"` slot
+returns `kind: "intelligence"`. So Zone B groups LiteLLM + AgentField
+both under INTELLIGENCE.
+
+Also revisit OTHER bucket — Billing and Notifications should land under
+DELIVERY (not OTHER), per the kind taxonomy in framework.
+
+### A4. Recovery actions on degraded provider cards
+
+**v0.1**: provider card with red 55s p95 has NO action buttons.
+
+**Fix — restore `<ProviderHealthCard />` actions per §18 Zone A spec**:
+
+```tsx
+{status !== "healthy" && (
+  <Button size="sm" variant="default" onClick={onSwitchFallback}>
+    Switch fallback
+  </Button>
+)}
+{adminUrl && (
+  <Button size="sm" variant="outline" asChild>
+    <a href={adminUrl} target="_blank">
+      Open LiteLLM ↗
+    </a>
+  </Button>
+)}
+```
+
+Critical for Journey 8 — operator must have inline recovery path.
+
+### A5. Connected services rows missing [Open ↗] buttons
+
+**v0.1**: rows like LiteLLM, AgentField have `admin_url` set but no
+visible click-out button. The whole point of Block 0 decision #4 (Health
+is the central OSS-link hub) requires these.
+
+**Fix — every `<ServiceHealthRow />` must render**:
+
+```tsx
+{service.admin_url && (
+  <Button size="sm" variant="outline" asChild className="ml-auto">
+    <a href={service.admin_url} target="_blank">
+      Open ↗
+    </a>
+  </Button>
+)}
+```
+
+Right-aligned. Visible for any service with `admin_url`.
+
+---
+
+## B. Layout fixes
+
+### B1. Provider card layout at N=1
+
+**v0.1**: split UPTIME/P95 columns with vertical separator + sparkline
+spanning full width below. Confusing visual structure when only one
+provider configured.
+
+**Fix — at N=1, render as full-width single card**:
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ ● openrouter                                          healthy        │
+│                                                                      │
+│  Uptime    100%         p95 latency  420ms                           │
+│  ▁▁▂▁▁▁▂▁▁▁▂▁▁▁▂▁▁▁▂▁▁▁▂▁▁▁▂▁  (latency over window, 24h)         │
+│                                                                      │
+│  3,412 samples · last check 37s ago        [Open LiteLLM ↗]         │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+3-col grid only kicks in at N≥2. At N=1, full-width with clearer
+labeling.
+
+### B2. Section header weight differentiation (recurring from Cost)
+
+**v0.1**: "LLM providers", "Connected services", "Database", "Runtime"
+all roughly same weight. Sub-sections "Connections", "Cache", "Slow
+queries", "Largest tables", "Vacuum" also same weight as each other.
+
+**Fix — apply §17.5 three-tier hierarchy strictly**:
+
+```tsx
+// PRIMARY (zone heading)
+<CardTitle className="text-lg font-semibold">
+  Connected services
+</CardTitle>
+
+// SECONDARY (sub-section inside zone)
+<CardTitle className="text-sm font-medium">
+  Slow queries
+</CardTitle>
+
+// TERTIARY (group label inside row container)
+<Label className="text-xs uppercase tracking-wider text-muted-foreground">
+  RUNTIME
+</Label>
+```
+
+Visual gradient: BIG → medium → small. Three distinct sizes. Don't put
+all section headers in tertiary tier.
+
+### B3. Database sub-sections in nested sub-Cards
+
+**v0.1**: Connections / Cache / Slow queries / Largest tables / Vacuum
+piled in one big Card with thin separators.
+
+**Fix — each sub-section in its own `<Card>` with subtle border**:
+
+```tsx
+<Card>  {/* zone */}
+  <CardHeader><CardTitle>Database</CardTitle></CardHeader>
+  <CardContent className="space-y-4">
+
+    <Card className="border-muted">  {/* sub-section */}
+      <CardHeader className="py-3">
+        <CardTitle className="text-sm font-medium">Connections</CardTitle>
+      </CardHeader>
+      <CardContent>...</CardContent>
+    </Card>
+
+    <Card className="border-muted">
+      <CardHeader className="py-3">
+        <CardTitle className="text-sm font-medium">Cache</CardTitle>
+      </CardHeader>
+      <CardContent>...</CardContent>
+    </Card>
+
+    {/* etc */}
+  </CardContent>
+</Card>
+```
+
+Visible gap between sub-Cards. No more piling.
+
+---
+
+## C. Component-level refinements
+
+### C1. Connections widget — stacked segment bar (not single thin)
+
+**v0.1**: single thin bar showing "9% of pool in use" + three numbers
+above.
+
+**Fix — show all three counts as stacked segments**:
+
+```
+ACTIVE 1   IDLE 8   FREE 91                            MAX 100
+[█][████████]░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+                                                                  
+9 in use · 91 capacity
+```
+
+Three segments stacked horizontally on a single `h-3` bar:
+- `bg-primary` for active (load-bearing connections)
+- `bg-primary/40` for idle (warm pool)
+- `bg-muted` for free (capacity remaining)
+
+Width per segment proportional to count. Operator sees pool saturation +
+warm/cold ratio at a glance.
+
+### C2. Cache donut — sample threshold + caveat
+
+**v0.1**: 100% hit ratio donut at ~6 samples — visually screams "perfect"
+but statistically meaningless.
+
+**Fix — gate the donut on sample count**:
+
+```tsx
+{sampleCount < 100 ? (
+  <div className="text-center text-muted-foreground">
+    <span className="text-2xl font-mono">—</span>
+    <p className="text-xs mt-2">
+      {sampleCount} samples · need ≥100 for meaningful ratio
+    </p>
+  </div>
+) : (
+  <MetricDonut hitPct={hitRatioPct} sampleCount={sampleCount} />
+)}
+```
+
+Em-dash with sample count when sparse. Real donut only with statistical
+confidence.
+
+### C3. Slow query truncation + HoverCard
+
+**v0.1**: query column allows full SQL to flow horizontally; rows include
+one-shot migration DDL (REINDEX, CREATE TABLE, GRANT, TRUNCATE).
+
+**Fix**:
+- Truncate to **60 chars** with ellipsis
+- `HoverCard` reveals full SQL on hover
+- **Filter out one-shot DDL** by default (REINDEX, CREATE, GRANT,
+  TRUNCATE, DROP, ALTER, DELETE FROM where rowcount low) — these are
+  setup noise
+- Add toggle: `[ ] Include DDL` checkbox above table for power users
+
+Without DDL filtering, every fresh fork's slow queries table is just
+migration noise.
+
+### C4. Status indicator consistency
+
+**v0.1**: provider card has status text on right ("healthy"); service
+rows have just a dot (no text). Inconsistent.
+
+**Fix — uniform pattern across all status displays**:
+
+- **Status dot** ALWAYS left-of-name (8px circle, theme tokens)
+- **Status text** when needed: right-aligned, color-keyed
+  - healthy → `text-muted-foreground` (quiet — good news is no news)
+  - degraded → `text-warning font-medium`
+  - down → `text-destructive font-medium`
+
+When everything is healthy, status text reads as quiet metadata. When
+something's wrong, it grabs attention.
+
+### C5. Timestamp convention
+
+**v0.1**: provider card shows "37s ago"; service rows show "now". Same
+data, two formats.
+
+**Fix — single convention everywhere**:
+
+```ts
+function formatAge(secs: number): string {
+  if (secs < 1)   return "now"
+  if (secs < 60)  return `${Math.floor(secs)}s ago`
+  if (secs < 3600) return `${Math.floor(secs/60)}m ago`
+  return `${Math.floor(secs/3600)}h ago`
+}
+```
+
+Use `formatAge()` for every "last check" / "last update" display on the
+page. "now" reserved for genuinely <1s ago.
+
+### C6. HEALTH anchor — quiet when healthy
+
+**v0.1**: top-bar shows `● HEALTH  healthy` with green dot + word.
+
+**Fix — hide the word "healthy"**; show status text only when
+problematic:
+
+```tsx
+<HoverCardTrigger>
+  <span className={cn("h-2 w-2 rounded-full", dotTone[status])} />
+  <span>HEALTH</span>
+  {status !== "healthy" && (
+    <span className={cn("text-xs ml-1", textTone[status])}>
+      {status === "down" ? `${downCount} services down` : "degraded"}
+    </span>
+  )}
+</HoverCardTrigger>
+```
+
+Per framework principle "color is signal, not decoration" — the green
+dot already says "healthy"; the word is redundant. Reserve text for when
+something's wrong.
+
+---
+
+## D. Sidebar / cross-cutting concerns (out-of-page scope)
+
+These aren't Health page issues but were surfaced during this review:
+
+### D1. v0.2 badge overuse
+
+Sidebar marks ~16 items as v0.2 even though their backend endpoints
+exist (Runs, Errors, Logs, Queue, Webhook flow, Cache, Notifications,
+Tenants, Users, API keys, Audit log, Billing, etc.).
+
+**Recommended**: either
+- Drop the v0.2 badge from items with shipped endpoints, OR
+- Replace with "v1 lite" or "thin v1" with HoverCard explaining the
+  rich version is v0.2
+
+Current state reads as "feature not ready" which discourages exploration.
+
+### D2. PLATFORM group not visible
+
+Sidebar cuts off below People. PLATFORM (Adapters, Auth, LLM providers,
+Webhook subscribers, Notifications channels, Secrets, Observability,
+Billing adapter, Deploy targets) must be visible or scroll-reachable.
+
+PLATFORM is essential — that's where adapter swaps live.
+
+---
+
+## Critique-fix summary table
+
+| # | Severity | Surface | Fix |
+|---|---|---|---|
+| A1 | **Critical** | Zone A | Show upstream providers, not adapter |
+| A2 | **Critical** | Anywhere status renders | Apply threshold table; red latency ≠ green pill |
+| A3 | **Critical** | Zone B groups | AgentField → INTELLIGENCE; Billing/Notif → DELIVERY |
+| A4 | **Critical** | Zone A | Restore Switch fallback + Open LiteLLM actions |
+| A5 | **Critical** | Zone B | Add [Open ↗] to every service with `admin_url` |
+| B1 | Layout | Zone A | Single-column card at N=1, 3-col at N≥2 |
+| B2 | Layout | All zones | Three-tier section header weight (lg / sm / xs) |
+| B3 | Layout | Zone C | Nested sub-Cards, not piled |
+| C1 | Component | Zone C Connections | Stacked segment bar (active/idle/free) |
+| C2 | Component | Zone C Cache | Sample threshold ≥100 before donut renders |
+| C3 | Component | Zone C Slow queries | 60-char truncate + HoverCard + DDL filter |
+| C4 | Component | Zone A + Zone B | Consistent status dot + text pattern |
+| C5 | Component | All zones | `formatAge()` everywhere; "now" only <1s |
+| C6 | Anchor | Top bar | Hide "healthy" word; show text only when problem |
+| D1 | Sidebar | Cross-cut | Drop / clarify v0.2 badge |
+| D2 | Sidebar | Cross-cut | PLATFORM group visible / scroll-reachable |
+
+All checked corrections must land before Health page is considered v1.
+
+---
+
 _Last updated: 2026-06-17. Next: Drawer primitive design._

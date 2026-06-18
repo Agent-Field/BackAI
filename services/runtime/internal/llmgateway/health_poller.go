@@ -91,8 +91,6 @@ func (p *ProviderHealthPoller) poll(ctx context.Context) {
 	defer p.mu.Unlock()
 
 	start := time.Now()
-	status := "healthy"
-	details := map[string]any{}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/health", nil)
 	if err != nil {
 		return
@@ -103,36 +101,147 @@ func (p *ProviderHealthPoller) poll(ctx context.Context) {
 	resp, err := p.client.Do(req)
 	latency := time.Since(start).Milliseconds()
 	if err != nil {
-		status = "unhealthy"
-		details["error"] = err.Error()
-	} else {
-		defer resp.Body.Close()
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		if resp.StatusCode == http.StatusUnauthorized {
-			p.log.Warn("provider health poll skipped; LiteLLM rejected master key",
-				"status_code", resp.StatusCode)
+		// Gateway unreachable — emit a single sentinel row so the
+		// dashboard can render "gateway down" rather than nothing.
+		p.insertRow(ctx, "litellm", "unhealthy", latency, map[string]any{"error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode == http.StatusUnauthorized {
+		p.log.Warn("provider health poll skipped; LiteLLM rejected master key",
+			"status_code", resp.StatusCode)
+		return
+	}
+	var parsed map[string]any
+	if json.Unmarshal(body, &parsed) == nil {
+		// Group LiteLLM's per-model endpoint state by upstream provider
+		// (openrouter, anthropic, openai, ...) so Zone A shows real
+		// upstream signal rather than a single "litellm" aggregate.
+		perProvider := groupEndpointsByProvider(parsed)
+		if len(perProvider) > 0 {
+			for prov, group := range perProvider {
+				status := perProviderStatus(group)
+				details := map[string]any{
+					"healthy_endpoint_count":   group.healthy,
+					"unhealthy_endpoint_count": group.unhealthy,
+					"status_code":              resp.StatusCode,
+					"models":                   group.models,
+				}
+				p.insertRow(ctx, prov, status, latency, details)
+			}
 			return
 		}
-		if resp.StatusCode >= 500 {
-			status = "unhealthy"
-		} else if resp.StatusCode >= 300 {
-			status = "degraded"
-		}
-		var parsed map[string]any
-		if json.Unmarshal(body, &parsed) == nil {
-			details = parsed
-		} else if len(body) > 0 {
-			details["body"] = string(body)
-		}
-		details["status_code"] = resp.StatusCode
 	}
+
+	// Fall back to the previous aggregate row when parsing didn't yield
+	// per-provider data (older LiteLLM versions, unexpected schema, etc.).
+	status := "healthy"
+	details := map[string]any{}
+	if parsed != nil {
+		details = parsed
+	} else if len(body) > 0 {
+		details["body"] = string(body)
+	}
+	details["status_code"] = resp.StatusCode
+	if resp.StatusCode >= 500 {
+		status = "unhealthy"
+	} else if resp.StatusCode >= 300 {
+		status = "degraded"
+	}
+	p.insertRow(ctx, "litellm", status, latency, details)
+}
+
+func (p *ProviderHealthPoller) insertRow(ctx context.Context, provider, status string, latency int64, details map[string]any) {
 	detailsJSON, _ := json.Marshal(details)
 	if _, err := p.pool.Exec(ctx, `
 		insert into suite_provider_health_log (provider, status, latency_ms, details)
 		values ($1, $2, $3, $4::jsonb)
-	`, "litellm", status, latency, detailsJSON); err != nil {
-		p.log.Warn("provider health insert failed", "error", err)
+	`, provider, status, latency, detailsJSON); err != nil {
+		p.log.Warn("provider health insert failed", "error", err, "provider", provider)
 	}
+}
+
+// providerEndpointGroup tracks endpoint counts and the model names that
+// belong to a single upstream provider during one poll cycle.
+type providerEndpointGroup struct {
+	healthy   int
+	unhealthy int
+	models    []string
+}
+
+// groupEndpointsByProvider scans LiteLLM's /health payload (which
+// reports healthy_endpoints + unhealthy_endpoints arrays of per-model
+// objects) and folds the results into one bucket per upstream provider.
+func groupEndpointsByProvider(parsed map[string]any) map[string]*providerEndpointGroup {
+	out := map[string]*providerEndpointGroup{}
+	addAll := func(key, status string) {
+		arr, _ := parsed[key].([]any)
+		for _, item := range arr {
+			row, _ := item.(map[string]any)
+			modelName, _ := row["model"].(string)
+			provider := providerForModel(modelName)
+			if provider == "" {
+				continue
+			}
+			group, ok := out[provider]
+			if !ok {
+				group = &providerEndpointGroup{}
+				out[provider] = group
+			}
+			if status == "healthy" {
+				group.healthy++
+			} else {
+				group.unhealthy++
+			}
+			group.models = append(group.models, modelName)
+		}
+	}
+	addAll("healthy_endpoints", "healthy")
+	addAll("unhealthy_endpoints", "unhealthy")
+	return out
+}
+
+// providerForModel maps a LiteLLM model identifier (e.g.
+// "openrouter/qwen/qwen-2.5-72b-instruct" or "gpt-4o-mini") to the
+// canonical upstream provider name used in suite_provider_health_log.
+func providerForModel(model string) string {
+	if model == "" {
+		return ""
+	}
+	if i := strings.Index(model, "/"); i > 0 {
+		return strings.ToLower(strings.TrimSpace(model[:i]))
+	}
+	switch {
+	case strings.HasPrefix(model, "claude"):
+		return "anthropic"
+	case strings.HasPrefix(model, "gemini"):
+		return "google"
+	case strings.HasPrefix(model, "qwen"):
+		return "qwen"
+	case strings.HasPrefix(model, "o1"),
+		strings.HasPrefix(model, "gpt"),
+		strings.HasPrefix(model, "text-"),
+		strings.HasPrefix(model, "dall-e"):
+		return "openai"
+	}
+	return "other"
+}
+
+// perProviderStatus collapses one group's endpoint counts into the
+// status string consumed by the dashboard ("healthy" / "degraded" /
+// "unhealthy").
+func perProviderStatus(g *providerEndpointGroup) string {
+	if g == nil {
+		return "unhealthy"
+	}
+	if g.unhealthy == 0 {
+		return "healthy"
+	}
+	if g.healthy == 0 {
+		return "unhealthy"
+	}
+	return "degraded"
 }
 
 func ReadProviderHealth(ctx context.Context, pool *pgxpool.Pool, window time.Duration) (ProviderHealthList, error) {
