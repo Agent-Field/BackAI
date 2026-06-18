@@ -133,9 +133,23 @@ export function RunsShell({ initialSnapshot }: RunsShellProps) {
   const counts = useMemo(() => statusCounts(snapshot.runs), [snapshot.runs])
 
   const selectedRun = useMemo<Run | null>(
-    () => snapshot.runs.find((r) => r.id === drawerId) ?? null,
-    [snapshot.runs, drawerId],
+    () => filtered.find((r) => r.id === drawerId) ?? null,
+    [filtered, drawerId],
   )
+
+  // Compute prev/next within the currently filtered view so the
+  // drawer's ← / → keys move through what the operator is actually
+  // looking at, not the unfiltered fetch.
+  const selectedIndex = useMemo(
+    () =>
+      drawerId ? filtered.findIndex((r) => r.id === drawerId) : -1,
+    [filtered, drawerId],
+  )
+  const prevRun = selectedIndex > 0 ? filtered[selectedIndex - 1] : null
+  const nextRun =
+    selectedIndex >= 0 && selectedIndex < filtered.length - 1
+      ? filtered[selectedIndex + 1]
+      : null
 
   return (
     <div className="flex flex-col gap-section px-page-x py-page-y">
@@ -158,6 +172,10 @@ export function RunsShell({ initialSnapshot }: RunsShellProps) {
         run={selectedRun}
         onClose={() => openDrawer(null)}
         onMutated={() => refresh(filters.status, false)}
+        onPrev={prevRun ? () => openDrawer(prevRun.id) : undefined}
+        onNext={nextRun ? () => openDrawer(nextRun.id) : undefined}
+        hasPrev={prevRun !== null}
+        hasNext={nextRun !== null}
       />
     </div>
   )

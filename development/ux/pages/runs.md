@@ -613,5 +613,451 @@ All checked.
 
 ---
 
+---
+
+# v0.1 → v1 Corrections (from implementation review)
+
+After v0.1 ship + screenshot review, the following corrections must land
+for v1. Three categories: critical brief deviations, refinements that
+matter, and next-level tier-1 enhancements that should ride along.
+
+## What's working — keep doing
+
+These v0.1 patterns already match spec; preserve them across all future
+list pages:
+
+- Sidebar IA: Home / Inbox / Cost / Health anchors + Activity / People
+  groups with v0.2 badges dropped (Health critique D1 applied)
+- HEALTH anchor quiet when healthy — dot only, no "healthy" word (Health
+  critique C6 applied)
+- Tenant switcher friendly name "Block2 Review" (Cost critique applied)
+- Cost anchor delta `$0 ↓ -100%` with arrow (Cost critique applied)
+- Status filter pills with live counts: `All 200 / OK 180 / Failed 20 /
+  Running 0 / Queued 0 / Cancelled 0` — even 0-count states render
+  (framework principle: structure visible at zero)
+- Time range pills `1h / 24h / 7d / 30d / All`
+- Failed row red left border accent
+- Status text right-aligned, muted "ok" / loud "failed"
+- Relative time "6h ago" on rows
+- Drawer slides from right with summary line
+
+These are the patterns to apply unchanged on Errors / Webhook flow /
+Sandbox runs / Queue / Notifications.
+
+---
+
+## A. Critical brief deviations (must fix for v1)
+
+### A1. Drawer is missing TABS
+
+**v0.1**: Drawer shows INPUT and OUTPUT as bare inline fields below
+Quick Facts. Both display `—`.
+
+**Problem**: Per `_primitive-drawer.md` §4 Run drawer config, INPUT and
+OUTPUT belong in TABS, not as flat fields. Tab structure is missing
+entirely.
+
+**Fix — implement the 6 tabs per Drawer primitive spec**:
+
+```tsx
+<DrawerTabs
+  tabs={[
+    { id: "input",  label: "Input",  render: (e) => <JSONViewer data={e.input} /> },
+    { id: "output", label: "Output", render: (e) => <JSONViewer data={e.output} /> },
+    { id: "steps",  label: "Steps",  render: (e) => <ReasonerPath path={e.reasoner_path} /> },
+    { id: "tools",  label: "Tools",  render: (e) => <ToolCallList calls={e.tool_calls} /> },
+    { id: "errors", label: "Errors", render: (e) => <ErrorBlock error={e.error} />, hideWhen: (e) => !e.error },
+    { id: "audit",  label: "Audit",  render: (e) => <AuditList entries={e.audit_entries} /> },
+  ]}
+  defaultTab="input"
+  urlState
+/>
+```
+
+Quick Facts grid is for **short metadata** (status, tenant, model, tokens,
+started). Payloads are deep content → tabs.
+
+### A2. Drawer is missing RELATED links section
+
+**v0.1**: No Related section between Tabs and Actions. Only the
+"Open in AgentField" action at the bottom.
+
+**Fix — add Related per Drawer spec §3**:
+
+```tsx
+<DrawerRelated
+  links={[
+    { label: "Tenant",      href: `/people/tenants/${e.tenant_id}`,         text: e.tenant_name },
+    { label: "Agent",       href: `/build/agents/${e.agent}`,               text: e.agent },
+    { label: "Parent run",  href: `/operate/runs?drawer=run/${e.parent_run_id}`, text: shortId(e.parent_run_id), hideWhen: !e.parent_run_id },
+  ]}
+/>
+```
+
+### A3. "Open in AgentField" points to JSON API, not UI
+
+**v0.1**: button opens `http://localhost:8081/agent-api/executions/<id>/details`
+which returns raw JSON — not the AgentField UI page.
+
+**Root cause** in `services/runtime/internal/server/run_agentfield.go:105`:
+
+```go
+DetailsURL: base + "/agent-api/executions/" + execID + "/details"
+              ^^^^^^^^^^^ — this is the JSON API URL, semantically wrong
+              for a "View in UI" link.
+```
+
+**Fix — runtime adds a new `ui_url` field** (Gap 32):
+
+```go
+type runAgentFieldResponse struct {
+    Overview         agentfield.RunOverview `json:"overview"`
+    AgentFieldURL    string                 `json:"agentfield_url"`
+    UIURL            string                 `json:"ui_url"`        // ← NEW
+    DetailsURL       string                 `json:"details_url"`   // keep for API consumers
+    ActionsAvailable []string               `json:"actions_available"`
+}
+```
+
+Where `UIURL = base + "/executions/" + execID` — but **verify the actual
+AgentField UI route** by checking the AgentField repo's Next.js routes.
+Probable shapes:
+- `/executions/<id>` (most likely)
+- `/runs/<id>`
+- `/agent/<agent>/runs/<id>` (agent-scoped)
+
+Dashboard then uses `ui_url` as the button href; falls back to
+`agentfield_url` (root) if `ui_url` missing.
+
+### A4. Tenant column shows raw UUID instead of name
+
+**v0.1**: list rows + drawer Quick Facts both show `00000000` (raw
+tenant UUID prefix).
+
+**Fix** — `/api/v1/runs` already returns `tenant_name`. Use it as the
+visible value; show UUID prefix in muted text or HoverCard:
+
+```tsx
+<TableCell>
+  <span>{run.tenant_name || "—"}</span>
+  {run.tenant_name && (
+    <HoverCard>
+      <HoverCardTrigger asChild>
+        <span className="ml-1 text-xs text-muted-foreground font-mono">
+          {run.tenant_id.slice(0, 8)}
+        </span>
+      </HoverCardTrigger>
+      <HoverCardContent>
+        <code>{run.tenant_id}</code>
+      </HoverCardContent>
+    </HoverCard>
+  )}
+</TableCell>
+```
+
+Same pattern in drawer Quick Facts TENANT tile.
+
+### A5. Drawer STARTED is truncated ISO instead of `formatAge()`
+
+**v0.1**: STARTED tile shows "2026-06-17 19:..." (truncated).
+
+**Fix** — use the universal `formatAge()` convention:
+
+```tsx
+<KeyValueTile
+  label="STARTED"
+  value={
+    <HoverCard>
+      <HoverCardTrigger>{formatAge(secondsSince(run.started_at))}</HoverCardTrigger>
+      <HoverCardContent>{formatISO(run.started_at)}</HoverCardContent>
+    </HoverCard>
+  }
+/>
+```
+
+"6h ago" visible, full ISO on hover. Matches Health's `formatAge()`
+convention applied site-wide.
+
+### A6. Drawer ID has no copy button
+
+**v0.1**: ID tile shows truncated UUID `46ddb31b-c284-…` with no way to
+copy the full id.
+
+**Fix** — every header / id field uses `<CopyButton />` per Drawer §14:
+
+```tsx
+<KeyValueTile
+  label="ID"
+  value={
+    <span className="flex items-center gap-1 font-mono text-xs">
+      {shortId(run.id)}
+      <CopyButton value={run.id} />
+    </span>
+  }
+/>
+```
+
+Single-click copy, toast confirms "Copied."
+
+### A7. Drawer payload empty state is bare em-dash
+
+**v0.1**: INPUT and OUTPUT both render `—` when AgentField returns no
+payload (stub-tier runs, polling, etc.).
+
+**Fix — explanatory empty state per Drawer brief §6 + framework
+principle**:
+
+```tsx
+{!input ? (
+  <div className="p-6 text-center text-sm text-muted-foreground">
+    No payload recorded for this run.
+    <p className="text-xs mt-2">
+      Stub-tier runs (polling, health checks) don't persist input
+      payloads.
+    </p>
+  </div>
+) : (
+  <DrawerJSONViewer data={input} />
+)}
+```
+
+Don't show bare `—` when there's a reason.
+
+### A8. Drawer missing keyboard navigation
+
+**v0.1**: no `←` / `→` arrow navigation between rows in the list. No
+keyboard hints bar.
+
+**Fix** — implement per Drawer §8:
+
+- `←` / `→` (or `j`/`k`) moves drawer to prev/next run in the underlying
+  list filter
+- `Esc` closes
+- Type-specific: `R` re-run, `X` cancel
+- `<DrawerKeyboardHints />` bar at bottom of drawer showing the keys
+
+This is the killer triage DX — operator scans 50 failed runs by holding
+`→`. Without it, drawer triage is click-heavy.
+
+---
+
+## B. Polish / refinements
+
+### B1. Refresh button has no micro-animation
+
+**Fix**:
+
+```tsx
+const [isRefreshing, setIsRefreshing] = useState(false)
+
+<Button
+  variant="ghost"
+  size="icon"
+  onClick={async () => {
+    setIsRefreshing(true)
+    await refetch()
+    setIsRefreshing(false)
+  }}
+  aria-label="Refresh runs"
+>
+  <RefreshCw className={cn(
+    "h-4 w-4 transition-transform",
+    isRefreshing && "animate-spin"
+  )} />
+</Button>
+```
+
+Icon spins during fetch. Brief 1.1× scale pulse on completion (~200ms).
+Toast not needed — data update IS the confirmation.
+
+### B2. Live ● indicator missing
+
+**v0.1**: header shows "Refresh" but no signal whether WS is connected.
+
+**Fix** — small connection chip:
+
+```tsx
+<div className="flex items-center gap-1.5">
+  <span className={cn(
+    "h-1.5 w-1.5 rounded-full",
+    wsConnected ? "bg-success animate-pulse" : "bg-muted-foreground"
+  )} />
+  <span className="text-xs text-muted-foreground">
+    {wsConnected ? "Live" : "Disconnected"}
+  </span>
+</div>
+```
+
+Operator knows whether they're seeing fresh data or stale.
+
+### B3. "N new runs ↑" chip missing during scroll-away live updates
+
+Per brief §11. Not visible in screenshot. Reinforce implementation:
+
+```tsx
+{newRunsCount > 0 && hasScrolledDown && (
+  <button
+    onClick={scrollToTopAndClearChip}
+    className="sticky top-12 left-1/2 -translate-x-1/2 px-3 py-1
+               rounded-full bg-primary text-primary-foreground text-sm
+               shadow-md animate-in slide-in-from-top-2"
+  >
+    {newRunsCount} new {newRunsCount === 1 ? "run" : "runs"} ↑
+  </button>
+)}
+```
+
+---
+
+## C. Next-level tier-1 enhancements (high-impact, low-cost)
+
+These ride along with the v1 fixes — they're the difference between
+"works" and "wow-grade." All implementable with shadcn + Recharts:
+
+### C1. Mini histogram at top of Runs page
+
+Shows runs/minute (or /hour) over the selected time range, with failed
+slice in red:
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ ▁▂▃▄▅▆▇█▇▆▅▄▃▂▁▁▂▃▄▅▆▇█▇▆▅▄▃▂▁  (200 runs · 20 failed)             │
+│ ↑                                                                    │
+│ click any bucket → filter to that window                             │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+Build with Recharts `<BarChart>` — height ~40px, no axes. Click bucket →
+`from`/`to` filter applied.
+
+### C2. Inline error preview on hover (failed rows)
+
+```tsx
+<HoverCard>
+  <HoverCardTrigger>
+    <TableRow className={cn(failedClass)}>
+      ...
+    </TableRow>
+  </HoverCardTrigger>
+  {run.status === "failed" && run.error_summary && (
+    <HoverCardContent className="w-[480px]">
+      <code className="text-xs whitespace-pre-wrap">
+        {run.error_summary}
+      </code>
+      <div className="mt-2 text-xs text-muted-foreground">
+        Model: {run.model} · Last call: {formatAge(run.failed_at)}
+      </div>
+    </HoverCardContent>
+  )}
+</HoverCard>
+```
+
+Faster triage — operator sees the error without opening drawer.
+
+### C3. Cost coloring (gradient bar in row)
+
+Subtle horizontal bar in Cost cell scaled to row max:
+
+```tsx
+<TableCell className="text-right tabular-nums">
+  <div className="relative">
+    <div
+      className="absolute inset-0 bg-warning/10 rounded"
+      style={{ width: `${(run.cost_usd / maxCostInPage) * 100}%` }}
+    />
+    <span className="relative font-mono">{formatCost(run.cost_usd)}</span>
+  </div>
+</TableCell>
+```
+
+Visual cost magnitude. Expensive rows immediately visible.
+
+### C4. Per-row duration vs avg micro-sparkline
+
+A tiny bar showing this run's duration vs reasoner average:
+
+```
+duration  ▁▁▁██  2.4s  ← this run vs avg for this reasoner
+```
+
+Slow rows (above avg) immediately visible. Computed client-side from
+the visible page rows.
+
+### C5. Quick-jump in filter chips
+
+Status / Time pills currently click to apply. Add Cmd+K-style hotkeys:
+- `1` → Today
+- `2` → 24h
+- `3` → 7d
+- `4` → 30d
+- `5` → All
+- `f` → focus search
+- `s` → cycle status filter
+
+Visible hint on hover ("Press 1").
+
+---
+
+## D. Backend gaps surfaced from this critique
+
+| Gap | Severity | Notes |
+|---|---|---|
+| **32.** AgentField UI URL field | **Blocking** for "Open in AgentField" button | Runtime should emit `ui_url` field (not just `details_url` which points to JSON API) |
+
+Gap 27-31 (from initial Runs brief) remain — server-side filters for
+time range, search, multi-status, lifecycle status, trigger source.
+
+---
+
+## E. Strategic note: drawer brief deviations
+
+The v0.1 implementation **diverged significantly** from the Drawer
+primitive brief (`_primitive-drawer.md`):
+
+- No tabs
+- No Related section
+- No keyboard nav
+- No copy buttons
+- Quick Facts treated payloads as facts
+
+These are **not small refinements — they're the spec**. The Drawer
+primitive is reused on Runs / Errors / Webhook flow / Sandbox runs /
+Queue / Approvals / Notifications. Getting it right ONCE unblocks all of
+them.
+
+**Recommendation**: do a brief-vs-implementation audit pass on the
+Drawer primitive before building more list pages on top of it. Current
+drawer-as-implemented will not pattern-replicate cleanly to 7 more
+surfaces.
+
+---
+
+## Critique-fix summary table
+
+| # | Severity | Surface | Fix |
+|---|---|---|---|
+| A1 | **Critical** | Drawer | Implement 6 tabs per Drawer primitive spec |
+| A2 | **Critical** | Drawer | Add Related links section |
+| A3 | **Critical** | Backend | Runtime emits `ui_url` (not just `details_url`) |
+| A4 | **Critical** | List + Drawer | Tenant name resolved from `tenant_name` field |
+| A5 | Layout | Drawer Quick Facts | `formatAge()` for STARTED |
+| A6 | Component | Drawer | `<CopyButton />` on ID field |
+| A7 | Component | Drawer | Empty-payload explanatory state, not bare `—` |
+| A8 | Component | Drawer | Keyboard nav + hints bar |
+| B1 | Polish | Page header | Refresh button spin animation |
+| B2 | Polish | Page header | Live `●` connection indicator |
+| B3 | Polish | List | "N new runs ↑" chip during live updates |
+| C1 | Next-level | Page header | Mini histogram with failed slice |
+| C2 | Next-level | List rows | Inline error preview on hover |
+| C3 | Next-level | List Cost cell | Cost gradient bar |
+| C4 | Next-level | List Duration cell | Duration vs avg sparkline |
+| C5 | Next-level | Filter bar | Keyboard hotkeys 1-5 / f / s |
+
+All A-tier corrections must land before Runs is considered v1. B-tier
+during v1 polish week. C-tier should ride along where possible — they're
+small additions with high "wow" return.
+
+---
+
 _Last updated: 2026-06-17. Next: Tenant detail (composition over many
 primitives)._

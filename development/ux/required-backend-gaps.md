@@ -500,6 +500,33 @@ run-actions surface were sufficient.
 - **Suggested fix**: Add `trigger_source` column or derive on query
   via regex on endpoint path.
 
+### Gap 32 — AgentField UI deep-link URL ⬜ Open
+- **Surfaced by**: Runs v0.1 implementation review (Drawer "Open in AgentField" button)
+- **What we need**: Runtime should emit a `ui_url` field pointing to the
+  AgentField UI page for the execution — separate from the existing
+  `details_url` which points to the JSON API endpoint.
+- **What we have**: `run_agentfield.go:105` emits
+  `DetailsURL = base + "/agent-api/executions/" + execID + "/details"`
+  which is the JSON API endpoint. Opening it in a browser shows raw
+  JSON, not the AgentField UI.
+- **Data is computable**: YES — just need to verify the AgentField UI
+  route convention.
+- **Severity**: **Blocking** for "Open in AgentField" button on Run drawer.
+- **Suggested fix**:
+  ```go
+  type runAgentFieldResponse struct {
+      Overview         agentfield.RunOverview `json:"overview"`
+      AgentFieldURL    string                 `json:"agentfield_url"`
+      UIURL            string                 `json:"ui_url"`        // NEW
+      DetailsURL       string                 `json:"details_url"`   // keep for SDK
+      ActionsAvailable []string               `json:"actions_available"`
+  }
+  ```
+  Where `UIURL = base + "/executions/" + execID` — verify the actual
+  AgentField UI route by checking AgentField repo's Next.js app routes.
+  Probable shapes: `/executions/<id>` (most likely), `/runs/<id>`, or
+  `/agent/<agent>/runs/<id>`.
+
 ### Gap 7 — Backing services strip "admin URL" field ✅ Closed (verified, 2026-06-17)
 - **Verified shipped**: `adminService.AdminURL *string` already exists in
   `services.go:27` and is populated by both `serviceFromSlot` (slot

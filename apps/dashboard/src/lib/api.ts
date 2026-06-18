@@ -151,6 +151,9 @@ export const RunSchema = z.object({
   agent: z.string(),
   status: z.enum(["queued", "running", "succeeded", "failed", "cancelled"]),
   tenant_id: z.string().optional(),
+  // Joined via suite_tenants in the runs handler so the dashboard can
+  // render a friendly tenant name without a second round trip.
+  tenant_name: z.string().optional(),
   started_at: z.string(),
   duration_ms: z.number().optional(),
   cost_usd: z.number().optional(),
@@ -193,6 +196,9 @@ export type RunOverview = z.infer<typeof RunOverviewSchema>
 export const RunAgentFieldSchema = z.object({
   overview: RunOverviewSchema,
   agentfield_url: z.string(),
+  // Browser-friendly UI deep link for "Open in AgentField". `details_url`
+  // still points at the JSON API for programmatic consumers.
+  ui_url: z.string().optional(),
   details_url: z.string(),
   actions_available: z.array(z.string()),
 })

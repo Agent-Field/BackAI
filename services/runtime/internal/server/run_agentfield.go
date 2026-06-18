@@ -42,10 +42,17 @@ import (
 // aren't valid for the current run state (e.g. you can't resume a run
 // that's already running).
 type runAgentFieldResponse struct {
-	Overview         agentfield.RunOverview `json:"overview"`
-	AgentFieldURL    string                 `json:"agentfield_url"`
-	DetailsURL       string                 `json:"details_url"`
-	ActionsAvailable []string               `json:"actions_available"`
+	Overview      agentfield.RunOverview `json:"overview"`
+	AgentFieldURL string                 `json:"agentfield_url"`
+	// UIURL is the browser-friendly deep link to the AgentField UI for
+	// this execution. Dashboards link operators here; the previous
+	// DetailsURL field pointed at the JSON API endpoint, which rendered
+	// raw JSON when opened in a browser.
+	UIURL string `json:"ui_url"`
+	// DetailsURL stays available for programmatic consumers that want
+	// the raw execution payload from AgentField's agent-api.
+	DetailsURL       string   `json:"details_url"`
+	ActionsAvailable []string `json:"actions_available"`
 }
 
 // agentfieldActionTimeout caps how long we wait for AgentField to ack a
@@ -102,6 +109,7 @@ func (s *Server) handleRunAgentField(w http.ResponseWriter, r *http.Request) {
 	resp := runAgentFieldResponse{
 		Overview:         overview,
 		AgentFieldURL:    base,
+		UIURL:            base + "/executions/" + execID,
 		DetailsURL:       base + "/agent-api/executions/" + execID + "/details",
 		ActionsAvailable: actionsForStatus(overview.Status),
 	}

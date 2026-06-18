@@ -51,6 +51,7 @@ type runRecord struct {
 	Agent      string  `json:"agent"`
 	Status     string  `json:"status"`
 	TenantID   string  `json:"tenant_id,omitempty"`
+	TenantName string  `json:"tenant_name,omitempty"`
 	StartedAt  string  `json:"started_at"`
 	DurationMS *int64  `json:"duration_ms,omitempty"`
 	CostUSD    float64 `json:"cost_usd"`
@@ -190,6 +191,7 @@ func (s *Server) queryRuns(ctx context.Context, q runQuery) (runListResponse, er
         select
             r.id,
             coalesce(r.tenant_id::text, '') as tenant_id_text,
+            coalesce(t.name, '')            as tenant_name,
             r.endpoint,
             r.status_code,
             r.duration_ms,
@@ -201,7 +203,8 @@ func (s *Server) queryRuns(ctx context.Context, q runQuery) (runListResponse, er
                  and e.occurred_at >= r.created_at - interval '5 seconds'
                  and e.occurred_at <= r.created_at + interval '60 seconds'
             ), 0) as cost_usd
-          from suite_gateway_requests r ` + where +
+          from suite_gateway_requests r
+          left join suite_tenants t on t.id = r.tenant_id ` + where +
 		" order by r.created_at desc limit $" + strconv.Itoa(limitIdx) +
 		" offset $" + strconv.Itoa(offsetIdx)
 
@@ -215,13 +218,14 @@ func (s *Server) queryRuns(ctx context.Context, q runQuery) (runListResponse, er
 		var (
 			id         pgtype.UUID
 			tenantID   string
+			tenantName string
 			endpoint   string
 			statusCode pgtype.Int4
 			durationMS pgtype.Int4
 			createdAt  time.Time
 			costUSD    float64
 		)
-		if err := rows.Scan(&id, &tenantID, &endpoint, &statusCode, &durationMS, &createdAt, &costUSD); err != nil {
+		if err := rows.Scan(&id, &tenantID, &tenantName, &endpoint, &statusCode, &durationMS, &createdAt, &costUSD); err != nil {
 			return out, err
 		}
 		rec := runRecord{
@@ -233,6 +237,9 @@ func (s *Server) queryRuns(ctx context.Context, q runQuery) (runListResponse, er
 		}
 		if tenantID != "" {
 			rec.TenantID = tenantID
+		}
+		if tenantName != "" {
+			rec.TenantName = tenantName
 		}
 		if durationMS.Valid {
 			v := int64(durationMS.Int32)

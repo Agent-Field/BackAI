@@ -93,9 +93,19 @@ export function RunRow({ run, selected, onSelect }: RunRowProps) {
           </span>
         )}
       </div>
-      <span className="min-w-0 truncate font-mono text-muted-foreground">
-        {run.tenant_id ? run.tenant_id.slice(0, 8) : "—"}
-      </span>
+      <div className="flex min-w-0 flex-col gap-tile-tight">
+        <span
+          className="truncate text-meta text-foreground"
+          title={run.tenant_id ?? undefined}
+        >
+          {run.tenant_name ?? "—"}
+        </span>
+        {run.tenant_id ? (
+          <span className="truncate font-mono text-meta text-muted-foreground">
+            {run.tenant_id.slice(0, 8)}
+          </span>
+        ) : null}
+      </div>
       <span className="text-right font-mono tabular-nums text-foreground">
         {formatRunDuration(run.duration_ms)}
       </span>
