@@ -60,6 +60,15 @@ search filters, single-select status chips, intentionally absent
 trigger column). No new endpoints — `GET /api/v1/runs` and the
 run-actions surface were sufficient.
 
+## Snapshot after Tenant detail v1 (2026-06-17)
+
+Gaps **33–35** deferred to v0.2 per the Tenant detail brief's
+v1-SHIPS list. v1 mitigation for each gap recorded below (client-side
+at-risk computation + activity merge, Notes tab hidden). No new
+endpoints — `GET /api/v1/admin/tenants/{id}/drilldown` is rich
+enough to hydrate header + Overview + Members + Keys tabs in one
+fetch.
+
 ---
 
 ## Gaps discovered
@@ -526,6 +535,46 @@ run-actions surface were sufficient.
   AgentField UI route by checking AgentField repo's Next.js app routes.
   Probable shapes: `/executions/<id>` (most likely), `/runs/<id>`, or
   `/agent/<agent>/runs/<id>`.
+
+### Gap 33 — Tenant health composite signal ⏸ Deferred (Tenant detail v1 computes client-side)
+- **v1 mitigation shipped**: `deriveAtRiskSignals()` in
+  `lib/tenant-detail/derive.ts` folds recent-run failure rate, key
+  budget overruns, and trial expiry into AtRiskAlert cards on the
+  header.
+- **Surfaced by**: Page Brief — Tenant detail (header "at risk" callout)
+- **What we need**: Server-side composite "at-risk" computation per
+  tenant combining budget consumption, error rate, account expiry,
+  rate-limit headroom, and suspended state.
+- **What we have**: Each signal is queryable individually; no composite.
+- **Severity**: Inefficient (v1 client computes from drilldown response).
+- **Suggested fix**: Add `at_risk_signals: [{id, message, severity,
+  actions}]` to drilldown response. v0.2.
+
+### Gap 34 — Operator notes (per-tenant) ⏸ Deferred (Notes tab hidden in v1)
+- **v1 mitigation shipped**: Notes tab is not rendered; v1 ships
+  four tabs (Overview / Members / Keys / Settings). Notes lands with
+  the schema.
+- **Surfaced by**: Tenant detail (Notes tab)
+- **What we need**: Storage for free-form operator notes per tenant —
+  distinct from system audit (which logs WHAT happened) — these log WHY
+  the operator took action.
+- **What we have**: No notes table.
+- **Severity**: **Blocking** for Notes tab.
+- **Suggested fix**: New `suite_tenant_notes` table + GET/POST/DELETE
+  endpoints. v0.2.
+
+### Gap 35 — Tenant activity timeline unified ⏸ Deferred (Tenant detail v1 merges client-side)
+- **v1 mitigation shipped**: `mergeActivity()` in
+  `lib/tenant-detail/derive.ts` interleaves drilldown.recent_runs and
+  drilldown.recent_webhooks into one chronological feed. The unified
+  endpoint will replace the helper without UI changes.
+- **Surfaced by**: Tenant detail (Overview tab Recent Activity)
+- **What we need**: Unified timeline merging runs + audit + activity log
+  + webhook deliveries scoped to one tenant, chronologically ordered.
+- **What we have**: 4 separate endpoints; client merges.
+- **Severity**: Inefficient (v1 ships client merge from drilldown).
+- **Suggested fix**: `GET /api/v1/admin/tenants/{id}/timeline?limit=20`
+  returning typed union of events. v0.2.
 
 ### Gap 7 — Backing services strip "admin URL" field ✅ Closed (verified, 2026-06-17)
 - **Verified shipped**: `adminService.AdminURL *string` already exists in

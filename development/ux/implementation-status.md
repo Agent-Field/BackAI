@@ -504,4 +504,84 @@ multi-status, richer status enum, and trigger-source filtering.
 
 ---
 
-_Last updated: 2026-06-17. Next: drawer primitive design + Tenant detail._
+---
+
+## Tenant detail — DONE (v1)
+
+**Branch**: `feat/ui-redesign`
+**Page Brief**: `development/ux/pages/tenant-detail.md`
+**Route**: `/people/tenants/[id]` (dashboard) + `/people/tenants` minimal list
+**Scope (per brief §"v1 SHIPS")**: Sticky header with KPI tiles +
+at-risk callouts + Suspend / Reactivate actions + 4 tabs (Overview /
+Members / Keys / Settings). Cost / Errors / Runs / Audit / Webhooks
+deferred — they link to global pages filtered to the tenant where
+present, and to v0.2 otherwise.
+
+### Decisions locked
+
+- **Live data**: 10s polling (theme.polling.services). Brief calls for
+  WebSocket; defers alongside the framework-wide WS upgrade.
+- **Tab state**: URL-persistent (`?tab=overview|members|keys|settings`).
+- **At-risk computation**: client-side (Gap 33 mitigation) via
+  `deriveAtRiskSignals()` — fold recent-run failure rate + key budget
+  overrun + trial expiry into per-signal AtRiskAlert cards.
+- **Activity feed merge**: client-side (Gap 35 mitigation) via
+  `mergeActivity()` — folds drilldown.recent_runs + recent_webhooks
+  into one chronological feed.
+- **Mutations**: Edit name + Delete (type-to-confirm) + Suspend /
+  Reactivate + Revoke key. Invite / Rotate / Issue key deferred to
+  v0.2 (need the secret-reveal flow from the Drawer primitive).
+
+### Frontend — built
+
+| Surface | File | Notes |
+|---|---|---|
+| Server snapshot | `apps/dashboard/src/lib/tenant-detail/data.ts` | One `api.tenantDrilldown(id)` fetch hydrates the whole page; null → 404 surface |
+| Types | `apps/dashboard/src/lib/tenant-detail/types.ts` | `TenantDetailTab`, `AtRiskSignal`, `TenantDetailSnapshot` |
+| Derivations | `apps/dashboard/src/lib/tenant-detail/derive.ts` | At-risk + activity merge + status classifier + formatters |
+| Shell | `apps/dashboard/src/components/tenant-detail/tenant-detail-shell.tsx` | Tabs + URL state + 10s polling + Suspend/Reactivate |
+| Header | `apps/dashboard/src/components/tenant-detail/tenant-header.tsx` | Sticky identity + at-risk cards + 5 KPI tiles + actions |
+| AtRiskAlert | `apps/dashboard/src/components/tenant-detail/at-risk-alert.tsx` | Slim alert with warning/critical accent |
+| KPI tile | `apps/dashboard/src/components/tenant-detail/kpi-tile.tsx` | Reuses `Sparkline` primitive |
+| Overview tab | `apps/dashboard/src/components/tenant-detail/overview-tab.tsx` | Merged activity feed + recent-runs list |
+| Members tab | `apps/dashboard/src/components/tenant-detail/members-tab.tsx` | Role badge + email + last-active |
+| Keys tab | `apps/dashboard/src/components/tenant-detail/keys-tab.tsx` | Card per key with GaugeBar + CopyButton + Revoke |
+| Settings tab | `apps/dashboard/src/components/tenant-detail/settings-tab.tsx` | Identity form + Danger zone (type-to-confirm) |
+| Tenants list page | `apps/dashboard/src/app/(dashboard)/people/tenants/page.tsx` | Minimal hub linking each tenant to its detail page |
+| Tenant detail entry | `apps/dashboard/src/app/(dashboard)/people/tenants/[id]/page.tsx` | Server component, `force-dynamic`, 404 surface |
+| Sidebar | `apps/dashboard/src/components/app-sidebar.tsx` | Tenants removed from the v0.2 dim set |
+
+### Backend — no new endpoints
+
+`GET /api/v1/admin/tenants/{id}/drilldown` already returns header +
+Overview + Members + Keys data in a single payload. Tenant + key
+mutations reuse existing `PATCH /api/v1/admin/tenants/{id}`,
+`DELETE /api/v1/admin/tenants/{id}`, `DELETE /api/v1/admin/keys/{id}`
+endpoints.
+
+### Deferred / out of scope (v1)
+
+- **Cost / Runs / Errors tabs** — link out to global pages filtered to
+  the tenant where supported; deeper tab composition tracked as v0.2.
+- **Audit tab** — defer to drawer primitive shipping with the audit
+  drilldown.
+- **Webhooks tab** — defer until the Webhook flow page brief drops.
+- **Notes tab** — Gap 34 (requires `suite_tenant_notes` table).
+- **Tenant health composite** — Gap 33; v1 ships client-side.
+- **Invite member / Issue key / Rotate key** — Sheet / reveal flow
+  needs the Drawer primitive.
+- **Compare two tenants side-by-side** — v0.2.
+
+---
+
+## Backend gaps — status after Tenant detail
+
+| Gap | Description | Status after Tenant detail v1 |
+|---|---|---|
+| **33** | Tenant health composite | ⏸ Deferred — `deriveAtRiskSignals()` computes signals client-side |
+| **34** | Operator notes table | ⏸ Deferred — Notes tab hidden in v1 |
+| **35** | Tenant activity timeline unified | ⏸ Deferred — `mergeActivity()` folds recent_runs + recent_webhooks client-side |
+
+---
+
+_Last updated: 2026-06-17. Next: Errors page brief (Drawer + EntityListTable composition)._

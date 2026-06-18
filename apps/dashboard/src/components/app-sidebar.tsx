@@ -117,7 +117,7 @@ const GROUPS: NavGroup[] = [
     id: "people",
     label: "People",
     items: [
-      { id: "tenants", label: "Tenants", href: "/people/tenants", icon: Building2, comingSoon: true },
+      { id: "tenants", label: "Tenants", href: "/people/tenants", icon: Building2 },
       { id: "users", label: "Users", href: "/people/users", icon: Users, comingSoon: true },
       { id: "keys", label: "API keys", href: "/people/keys", icon: KeyRound, comingSoon: true },
       { id: "sessions", label: "Sessions", href: "/people/sessions", icon: Fingerprint, comingSoon: true },
