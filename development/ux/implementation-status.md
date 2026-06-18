@@ -331,4 +331,98 @@ Per brief §24 and §20:
 
 ---
 
-_Last updated: 2026-06-17. Next page brief to groom: Health._
+---
+
+## Health — DONE (v1)
+
+**Branch**: `feat/ui-redesign`
+**Page Brief**: `development/ux/pages/health.md`
+**Route**: `/health` (dashboard)
+**Scope (per brief §"v1 SHIPS")**: Zone 0 (Incident / All-clear banner) +
+Zone A (LLM providers) + Zone B (Connected services grid) + Zone C
+(Database) + Zone D (Runtime). Workers + TLS deferred to v0.2 (Gaps
+21/22). Status transition log + smart recovery + cache delta deferred
+(Gaps 20/23/24).
+
+### Decisions locked
+
+- **Live data**: 10s polling (theme.polling.services). Brief calls for
+  WebSocket; deferred to v0.2 alongside the live-tick framework upgrade.
+- **Provider window chips**: 24h / 7d / 30d, URL-persistent (`?window=`).
+  Reuses the standardised `FilterChip` primitive so contrast + density
+  match Inbox / Cost chips.
+- **Manual refresh**: Refresh button in the header runs the same fetch
+  loop and toasts on success.
+- **Overall summary computation**: client-side via
+  `lib/health/derive.ts::summarise()`. Drives the Incident banner; v0.2
+  swaps for backend-emitted incident events.
+- **Service grouping**: by `kind` (Runtime / Data / Intelligence /
+  Storage / Queue / Delivery / Observability / Other). Order locked in
+  derive.ts so the page reads top-down by criticality.
+- **Empty states**: every sub-card renders its frame even at zero
+  data — slow queries shows the table header + "First period of data"
+  row; cache donut shows "—" hit ratio when no traffic; provider grid
+  uses dashed-border affordance when no providers configured.
+
+### Frontend — built
+
+| Surface | File | Notes |
+|---|---|---|
+| Server-rendered snapshot | `apps/dashboard/src/lib/health/data.ts` | `Promise.allSettled` over services + providers + db + metrics |
+| Types | `apps/dashboard/src/lib/health/types.ts` | `HealthSnapshot`, `OverallSummary`, `ProviderWindowKind`, `isProviderWindowKind` |
+| Derivations | `apps/dashboard/src/lib/health/derive.ts` | Status classifiers, overall summariser, service grouping, sparkline + formatters (latency / bytes / duration / relative time) |
+| Shell | `apps/dashboard/src/components/health/health-shell.tsx` | Polling, URL-state provider window, manual refresh, overall summary |
+| Incident banner | `apps/dashboard/src/components/health/incident-banner.tsx` | All-clear + degraded variants, same height across both |
+| Zone A — providers | `apps/dashboard/src/components/health/zone-a-providers.tsx` | Grid (3/2/1 cols) + window chips + EmptyProvidersCard fallback |
+| ProviderHealthCard | `apps/dashboard/src/components/health/provider-health-card.tsx` | Status dot + uptime + p95 + sparkline + switch-fallback link when degraded |
+| Zone B — services | `apps/dashboard/src/components/health/zone-b-services.tsx` | Grouped by kind, each group its own sub-card |
+| ServiceHealthRow | `apps/dashboard/src/components/health/service-health-row.tsx` | Dot + name + purpose + host + version + checked time + click-out arrow |
+| Zone C — database | `apps/dashboard/src/components/health/zone-c-database.tsx` | Five sub-cards (Connections, Cache, Slow queries, Largest tables, Vacuum) |
+| Zone D — runtime | `apps/dashboard/src/components/health/zone-d-runtime.tsx` | 4 tiles (Version / Uptime / Memory / Goroutines) + HTTP summary + Top routes table |
+| Page entry | `apps/dashboard/src/app/(dashboard)/health/page.tsx` | Server component, `force-dynamic` |
+| Top-bar anchor | `apps/dashboard/src/components/layout/top-bar.tsx` | Health AnchorPill points at `/health` |
+| Sidebar | `apps/dashboard/src/components/app-sidebar.tsx` | Health removed from `comingSoon` set |
+
+### Primitives promoted to `components/ui/`
+
+| Primitive | Notes |
+|---|---|
+| `ZoneCard` / `ZoneCardHeader` | Moved out of `components/cost/` into `components/ui/zone-card.tsx` so Cost + Health share the same primitive. Cost re-export shim keeps the old import path working |
+
+### Backend — no new endpoints
+
+All four sources existed in Block 1:
+
+| Endpoint | Powers |
+|---|---|
+| `GET /api/v1/admin/services` | Zone B |
+| `GET /api/v1/admin/llm/provider-health?window=` | Zone A |
+| `GET /api/v1/admin/db/health` | Zone C |
+| `GET /api/v1/metrics/summary` | Zone D |
+
+### Deferred / out of scope (v1)
+
+- **Workers section** — Gap 21
+- **TLS / cert expiry section** — Gap 22
+- **"Degraded since X" transition log** — Gap 20
+- **Smart recovery suggestions** — Gap 23
+- **DB cache hit ratio delta** — Gap 24
+- **WebSocket subscription** — brief calls for WS; v1 polls at 10s
+- **HoverCard for slow queries** — table renders truncated query; full
+  text via title tooltip in v1, HoverCard in v0.2
+
+---
+
+## Backend gaps — status after Health
+
+| Gap | Description | Status after Health v1 |
+|---|---|---|
+| **20** | Service status transition log | ⏸ **Deferred to v0.2** — IncidentBanner uses current-only language; "since X" deltas await Gap 20 |
+| **21** | Worker / River status | ⏸ **Deferred to v0.2** — Workers section hidden in v1 per brief |
+| **22** | TLS / cert expiry | ⏸ **Deferred to v0.2** — TLS section hidden in v1 |
+| **23** | Suggested recovery actions | ⏸ **Deferred to v0.2** — ProviderHealthCard surfaces a "Switch fallback" link to PLATFORM → Adapters when degraded |
+| **24** | DB previous-period cache hit ratio | ⏸ **Deferred to v0.2** — Cache sub-card shows current ratio only |
+
+---
+
+_Last updated: 2026-06-17. Next: drawer primitive design._

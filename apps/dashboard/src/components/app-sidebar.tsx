@@ -95,7 +95,7 @@ const ANCHORS: NavItem[] = [
   { id: "home", label: "Home", href: "/", icon: Home },
   { id: "inbox", label: "Inbox", href: "/inbox", icon: Inbox },
   { id: "cost", label: "Cost", href: "/cost", icon: CircleDollarSign },
-  { id: "health", label: "Health", href: "/health", icon: HeartPulse, comingSoon: true },
+  { id: "health", label: "Health", href: "/health", icon: HeartPulse },
 ]
 
 const GROUPS: NavGroup[] = [

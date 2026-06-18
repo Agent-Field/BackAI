@@ -43,6 +43,15 @@ hidden surface). No new endpoints introduced; the existing
 `/api/v1/cost`, `/api/v1/admin/budgets`, and `/api/v1/llm/cache/stats`
 were sufficient.
 
+## Snapshot after Health v1 (2026-06-17)
+
+Gaps **20–24** explicitly deferred to v0.2 per the Health brief's
+v1-SHIPS / v0.2-DEFERS table. v1 mitigation for each gap recorded
+below (current-only language, hidden surfaces, static fallback link,
+or "—" placeholders). No new endpoints — `/api/v1/admin/services`,
+`/api/v1/admin/llm/provider-health`, `/api/v1/admin/db/health`, and
+`/api/v1/metrics/summary` were all in place.
+
 ---
 
 ## Gaps discovered
@@ -340,6 +349,66 @@ were sufficient.
 - **Suggested fix**: Add `tool_name` column to `suite_cost_events`. Tool
   adapters must register costs with the cost ledger when they hit
   external paid APIs. v0.2.
+
+### Gap 20 — Service status transition log ⏸ Deferred (Health v1 uses current-only language)
+- **v1 mitigation shipped**: IncidentBanner copy avoids "since X" /
+  "for Nm" phrasing and shows the freshness via the "last sweep N ago"
+  timestamp. Banner stays in the same slot regardless of state so the
+  page doesn't jump on transitions.
+- **Surfaced by**: Page Brief — Health (Zone 0 "degraded since 14:32")
+- **What we need**: Persistent log of status transitions per service so
+  the Incident banner can show "degraded since X (Nm ago)" instead of
+  just current state.
+- **What we have**: `suite_provider_health_log` exists for LLM providers
+  but not for backing services generally; only current status is read.
+- **Severity**: Inefficient (v1 shows current; v0.2 adds since-when).
+- **Suggested fix**: Generalize provider health log pattern to
+  `suite_service_status_log` covering all backing services. v0.2.
+
+### Gap 21 — Worker / River status surface ⏸ Deferred (Health v1 hides Workers)
+- **v1 mitigation shipped**: Workers section is intentionally absent
+  from Health v1 per brief §"v1 SHIPS". Operators who care about jobs
+  can still inspect the Queue link in the sidebar (also v0.2).
+- **Surfaced by**: Health (Workers section)
+- **What we need**: Endpoint surfacing River worker count, healthy/paused,
+  per-queue throughput, restart rate.
+- **What we have**: `/api/v1/queues/summary` for depth, not worker state.
+- **Severity**: **Blocking** for Workers section on Health.
+- **Suggested fix**: `GET /api/v1/admin/workers` returning per-queue
+  worker metadata. v0.2.
+
+### Gap 22 — TLS / cert expiry surface ⏸ Deferred (Health v1 hides TLS)
+- **v1 mitigation shipped**: TLS / cert section is hidden in v1.
+- **Surfaced by**: Health (TLS / domain section)
+- **What we need**: Per-domain cert expiry, DNS verification state.
+- **What we have**: Caddy manages certs; admin API at `:2019` not proxied.
+- **Severity**: Inefficient (v1 hides; v0.2 adds it).
+- **Suggested fix**: Proxy Caddy admin via runtime, or probe via
+  `tls.Dial`. v0.2.
+
+### Gap 23 — Suggested recovery actions per status ⏸ Deferred (Health v1 links to PLATFORM)
+- **v1 mitigation shipped**: ProviderHealthCard surfaces a
+  "Switch fallback" link to `/platform/adapters#llm` when the provider
+  is degraded or down. v0.2 replaces the static link with smart
+  per-state suggestions.
+- **Surfaced by**: Health + Errors page
+- **What we need**: When provider degrades → "Switch fallback to Y"; when
+  DB cache low → "Run VACUUM"; etc.
+- **What we have**: Status surfaced; no recommendation engine.
+- **Severity**: Inefficient (v1 links to PLATFORM page; v0.2 smart).
+- **Suggested fix**: Rule table in runtime mapping
+  `(slot, status_pattern) → suggested_action`. v0.2.
+
+### Gap 24 — DB previous-period cache hit ratio ⏸ Deferred (Health v1 shows current only)
+- **v1 mitigation shipped**: Zone C cache donut renders the current
+  ratio; no delta. Donut still renders at zero traffic (placeholder
+  slice + "—" hit ratio) per the brief's structure-visible principle.
+- **Surfaced by**: Health (Zone C cache hit ratio delta)
+- **What we need**: Prior-period cache hit ratio for delta indicator.
+- **What we have**: Current only.
+- **Severity**: Cosmetic.
+- **Suggested fix**: Periodic snapshot table `suite_db_health_snapshot`
+  rolling 30d. v0.2.
 
 ### Gap 7 — Backing services strip "admin URL" field ✅ Closed (verified, 2026-06-17)
 - **Verified shipped**: `adminService.AdminURL *string` already exists in

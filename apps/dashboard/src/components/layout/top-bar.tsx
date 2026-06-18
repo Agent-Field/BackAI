@@ -140,6 +140,7 @@ export function TopBar({
           />
           <AnchorPill
             label="Health"
+            href="/health"
             value={anchors === null ? "—" : anchors.health}
             status={anchors === null ? "idle" : healthStatus(anchors.health)}
             helpText="Runtime dependencies (AgentField, Postgres)"
