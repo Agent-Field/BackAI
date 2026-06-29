@@ -76,7 +76,7 @@ surfaces:
 	defer restoreGenerator()
 
 	var stdout bytes.Buffer
-	if err := Run([]string{"--name", "DocuChat", "--color", "#0a66c2", "--logo", logo}, strings.NewReader(""), &stdout, &bytes.Buffer{}); err != nil {
+	if err := Run([]string{"--brand", "--name", "DocuChat", "--color", "#0a66c2", "--logo", logo}, strings.NewReader(""), &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
 
@@ -115,7 +115,7 @@ func TestRunRejectsInvalidColor(t *testing.T) {
 	restoreCwd := chdir(t, root)
 	defer restoreCwd()
 
-	err := Run([]string{"--name", "DocuChat", "--color", "blue"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	err := Run([]string{"--brand", "--name", "DocuChat", "--color", "blue"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "--color must be") {
 		t.Fatalf("expected color error, got %v", err)
 	}
