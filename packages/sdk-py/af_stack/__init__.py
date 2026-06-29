@@ -32,6 +32,7 @@ from . import (
     agents,
     approvals,
     audio,
+    auth,
     billing,
     cost,
     crons,
@@ -64,6 +65,7 @@ __version__ = "0.0.1"
 suite = SimpleNamespace(
     agents=agents,
     approvals=approvals,
+    auth=auth,
     shipwright=shipwright,
     jobs=jobs,
     secrets=secrets,
@@ -104,6 +106,7 @@ __all__ = [
     "agents",
     "approvals",
     "audio",
+    "auth",
     "billing",
     "bind",
     "cost",
