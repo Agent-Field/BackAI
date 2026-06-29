@@ -16,7 +16,7 @@
     "@hookform/resolvers": "^5.4.0",
     "@types/pg": "^8.20.0",
     "bcryptjs": "^2.4.3",
-    "better-auth": "^1.6.14",
+    "better-auth": "^1.6.22",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.17.0",
