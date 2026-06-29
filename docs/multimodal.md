@@ -1,6 +1,6 @@
 # Multimodal API
 
-AF Stack exposes OpenAI-compatible multimodal endpoints through the
+BackAI exposes OpenAI-compatible multimodal endpoints through the
 same LLM gateway as chat and embeddings. Calls route to either the
 LiteLLM sidecar (for the OpenAI catalog) or a first-party adapter
 (ElevenLabs, Cartesia, Flux, fal.ai) based on the model id prefix.
@@ -14,9 +14,9 @@ POST /api/v1/images/edits              ← image edit (multipart)
 POST /api/v1/images/variations         ← image variations (multipart)
 ```
 
-These endpoints do not create AF Stack media state, conversation state,
+These endpoints do not create BackAI media state, conversation state,
 memory, runs, spans, or traces. Agent state remains owned by
-AgentField; AF Stack owns the public gateway, tenancy, policy hooks,
+AgentField; BackAI owns the public gateway, tenancy, policy hooks,
 and provider routing.
 
 ## Provider Routing

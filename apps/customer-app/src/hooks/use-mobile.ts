@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: Apache-2.0
-
 import * as React from "react"
 
 const MOBILE_BREAKPOINT = 768

@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -175,23 +176,37 @@ func (c *Client) Discover(ctx context.Context) ([]AgentInfo, error) {
 		return raw.Agents, nil
 	}
 	agents := make([]AgentInfo, 0, len(raw.Capabilities))
-	for _, entry := range raw.Capabilities {
-		info := AgentInfo{NodeID: entry.AgentID, Version: entry.Version}
-		seenTag := map[string]bool{}
-		for _, rz := range entry.Reasoners {
+	for _, capability := range raw.Capabilities {
+		if capability.AgentID == "" {
+			continue
+		}
+		reasoners := make([]string, 0, len(capability.Reasoners))
+		tagSet := map[string]struct{}{}
+		for _, reasoner := range capability.Reasoners {
 			// Skip AF's internal system reasoners (e.g. __capabilities__).
-			if strings.HasPrefix(rz.ID, "__") {
+			if strings.HasPrefix(reasoner.ID, "__") {
 				continue
 			}
-			info.Reasoners = append(info.Reasoners, rz.ID)
-			for _, tg := range rz.Tags {
-				if !seenTag[tg] {
-					seenTag[tg] = true
-					info.Tags = append(info.Tags, tg)
+			if reasoner.ID != "" {
+				reasoners = append(reasoners, reasoner.ID)
+			}
+			for _, tag := range reasoner.Tags {
+				if tag != "" {
+					tagSet[tag] = struct{}{}
 				}
 			}
 		}
-		agents = append(agents, info)
+		tags := make([]string, 0, len(tagSet))
+		for tag := range tagSet {
+			tags = append(tags, tag)
+		}
+		sort.Strings(tags)
+		agents = append(agents, AgentInfo{
+			NodeID:    capability.AgentID,
+			Version:   capability.Version,
+			Tags:      tags,
+			Reasoners: reasoners,
+		})
 	}
 	return agents, nil
 }

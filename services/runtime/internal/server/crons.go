@@ -15,7 +15,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Agent-Field/backai/services/runtime/internal/audit"
 	"github.com/Agent-Field/backai/services/runtime/internal/crons"
+	"github.com/Agent-Field/backai/services/runtime/internal/jobs"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
 )
 
@@ -47,6 +49,7 @@ func (s *Server) registerCronsRoutes() {
 	s.mux.HandleFunc("POST /api/v1/crons", s.handleCreateCron)
 	s.mux.HandleFunc("GET /api/v1/crons/{id}", s.handleGetCron)
 	s.mux.HandleFunc("PUT /api/v1/crons/{id}/active", s.handleSetCronActive)
+	s.mux.HandleFunc("POST /api/v1/crons/{id}/trigger", s.handleTriggerCron)
 	s.mux.HandleFunc("DELETE /api/v1/crons/{id}", s.handleDeleteCron)
 }
 
@@ -213,6 +216,61 @@ func (s *Server) handleDeleteCron(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 }
 
+func (s *Server) handleTriggerCron(w http.ResponseWriter, r *http.Request) {
+	ctx, span := s.dashTracer().Start(r.Context(), "dashboard.crons.trigger")
+	defer span.End()
+
+	if s.crons == nil || !s.crons.HasPool() {
+		writeError(w, http.StatusServiceUnavailable,
+			"CRONS_NOT_CONFIGURED",
+			"crons module is not configured on this runtime", nil)
+		return
+	}
+	if s.jobs == nil {
+		writeError(w, http.StatusServiceUnavailable,
+			"JOBS_NOT_CONFIGURED",
+			"jobs module is not configured on this runtime", nil)
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "id is required", nil)
+		return
+	}
+	cron, err := s.crons.Get(ctx, id)
+	if err != nil {
+		writeCronsError(w, err)
+		return
+	}
+	args, err := json.Marshal(cron.Args)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL", "could not encode cron args", nil)
+		return
+	}
+	tenantID := ""
+	if cron.TenantID != nil {
+		tenantID = *cron.TenantID
+	}
+	row, err := s.jobs.Enqueue(ctx, cron.JobName, json.RawMessage(args), jobs.EnqueueOpts{TenantID: tenantID})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "ENQUEUE_FAILED", err.Error(), nil)
+		return
+	}
+	s.audit.Write(ctx, r, audit.Event{
+		Action:       "cron.triggered_manually",
+		ResourceType: "cron",
+		ResourceID:   cron.ID,
+		Metadata: map[string]any{
+			"trigger":   "manual",
+			"cron_id":   cron.ID,
+			"tenant_id": tenantID,
+			"job_name":  cron.JobName,
+			"job_id":    row.ID,
+		},
+	})
+	writeJSON(w, http.StatusCreated, marshalJobRow(row))
+}
+
 // ─── OpenAPI ──────────────────────────────────────────────────────────────
 
 func (s *Server) registerCronsOpenAPI() {
@@ -235,6 +293,12 @@ func (s *Server) registerCronsOpenAPI() {
 	})
 	b.Register("PUT", "/api/v1/crons/{id}/active", openapi.RouteMeta{
 		Summary: "Toggle a cron's is_active flag", Tags: []string{"crons"},
+		Parameters: []openapi.Parameter{
+			{Name: "id", In: "path", Required: true, Schema: map[string]any{"type": "string"}},
+		},
+	})
+	b.Register("POST", "/api/v1/crons/{id}/trigger", openapi.RouteMeta{
+		Summary: "Manually trigger a cron once", Tags: []string{"crons"},
 		Parameters: []openapi.Parameter{
 			{Name: "id", In: "path", Required: true, Schema: map[string]any{"type": "string"}},
 		},

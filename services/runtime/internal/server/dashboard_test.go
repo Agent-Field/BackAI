@@ -144,9 +144,28 @@ func TestHomeOverviewEmptyDeps(t *testing.T) {
 	}
 
 	// KPI fields are present and numeric.
-	for _, k := range []string{"requests_per_minute", "error_rate", "cost_today_usd", "queue_depth"} {
+	for _, k := range []string{
+		"requests_per_minute",
+		"error_rate",
+		"cost_today_usd",
+		"queue_depth",
+		"live_runs",
+		"failed_runs_last_24h",
+	} {
 		if _, ok := body[k].(float64); !ok {
 			t.Errorf("expected %s to be a number, got %T", k, body[k])
+		}
+	}
+
+	// Budgets aggregate is always present even when no Budgets store is wired.
+	agg, ok := body["budgets_aggregate"].(map[string]any)
+	if !ok {
+		t.Errorf("expected budgets_aggregate to be an object, got %T", body["budgets_aggregate"])
+	} else {
+		for _, k := range []string{"tenants_at_risk", "avg_consumed_pct", "tenant_count"} {
+			if _, ok := agg[k].(float64); !ok {
+				t.Errorf("expected budgets_aggregate.%s to be a number, got %T", k, agg[k])
+			}
 		}
 	}
 

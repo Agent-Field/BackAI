@@ -35,11 +35,11 @@ node "${REPO_ROOT}/scripts/capture-screenshots.mjs" || {
 }
 
 # The capture script writes every page; this example only needs cost.png.
-OUT="${REPO_ROOT}/dashboard-screenshots/cost.png"
+OUT="${REPO_ROOT}/docs/assets/dashboard-screenshots/cost.png"
 if [ -f "${OUT}" ]; then
     echo
     echo "✓ cost.png ready at: ${OUT}"
-    echo "  reference it from this README as ../../dashboard-screenshots/cost.png"
+    echo "  reference it from this README as ../../docs/assets/dashboard-screenshots/cost.png"
 else
     echo "WARN: ${OUT} not found" >&2
     exit 1

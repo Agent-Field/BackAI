@@ -66,10 +66,11 @@ const (
 // They serve cross-tenant diagnostics or the OpenAPI spec; gating them
 // behind auth would break the operator's first boot.
 var publicPaths = map[string]struct{}{
-	"/health":       {},
-	"/ready":        {},
-	"/metrics":      {},
-	"/openapi.json": {},
+	"/health":        {},
+	"/ready":         {},
+	"/metrics":       {},
+	"/openapi.json":  {},
+	"/api/v1/agents": {},
 }
 
 // publicPrefixes are path prefixes that bypass resolution. The
@@ -77,7 +78,6 @@ var publicPaths = map[string]struct{}{
 // browser session, behind the dashboard's own auth) don't need a
 // runtime-side tenant binding in v1.
 var publicPrefixes = []string{
-	"/api/v1/agents", // discovery is unauthenticated
 	"/api/v1/runs",
 	"/api/v1/home/overview",
 	"/api/v1/cost",
@@ -120,6 +120,10 @@ var publicPrefixes = []string{
 	"/api/v1/mcp",
 	// Skills (Phase 11.3) — install/list/attach surface.
 	"/api/v1/skills",
+	// Secrets + config are operator dashboard surfaces. The handlers use
+	// default-tenant semantics until full per-tenant dashboard switching lands.
+	"/api/v1/secrets",
+	"/api/v1/config",
 	// Harnesses (Phase 11.4) — probe + list surface for the dashboard.
 	"/api/v1/harnesses",
 	// Crons (Phase 12.2) — scheduled-job CRUD surface.

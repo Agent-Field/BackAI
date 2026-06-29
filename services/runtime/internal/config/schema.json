@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://backai.dev/schemas/backai.config.schema.json",
+  "title": "BackAI feature configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["preset", "features"],
+  "properties": {
+    "preset": {
+      "type": "string",
+      "enum": ["lean", "full-observability", "production", "custom"]
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "db_health",
+        "provider_health_polling",
+        "notifications_mute",
+        "brand_override",
+        "search_index_stats",
+        "cron_manual_trigger",
+        "cache_flush",
+        "api_key_rotate",
+        "llm_gateway",
+        "logs",
+        "traces",
+        "metrics",
+        "errors"
+      ],
+      "properties": {
+        "db_health": { "$ref": "#/$defs/feature_bool" },
+        "provider_health_polling": { "$ref": "#/$defs/feature_bool" },
+        "notifications_mute": { "$ref": "#/$defs/feature_bool" },
+        "brand_override": { "$ref": "#/$defs/feature_bool" },
+        "search_index_stats": { "$ref": "#/$defs/feature_bool" },
+        "cron_manual_trigger": { "$ref": "#/$defs/feature_bool" },
+        "cache_flush": { "$ref": "#/$defs/feature_bool" },
+        "api_key_rotate": { "$ref": "#/$defs/feature_bool" },
+        "llm_gateway": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["virtual_keys", "spend_tracking"],
+          "properties": {
+            "virtual_keys": { "type": "boolean" },
+            "spend_tracking": { "type": "boolean" }
+          }
+        },
+        "logs": { "$ref": "#/$defs/logs" },
+        "traces": { "$ref": "#/$defs/traces" },
+        "metrics": { "$ref": "#/$defs/metrics" },
+        "errors": { "$ref": "#/$defs/errors" }
+      }
+    }
+  },
+  "$defs": {
+    "feature_bool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "logs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "adapter": { "type": "string", "enum": ["ring", "loki", "remote"] },
+        "backend": { "type": "string", "enum": ["ring", "loki", "remote"], "deprecated": true },
+        "loki": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "url": { "type": "string" },
+            "tenant": { "type": "string" }
+          }
+        },
+        "remote": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "url": { "type": "string" },
+            "token": { "type": "string" }
+          }
+        }
+      }
+    },
+    "traces": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "adapter": { "type": "string", "enum": ["empty", "tempo", "remote"] },
+        "backend": { "type": "string", "enum": ["empty", "tempo", "remote"], "deprecated": true },
+        "tempo": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "url": { "type": "string" },
+            "tenant": { "type": "string" }
+          }
+        },
+        "remote": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "url": { "type": "string" },
+            "token": { "type": "string" }
+          }
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "adapter", "container_metrics"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "adapter": { "type": "string", "enum": ["none", "prometheus", "remote"] },
+        "container_metrics": { "type": "boolean" }
+      }
+    },
+    "errors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "anyOf": [
+        { "required": ["adapter"] },
+        { "required": ["backend"] }
+      ],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "adapter": { "type": "string", "enum": ["logfilter", "glitchtip", "remote"] },
+        "backend": { "type": "string", "enum": ["logfilter", "glitchtip", "remote"], "deprecated": true }
+      }
+    }
+  }
+}

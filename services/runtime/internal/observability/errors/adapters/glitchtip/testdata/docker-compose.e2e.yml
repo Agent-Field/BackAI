@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:18.1-alpine
+    environment:
+      POSTGRES_HOST_AUTH_METHOD: trust
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  glitchtip:
+    image: glitchtip/glitchtip:6.1.8
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${BACKAI_E2E_GLITCHTIP_PORT:-18095}:8000"
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres
+      VALKEY_URL: ""
+      SECRET_KEY: backai-block6-e2e-secret-key-change-me
+      EMAIL_URL: consolemail://
+      DEFAULT_FROM_EMAIL: errors-e2e@backai.local
+      GLITCHTIP_DOMAIN: "http://localhost:${BACKAI_E2E_GLITCHTIP_PORT:-18095}"
+      SERVER_ROLE: all_in_one
+      GLITCHTIP_ENABLE_LOGS: "False"
+      GLITCHTIP_ENABLE_UPTIME: "False"
+      GLITCHTIP_ENABLE_MCP: "False"
+      GLITCHTIP_ENABLE_DUCKDB: "False"
+      ENABLE_ADMIN: "True"
+      ENABLE_OPENAPI: "False"
+    healthcheck:
+      test: ["CMD-SHELL", "python - <<'PY'\nimport urllib.request\nurllib.request.urlopen('http://127.0.0.1:8000/', timeout=2).read(1)\nPY"]
+      interval: 5s
+      timeout: 3s
+      retries: 60

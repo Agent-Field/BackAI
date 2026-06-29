@@ -4,7 +4,7 @@ The SKILL.md primitives table is the lookup. This file is the deep
 description: what each primitive does, when to use it vs alternatives,
 what's free vs what you write, common mistakes.
 
-Organized by the 8 bands of `STACK.md`.
+Organized by the 8 bands of `docs/stack.md`.
 
 ## ④ Intelligence
 
@@ -221,7 +221,7 @@ Per-tenant budgets returning `HTTP 402 BUDGET_EXCEEDED` when crossed.
 
 ## Roadmap primitives (yet to ship)
 
-These are documented in `EXTENSIBILITY.md` / `STRATEGY.md`. If the user
+These are documented in `docs/extensibility.md` / `development/strategy.md`. If the user
 needs them today, propose a workaround or wait.
 
 | Primitive | Status | Workaround until shipped |

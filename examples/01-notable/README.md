@@ -1,6 +1,6 @@
 # Notable
 
-Notable is what AF Stack looks like when you build a real SaaS on it.
+Notable is what BackAI looks like when you build a real SaaS on it.
 Multi-tenant notes, three small AF agents, a billing meter, and a custom
 dashboard plugin — all sitting on top of the platform's default
 primitives.
@@ -89,7 +89,7 @@ Two surfaces feed the billing module:
 
 - **LLM tokens** are cost-tracked automatically. Every `app.ai()` call
   flows through the LLM gateway, which fires `HookLLMPostCall` after
-  the upstream returns. Phase 7.2's recorder writes the cost into
+  the upstream returns. The recorder writes the cost into
   `suite_cost_events`; the billing service rolls it up into the tenant's
   monthly meter row.
 - **Custom app meters** — `notable_notes_created` — fire from
@@ -174,9 +174,9 @@ button to the dashboard — is in `docs/walkthrough.md`.
 - A user-facing notes UI. The example ships server + agents + operator
   dashboard. A product UI would triple the example's size for zero
   educational value over what the operator dashboard already shows.
-- Real-time collaboration. CRDTs are a product choice; AF Stack ships
+- Real-time collaboration. CRDTs are a product choice; BackAI ships
   the primitives, not the editor.
-- A workload-module mount for the handlers. The Phase 13.4 loader will
+- A workload-module mount for the handlers. A future loader will
   let `handlers/notes.py` move under `workload-modules/notes/` and
   drop the separate container; until it lands, the FastAPI service is
   the cleanest path that still works today.

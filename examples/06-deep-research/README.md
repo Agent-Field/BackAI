@@ -1,6 +1,6 @@
 # 06 — Deep Research
 
-Deep Research is what AF Stack looks like when you build long-running
+Deep Research is what BackAI looks like when you build long-running
 agents with parallel sub-investigations. The agent fans out, each
 sub-question runs in its own harness, findings accumulate in AF memory,
 and the final synthesis joins everything.

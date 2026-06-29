@@ -1,6 +1,6 @@
 # Search API
 
-AF Stack ships a tenant-scoped app-data search index for product records
+BackAI ships a tenant-scoped app-data search index for product records
 and workload-module data.
 
 This is separate from AgentField state. Do not use this table for agent

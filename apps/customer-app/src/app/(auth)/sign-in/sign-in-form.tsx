@@ -144,7 +144,7 @@ export function SignInForm({ sso }: SignInFormProps) {
       <CardHeader>
         <CardTitle>Sign in to {brand.displayName}</CardTitle>
         <CardDescription>
-          Ask code questions. Watch the gateway answer. See the cost.
+          Chat through support cases, account issues, and billing questions.
         </CardDescription>
       </CardHeader>
       <Suspense fallback={null}>

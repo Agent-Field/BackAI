@@ -1,6 +1,6 @@
 # Realtime
 
-AF Stack exposes a small Postgres-backed realtime bridge:
+BackAI exposes a small Postgres-backed realtime bridge:
 
 ```text
 Postgres NOTIFY suite_realtime, '<json payload>'
@@ -8,7 +8,7 @@ Postgres NOTIFY suite_realtime, '<json payload>'
         -> suite.realtime.subscribe(table, filter)
 ```
 
-This is for application data owned by AF Stack or workload modules. It
+This is for application data owned by BackAI or workload modules. It
 does not stream AgentField runs, spans, traces, sessions, or memory.
 Those AI-stateful streams stay in AgentField.
 

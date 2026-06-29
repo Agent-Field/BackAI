@@ -29,7 +29,8 @@ harder to scale independently.
 
 ```bash
 # 1. Clone + cd
-git clone https://github.com/<you>/af-stack && cd af-stack
+git clone https://github.com/Agent-Field/backai supportdesk-ai
+cd supportdesk-ai
 
 # 2. Template fly.toml + fly.dashboard.toml
 #    Replace <app-name>, <dashboard-app-name>, <primary-region>, <runtime-app-name>.

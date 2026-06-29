@@ -118,7 +118,7 @@ If your case fits a hook, use that. If it needs a different backend
 
 The dashboard's `Build → Modules` tab shows the live adapter choices.
 will eventually add a dedicated `Infrastructure → Adapters` page (per
-`POSITIONING.md` Part 3 B2) that lists every primitive + every
+`development/positioning.md` Part 3 B2) that lists every primitive + every
 available adapter + the active one + a link to docs.
 
 That page is **read-only** — config still happens in env. The dashboard

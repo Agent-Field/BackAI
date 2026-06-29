@@ -27,6 +27,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/Agent-Field/backai/services/runtime/internal/appmetrics"
 	"github.com/Agent-Field/backai/services/runtime/internal/cost"
 )
 
@@ -156,6 +157,7 @@ func (s *Service) Run(ctx context.Context, spec RunSpec) (*SandboxRun, error) {
 		}
 		costUSD = res.CPUSeconds * CostPerCPUSecond
 	}
+	appmetrics.ObserveSandboxRun(adapterName, string(terminalStatus))
 
 	// Persist the terminal row.
 	if s.recorder != nil && s.recorder.HasPool() && res != nil {

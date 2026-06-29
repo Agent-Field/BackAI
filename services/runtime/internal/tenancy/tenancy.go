@@ -177,6 +177,27 @@ type IssuedAPIKey struct {
 	Value string `json:"value"`
 }
 
+// MirrorRotationError means RotateKey completed the local system-of-record
+// rotation but failed while mirroring that change to LiteLLM virtual keys.
+// Callers must still return the one-time plaintext replacement key.
+type MirrorRotationError struct {
+	Err error
+}
+
+func (e *MirrorRotationError) Error() string {
+	if e == nil || e.Err == nil {
+		return "tenancy: litellm mirror rotation failed"
+	}
+	return "tenancy: litellm mirror rotation failed: " + e.Err.Error()
+}
+
+func (e *MirrorRotationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
 // TenantDetailMember matches TenantDetailSchema.members[].
 type TenantDetailMember struct {
 	User User   `json:"user"`

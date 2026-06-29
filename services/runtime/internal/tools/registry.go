@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Agent-Field/backai/services/runtime/internal/toolstats"
 )
 
 // Registry is the central tool table + per-tenant enable layer.
@@ -30,6 +32,16 @@ type Registry struct {
 	tools map[ToolName]Tool
 	pool  *pgxpool.Pool
 	log   *slog.Logger
+	stats *toolstats.Recorder
+}
+
+func (r *Registry) SetStatsRecorder(rec *toolstats.Recorder) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.stats = rec
 }
 
 // NewRegistry returns an empty registry. Pass nil pool to disable the
@@ -242,7 +254,19 @@ func (r *Registry) IsEnabled(ctx context.Context, tenantID string, name ToolName
 //
 // When tenantID is empty (boot-mode / system call) the enable check is
 // skipped — the caller is trusted.
-func (r *Registry) Invoke(ctx context.Context, tenantID string, name ToolName, verb string, args map[string]any) (any, error) {
+func (r *Registry) Invoke(ctx context.Context, tenantID string, name ToolName, verb string, args map[string]any) (out any, err error) {
+	started := time.Now()
+	defer func() {
+		var rec *toolstats.Recorder
+		if r != nil {
+			r.mu.RLock()
+			rec = r.stats
+			r.mu.RUnlock()
+		}
+		if rec != nil {
+			rec.RecordResult(ctx, tenantID, string(name), toolstats.TransportNative, started, err)
+		}
+	}()
 	if r == nil {
 		return nil, ErrNotConfigured
 	}

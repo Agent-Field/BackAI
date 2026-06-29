@@ -1,6 +1,6 @@
 # Multi-Replica Deployment
 
-When and how to scale AF Stack horizontally. The runtime is the
+When and how to scale BackAI horizontally. The runtime is the
 component that benefits from replicas; the dashboard rarely needs more
 than 2.
 
@@ -11,7 +11,7 @@ than 2.
 | Runtime | Yes — horizontal | Stateless HTTP. Workers (notifications, webhook outbound, crons, sandbox refresh, MCP pool) use `FOR UPDATE SKIP LOCKED` so multiple replicas claim work safely. |
 | Dashboard | Yes — but rarely needed | Stateless Next.js. Sits behind a CDN typically. Two replicas for HA, not throughput. |
 | Postgres | Vertical first, then read replicas | The bottleneck for everything. Vertical scaling (more cores + RAM) buys you orders of magnitude before read replicas pay off. |
-| MinIO / S3 | Out of scope | Use a managed service. AF Stack reads / writes blobs; the storage layer is the storage layer's problem. |
+| MinIO / S3 | Out of scope | Use a managed service. BackAI reads / writes blobs; the storage layer is the storage layer's problem. |
 | AgentField control plane | Yes — horizontal | Per AF's own scaling model. |
 
 ## Recommended starting point
@@ -23,7 +23,7 @@ than 2.
 | Production medium (100 – 1k tenants) | 3 (HPA 3 → 8) | 2 | db.m5.large + read replica |
 | Production large (1k+ tenants) | HPA 5 → 20 | 2 | db.m5.2xlarge + 2 read replicas + connection pooler |
 
-The Phase 14.1 Helm chart's `values-prod.yaml` ships HPA tuned for
+The Helm chart's `values-prod.yaml` ships HPA tuned for
 "production small". Override at the values level when you outgrow it.
 
 ## What multiple replicas share
@@ -104,12 +104,12 @@ Watch these metrics:
 | PG connection count | > 70% of max = add PgBouncer |
 | Cron lag (oldest `next_run_at` in the past) | > 5 minutes = scheduler bottleneck (rare) |
 
-The Phase 12.2 metrics tab surfaces these without leaving the dashboard.
+The metrics tab surfaces these without leaving the dashboard.
 
 ## Limits we know about
 
 - **Webhook outbound throughput** is capped at 32 deliveries per 2s tick
-  per pod (Phase 10.3 worker config). At 3 pods that's 48 / second
+  per pod. At 3 pods that's 48 / second
   steady-state. For higher throughput, bump the batch size in the
   worker config.
 - **Notifications drain** is the same shape; same headroom math.

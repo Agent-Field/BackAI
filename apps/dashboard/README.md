@@ -1,43 +1,29 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# BackAI Admin Dashboard
 
-For AF Stack fork customization rules, see [`EDITING.md`](EDITING.md).
+Operator console for a BackAI deployment. This app is for the team
+running the AI product: tenants, API keys, costs, runs, jobs, storage,
+billing, plugins, and platform operations.
 
-## Getting Started
+For fork customization rules, see [`EDITING.md`](EDITING.md). For the
+overall repo ownership model, see [`docs/repo-map.md`](../../docs/repo-map.md).
 
-First, run the development server:
+## Local Development
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+From the root stack, the dashboard runs at `http://localhost:33000`.
+When developing only this app, make sure the runtime API URL points at a
+running BackAI runtime.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## What To Customize
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Prefer adding domain-specific admin views as plugins under
+`apps/dashboard/plugins/<id>/`. Change the shared dashboard shell only
+when the capability is useful to every BackAI fork.
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-
-## Add a plugin
+## Add A Plugin
 
 A plugin is a contributor-owned folder under `apps/dashboard/plugins/<id>/`.
 The shell auto-discovers it — no edits to `nav.ts`, the sidebar, or the

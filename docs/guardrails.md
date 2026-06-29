@@ -1,6 +1,6 @@
 # Gateway Guardrails
 
-AF Stack applies PII redaction and moderation at the public LLM gateway
+BackAI applies PII redaction and moderation at the public LLM gateway
 boundary. This is intentionally gateway-local policy: AgentField still
 owns AI-stateful runs, memory, spans, traces, and tool-call history.
 
@@ -72,7 +72,7 @@ PII is not leaked during sidecar outages.
 ## Moderation
 
 Moderation block rules are explicit regular expressions supplied by the
-operator. AF Stack does not ship a broad content taxonomy by default
+operator. BackAI does not ship a broad content taxonomy by default
 because self-hosted teams usually need different policy choices by
 industry, region, and customer contract.
 

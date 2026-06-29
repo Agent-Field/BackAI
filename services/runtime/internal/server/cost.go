@@ -38,6 +38,7 @@ import (
 // Nullable fields use *string so they serialise as JSON null when absent.
 type costEventWire struct {
 	ID               string  `json:"id"`
+	RequestID        *string `json:"request_id"`
 	TenantID         *string `json:"tenant_id"`
 	APIKeyID         *string `json:"api_key_id"`
 	Model            string  `json:"model"`
@@ -86,6 +87,7 @@ type setBudgetInputWire struct {
 func marshalCostEvent(e cost.EventRow) costEventWire {
 	return costEventWire{
 		ID:               e.ID,
+		RequestID:        e.RequestID,
 		TenantID:         e.TenantID,
 		APIKeyID:         e.APIKeyID,
 		Model:            e.Model,
@@ -202,6 +204,7 @@ func writeBudgetError(w http.ResponseWriter, err error) {
 // Query params:
 //
 //	tenant uuid          — scope to tenant
+//	request_id string    — scope to one gateway request
 //	model  string        — scope to model id
 //	from   RFC3339       — lower bound (inclusive)
 //	to     RFC3339       — upper bound (exclusive)
@@ -217,10 +220,11 @@ func (s *Server) handleListCostEvents(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := parsePaging(q.Get("limit"), q.Get("offset"))
 	opts := cost.EventsOpts{
-		TenantID: strings.TrimSpace(q.Get("tenant")),
-		Model:    strings.TrimSpace(q.Get("model")),
-		Limit:    limit,
-		Offset:   offset,
+		TenantID:  strings.TrimSpace(q.Get("tenant")),
+		RequestID: strings.TrimSpace(q.Get("request_id")),
+		Model:     strings.TrimSpace(q.Get("model")),
+		Limit:     limit,
+		Offset:    offset,
 	}
 	if v := strings.TrimSpace(q.Get("from")); v != "" {
 		t, err := parseRFC3339(v)
@@ -240,6 +244,7 @@ func (s *Server) handleListCostEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	span.SetAttributes(
 		attribute.String("filter.tenant", opts.TenantID),
+		attribute.String("filter.request_id", opts.RequestID),
 		attribute.String("filter.model", opts.Model),
 		attribute.Int("paging.limit", limit),
 		attribute.Int("paging.offset", offset),

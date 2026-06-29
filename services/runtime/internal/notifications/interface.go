@@ -109,18 +109,68 @@ type ListResult struct {
 	HasMore       bool
 }
 
+// MutePattern is the exact+wildcard match contract for notification
+// suppression. Empty values are normalised to "*" by Validate.
+type MutePattern struct {
+	Kind      string `json:"kind"`
+	Recipient string `json:"recipient"`
+	Template  string `json:"template"`
+	Category  string `json:"category"`
+}
+
+// Mute is one durable notification mute rule.
+type Mute struct {
+	ID        string      `json:"id"`
+	TenantID  *string     `json:"tenant_id"`
+	Pattern   MutePattern `json:"pattern"`
+	Reason    *string     `json:"reason"`
+	ExpiresAt *string     `json:"expires_at"`
+	CreatedBy *string     `json:"created_by"`
+	CreatedAt string      `json:"created_at"`
+}
+
+// CreateMuteInput is the body of POST /api/v1/notifications/mutes.
+type CreateMuteInput struct {
+	TenantID  string      `json:"tenant_id,omitempty"`
+	Pattern   MutePattern `json:"pattern"`
+	Reason    string      `json:"reason,omitempty"`
+	ExpiresAt *time.Time  `json:"expires_at,omitempty"`
+	CreatedBy string      `json:"created_by,omitempty"`
+}
+
+// MuteListResult is one page of mute rules.
+type MuteListResult struct {
+	Mutes []Mute `json:"mutes"`
+}
+
 // Stats mirrors NotificationStatsSchema.
 type Stats struct {
-	ByStatus     map[Status]int `json:"by_status"`
-	ByAdapter    []AdapterCount `json:"by_adapter"`
-	SentToday    int            `json:"sent_today"`
-	FailedToday  int            `json:"failed_today"`
+	ByStatus    map[Status]int `json:"by_status"`
+	ByAdapter   []AdapterCount `json:"by_adapter"`
+	SentToday   int            `json:"sent_today"`
+	FailedToday int            `json:"failed_today"`
 }
 
 // AdapterCount is one entry in Stats.ByAdapter.
 type AdapterCount struct {
 	Adapter string `json:"adapter"`
 	Count   int    `json:"count"`
+}
+
+type Channel struct {
+	ID        string         `json:"id"`
+	Kind      Kind           `json:"kind"`
+	Config    map[string]any `json:"config_json"`
+	Enabled   bool           `json:"enabled"`
+	Source    string         `json:"source"`
+	CreatedAt string         `json:"created_at"`
+	UpdatedAt string         `json:"updated_at"`
+}
+
+type ChannelInput struct {
+	Kind    Kind
+	Config  map[string]any
+	Enabled bool
 }
 
 // Adapter is the wire-level contract every notification backend must
@@ -146,6 +196,31 @@ var (
 	ErrNotFound      = errors.New("notifications: not found")
 	ErrAdapter       = errors.New("notifications: adapter error")
 )
+
+// Validate normalises a mute pattern to exact-or-wildcard semantics.
+func (p *MutePattern) Validate() error {
+	if p == nil {
+		return fmt.Errorf("%w: pattern is required", ErrInvalidInput)
+	}
+	p.Kind = normaliseMutePart(p.Kind)
+	p.Recipient = normaliseMutePart(p.Recipient)
+	p.Template = normaliseMutePart(p.Template)
+	p.Category = normaliseMutePart(p.Category)
+	for _, v := range []string{p.Kind, p.Recipient, p.Template, p.Category} {
+		if strings.ContainsAny(v, "%_") {
+			return fmt.Errorf("%w: mute patterns support exact values or * wildcard only", ErrInvalidInput)
+		}
+	}
+	return nil
+}
+
+func normaliseMutePart(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "*"
+	}
+	return value
+}
 
 // Validate normalises the input in-place and returns an error if any
 // field is out of bounds.

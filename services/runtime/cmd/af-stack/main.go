@@ -25,8 +25,10 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/activity"
+	adapterregistry "github.com/Agent-Field/backai/services/runtime/internal/adapters/registry"
 	"github.com/Agent-Field/backai/services/runtime/internal/agentfield"
 	"github.com/Agent-Field/backai/services/runtime/internal/approvals"
 	"github.com/Agent-Field/backai/services/runtime/internal/billing"
@@ -56,6 +58,16 @@ import (
 	notificationsresend "github.com/Agent-Field/backai/services/runtime/internal/notifications/adapters/resend"
 	"github.com/Agent-Field/backai/services/runtime/internal/oauth"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
+	obserrors "github.com/Agent-Field/backai/services/runtime/internal/observability/errors"
+	"github.com/Agent-Field/backai/services/runtime/internal/observability/errors/errorselect"
+	"github.com/Agent-Field/backai/services/runtime/internal/observability/logs"
+	"github.com/Agent-Field/backai/services/runtime/internal/observability/logs/logselect"
+	"github.com/Agent-Field/backai/services/runtime/internal/observability/metrics"
+	"github.com/Agent-Field/backai/services/runtime/internal/observability/metrics/metricselect"
+	"github.com/Agent-Field/backai/services/runtime/internal/observability/traces"
+	"github.com/Agent-Field/backai/services/runtime/internal/observability/traces/traceselect"
+	"github.com/Agent-Field/backai/services/runtime/internal/probe"
+	"github.com/Agent-Field/backai/services/runtime/internal/retention"
 	"github.com/Agent-Field/backai/services/runtime/internal/sandbox"
 	dockersandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/docker"
 	e2bsandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/e2b"
@@ -72,6 +84,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/tenancy"
 	"github.com/Agent-Field/backai/services/runtime/internal/tooladapters"
 	"github.com/Agent-Field/backai/services/runtime/internal/tools"
+	"github.com/Agent-Field/backai/services/runtime/internal/toolstats"
 	"github.com/Agent-Field/backai/services/runtime/internal/webhooks"
 )
 
@@ -117,6 +130,481 @@ func (w *webhookAgentInvoker) Execute(
 
 const version = "0.0.1"
 
+func caps(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return json.RawMessage(b)
+}
+
+func defaulted(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func staticStatus(status adapterregistry.Status) adapterregistry.Probe {
+	return func(context.Context) (adapterregistry.Status, error) {
+		return status, nil
+	}
+}
+
+func buildAdapterRegistry(
+	cfg config.Config,
+	database *db.DB,
+	afClient *agentfield.Client,
+	store storage.Storage,
+	vault *secrets.Vault,
+	jobsManager *jobs.Manager,
+	llmGW *llmgateway.Gateway,
+	litellmAdmin *llmgateway.LiteLLMAdmin,
+	sandboxSvc *sandbox.Service,
+	notificationsSvc *notifications.Service,
+	webhooksSvc *webhooks.Service,
+	billingSvc *billing.Service,
+	logsStore logs.Store,
+	tracesStore traces.Store,
+	metricsStore metrics.Store,
+	errorsStore obserrors.Store,
+) *adapterregistry.Registry {
+	r := adapterregistry.New()
+
+	storageName := defaulted(cfg.Storage.Adapter, "minio")
+	storageStatus := adapterregistry.StatusUnhealthy
+	storageKind := adapterregistry.KindNone
+	storageCaps := map[string]any{"contract_pending": true}
+	if store != nil {
+		storageKind = adapterregistry.KindBuiltin
+		storageStatus = adapterregistry.StatusHealthy
+		c := store.Capabilities()
+		storageCaps = map[string]any{
+			"max_object_size_bytes":     c.MaxObjectSizeBytes,
+			"supports_multipart":        c.SupportsMultipart,
+			"presign_ttl_max_seconds":   c.PresignTTLMaxSeconds,
+			"supports_signed_uploads":   c.PresignTTLMaxSeconds > 0,
+			"supports_range_requests":   false,
+			"supports_metadata_headers": false,
+		}
+	}
+	r.Register(adapterregistry.Slot{
+		ID:               "storage",
+		Tier:             adapterregistry.Tier1,
+		Kind:             storageKind,
+		Name:             storageName,
+		Capabilities:     caps(storageCaps),
+		AvailableBuiltin: []string{"minio", "s3"},
+		SwapMethod:       "env_var",
+		SwapEnv:          "AF_STACK_S3_ADAPTER",
+		AdminUI:          os.Getenv("AF_STACK_MINIO_CONSOLE_URL"),
+		Probe:            staticStatus(storageStatus),
+	})
+
+	sandboxName := defaulted(cfg.Sandbox.Adapter, "docker")
+	sandboxStatus := adapterregistry.StatusUnhealthy
+	sandboxKind := adapterregistry.KindNone
+	sandboxCaps := map[string]any{"contract_pending": true}
+	if sandboxSvc != nil && sandboxSvc.AdapterAvailable() {
+		sandboxKind = adapterregistry.KindBuiltin
+		sandboxStatus = adapterregistry.StatusHealthy
+		sandboxCaps = map[string]any{
+			"max_timeout_s":      sandboxSvc.Capabilities().MaxTimeoutS,
+			"supports_gpu":       sandboxSvc.Capabilities().SupportsGPU,
+			"supports_network":   sandboxSvc.Capabilities().SupportsNetwork,
+			"supports_mounts":    sandboxSvc.Capabilities().SupportsMounts,
+			"supports_streaming": true,
+			"cold_start_ms":      sandboxSvc.Capabilities().ColdStartMS,
+		}
+	}
+	r.Register(adapterregistry.Slot{
+		ID:               "sandbox",
+		Tier:             adapterregistry.Tier1,
+		Kind:             sandboxKind,
+		Name:             sandboxName,
+		Capabilities:     caps(sandboxCaps),
+		AvailableBuiltin: []string{"docker", "gvisor", "firecracker", "e2b"},
+		SwapMethod:       "env_var",
+		SwapEnv:          "AF_STACK_SANDBOX_ADAPTER",
+		Probe:            staticStatus(sandboxStatus),
+	})
+
+	llmName := "unset"
+	llmStatus := adapterregistry.StatusUnhealthy
+	if llmGW != nil {
+		llmName = llmGW.ProviderName()
+		llmStatus = adapterregistry.StatusHealthy
+	}
+	keyMgmtMode := llmgateway.KeyMgmtUnknown
+	keyMgmtErr := ""
+	virtualKeysActive := false
+	if litellmAdmin != nil {
+		keyMgmtMode, keyMgmtErr = litellmAdmin.KeyManagement()
+		virtualKeysActive = litellmAdmin.VirtualKeysActive()
+	}
+	llmCaps := map[string]any{
+		"supports_chat":        llmGW != nil,
+		"supports_embeddings":  llmGW != nil,
+		"virtual_keys_active":  virtualKeysActive,
+		"key_management_mode":  string(keyMgmtMode),
+		"spend_tracking_exact": virtualKeysActive,
+		"contract_pending":     true,
+	}
+	if keyMgmtErr != "" {
+		llmCaps["key_management_error"] = keyMgmtErr
+	}
+	r.Register(adapterregistry.Slot{
+		ID:           "llm-chat",
+		Tier:         adapterregistry.Tier1,
+		Kind:         adapterregistry.KindBuiltin,
+		Name:         llmName,
+		SwapMethod:   "env_var",
+		SwapEnv:      "AF_STACK_LLM_GATEWAY_ADAPTER",
+		AdminUI:      os.Getenv("AF_STACK_LITELLM_URL"),
+		Capabilities: caps(llmCaps),
+		Probe:        staticStatus(llmStatus),
+	})
+
+	r.Register(adapterregistry.Slot{
+		ID:         "multimodal",
+		Tier:       adapterregistry.Tier1,
+		Kind:       adapterregistry.KindBuiltin,
+		Name:       "first-party + litellm",
+		SwapMethod: "env_var",
+		SwapEnv:    "AF_STACK_MULTIMODAL_ADAPTER",
+		Capabilities: caps(map[string]any{
+			"supports_tts":              true,
+			"supports_stt":              true,
+			"supports_image_generation": true,
+			"contract_pending":          true,
+		}),
+		Probe: staticStatus(llmStatus),
+	})
+
+	logsAdapter := logselect.Adapter(cfg)
+	logsKind := adapterregistry.KindBuiltin
+	if logsAdapter == "remote" {
+		logsKind = adapterregistry.KindRemote
+	}
+	logsCaps := map[string]any{"contract_pending": true}
+	logsStatus := adapterregistry.StatusUnhealthy
+	if logsStore != nil {
+		logsStatus = adapterregistry.StatusHealthy
+		c := logsStore.Capabilities()
+		logsCaps = map[string]any{
+			"supports_tail":         c.SupportsTail,
+			"supports_full_text":    c.SupportsFullText,
+			"supports_regex_search": c.SupportsRegexSearch,
+			"supports_trace_id":     c.SupportsTraceID,
+			"native_query_lang":     c.NativeQueryLang,
+			"retention_days":        c.RetentionDays,
+			"max_entries_per_page":  c.MaxEntriesPerPage,
+		}
+	}
+	r.Register(adapterregistry.Slot{
+		ID:               "logs",
+		Tier:             adapterregistry.Tier1,
+		Kind:             logsKind,
+		Name:             logselect.Name(cfg, logsStore),
+		AvailableBuiltin: []string{"ring", "loki", "remote"},
+		SwapMethod:       "env_var",
+		SwapEnv:          "AF_STACK_LOGS_ADAPTER",
+		AdminUI:          cfg.Logs.Loki.URL,
+		Capabilities:     caps(logsCaps),
+		Probe:            staticStatus(logsStatus),
+	})
+
+	tracesAdapter := traceselect.Adapter(cfg)
+	tracesKind := adapterregistry.KindBuiltin
+	if tracesAdapter == "remote" {
+		tracesKind = adapterregistry.KindRemote
+	}
+	tracesCaps := map[string]any{"contract_pending": true}
+	tracesStatus := adapterregistry.StatusUnhealthy
+	if tracesStore != nil {
+		tracesStatus = adapterregistry.StatusHealthy
+		c := tracesStore.Capabilities()
+		tracesCaps = map[string]any{
+			"supports_traceql":      c.SupportsTraceQL,
+			"supports_tag_search":   c.SupportsTagSearch,
+			"native_query_lang":     c.NativeQueryLang,
+			"retention_hours":       c.RetentionHours,
+			"max_results_per_query": c.MaxResultsPerQuery,
+		}
+	}
+	r.Register(adapterregistry.Slot{
+		ID:               "traces",
+		Tier:             adapterregistry.Tier1,
+		Kind:             tracesKind,
+		Name:             traceselect.Name(cfg, tracesStore),
+		AvailableBuiltin: []string{"empty", "tempo", "remote"},
+		SwapMethod:       "env_var",
+		SwapEnv:          "AF_STACK_TRACES_ADAPTER",
+		AdminUI:          cfg.Traces.Tempo.URL,
+		Capabilities:     caps(tracesCaps),
+		Probe:            staticStatus(tracesStatus),
+	})
+
+	metricsAdapter := metricselect.Adapter(cfg)
+	metricsKind := adapterregistry.KindBuiltin
+	if metricsAdapter == "remote" {
+		metricsKind = adapterregistry.KindRemote
+	}
+	metricsCaps := map[string]any{"contract_pending": true}
+	metricsStatus := adapterregistry.StatusUnhealthy
+	if metricsStore != nil {
+		metricsStatus = adapterregistry.StatusHealthy
+		c := metricsStore.Capabilities()
+		metricsCaps = map[string]any{
+			"supports_instant_query":     c.SupportsInstantQuery,
+			"supports_range_query":       c.SupportsRangeQuery,
+			"supports_container":         c.SupportsContainer,
+			"supports_container_metrics": c.SupportsContainer,
+			"native_query_lang":          c.NativeQueryLang,
+			"retention_hours":            c.RetentionHours,
+			"max_series_per_query":       c.MaxSeriesPerQuery,
+		}
+	}
+	r.Register(adapterregistry.Slot{
+		ID:               "metrics",
+		Tier:             adapterregistry.Tier1,
+		Kind:             metricsKind,
+		Name:             metricselect.Name(cfg, metricsStore),
+		AvailableBuiltin: []string{"none", "prometheus", "remote"},
+		SwapMethod:       "env_var",
+		SwapEnv:          "AF_STACK_METRICS_ADAPTER",
+		AdminUI:          cfg.Metrics.Prometheus.URL,
+		Capabilities:     caps(metricsCaps),
+		Probe:            staticStatus(metricsStatus),
+	})
+
+	errorsAdapter := errorselect.Adapter(cfg)
+	errorsKind := adapterregistry.KindBuiltin
+	if errorsAdapter == "remote" {
+		errorsKind = adapterregistry.KindRemote
+	}
+	errorsCaps := map[string]any{"contract_pending": true}
+	errorsStatus := adapterregistry.StatusUnhealthy
+	if errorsStore != nil {
+		errorsStatus = adapterregistry.StatusHealthy
+		c := errorsStore.Capabilities()
+		errorsCaps = map[string]any{
+			"supports_list":       c.SupportsList,
+			"supports_get":        c.SupportsGet,
+			"supports_mute":       c.SupportsMute,
+			"supports_resolve":    c.SupportsResolve,
+			"supports_ingest":     c.SupportsIngest,
+			"supports_alerting":   c.SupportsAlerting,
+			"native_query_lang":   c.NativeQueryLang,
+			"retention_days":      c.RetentionDays,
+			"persistence":         c.Persistence,
+			"max_groups_per_page": c.MaxGroupsPerPage,
+		}
+	}
+	r.Register(adapterregistry.Slot{
+		ID:               "errors",
+		Tier:             adapterregistry.Tier1,
+		Kind:             errorsKind,
+		Name:             errorselect.Name(cfg, errorsStore),
+		AvailableBuiltin: []string{"logfilter", "glitchtip", "remote"},
+		SwapMethod:       "env_var",
+		SwapEnv:          "AF_STACK_ERRORS_ADAPTER",
+		AdminUI:          cfg.Errors.GlitchTip.URL,
+		Capabilities:     caps(errorsCaps),
+		Probe:            staticStatus(errorsStatus),
+	})
+
+	notificationName := "none"
+	notificationKind := adapterregistry.KindNone
+	notificationStatus := adapterregistry.StatusUnhealthy
+	channels := []string{}
+	if notificationsSvc != nil && notificationsSvc.AdapterAvailable() {
+		notificationName = notificationsSvc.AdapterName()
+		notificationKind = adapterregistry.KindBuiltin
+		notificationStatus = adapterregistry.StatusHealthy
+		switch notificationName {
+		case "resend":
+			channels = []string{"email"}
+		case "log":
+			channels = []string{"log"}
+		default:
+			channels = []string{notificationName}
+		}
+	}
+	r.Register(adapterregistry.Slot{
+		ID:               "notifications",
+		Tier:             adapterregistry.Tier1,
+		Kind:             notificationKind,
+		Name:             notificationName,
+		AvailableBuiltin: []string{"log", "resend"},
+		SwapMethod:       "env_var",
+		SwapEnv:          "AF_STACK_NOTIFICATIONS_ADAPTER",
+		Capabilities: caps(map[string]any{
+			"channels":                      channels,
+			"supports_html":                 notificationName == "resend",
+			"supports_templates":            false,
+			"supports_cc_bcc":               false,
+			"tracks_delivery_status":        false,
+			"supports_retry":                false,
+			"supports_metadata_passthrough": true,
+			"contract_pending":              true,
+		}),
+		Probe: staticStatus(notificationStatus),
+	})
+
+	billingName := "none"
+	billingStatus := adapterregistry.StatusUnhealthy
+	if billingSvc != nil {
+		billingName = billingSvc.AdapterName()
+		billingStatus = adapterregistry.StatusHealthy
+	}
+	r.Register(adapterregistry.Slot{
+		ID:               "billing",
+		Tier:             adapterregistry.Tier1,
+		Kind:             adapterregistry.KindBuiltin,
+		Name:             billingName,
+		AvailableBuiltin: []string{"stripe", "lago", "none"},
+		SwapMethod:       "env_var",
+		SwapEnv:          "AF_STACK_BILLING_ADAPTER",
+		Capabilities: caps(map[string]any{
+			"supports_customers":            billingSvc != nil,
+			"supports_customer_portal":      billingSvc != nil && billingName != "none",
+			"supports_metered_billing":      billingSvc != nil,
+			"supports_webhook_verification": billingSvc != nil && billingName == "stripe",
+			"contract_pending":              true,
+		}),
+		Probe: staticStatus(billingStatus),
+	})
+
+	secretsStatus := adapterregistry.StatusUnhealthy
+	secretsKind := adapterregistry.KindNone
+	if vault != nil {
+		secretsStatus = adapterregistry.StatusHealthy
+		secretsKind = adapterregistry.KindBuiltin
+	}
+	r.Register(adapterregistry.Slot{
+		ID:         "secrets",
+		Tier:       adapterregistry.Tier1,
+		Kind:       secretsKind,
+		Name:       "envelope-local",
+		SwapMethod: "env_var",
+		SwapEnv:    "AF_STACK_SECRETS_ADAPTER",
+		Capabilities: caps(map[string]any{
+			"supports_rotation":  vault != nil,
+			"supports_reveal":    vault != nil,
+			"supports_metadata":  vault != nil,
+			"audit_log_revealed": true,
+			"kms_backend":        defaulted(os.Getenv("AF_STACK_KMS_PROVIDER"), "local"),
+			"contract_pending":   true,
+		}),
+		Probe: staticStatus(secretsStatus),
+	})
+
+	r.Register(adapterregistry.Slot{
+		ID:         "auth",
+		Tier:       adapterregistry.Tier1,
+		Kind:       adapterregistry.KindBuiltin,
+		Name:       "better-auth",
+		SwapMethod: "env_var",
+		SwapEnv:    "AF_STACK_AUTH_ADAPTER",
+		Capabilities: caps(map[string]any{
+			"supports_oauth_providers":     []string{"google", "github", "microsoft"},
+			"supports_magic_links":         true,
+			"supports_passwordless":        false,
+			"supports_mfa":                 false,
+			"supports_sso":                 false,
+			"supports_token_introspection": true,
+			"supports_session_enumeration": false,
+			"contract_pending":             true,
+		}),
+		Probe: staticStatus(adapterregistry.StatusHealthy),
+	})
+
+	databaseStatus := adapterregistry.StatusUnhealthy
+	if database != nil && database.Pool != nil {
+		databaseStatus = adapterregistry.StatusHealthy
+	}
+	r.Register(adapterregistry.Slot{
+		ID:         "database",
+		Tier:       adapterregistry.Tier2,
+		Kind:       adapterregistry.KindBuiltin,
+		Name:       "postgres",
+		SwapMethod: "connection_string",
+		SwapEnv:    "AF_STACK_DATABASE_URL",
+		Capabilities: caps(map[string]any{
+			"supports_pgvector": true,
+			"supports_rls":      true,
+		}),
+		Probe: staticStatus(databaseStatus),
+	})
+
+	reasoningStatus := adapterregistry.StatusUnhealthy
+	if afClient != nil {
+		reasoningStatus = adapterregistry.StatusHealthy
+	}
+	r.Register(adapterregistry.Slot{
+		ID:         "reasoning",
+		Tier:       adapterregistry.Tier3,
+		Kind:       adapterregistry.KindBuiltin,
+		Name:       "agentfield",
+		SwapMethod: "none",
+		AdminUI:    os.Getenv("AF_STACK_AGENTFIELD_URL"),
+		Capabilities: caps(map[string]any{
+			"supports_runs":         afClient != nil,
+			"supports_capabilities": afClient != nil,
+		}),
+		Probe: staticStatus(reasoningStatus),
+	})
+
+	queueStatus := adapterregistry.StatusUnhealthy
+	if jobsManager != nil {
+		queueStatus = adapterregistry.StatusHealthy
+	}
+	r.Register(adapterregistry.Slot{
+		ID:         "job-queue",
+		Tier:       adapterregistry.Tier3,
+		Kind:       adapterregistry.KindBuiltin,
+		Name:       "river",
+		SwapMethod: "none",
+		Capabilities: caps(map[string]any{
+			"supports_retries":       jobsManager != nil,
+			"supports_cron_dispatch": jobsManager != nil,
+		}),
+		Probe: staticStatus(queueStatus),
+	})
+
+	webhooksStatus := adapterregistry.StatusUnhealthy
+	if webhooksSvc != nil && webhooksSvc.Configured() {
+		webhooksStatus = adapterregistry.StatusHealthy
+	}
+	r.Register(adapterregistry.Slot{
+		ID:         "webhooks",
+		Tier:       adapterregistry.Tier3,
+		Kind:       adapterregistry.KindBuiltin,
+		Name:       "svix",
+		SwapMethod: "env_var",
+		SwapEnv:    "AF_STACK_SVIX_URL",
+		AdminUI:    os.Getenv("AF_STACK_SVIX_URL"),
+		Capabilities: caps(map[string]any{
+			"supports_outbound": webhooksSvc != nil && webhooksSvc.Configured(),
+			"supports_inbound":  webhooksSvc != nil,
+		}),
+		Probe: staticStatus(webhooksStatus),
+	})
+
+	return r
+}
+
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -145,13 +633,35 @@ func main() {
 		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
 		os.Exit(1)
 	}
+	featureCfg, featureIssues, featureErr := config.LoadFeatureConfig(config.DefaultFeatureConfigPath)
+	if featureErr != nil {
+		lean, _ := config.PresetFeatures(config.PresetLean)
+		featureCfg = config.FeatureConfig{Preset: config.PresetLean, Features: lean}
+		featureIssues = []config.ValidationError{{
+			Feature:     "backai.config",
+			Level:       config.ValidationErrorLevel,
+			Message:     featureErr.Error(),
+			Remediation: "Fix backai.config.yaml or copy backai.config.yaml.example.",
+		}}
+	}
 
 	// Log ring buffer + slog wiring. The ring tees every structured log
 	// record into a fixed-capacity in-memory buffer the dashboard's
 	// /operate/logs tab reads from. Strictly process-local; multi-process
 	// deployments need a real aggregator.
 	logRing := logger.NewRing(logger.RingSize, "af-stack")
-	log := logger.NewWithRing(cfg.Logging.Level, cfg.Logging.Format, logRing)
+	sentryIntegration, sentryErr := observability.SetupSentry(observability.SentryConfig{
+		DSN:         os.Getenv("SENTRY_DSN"),
+		Environment: firstNonEmpty(os.Getenv("SENTRY_ENVIRONMENT"), os.Getenv("AF_STACK_ENV")),
+		Release:     firstNonEmpty(os.Getenv("SENTRY_RELEASE"), version),
+		ServiceName: cfg.Observability.ServiceName,
+	})
+	if sentryErr != nil {
+		fmt.Fprintf(os.Stderr, "sentry setup error: %v\n", sentryErr)
+		os.Exit(1)
+	}
+	log := logger.NewWithRingAndWrapper(cfg.Logging.Level, cfg.Logging.Format, logRing, sentryIntegration.WrapHandler)
+	defer sentryIntegration.Flush()
 	log.Info("af-stack starting",
 		"version", version,
 		"http_addr", cfg.Server.HTTPAddr,
@@ -180,6 +690,46 @@ func main() {
 	workersCtx, workersCancel := context.WithCancel(context.Background())
 	defer workersCancel()
 	ctx := workersCtx
+
+	logsStore, err := logselect.Select(ctx, cfg, logRing)
+	if err != nil {
+		log.Error("logs adapter init failed", "adapter", logselect.Adapter(cfg), "error", err)
+		os.Exit(1)
+	}
+	log.Info("logs adapter ready",
+		"adapter", logselect.Adapter(cfg),
+		"name", logselect.Name(cfg, logsStore),
+	)
+
+	tracesStore, err := traceselect.Select(ctx, cfg)
+	if err != nil {
+		log.Error("traces adapter init failed", "adapter", traceselect.Adapter(cfg), "error", err)
+		os.Exit(1)
+	}
+	log.Info("traces adapter ready",
+		"adapter", traceselect.Adapter(cfg),
+		"name", traceselect.Name(cfg, tracesStore),
+	)
+
+	metricsStore, err := metricselect.Select(ctx, cfg)
+	if err != nil {
+		log.Error("metrics adapter init failed", "adapter", metricselect.Adapter(cfg), "error", err)
+		os.Exit(1)
+	}
+	log.Info("metrics adapter ready",
+		"adapter", metricselect.Adapter(cfg),
+		"name", metricselect.Name(cfg, metricsStore),
+	)
+
+	errorsStore, err := errorselect.Select(ctx, cfg, logsStore)
+	if err != nil {
+		log.Error("errors adapter init failed", "adapter", errorselect.Adapter(cfg), "error", err)
+		os.Exit(1)
+	}
+	log.Info("errors adapter ready",
+		"adapter", errorselect.Adapter(cfg),
+		"name", errorselect.Name(cfg, errorsStore),
+	)
 
 	// Observability: set up OTel + Prometheus. Failures are non-fatal —
 	// the runtime keeps working without traces.
@@ -230,6 +780,9 @@ func main() {
 			}
 			migCancel()
 			log.Info("migrations applied")
+			statsCtx, statsCancel := context.WithTimeout(ctx, 5*time.Second)
+			warnIfPGStatsRoleMissing(statsCtx, database.Pool, log)
+			statsCancel()
 			defer database.Close()
 		}
 	} else {
@@ -385,12 +938,77 @@ func main() {
 	// them through to the client.
 
 	// LiteLLM admin client — talks to the master-key-protected /key/* +
-	// /spend/* surface on the same sidecar the gateway calls. Used by
-	// tenancy.IssueAPIKey to mint a matching LiteLLM virtual key
-	// alongside every suite_api_keys row (item #22). Always constructed;
-	// Configured() reports false when env isn't set so the mirroring
-	// path silently skips.
+	// /spend/* surface on the same sidecar the gateway calls. At boot we
+	// probe key management once and cache the mode: stateless LiteLLM is
+	// supported for chat routing, while virtual-key mirroring activates
+	// only when LiteLLM reports a connected key DB.
 	litellmAdmin := buildLiteLLMAdmin(log)
+	probeReg := probe.NewRegistry(log)
+	litellmURL, litellmMasterKey := litellmEnv()
+	probeReg.Register(probe.NewLiteLLMVirtualKeysProbe(litellmURL, litellmMasterKey, 5*time.Minute))
+	probeReg.Register(probe.NewLiteLLMSpendTrackingProbe(litellmURL, litellmMasterKey, 5*time.Minute))
+	if database != nil && database.Pool != nil {
+		probeReg.Register(&probe.PGStatStatementsProbe{Pool: database.Pool, Interval: 5 * time.Minute})
+		probeReg.Register(&probe.PGRoleReadAllStatsProbe{Pool: database.Pool, Interval: 5 * time.Minute})
+	}
+	litellmAdmin.WithProbeRegistry(probeReg)
+	{
+		probeCtx, probeCancel := context.WithTimeout(ctx, 10*time.Second)
+		probeReg.RunAll(probeCtx)
+		probeCancel()
+		mode, probeErr := litellmAdmin.KeyManagement()
+		if probeErr != "" {
+			log.Warn("litellm key-management probe failed",
+				"mode", mode,
+				"virtual_keys_active", litellmAdmin.VirtualKeysActive(),
+				"error", probeErr)
+		} else {
+			log.Info("litellm key-management probe complete",
+				"mode", mode,
+				"virtual_keys_active", litellmAdmin.VirtualKeysActive())
+		}
+		go probeReg.StartScheduled(ctx)
+	}
+	if database != nil && database.Pool != nil {
+		if poller := llmgateway.NewProviderHealthPoller(database.Pool, litellmURL, litellmMasterKey, log); poller != nil && poller.Configured() {
+			go poller.Run(ctx, 5*time.Minute)
+			log.Info("llm provider health poller started", "interval", "5m")
+		}
+		retentionReg := retention.NewRegistry()
+		retentionReg.Register(retention.Policy{
+			Table:       "suite_provider_health_log",
+			RetainDays:  30,
+			OrderColumn: "observed_at",
+			BatchSize:   1000,
+		})
+		sqlDB := stdlib.OpenDBFromPool(database.Pool)
+		systemCrons := crons.NewSystemScheduler(log)
+		if err := systemCrons.RegisterSystem("retention.daily", "0 3 * * *", func(runCtx context.Context) error {
+			retentionCtx, cancel := context.WithTimeout(runCtx, 5*time.Minute)
+			defer cancel()
+			report, err := retentionReg.Run(retentionCtx, sqlDB)
+			if err != nil {
+				return err
+			}
+			if report.RowsDeleted > 0 || report.RowsRolledUp > 0 {
+				log.Info("retention run complete",
+					"table", report.Table,
+					"rows_deleted", report.RowsDeleted,
+					"rows_rolled_up", report.RowsRolledUp,
+					"duration", report.Duration)
+			}
+			return nil
+		}); err != nil {
+			log.Warn("retention system cron registration failed", "error", err)
+		} else {
+			go systemCrons.Run(ctx)
+			go func() {
+				if err := systemCrons.RunNow(ctx, "retention.daily"); err != nil {
+					log.Warn("retention startup run failed", "error", err)
+				}
+			}()
+		}
+	}
 
 	// Tenancy manager — required when the multi-tenancy module is enabled,
 	// optional otherwise (admin endpoints already gate on the flag).
@@ -414,6 +1032,7 @@ func main() {
 			log.Info("tenancy manager ready",
 				"multi_tenancy_enabled", cfg.Modules.Enabled["multi-tenancy"],
 				"litellm_mirror", litellmAdmin.Configured(),
+				"litellm_virtual_keys_active", litellmAdmin.VirtualKeysActive(),
 				"litellm_secrets_sink", sink != nil,
 			)
 		}
@@ -478,7 +1097,7 @@ func main() {
 		// Hand the admin client to the aggregator so the dashboard reads
 		// live totals from /spend/keys; the suite_cost_events sum is now
 		// audit-only.
-		if litellmAdmin.Configured() {
+		if litellmAdmin.VirtualKeysActive() {
 			costAggregate.WithLiteLLM(llmgateway.NewCostSpendReader(litellmAdmin))
 		}
 		if hookEngine != nil {
@@ -638,6 +1257,11 @@ func main() {
 		log.Info("tool adapters not configured (no database); /api/v1/tools/* will return empty/503")
 	}
 
+	var toolStats *toolstats.Recorder
+	if database != nil && database.Pool != nil {
+		toolStats = toolstats.NewRecorder(database.Pool, log)
+	}
+
 	// Strict-interface native tool registry (#16 — internal/tools/).
 	// Sits alongside the legacy tooladapters service. The factory reads
 	// env (AF_STACK_TOOL_BROWSER, AF_STACK_TOOL_SEARCH, BROWSER_USE_URL,
@@ -657,6 +1281,7 @@ func main() {
 		if regErr != nil {
 			log.Error("native tools: registry build failed", "error", regErr)
 		} else {
+			reg.SetStatsRecorder(toolStats)
 			toolsRegistry = reg
 			log.Info("native tools ready", "count", len(reg.All()))
 		}
@@ -695,6 +1320,11 @@ func main() {
 			notificationsSvc = notifications.NewService(nil, adapter, log)
 			log.Info("notifications: running without DB; rows will not persist")
 		}
+		notificationsSvc.SetChannelDefaults(notificationChannelDefaults(adapter))
+		if err := notificationsSvc.ReloadChannels(ctx); err != nil {
+			log.Warn("notifications: channel reload failed", "error", err)
+		}
+		startNotificationChannelReload(ctx, notificationsSvc, log)
 		// Worker drains queued rows every 2s. It no-ops gracefully when
 		// the adapter or DB are missing — Run() reports its own state.
 		worker := notifications.NewWorker(notificationsSvc, log)
@@ -845,6 +1475,7 @@ func main() {
 		mcpPool = mcp.NewPool(mcpStore, secretReader, mcp.PoolConfig{
 			Logger:  log,
 			Factory: newMCPAdapterFactory(),
+			Stats:   toolStats,
 		})
 		reconCtx, reconCancel := context.WithTimeout(ctx, 30*time.Second)
 		if err := mcpPool.Reconcile(reconCtx); err != nil {
@@ -883,6 +1514,26 @@ func main() {
 		log.Info("crons: store not configured (no database); /api/v1/crons mutations will return 503")
 	}
 
+	adapterRegistry := buildAdapterRegistry(
+		cfg,
+		database,
+		afClient,
+		store,
+		vault,
+		jobsManager,
+		llmGW,
+		litellmAdmin,
+		sandboxSvc,
+		notificationsSvc,
+		webhooksSvc,
+		billingSvc,
+		logsStore,
+		tracesStore,
+		metricsStore,
+		errorsStore,
+	)
+	probeReg.WithAdapterRegistry(adapterRegistry)
+
 	srv := server.New(cfg, log, server.Deps{
 		DB:              database,
 		AF:              afClient,
@@ -914,12 +1565,20 @@ func main() {
 		MCPStore:        mcpStore,
 		Crons:           cronsStore,
 		ToolAdapters:    toolAdapterSvc,
+		AdapterRegistry: adapterRegistry,
+		ProbeRegistry:   probeReg,
+		FeatureConfig:   featureCfg,
+		FeatureWarnings: featureIssues,
 		ToolsRegistry:   toolsRegistry,
 		OAuthManager:    oauthManager,
 		OAuthFactory:    oauthFactory,
 		Shipwright:      shipwrightStore,
 		Approvals:       approvalsStore,
 		LogRing:         logRing,
+		LogsStore:       logsStore,
+		TracesStore:     tracesStore,
+		MetricsStore:    metricsStore,
+		ErrorsStore:     errorsStore,
 		Version:         version,
 	})
 
@@ -1140,6 +1799,53 @@ func buildNotificationsAdapter(log *slog.Logger) notifications.Adapter {
 	}
 }
 
+func notificationChannelDefaults(adapter notifications.Adapter) []notifications.Channel {
+	name := "log"
+	if adapter != nil && adapter.Name() != "" {
+		name = adapter.Name()
+	}
+	kind := notifications.KindLog
+	config := map[string]any{"adapter": name}
+	if name == "resend" {
+		kind = notifications.KindEmail
+		config["from"] = os.Getenv("AF_STACK_NOTIFICATIONS_FROM")
+		config["has_api_key"] = strings.TrimSpace(os.Getenv("RESEND_API_KEY")) != ""
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	return []notifications.Channel{{
+		ID:        "env-" + string(kind),
+		Kind:      kind,
+		Config:    config,
+		Enabled:   true,
+		Source:    "env",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}}
+}
+
+func startNotificationChannelReload(ctx context.Context, svc *notifications.Service, log *slog.Logger) {
+	if svc == nil {
+		return
+	}
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGHUP)
+	go func() {
+		defer signal.Stop(ch)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ch:
+				if err := svc.ReloadChannels(ctx); err != nil {
+					log.Warn("notifications: SIGHUP channel reload failed", "error", err)
+				} else {
+					log.Info("notifications: channel rows reloaded")
+				}
+			}
+		}
+	}()
+}
+
 // buildGuardrails constructs the gateway-local PII/moderation layer.
 //
 // Defaults:
@@ -1238,6 +1944,14 @@ func splitEnvList(raw string) []string {
 func buildLLMGateway(log *slog.Logger, afClient *agentfield.Client) *llmgateway.Gateway {
 	_ = afClient // reserved for forward-compat
 
+	demoMode := strings.ToLower(strings.TrimSpace(os.Getenv("AF_STACK_DEMO_MODE")))
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("AF_STACK_LLM_PROVIDER")), "demo") ||
+		demoMode == "true" ||
+		(demoMode == "auto" && !hasLLMProviderKey()) {
+		log.Info("llm gateway: demo provider enabled")
+		return llmgateway.New(llmgateway.NewDemoProvider())
+	}
+
 	url, masterKey := litellmEnv()
 
 	log.Info("llm gateway: litellm sidecar", "url", url)
@@ -1252,6 +1966,24 @@ func buildLLMGateway(log *slog.Logger, afClient *agentfield.Client) *llmgateway.
 		gateway = gateway.WithMultimodal(multimodal)
 	}
 	return gateway
+}
+
+func hasLLMProviderKey() bool {
+	keys := []string{
+		"OPENROUTER_API_KEY",
+		"OPENAI_API_KEY",
+		"ANTHROPIC_API_KEY",
+		"GEMINI_API_KEY",
+		"MISTRAL_API_KEY",
+		"DEEPSEEK_API_KEY",
+		"GROQ_API_KEY",
+	}
+	for _, key := range keys {
+		if strings.TrimSpace(os.Getenv(key)) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // buildMultimodal assembles the first-party multimodal adapter registry
@@ -1310,6 +2042,22 @@ func litellmEnv() (url, masterKey string) {
 		masterKey = "sk-litellm-dev"
 	}
 	return url, masterKey
+}
+
+func warnIfPGStatsRoleMissing(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) {
+	if pool == nil {
+		return
+	}
+	var ok bool
+	if err := pool.QueryRow(ctx, `
+		select coalesce(pg_has_role(current_user, 'pg_read_all_stats', 'member'), false)
+	`).Scan(&ok); err != nil {
+		log.Warn("postgres stats visibility probe failed", "error", err)
+		return
+	}
+	if !ok {
+		log.Warn("postgres stats visibility is reduced; grant pg_read_all_stats to the runtime DB role for complete DB health and search-index stats")
+	}
 }
 
 // tenancySecretSink adapts *secrets.Vault to the tenancy.SecretSink

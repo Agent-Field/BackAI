@@ -64,6 +64,7 @@ export type CostSummary = z.infer<typeof CostSummarySchema>
 
 export const CostEventSchema = z.object({
   id: z.string(),
+  request_id: z.string().nullable().optional(),
   tenant_id: z.string().nullable(),
   api_key_id: z.string().nullable(),
   model: z.string(),
@@ -216,11 +217,13 @@ export const api = {
   },
   costEvents: (params?: {
     tenant?: string
+    request_id?: string
     limit?: number
     offset?: number
   }) => {
     const qs = new URLSearchParams()
     if (params?.tenant) qs.set("tenant", params.tenant)
+    if (params?.request_id) qs.set("request_id", params.request_id)
     if (params?.limit !== undefined) qs.set("limit", String(params.limit))
     if (params?.offset !== undefined) qs.set("offset", String(params.offset))
     const q = qs.toString()

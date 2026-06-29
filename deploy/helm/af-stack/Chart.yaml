@@ -14,9 +14,9 @@ keywords:
   - llm
   - agents
   - multi-tenant
-home: https://github.com/agentfield/af-stack
+home: https://github.com/Agent-Field/backai
 sources:
-  - https://github.com/agentfield/af-stack
+  - https://github.com/Agent-Field/backai
 maintainers:
   - name: AgentField
     email: support@agentfield.ai

@@ -22,12 +22,15 @@
 //     "model":            string,
 //     "provider":         string,
 //     "agent":            string (optional),
+//     "reasoner":         string (optional),
 //     "prompt_tokens":    int,
 //     "completion_tokens": int,
 //     "total_tokens":     int (optional, derived if absent),
 //     "cost_usd":         float64,
 //     "cached":           bool,
 //     "latency_ms":       int,
+//     "status_code":      int,
+//     "error_code":       string (optional),
 //   }
 //
 // Why map[string]any instead of a typed struct: hooks.Engine carries
@@ -95,17 +98,21 @@ func PostCallHandler(r *Recorder) hooks.Handler {
 			return payload, nil
 		}
 		ev := Event{
-			TenantID: stringFromMap(m, "tenant_id"),
-			APIKeyID: stringFromMap(m, "api_key_id"),
-			Model:    stringFromMap(m, "model"),
-			Provider: stringFromMap(m, "provider"),
-			Agent:    stringFromMap(m, "agent"),
-			Modality: stringFromMap(m, "modality"),
+			RequestID: stringFromMap(m, "request_id"),
+			TenantID:  stringFromMap(m, "tenant_id"),
+			APIKeyID:  stringFromMap(m, "api_key_id"),
+			Model:     stringFromMap(m, "model"),
+			Provider:  stringFromMap(m, "provider"),
+			Agent:     stringFromMap(m, "agent"),
+			Reasoner:  stringFromMap(m, "reasoner"),
+			Modality:  stringFromMap(m, "modality"),
 
 			PromptTokens:     intFromMap(m, "prompt_tokens"),
 			CompletionTokens: intFromMap(m, "completion_tokens"),
 			TotalTokens:      intFromMap(m, "total_tokens"),
 			LatencyMS:        intFromMap(m, "latency_ms"),
+			StatusCode:       intFromMap(m, "status_code"),
+			ErrorCode:        stringFromMap(m, "error_code"),
 
 			CostUSD: floatFromMap(m, "cost_usd"),
 			Cached:  boolFromMap(m, "cached"),

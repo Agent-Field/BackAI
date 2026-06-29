@@ -1,0 +1,25 @@
+id: shipwright
+name: Shipwright
+profile: advanced-coding-agent-example
+default_path: false
+summary: Coding-agent task factory with AgentField execution and durable patch metadata.
+requires:
+  provider_key: recommended
+  auth: true
+  multi_tenancy: true
+  billing: optional
+  storage: optional
+  sandbox: recommended_for_real_runs
+  github: optional
+demonstrates:
+  - agentfield_execution
+  - task_metadata
+  - patch_capture
+  - optional_github_pr_flow
+  - customer_polling_ui
+deploy:
+  compose: overlay
+  railway: not_packaged
+notes:
+  - This is intentionally not the default product path.
+  - The included agent can run as a stub; real coding-agent runs need provider, harness, and repo credentials.

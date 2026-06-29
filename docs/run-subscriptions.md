@@ -1,6 +1,6 @@
 # Realtime Run Subscriptions
 
-AF Stack exposes a dashboard-friendly WebSocket bridge for live
+BackAI exposes a dashboard-friendly WebSocket bridge for live
 AgentField run events:
 
 ```text
@@ -8,7 +8,7 @@ GET /api/v1/runs/{run_id}/events
 ```
 
 This endpoint does not store runs, spans, traces, tool calls, memory, or
-workflow state in AF Stack. It opens AgentField's Server-Sent Events
+workflow state in BackAI. It opens AgentField's Server-Sent Events
 stream for the run/workflow and relays each event to the WebSocket
 client. AgentField remains the source of truth.
 
@@ -55,7 +55,7 @@ Each AgentField SSE frame becomes a JSON WebSocket message:
 }
 ```
 
-If AgentField emits comment-style keepalives, AF Stack forwards them as:
+If AgentField emits comment-style keepalives, BackAI forwards them as:
 
 ```json
 {
@@ -79,5 +79,5 @@ Then it falls back to the older workflow-events path:
 ```
 
 If the connected AgentField control plane does not support run event
-streaming yet, the AF Stack endpoint returns `404
+streaming yet, the BackAI endpoint returns `404
 AGENTFIELD_RUN_EVENTS_NOT_FOUND` before upgrading the connection.

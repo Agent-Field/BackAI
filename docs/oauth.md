@@ -1,6 +1,6 @@
 # OAuth-on-behalf-of-user
 
-AF Stack ships built-in OAuth so backend agents can act on behalf of
+BackAI ships built-in OAuth so backend agents can act on behalf of
 customers in third-party APIs. The first shipped providers are GitHub
 and Google. The shape is Composio-like, but native to the stack.
 
@@ -117,7 +117,7 @@ The runtime also needs:
 The `/oauth/token` endpoint requires `X-AF-Stack-Internal: 1`. The CORS
 allow-list does not include this header, so cross-origin browser
 requests cannot send it; only server-side callers (agents, workload
-modules, the AF Stack SDK from a Node process) reach it.
+modules, the BackAI SDK from a Node process) reach it.
 
 ## SDK usage
 

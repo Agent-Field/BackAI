@@ -1,6 +1,6 @@
 # AF Stack Helm chart
 
-Production-grade Helm chart for [AF Stack](https://github.com/agentfield/af-stack):
+Production-grade Helm chart for [BackAI](https://github.com/Agent-Field/backai):
 a single Go binary runtime plus a Next.js operator dashboard, wired to
 Postgres + S3, with HPA, PDB, NetworkPolicy, and an optional Prometheus
 ServiceMonitor.

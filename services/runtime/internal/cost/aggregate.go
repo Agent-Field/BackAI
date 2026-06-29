@@ -85,6 +85,7 @@ type TenantTotal struct {
 // without re-parsing.
 type EventRow struct {
 	ID               string
+	RequestID        *string
 	TenantID         *string
 	APIKeyID         *string
 	Model            string
@@ -287,6 +288,9 @@ func (a *Aggregate) Events(ctx context.Context, opts EventsOpts) (EventList, err
 	if opts.TenantID != "" {
 		conds = append(conds, "tenant_id = "+bind(opts.TenantID))
 	}
+	if opts.RequestID != "" {
+		conds = append(conds, "request_id = "+bind(opts.RequestID))
+	}
 	if opts.Model != "" {
 		conds = append(conds, "model = "+bind(opts.Model))
 	}
@@ -317,6 +321,7 @@ func (a *Aggregate) Events(ctx context.Context, opts EventsOpts) (EventList, err
 	rows, err := a.pool.Query(ctx, `
         select
             id::text,
+            request_id,
             tenant_id::text,
             api_key_id::text,
             model, provider, agent,
@@ -336,13 +341,15 @@ func (a *Aggregate) Events(ctx context.Context, opts EventsOpts) (EventList, err
 
 	for rows.Next() {
 		var (
-			ev               EventRow
-			tenantID         *string
-			apiKeyID         *string
-			agent            *string
+			ev        EventRow
+			requestID *string
+			tenantID  *string
+			apiKeyID  *string
+			agent     *string
 		)
 		if err := rows.Scan(
 			&ev.ID,
+			&requestID,
 			&tenantID,
 			&apiKeyID,
 			&ev.Model,
@@ -358,6 +365,7 @@ func (a *Aggregate) Events(ctx context.Context, opts EventsOpts) (EventList, err
 		); err != nil {
 			return out, fmt.Errorf("cost: scan event: %w", err)
 		}
+		ev.RequestID = requestID
 		ev.TenantID = tenantID
 		ev.APIKeyID = apiKeyID
 		ev.Agent = agent

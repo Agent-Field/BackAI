@@ -1,12 +1,12 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "templateMetadata": {
-    "name": "AF Stack",
-    "description": "Self-hostable backend for AI agent products. Runtime (Go) + dashboard (Next.js) + managed Postgres. External S3 (Tigris/R2/AWS). External LLM provider.",
+    "name": "BackAI",
+    "description": "Open-source AI app template with SupportDesk AI, customer app, admin dashboard, runtime, LiteLLM, and managed Postgres.",
     "category": "ai-ml",
-    "tags": ["agents", "ai", "go", "nextjs", "postgres"],
-    "icon": "https://raw.githubusercontent.com/agentfield/af-stack/main/apps/dashboard/public/icon.png",
-    "repository": "https://github.com/agentfield/af-stack",
+    "tags": ["agents", "ai", "template", "nextjs", "postgres"],
+    "icon": "https://raw.githubusercontent.com/Agent-Field/backai/main/apps/dashboard/public/icon.png",
+    "repository": "https://github.com/Agent-Field/backai",
     "readme": "deploy/railway/README.md"
   },
   "services": [
@@ -32,9 +32,99 @@
       ]
     },
     {
+      "name": "agentfield",
+      "source": {
+        "image": "agentfield/control-plane:latest"
+      },
+      "deploy": {
+        "restartPolicyType": "ON_FAILURE",
+        "restartPolicyMaxRetries": 10,
+        "numReplicas": 1
+      },
+      "variables": {
+        "PORT": "8080",
+        "AGENTFIELD_STORAGE_MODE": "postgres",
+        "AGENTFIELD_STORAGE_POSTGRES_URL": {
+          "default": "${{ postgres.DATABASE_URL }}",
+          "description": "AgentField metadata store. Uses the bundled Postgres service."
+        },
+        "AGENTFIELD_STORAGE_POSTGRES_ENABLE_MEMORY_FALLBACK": "false",
+        "AGENTFIELD_STORAGE_POSTGRES_ENABLE_DID_FALLBACK": "false",
+        "AGENTFIELD_STORAGE_POSTGRES_ENABLE_VC_FALLBACK": "false",
+        "AGENTFIELD_STORAGE_POSTGRES_ENABLE_AUTO_MIGRATION": "true",
+        "OPENROUTER_API_KEY": {
+          "description": "Optional. Passed through for AgentField-hosted agent code.",
+          "isSecret": true
+        },
+        "OPENAI_API_KEY": {
+          "description": "Optional. Passed through for AgentField-hosted agent code.",
+          "isSecret": true
+        },
+        "ANTHROPIC_API_KEY": {
+          "description": "Optional. Passed through for AgentField-hosted agent code.",
+          "isSecret": true
+        }
+      }
+    },
+    {
+      "name": "litellm",
+      "source": {
+        "repo": "Agent-Field/backai",
+        "rootDirectory": "."
+      },
+      "build": {
+        "builder": "DOCKERFILE",
+        "dockerfilePath": "deploy/railway/litellm.Dockerfile"
+      },
+      "deploy": {
+        "healthcheckPath": "/health/readiness",
+        "healthcheckTimeout": 30,
+        "restartPolicyType": "ON_FAILURE",
+        "restartPolicyMaxRetries": 10,
+        "numReplicas": 1
+      },
+      "variables": {
+        "PORT": "4000",
+        "LITELLM_MASTER_KEY": {
+          "generator": "secret",
+          "length": 48,
+          "isSecret": true,
+          "description": "Internal LiteLLM master key shared only with runtime."
+        },
+        "OPENROUTER_API_KEY": {
+          "description": "Optional. OpenRouter API key for real model calls. Leave blank for BackAI demo mode.",
+          "isSecret": true
+        },
+        "OPENAI_API_KEY": {
+          "description": "Optional. Direct OpenAI provider key.",
+          "isSecret": true
+        },
+        "ANTHROPIC_API_KEY": {
+          "description": "Optional. Direct Anthropic provider key.",
+          "isSecret": true
+        },
+        "GEMINI_API_KEY": {
+          "description": "Optional. Direct Gemini provider key.",
+          "isSecret": true
+        },
+        "MISTRAL_API_KEY": {
+          "description": "Optional. Direct Mistral provider key.",
+          "isSecret": true
+        },
+        "DEEPSEEK_API_KEY": {
+          "description": "Optional. Direct DeepSeek provider key.",
+          "isSecret": true
+        },
+        "GROQ_API_KEY": {
+          "description": "Optional. Direct Groq provider key.",
+          "isSecret": true
+        }
+      }
+    },
+    {
       "name": "runtime",
       "source": {
-        "repo": "agentfield/af-stack",
+        "repo": "Agent-Field/backai",
         "rootDirectory": "."
       },
       "build": {
@@ -54,6 +144,7 @@
         "AF_STACK_METRICS_ADDR": ":9090",
         "AF_STACK_MODULE_MULTI_TENANCY": "true",
         "AF_STACK_SANDBOX_ADAPTER": "e2b",
+        "AF_STACK_DEMO_MODE": "auto",
         "AF_STACK_S3_ADAPTER": "s3",
         "AF_STACK_S3_REGION": "us-east-1",
         "LOG_FORMAT": "json",
@@ -62,6 +153,19 @@
         "AF_STACK_DATABASE_URL": {
           "default": "${{ postgres.DATABASE_URL }}",
           "description": "Postgres connection string. Defaults to the bundled Postgres service."
+        },
+        "AF_STACK_AGENTFIELD_URL": {
+          "default": "http://${{ agentfield.RAILWAY_PRIVATE_DOMAIN }}:8080",
+          "description": "Private AgentField control-plane URL."
+        },
+        "AF_STACK_LITELLM_URL": {
+          "default": "http://${{ litellm.RAILWAY_PRIVATE_DOMAIN }}:4000",
+          "description": "Private LiteLLM sidecar URL."
+        },
+        "LITELLM_MASTER_KEY": {
+          "default": "${{ litellm.LITELLM_MASTER_KEY }}",
+          "isSecret": true,
+          "description": "Internal LiteLLM master key."
         },
         "AF_STACK_KMS_KEY": {
           "generator": "secret",
@@ -92,19 +196,42 @@
           "isSecret": true
         },
         "OPENROUTER_API_KEY": {
-          "description": "OpenRouter API key (one key, many models). Optional if you set OPENAI_API_KEY or ANTHROPIC_API_KEY.",
+          "default": "${{ litellm.OPENROUTER_API_KEY }}",
+          "description": "Optional. Used by runtime only to switch auto demo mode to LiteLLM mode.",
           "isSecret": true
         },
         "ANTHROPIC_API_KEY": {
-          "description": "Optional. Direct Anthropic provider key.",
+          "default": "${{ litellm.ANTHROPIC_API_KEY }}",
+          "description": "Optional. Used by runtime only to detect configured provider mode.",
           "isSecret": true
         },
         "OPENAI_API_KEY": {
-          "description": "Optional. Direct OpenAI provider key.",
+          "default": "${{ litellm.OPENAI_API_KEY }}",
+          "description": "Optional. Used by runtime only to detect configured provider mode.",
+          "isSecret": true
+        },
+        "GEMINI_API_KEY": {
+          "default": "${{ litellm.GEMINI_API_KEY }}",
+          "description": "Optional. Used by runtime only to detect configured provider mode.",
+          "isSecret": true
+        },
+        "MISTRAL_API_KEY": {
+          "default": "${{ litellm.MISTRAL_API_KEY }}",
+          "description": "Optional. Used by runtime only to detect configured provider mode.",
+          "isSecret": true
+        },
+        "DEEPSEEK_API_KEY": {
+          "default": "${{ litellm.DEEPSEEK_API_KEY }}",
+          "description": "Optional. Used by runtime only to detect configured provider mode.",
+          "isSecret": true
+        },
+        "GROQ_API_KEY": {
+          "default": "${{ litellm.GROQ_API_KEY }}",
+          "description": "Optional. Used by runtime only to detect configured provider mode.",
           "isSecret": true
         },
         "E2B_API_KEY": {
-          "description": "Sandbox adapter key. Required when AF_STACK_SANDBOX_ADAPTER=e2b.",
+          "description": "Optional for the SupportDesk first run. Required for sandbox-backed workloads.",
           "isSecret": true
         }
       }
@@ -112,7 +239,7 @@
     {
       "name": "dashboard",
       "source": {
-        "repo": "agentfield/af-stack",
+        "repo": "Agent-Field/backai",
         "rootDirectory": "."
       },
       "build": {
@@ -136,7 +263,7 @@
           "description": "Shared with the runtime — better-auth uses this pool."
         },
         "RUNTIME_URL": {
-          "default": "${{ runtime.RAILWAY_PRIVATE_DOMAIN }}:8080",
+          "default": "http://${{ runtime.RAILWAY_PRIVATE_DOMAIN }}:8080",
           "description": "Server-side fetches use Railway's private network."
         },
         "NEXT_PUBLIC_RUNTIME_URL": {
@@ -152,8 +279,85 @@
           "default": "https://${{ RAILWAY_PUBLIC_DOMAIN }}",
           "description": "Public dashboard URL — used by better-auth callback handling."
         },
+        "BETTER_AUTH_TRUSTED_ORIGINS": {
+          "default": "https://${{ RAILWAY_PUBLIC_DOMAIN }},https://${{ customer.RAILWAY_PUBLIC_DOMAIN }}",
+          "description": "Dashboard and customer app public origins."
+        },
+        "NEXT_PUBLIC_OPERATOR_URL": {
+          "default": "https://${{ RAILWAY_PUBLIC_DOMAIN }}",
+          "description": "Public admin URL."
+        },
+        "NEXT_PUBLIC_DASHBOARD_URL": {
+          "default": "https://${{ RAILWAY_PUBLIC_DOMAIN }}",
+          "description": "Public admin URL."
+        },
+        "CUSTOMER_APP_URL": {
+          "default": "https://${{ customer.RAILWAY_PUBLIC_DOMAIN }}",
+          "description": "Public customer app URL."
+        },
         "GOOGLE_CLIENT_ID": {
           "description": "Optional. Google OAuth client ID for SSO.",
+          "isSecret": false
+        },
+        "GOOGLE_CLIENT_SECRET": {
+          "description": "Optional. Google OAuth client secret.",
+          "isSecret": true
+        }
+      }
+    },
+    {
+      "name": "customer",
+      "source": {
+        "repo": "Agent-Field/backai",
+        "rootDirectory": "."
+      },
+      "build": {
+        "builder": "DOCKERFILE",
+        "dockerfilePath": "apps/customer-app/Dockerfile"
+      },
+      "deploy": {
+        "startCommand": "node_modules/.bin/next start -p 3000",
+        "healthcheckPath": "/",
+        "healthcheckTimeout": 30,
+        "restartPolicyType": "ON_FAILURE",
+        "restartPolicyMaxRetries": 10,
+        "numReplicas": 1
+      },
+      "variables": {
+        "PORT": "3000",
+        "NODE_ENV": "production",
+        "NEXT_TELEMETRY_DISABLED": "1",
+        "DATABASE_URL": {
+          "default": "${{ postgres.DATABASE_URL }}",
+          "description": "Shared with dashboard and runtime for better-auth and tenant provisioning."
+        },
+        "RUNTIME_URL": {
+          "default": "http://${{ runtime.RAILWAY_PRIVATE_DOMAIN }}:8080",
+          "description": "Server-side customer-app proxy uses Railway's private network."
+        },
+        "NEXT_PUBLIC_RUNTIME_URL": {
+          "default": "https://${{ runtime.RAILWAY_PUBLIC_DOMAIN }}",
+          "description": "Browser-visible runtime URL for copyable snippets."
+        },
+        "NEXT_PUBLIC_OPERATOR_URL": {
+          "default": "https://${{ dashboard.RAILWAY_PUBLIC_DOMAIN }}",
+          "description": "Admin URL used by customer-app link-outs."
+        },
+        "AF_STACK_AUTH_SECRET": {
+          "default": "${{ runtime.AF_STACK_AUTH_SECRET }}",
+          "isSecret": true,
+          "description": "Shared with dashboard and runtime — sessions use the same signing secret."
+        },
+        "BETTER_AUTH_URL": {
+          "default": "https://${{ RAILWAY_PUBLIC_DOMAIN }}",
+          "description": "Public customer app URL — used by better-auth callback handling."
+        },
+        "BETTER_AUTH_TRUSTED_ORIGINS": {
+          "default": "https://${{ RAILWAY_PUBLIC_DOMAIN }},https://${{ dashboard.RAILWAY_PUBLIC_DOMAIN }}",
+          "description": "Customer app and dashboard public origins."
+        },
+        "GOOGLE_CLIENT_ID": {
+          "description": "Optional. Google OAuth client ID for customer login.",
           "isSecret": false
         },
         "GOOGLE_CLIENT_SECRET": {

@@ -153,17 +153,34 @@ def check_railway() -> list[str]:
     services = data.get("services", [])
     require(isinstance(services, list) and services, "Railway template must define services")
     postgres = find_service(services, "postgres")
+    agentfield = find_service(services, "agentfield")
+    litellm = find_service(services, "litellm")
     runtime = find_service(services, "runtime")
     dashboard = find_service(services, "dashboard")
+    customer = find_service(services, "customer")
 
     require(postgres.get("source", {}).get("image") == "pgvector/pgvector:pg16", "Railway Postgres must use pgvector PG16")
+    require(agentfield.get("source", {}).get("image") == "agentfield/control-plane:latest", "Railway AgentField image mismatch")
+    require(
+        "AGENTFIELD_STORAGE_POSTGRES_URL" in agentfield.get("variables", {}),
+        "Railway AgentField must receive database URL",
+    )
+    require(litellm.get("build", {}).get("dockerfilePath") == "deploy/railway/litellm.Dockerfile", "Railway LiteLLM Dockerfile mismatch")
+    require(litellm.get("deploy", {}).get("healthcheckPath") == "/health/readiness", "Railway LiteLLM healthcheck must be /health/readiness")
     require(runtime.get("build", {}).get("dockerfilePath") == "services/runtime/Dockerfile", "Railway runtime Dockerfile mismatch")
     require(runtime.get("deploy", {}).get("healthcheckPath") == "/health", "Railway runtime healthcheck must be /health")
     require(dashboard.get("build", {}).get("dockerfilePath") == "apps/dashboard/Dockerfile", "Railway dashboard Dockerfile mismatch")
     require(dashboard.get("deploy", {}).get("healthcheckPath") == "/", "Railway dashboard healthcheck must be /")
+    require(customer.get("build", {}).get("dockerfilePath") == "apps/customer-app/Dockerfile", "Railway customer app Dockerfile mismatch")
+    require(customer.get("deploy", {}).get("healthcheckPath") == "/", "Railway customer app healthcheck must be /")
     require("AF_STACK_DATABASE_URL" in runtime.get("variables", {}), "Railway runtime must receive database URL")
+    require("AF_STACK_AGENTFIELD_URL" in runtime.get("variables", {}), "Railway runtime must receive AgentField URL")
+    require("AF_STACK_LITELLM_URL" in runtime.get("variables", {}), "Railway runtime must receive LiteLLM URL")
+    require("AF_STACK_DEMO_MODE" in runtime.get("variables", {}), "Railway runtime must set demo mode")
     require("DATABASE_URL" in dashboard.get("variables", {}), "Railway dashboard must receive database URL")
-    return ["Railway JSON parsed and required services validated"]
+    require("DATABASE_URL" in customer.get("variables", {}), "Railway customer app must receive database URL")
+    require("RUNTIME_URL" in customer.get("variables", {}), "Railway customer app must receive runtime URL")
+    return ["Railway JSON parsed and required BackAI services validated"]
 
 
 def check_render() -> list[str]:

@@ -2,9 +2,9 @@
 /**
  * Capture the three hero screenshots used in the README:
  *
- *   dashboard-screenshots/setup.png    - first-run wizard
- *   dashboard-screenshots/home.png     - signed-in operator Home with live data
- *   dashboard-screenshots/cost.png     - Operate / Cost dashboard
+ *   docs/assets/dashboard-screenshots/setup.png    - first-run wizard
+ *   docs/assets/dashboard-screenshots/home.png     - signed-in operator Home with live data
+ *   docs/assets/dashboard-screenshots/cost.png     - Operate / Cost dashboard
  *
  * Assumes:
  *   - the compose stack is up and an operator account already exists
@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url"
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const REPO_ROOT = resolve(__dirname, "..")
-const OUT_DIR = resolve(REPO_ROOT, "dashboard-screenshots")
+const OUT_DIR = resolve(REPO_ROOT, "docs/assets/dashboard-screenshots")
 
 const DASHBOARD_URL = process.env.DASHBOARD_URL ?? "http://localhost:33000"
 const OP_EMAIL = process.env.OP_EMAIL ?? "operator@example.com"

@@ -1,7 +1,7 @@
-# AF Stack Starter
+# BackAI Starter
 
 This is the canonical fork basis. The other examples show finished
-products; this one shows the four places you edit when turning AF Stack
+products; this one shows the four places you edit when turning BackAI
 into your own backend.
 
 ## What you copy

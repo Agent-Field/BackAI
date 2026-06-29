@@ -1,11 +1,12 @@
-# AF Stack local development stack
+# BackAI local development stack
 #
-# Brings up: Postgres, MinIO, AgentField control plane, suite runtime.
-# Other services (Svix, OTel, dashboard) added as their phases land.
+# Brings up: customer app, admin dashboard, runtime, Postgres, MinIO,
+# AgentField control plane, LiteLLM, and webhook sidecars.
 #
 # Quickstart:
 #   cp .env.example .env
-#   # edit .env: set OPENROUTER_API_KEY
+#   # optional: set OPENROUTER_API_KEY for live model calls
+#   node scripts/preflight.mjs
 #   docker compose up
 
 services:
@@ -18,9 +19,11 @@ services:
       POSTGRES_PASSWORD: afstack
       POSTGRES_MULTIPLE_DATABASES: afstack,agentfield
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./deploy/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
       - ./scripts/postgres-init.sh:/docker-entrypoint-initdb.d/postgres-init.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U afstack"]
@@ -35,8 +38,8 @@ services:
       MINIO_ROOT_USER: ${AF_STACK_S3_ACCESS_KEY:-minio}
       MINIO_ROOT_PASSWORD: ${AF_STACK_S3_SECRET_KEY:-minio-secret}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio-data:/data
     healthcheck:
@@ -46,10 +49,10 @@ services:
       retries: 5
 
   # LiteLLM Proxy — handles every upstream LLM provider so the runtime
-  # doesn't ship a hand-rolled client per vendor. AF Stack forwards
+  # doesn't ship a hand-rolled client per vendor. BackAI forwards
   # /api/v1/llm/* to this sidecar; LiteLLM routes to OpenRouter / OpenAI /
   # Anthropic / Google / Mistral / DeepSeek / Groq / Cohere / Bedrock / etc.
-  # based on apps/backend/litellm-config.yaml. AF Stack keeps tenant
+  # based on apps/backend/litellm-config.yaml. BackAI keeps tenant
   # resolution, cost ledger, budgets, cache, and hooks on its side.
   litellm:
     image: ghcr.io/berriai/litellm:main-stable
@@ -90,7 +93,7 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     ports:
-      - "8081:8080"
+      - "${AGENTFIELD_PORT:-8081}:8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -99,7 +102,7 @@ services:
     # probe instead.
     restart: unless-stopped
 
-  # AF Stack suite runtime (Go single binary).
+  # BackAI runtime (Go single binary).
   runtime:
     build:
       context: .
@@ -126,6 +129,20 @@ services:
       # sidecar auth; customers never see it.
       AF_STACK_LITELLM_URL: ${AF_STACK_LITELLM_URL:-http://litellm:4000}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-litellm-dev}
+      # Runtime sees provider-key presence so AF_STACK_DEMO_MODE=auto can
+      # switch from deterministic demo mode to the LiteLLM-backed provider.
+      # LiteLLM still owns the actual upstream provider calls.
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      # First-run demo mode: "auto" uses the deterministic demo provider only
+      # when no real provider key is present. Adding OPENROUTER_API_KEY /
+      # OPENAI_API_KEY / etc. switches the same endpoint to LiteLLM.
+      AF_STACK_DEMO_MODE: ${AF_STACK_DEMO_MODE:-auto}
       # Gateway guardrails: regex PII redaction is on by default.
       # Set AF_STACK_PII_PROVIDER=presidio and Presidio URLs to use
       # a Presidio analyzer/anonymizer sidecar.
@@ -216,13 +233,15 @@ services:
       AF_STACK_DEFAULT_OPERATOR_PASSWORD: ${AF_STACK_DEFAULT_OPERATOR_PASSWORD:-changeme123}
       AF_STACK_DEFAULT_OPERATOR_NAME: ${AF_STACK_DEFAULT_OPERATOR_NAME:-Default Operator}
       # Tell better-auth which URL the operator hits the dashboard at.
-      BETTER_AUTH_URL: http://localhost:${AF_STACK_DASHBOARD_PORT:-3000}
-      BETTER_AUTH_TRUSTED_ORIGINS: ${BETTER_AUTH_TRUSTED_ORIGINS:-}
+      BETTER_AUTH_URL: http://localhost:${AF_STACK_DASHBOARD_PORT:-33000}
+      BETTER_AUTH_TRUSTED_ORIGINS: ${BETTER_AUTH_TRUSTED_ORIGINS:-http://localhost:${AF_STACK_CUSTOMER_APP_PORT:-34000},http://localhost:${AF_STACK_DASHBOARD_PORT:-33000}}
       # Server-side fetches use Docker DNS.
       RUNTIME_URL: http://runtime:8080
       # Client-side fetches use the host-mapped runtime port.
       NEXT_PUBLIC_RUNTIME_URL: http://localhost:${AF_STACK_PORT:-8080}
-      NEXT_PUBLIC_RUNTIME_UI_URL: http://localhost:8081
+      NEXT_PUBLIC_RUNTIME_UI_URL: http://localhost:${AGENTFIELD_PORT:-8081}
+      NEXT_PUBLIC_DASHBOARD_URL: http://localhost:${AF_STACK_DASHBOARD_PORT:-33000}
+      CUSTOMER_APP_URL: http://localhost:${AF_STACK_CUSTOMER_APP_PORT:-34000}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       AF_STACK_SSO_LABEL: ${AF_STACK_SSO_LABEL:-}
@@ -232,7 +251,7 @@ services:
       AF_STACK_SSO_CLIENT_SECRET: ${AF_STACK_SSO_CLIENT_SECRET:-}
       AF_STACK_SSO_SCOPES: ${AF_STACK_SSO_SCOPES:-}
     ports:
-      - "${AF_STACK_DASHBOARD_PORT:-3000}:3000"
+      - "${AF_STACK_DASHBOARD_PORT:-33000}:3000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -240,10 +259,62 @@ services:
         condition: service_started
     restart: unless-stopped
 
-  # Sample AgentField agent. The 60-second quickstart calls this via the
-  # gateway to prove end-to-end connectivity. Replace with your own agents
-  # in apps/backend/agents/<your-agent>/ to customise.
+  # Next.js customer product. This is the first browser target for the
+  # template: sign up, draft a SupportDesk reply, then deep-link to the
+  # matching admin cost event.
+  customer-app:
+    build:
+      context: .
+      dockerfile: apps/customer-app/Dockerfile
+    environment:
+      DATABASE_URL: postgres://afstack:afstack@postgres:5432/afstack?sslmode=disable
+      AF_STACK_AUTH_SECRET: ${AF_STACK_AUTH_SECRET:-dev-secret-change-me-in-prod}
+      BETTER_AUTH_URL: http://localhost:${AF_STACK_CUSTOMER_APP_PORT:-34000}
+      BETTER_AUTH_TRUSTED_ORIGINS: ${BETTER_AUTH_TRUSTED_ORIGINS:-http://localhost:${AF_STACK_CUSTOMER_APP_PORT:-34000},http://localhost:${AF_STACK_DASHBOARD_PORT:-33000}}
+      # Server-side proxy calls use Docker DNS.
+      RUNTIME_URL: http://runtime:8080
+      # Browser-visible URLs used in copyable snippets and admin link-outs.
+      NEXT_PUBLIC_RUNTIME_URL: http://localhost:${AF_STACK_PORT:-8080}
+      NEXT_PUBLIC_OPERATOR_URL: http://localhost:${AF_STACK_DASHBOARD_PORT:-33000}
+      NEXT_PUBLIC_RUNTIME_UI_URL: http://localhost:${AGENTFIELD_PORT:-8081}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      AF_STACK_SSO_LABEL: ${AF_STACK_SSO_LABEL:-}
+      AF_STACK_SSO_ISSUER: ${AF_STACK_SSO_ISSUER:-}
+      AF_STACK_SSO_DISCOVERY_URL: ${AF_STACK_SSO_DISCOVERY_URL:-}
+      AF_STACK_SSO_CLIENT_ID: ${AF_STACK_SSO_CLIENT_ID:-}
+      AF_STACK_SSO_CLIENT_SECRET: ${AF_STACK_SSO_CLIENT_SECRET:-}
+      AF_STACK_SSO_SCOPES: ${AF_STACK_SSO_SCOPES:-}
+    ports:
+      - "${AF_STACK_CUSTOMER_APP_PORT:-34000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      runtime:
+        condition: service_started
+    restart: unless-stopped
+
+  # Product AgentField agent for the first-run SupportDesk flow. This is the
+  # default proof that BackAI is not only an LLM proxy: the customer action
+  # goes through registered reasoners before the final LLM gateway call.
+  supportdesk-agent:
+    build:
+      context: apps/backend/agents/supportdesk
+      dockerfile: Dockerfile
+    environment:
+      AGENTFIELD_SERVER: http://agentfield:8080
+      NODE_ID: supportdesk
+      AGENT_CALLBACK_URL: http://supportdesk-agent:8090
+    depends_on:
+      agentfield:
+        condition: service_started
+    restart: unless-stopped
+
+  # Optional heavier AgentField sample with coding harness probes. It is useful
+  # for advanced agent/harness development, but it is intentionally outside the
+  # default first-run stack so the public quickstart stays light.
   sample-agent:
+    profiles: ["advanced"]
     build:
       context: apps/backend/agents/sample
       dockerfile: Dockerfile
@@ -271,7 +342,7 @@ services:
 
   # Svix — outbound webhook delivery (OSS audit item #2).
   #
-  # AF Stack uses Svix as a sidecar for outbound webhook delivery: the
+  # BackAI uses Svix as a sidecar for outbound webhook delivery: the
   # runtime's POST /api/v1/webhooks/send proxies to svix-server, which
   # owns the delivery queue, retries, signing, replay protection, and the
   # message log. We keep the inbound side (/webhooks/in/{slug}) ourselves

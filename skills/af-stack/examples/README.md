@@ -51,7 +51,7 @@ Stack. Sorted roughly by complexity.
 
 ## Why one platform handles all of these
 
-Every interesting AI startup needs **6+ of the 8 bands** in `STACK.md`.
+Every interesting AI startup needs **6+ of the 8 bands** in `docs/stack.md`.
 The differences between the 12 apps above aren't in the platform layer
 — they're in the user's edit surfaces:
 

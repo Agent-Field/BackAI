@@ -16,7 +16,7 @@
 //     Best-effort by design — a write failure logs but never errors the
 //     LLM call (we'd rather lose a ledger row than fail a request).
 //
-// Aggregation
+// # Aggregation
 //
 // Aggregate.Summary powers the dashboard's /api/v1/cost summary card and
 // per-breakdown tables. Aggregate.Events powers /api/v1/cost/events for
@@ -24,7 +24,7 @@
 // elapsed fraction of the current period (current_period_total /
 // elapsed_fraction).
 //
-// RLS note
+// # RLS note
 //
 // suite_cost_events and suite_budgets are intentionally NOT RLS-gated.
 // Phase 6 (migration 00004) excluded admin-managed tables from RLS
@@ -44,6 +44,9 @@ import (
 // apps/dashboard/src/lib/api.ts (snake_case JSON tags applied at the
 // HTTP layer).
 type Event struct {
+	// RequestID is the gateway request id. It lets customer apps link
+	// a user-visible action to the exact operator cost event.
+	RequestID string
 	// TenantID is the owning tenant. Empty means "no tenant" (the row
 	// is written with NULL tenant_id — the FK is set null).
 	TenantID string
@@ -61,6 +64,9 @@ type Event struct {
 	// the call. Empty when the call came from the raw LLM gateway path
 	// rather than via an agent invocation.
 	Agent string
+	// Reasoner is the leaf reasoner id captured from X-AF-Reasoner.
+	// Empty for raw gateway calls and older SDKs that do not send it.
+	Reasoner string
 	// PromptTokens / CompletionTokens are the provider's reported
 	// usage. TotalTokens is derived (prompt + completion) but stored
 	// because some providers report total separately from sums.
@@ -77,6 +83,10 @@ type Event struct {
 	Cached bool
 	// LatencyMS is end-to-end gateway-observed latency.
 	LatencyMS int
+	// StatusCode and ErrorCode capture terminal gateway status for
+	// reasoner analytics. ErrorCode is empty on success.
+	StatusCode int
+	ErrorCode  string
 	// OccurredAt is the call timestamp. Zero -> the recorder uses now().
 	OccurredAt time.Time
 	// Modality classifies the call: "text" (default for chat), "embedding",
@@ -135,12 +145,13 @@ type AggregateOpts struct {
 
 // EventsOpts scopes an Events list (paginated).
 type EventsOpts struct {
-	TenantID string
-	Model    string
-	From     time.Time
-	To       time.Time
-	Limit    int
-	Offset   int
+	TenantID  string
+	RequestID string
+	Model     string
+	From      time.Time
+	To        time.Time
+	Limit     int
+	Offset    int
 }
 
 // Sentinel errors -----------------------------------------------------------

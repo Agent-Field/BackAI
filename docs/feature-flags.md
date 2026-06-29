@@ -1,6 +1,6 @@
 # Feature Flags
 
-AF Stack ships durable runtime feature flags for the product you build
+BackAI ships durable runtime feature flags for the product you build
 on the stack. Flags are stored in Postgres and scoped by tenant RLS, so
 the dashboard, customer app, workload modules, and SDK clients all read
 the same values.

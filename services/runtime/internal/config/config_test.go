@@ -123,3 +123,133 @@ func TestSandboxEnvOverrides(t *testing.T) {
 		t.Errorf("E2BBaseURL = %q, want https://api.e2b.dev", cfg.Sandbox.E2BBaseURL)
 	}
 }
+
+func TestLogsEnvOverrides(t *testing.T) {
+	t.Setenv("AF_STACK_LOGS_ADAPTER", "LOKI")
+	t.Setenv("AF_STACK_LOGS_LOKI_URL", "http://loki:3100")
+	t.Setenv("AF_STACK_LOGS_LOKI_TENANT", "tenant-a")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Logs.Adapter != "loki" {
+		t.Fatalf("adapter=%q want loki", cfg.Logs.Adapter)
+	}
+	if cfg.Logs.Loki.URL != "http://loki:3100" || cfg.Logs.Loki.Tenant != "tenant-a" {
+		t.Fatalf("loki config=%+v", cfg.Logs.Loki)
+	}
+}
+
+func TestLogsAdapterRequiresURL(t *testing.T) {
+	cfg := Default()
+	cfg.Logs.Adapter = "loki"
+	if err := validate(cfg); err == nil {
+		t.Fatal("expected logs.adapter=loki without url to fail")
+	}
+	cfg = Default()
+	cfg.Logs.Adapter = "remote"
+	if err := validate(cfg); err == nil {
+		t.Fatal("expected logs.adapter=remote without url to fail")
+	}
+}
+
+func TestTracesEnvOverrides(t *testing.T) {
+	t.Setenv("AF_STACK_TRACES_ADAPTER", "TEMPO")
+	t.Setenv("AF_STACK_TRACES_TEMPO_URL", "http://tempo:3200")
+	t.Setenv("AF_STACK_TRACES_TEMPO_TENANT", "tenant-a")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Traces.Adapter != "tempo" {
+		t.Fatalf("adapter=%q want tempo", cfg.Traces.Adapter)
+	}
+	if cfg.Traces.Tempo.URL != "http://tempo:3200" || cfg.Traces.Tempo.Tenant != "tenant-a" {
+		t.Fatalf("tempo config=%+v", cfg.Traces.Tempo)
+	}
+}
+
+func TestTracesAdapterRequiresURL(t *testing.T) {
+	cfg := Default()
+	cfg.Traces.Adapter = "tempo"
+	if err := validate(cfg); err == nil {
+		t.Fatal("expected traces.adapter=tempo without url to fail")
+	}
+	cfg = Default()
+	cfg.Traces.Adapter = "remote"
+	if err := validate(cfg); err == nil {
+		t.Fatal("expected traces.adapter=remote without url to fail")
+	}
+}
+
+func TestMetricsEnvOverrides(t *testing.T) {
+	t.Setenv("AF_STACK_METRICS_ADAPTER", "PROMETHEUS")
+	t.Setenv("AF_STACK_METRICS_PROMETHEUS_URL", "http://prometheus:9090")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Metrics.Adapter != "prometheus" {
+		t.Fatalf("adapter=%q want prometheus", cfg.Metrics.Adapter)
+	}
+	if cfg.Metrics.Prometheus.URL != "http://prometheus:9090" {
+		t.Fatalf("prometheus config=%+v", cfg.Metrics.Prometheus)
+	}
+}
+
+func TestMetricsAdapterRequiresURL(t *testing.T) {
+	cfg := Default()
+	cfg.Metrics.Adapter = "prometheus"
+	if err := validate(cfg); err == nil {
+		t.Fatal("expected metrics.adapter=prometheus without url to fail")
+	}
+	cfg = Default()
+	cfg.Metrics.Adapter = "remote"
+	if err := validate(cfg); err == nil {
+		t.Fatal("expected metrics.adapter=remote without url to fail")
+	}
+}
+
+func TestErrorsEnvOverrides(t *testing.T) {
+	t.Setenv("AF_STACK_ERRORS_ADAPTER", "GLITCHTIP")
+	t.Setenv("AF_STACK_ERRORS_GLITCHTIP_URL", "http://glitchtip:8000")
+	t.Setenv("AF_STACK_ERRORS_GLITCHTIP_ORG", "backai")
+	t.Setenv("AF_STACK_ERRORS_GLITCHTIP_TOKEN", "token")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Errors.Adapter != "glitchtip" {
+		t.Fatalf("adapter=%q want glitchtip", cfg.Errors.Adapter)
+	}
+	if cfg.Errors.GlitchTip.URL != "http://glitchtip:8000" || cfg.Errors.GlitchTip.Org != "backai" || cfg.Errors.GlitchTip.Token != "token" {
+		t.Fatalf("glitchtip config=%+v", cfg.Errors.GlitchTip)
+	}
+}
+
+func TestErrorsAdapterRequiresConfig(t *testing.T) {
+	cfg := Default()
+	cfg.Errors.Adapter = "glitchtip"
+	if err := validate(cfg); err == nil {
+		t.Fatal("expected errors.adapter=glitchtip without url/org/token to fail")
+	}
+	cfg = Default()
+	cfg.Errors.Adapter = "remote"
+	if err := validate(cfg); err == nil {
+		t.Fatal("expected errors.adapter=remote without url to fail")
+	}
+}
+
+func TestErrorsBackendAlias(t *testing.T) {
+	cfg := Default()
+	cfg.Errors.Adapter = ""
+	cfg.Errors.Backend = "remote"
+	cfg.Errors.Remote.URL = "http://adapter:8080"
+	applyEnvOverrides(&cfg)
+	if cfg.Errors.Adapter != "remote" {
+		t.Fatalf("adapter=%q want remote from backend alias", cfg.Errors.Adapter)
+	}
+	if err := validate(cfg); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+}

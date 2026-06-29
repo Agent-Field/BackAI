@@ -26,6 +26,7 @@ RUN go build \
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/af-stack /usr/local/bin/af-stack
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=build /src/brand.yaml /app/brand.yaml
 
 EXPOSE 8080 9090
 USER nonroot:nonroot

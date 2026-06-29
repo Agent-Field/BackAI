@@ -17,14 +17,18 @@ import (
 
 // Config is the top-level runtime configuration.
 type Config struct {
-	Server        ServerConfig         `yaml:"server"`
-	Database      DatabaseConfig       `yaml:"database"`
-	AgentField    AgentFieldConfig     `yaml:"agentfield"`
-	Logging       LoggingConfig        `yaml:"logging"`
-	Observability ObservabilityConfig  `yaml:"observability"`
-	Modules       ModulesConfig        `yaml:"modules"`
-	Storage       StorageConfig        `yaml:"storage"`
-	Sandbox       SandboxConfig        `yaml:"sandbox"`
+	Server        ServerConfig        `yaml:"server"`
+	Database      DatabaseConfig      `yaml:"database"`
+	AgentField    AgentFieldConfig    `yaml:"agentfield"`
+	Logging       LoggingConfig       `yaml:"logging"`
+	Observability ObservabilityConfig `yaml:"observability"`
+	Modules       ModulesConfig       `yaml:"modules"`
+	Storage       StorageConfig       `yaml:"storage"`
+	Sandbox       SandboxConfig       `yaml:"sandbox"`
+	Logs          LogsConfig          `yaml:"logs"`
+	Traces        TracesConfig        `yaml:"traces"`
+	Metrics       MetricsConfig       `yaml:"metrics"`
+	Errors        ErrorsConfig        `yaml:"errors"`
 }
 
 // SandboxConfig holds sandbox-adapter settings. The Adapter field picks
@@ -40,6 +44,82 @@ type SandboxConfig struct {
 	Adapter    string `yaml:"adapter"`
 	E2BAPIKey  string `yaml:"e2b_api_key"`
 	E2BBaseURL string `yaml:"e2b_base_url"`
+}
+
+// LogsConfig selects the runtime log-store adapter. The ring adapter is the
+// zero-config default; Loki and remote adapters are activated only when the
+// operator sets AF_STACK_LOGS_ADAPTER and the corresponding URL.
+type LogsConfig struct {
+	Adapter string           `yaml:"adapter"`
+	Loki    LogsLokiConfig   `yaml:"loki"`
+	Remote  LogsRemoteConfig `yaml:"remote"`
+}
+
+type LogsLokiConfig struct {
+	URL    string `yaml:"url"`
+	Tenant string `yaml:"tenant"`
+}
+
+type LogsRemoteConfig struct {
+	URL   string `yaml:"url"`
+	Token string `yaml:"token"`
+}
+
+// TracesConfig selects the runtime trace-store adapter. The empty adapter is
+// the zero-config default; Tempo and remote adapters activate only when the
+// operator sets AF_STACK_TRACES_ADAPTER and the corresponding URL.
+type TracesConfig struct {
+	Adapter string             `yaml:"adapter"`
+	Tempo   TracesTempoConfig  `yaml:"tempo"`
+	Remote  TracesRemoteConfig `yaml:"remote"`
+}
+
+type TracesTempoConfig struct {
+	URL    string `yaml:"url"`
+	Tenant string `yaml:"tenant"`
+}
+
+type TracesRemoteConfig struct {
+	URL   string `yaml:"url"`
+	Token string `yaml:"token"`
+}
+
+// MetricsConfig selects the runtime metrics-store adapter. The none adapter is
+// the zero-config default; Prometheus and remote adapters activate only when
+// the operator sets AF_STACK_METRICS_ADAPTER and the corresponding URL.
+type MetricsConfig struct {
+	Adapter    string                  `yaml:"adapter"`
+	Prometheus MetricsPrometheusConfig `yaml:"prometheus"`
+	Remote     MetricsRemoteConfig     `yaml:"remote"`
+}
+
+type MetricsPrometheusConfig struct {
+	URL string `yaml:"url"`
+}
+
+type MetricsRemoteConfig struct {
+	URL   string `yaml:"url"`
+	Token string `yaml:"token"`
+}
+
+// ErrorsConfig selects the runtime errors adapter. The logfilter adapter is
+// the zero-config default; GlitchTip and remote activate only when configured.
+type ErrorsConfig struct {
+	Adapter   string                `yaml:"adapter"`
+	Backend   string                `yaml:"backend,omitempty"`
+	GlitchTip ErrorsGlitchTipConfig `yaml:"glitchtip"`
+	Remote    ErrorsRemoteConfig    `yaml:"remote"`
+}
+
+type ErrorsGlitchTipConfig struct {
+	URL   string `yaml:"url"`
+	Org   string `yaml:"org"`
+	Token string `yaml:"token"`
+}
+
+type ErrorsRemoteConfig struct {
+	URL   string `yaml:"url"`
+	Token string `yaml:"token"`
 }
 
 // StorageConfig holds object-storage settings. Populated from env vars
@@ -88,16 +168,16 @@ type ServerConfig struct {
 
 // DatabaseConfig holds Postgres connection settings.
 type DatabaseConfig struct {
-	URL             string `yaml:"url"`
-	MaxConnections  int    `yaml:"max_connections"`
-	MaxIdleConns    int    `yaml:"max_idle_connections"`
+	URL             string        `yaml:"url"`
+	MaxConnections  int           `yaml:"max_connections"`
+	MaxIdleConns    int           `yaml:"max_idle_connections"`
 	ConnMaxLifetime time.Duration `yaml:"conn_max_lifetime"`
 }
 
 // AgentFieldConfig holds the AF control plane connection settings.
 type AgentFieldConfig struct {
-	URL           string        `yaml:"url"`
-	HealthTimeout time.Duration `yaml:"health_timeout"`
+	URL            string        `yaml:"url"`
+	HealthTimeout  time.Duration `yaml:"health_timeout"`
 	RequestTimeout time.Duration `yaml:"request_timeout"`
 }
 
@@ -146,6 +226,18 @@ func Default() Config {
 		},
 		Sandbox: SandboxConfig{
 			Adapter: "docker",
+		},
+		Logs: LogsConfig{
+			Adapter: "ring",
+		},
+		Traces: TracesConfig{
+			Adapter: "empty",
+		},
+		Metrics: MetricsConfig{
+			Adapter: "none",
+		},
+		Errors: ErrorsConfig{
+			Adapter: "logfilter",
 		},
 	}
 }
@@ -269,6 +361,75 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("AF_STACK_E2B_BASE_URL"); v != "" {
 		cfg.Sandbox.E2BBaseURL = v
 	}
+
+	// Logs adapter slot. Keep selection on _ADAPTER to match the rest of
+	// the adapter registry; backend-specific URLs live under the same prefix.
+	if v := os.Getenv("AF_STACK_LOGS_ADAPTER"); v != "" {
+		cfg.Logs.Adapter = strings.ToLower(v)
+	}
+	if v := os.Getenv("AF_STACK_LOGS_LOKI_URL"); v != "" {
+		cfg.Logs.Loki.URL = v
+	}
+	if v := os.Getenv("AF_STACK_LOGS_LOKI_TENANT"); v != "" {
+		cfg.Logs.Loki.Tenant = v
+	}
+	if v := os.Getenv("AF_STACK_LOGS_ADAPTER_URL"); v != "" {
+		cfg.Logs.Remote.URL = v
+	}
+	if v := os.Getenv("AF_STACK_LOGS_ADAPTER_TOKEN"); v != "" {
+		cfg.Logs.Remote.Token = v
+	}
+
+	if v := os.Getenv("AF_STACK_TRACES_ADAPTER"); v != "" {
+		cfg.Traces.Adapter = strings.ToLower(v)
+	}
+	if v := os.Getenv("AF_STACK_TRACES_TEMPO_URL"); v != "" {
+		cfg.Traces.Tempo.URL = v
+	}
+	if v := os.Getenv("AF_STACK_TRACES_TEMPO_TENANT"); v != "" {
+		cfg.Traces.Tempo.Tenant = v
+	}
+	if v := os.Getenv("AF_STACK_TRACES_ADAPTER_URL"); v != "" {
+		cfg.Traces.Remote.URL = v
+	}
+	if v := os.Getenv("AF_STACK_TRACES_ADAPTER_TOKEN"); v != "" {
+		cfg.Traces.Remote.Token = v
+	}
+
+	if v := os.Getenv("AF_STACK_METRICS_ADAPTER"); v != "" {
+		cfg.Metrics.Adapter = strings.ToLower(v)
+	}
+	if v := os.Getenv("AF_STACK_METRICS_PROMETHEUS_URL"); v != "" {
+		cfg.Metrics.Prometheus.URL = v
+	}
+	if v := os.Getenv("AF_STACK_METRICS_ADAPTER_URL"); v != "" {
+		cfg.Metrics.Remote.URL = v
+	}
+	if v := os.Getenv("AF_STACK_METRICS_ADAPTER_TOKEN"); v != "" {
+		cfg.Metrics.Remote.Token = v
+	}
+
+	if cfg.Errors.Adapter == "" && cfg.Errors.Backend != "" {
+		cfg.Errors.Adapter = cfg.Errors.Backend
+	}
+	if v := os.Getenv("AF_STACK_ERRORS_ADAPTER"); v != "" {
+		cfg.Errors.Adapter = strings.ToLower(v)
+	}
+	if v := os.Getenv("AF_STACK_ERRORS_GLITCHTIP_URL"); v != "" {
+		cfg.Errors.GlitchTip.URL = v
+	}
+	if v := os.Getenv("AF_STACK_ERRORS_GLITCHTIP_ORG"); v != "" {
+		cfg.Errors.GlitchTip.Org = v
+	}
+	if v := os.Getenv("AF_STACK_ERRORS_GLITCHTIP_TOKEN"); v != "" {
+		cfg.Errors.GlitchTip.Token = v
+	}
+	if v := os.Getenv("AF_STACK_ERRORS_ADAPTER_URL"); v != "" {
+		cfg.Errors.Remote.URL = v
+	}
+	if v := os.Getenv("AF_STACK_ERRORS_ADAPTER_TOKEN"); v != "" {
+		cfg.Errors.Remote.Token = v
+	}
 }
 
 // validate returns an error if the config is in a non-runnable state.
@@ -288,6 +449,64 @@ func validate(cfg Config) error {
 	case "json", "text":
 	default:
 		return fmt.Errorf("logging.format must be json|text, got %q", cfg.Logging.Format)
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Logs.Adapter)) {
+	case "", "ring":
+	case "loki":
+		if strings.TrimSpace(cfg.Logs.Loki.URL) == "" {
+			return fmt.Errorf("logs.loki.url is required when logs.adapter=loki (set AF_STACK_LOGS_LOKI_URL)")
+		}
+	case "remote":
+		if strings.TrimSpace(cfg.Logs.Remote.URL) == "" {
+			return fmt.Errorf("logs.remote.url is required when logs.adapter=remote (set AF_STACK_LOGS_ADAPTER_URL)")
+		}
+	default:
+		return fmt.Errorf("logs.adapter must be ring|loki|remote, got %q", cfg.Logs.Adapter)
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Traces.Adapter)) {
+	case "", "empty":
+	case "tempo":
+		if strings.TrimSpace(cfg.Traces.Tempo.URL) == "" {
+			return fmt.Errorf("traces.tempo.url is required when traces.adapter=tempo (set AF_STACK_TRACES_TEMPO_URL)")
+		}
+	case "remote":
+		if strings.TrimSpace(cfg.Traces.Remote.URL) == "" {
+			return fmt.Errorf("traces.remote.url is required when traces.adapter=remote (set AF_STACK_TRACES_ADAPTER_URL)")
+		}
+	default:
+		return fmt.Errorf("traces.adapter must be empty|tempo|remote, got %q", cfg.Traces.Adapter)
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Metrics.Adapter)) {
+	case "", "none":
+	case "prometheus":
+		if strings.TrimSpace(cfg.Metrics.Prometheus.URL) == "" {
+			return fmt.Errorf("metrics.prometheus.url is required when metrics.adapter=prometheus (set AF_STACK_METRICS_PROMETHEUS_URL)")
+		}
+	case "remote":
+		if strings.TrimSpace(cfg.Metrics.Remote.URL) == "" {
+			return fmt.Errorf("metrics.remote.url is required when metrics.adapter=remote (set AF_STACK_METRICS_ADAPTER_URL)")
+		}
+	default:
+		return fmt.Errorf("metrics.adapter must be none|prometheus|remote, got %q", cfg.Metrics.Adapter)
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Errors.Adapter)) {
+	case "", "logfilter":
+	case "glitchtip":
+		if strings.TrimSpace(cfg.Errors.GlitchTip.URL) == "" {
+			return fmt.Errorf("errors.glitchtip.url is required when errors.adapter=glitchtip (set AF_STACK_ERRORS_GLITCHTIP_URL)")
+		}
+		if strings.TrimSpace(cfg.Errors.GlitchTip.Org) == "" {
+			return fmt.Errorf("errors.glitchtip.org is required when errors.adapter=glitchtip (set AF_STACK_ERRORS_GLITCHTIP_ORG)")
+		}
+		if strings.TrimSpace(cfg.Errors.GlitchTip.Token) == "" {
+			return fmt.Errorf("errors.glitchtip.token is required when errors.adapter=glitchtip (set AF_STACK_ERRORS_GLITCHTIP_TOKEN)")
+		}
+	case "remote":
+		if strings.TrimSpace(cfg.Errors.Remote.URL) == "" {
+			return fmt.Errorf("errors.remote.url is required when errors.adapter=remote (set AF_STACK_ERRORS_ADAPTER_URL)")
+		}
+	default:
+		return fmt.Errorf("errors.adapter must be logfilter|glitchtip|remote, got %q", cfg.Errors.Adapter)
 	}
 	return nil
 }

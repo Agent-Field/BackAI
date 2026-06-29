@@ -1,0 +1,24 @@
+id: llm-gateway-only
+name: LLM Gateway Only
+profile: attach-existing-app
+default_path: false
+summary: Smallest API-only shape for teams that already have a product app.
+requires:
+  provider_key: required_for_real_calls
+  auth: false
+  multi_tenancy: false
+  billing: false
+  storage: false
+  sandbox: false
+  github: false
+demonstrates:
+  - openai_compatible_gateway
+  - cost_events
+  - provider_routing
+  - dashboard_cost_view
+deploy:
+  compose: true
+  railway: use_root_template_without_customer_app_if_needed
+notes:
+  - This example deliberately disables customer auth and tenant keys.
+  - For production attach mode, enable multi-tenancy and call BackAI from your server.

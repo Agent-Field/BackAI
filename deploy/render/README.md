@@ -12,7 +12,7 @@ What this gets you:
 Drop this in your fork's README so others can one-click deploy:
 
 ```
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/<you>/af-stack)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Agent-Field/backai)
 ```
 
 The button URL pattern is `https://render.com/deploy?repo=<repo-url>`.

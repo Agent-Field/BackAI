@@ -1,0 +1,31 @@
+schema_version: 1
+
+name: backai
+codename: backai
+display_name: BackAI
+short_description: The open-source AI app template with the backend already wired.
+
+palette:
+  primary: "#111827"
+  accent: "#2563EB"
+  dark_mode: true
+
+logos:
+  light: ./brand/logo-light.svg
+  dark: ./brand/logo-dark.svg
+  favicon: ./brand/favicon.ico
+
+domains:
+  dashboard: admin.localhost
+  customer_app: app.localhost
+  api: api.localhost
+
+surfaces:
+  dashboard:
+    display_name: BackAI Admin
+    subtitle: Operator console
+    description: Operate tenants, usage, costs, runs, keys, and billing for your AI app.
+  customer_app:
+    display_name: SupportDesk AI
+    subtitle: Customer app
+    description: A polished support workflow built on the BackAI backend template.

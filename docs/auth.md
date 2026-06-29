@@ -1,6 +1,6 @@
 # Auth Bootstrap
 
-AF Stack ships two Next.js auth surfaces that share the same better-auth
+BackAI ships two Next.js auth surfaces that share the same better-auth
 tables:
 
 - `apps/dashboard/` for operators
@@ -28,7 +28,7 @@ better-auth session and `suite_operators`.
 
 ## Operator RBAC
 
-AF Stack uses Casbin in the runtime for operator/admin authorization.
+BackAI uses Casbin in the runtime for operator/admin authorization.
 The dashboard still performs the first session gate with
 `requireOperator()`, but every `/api/v1/admin/*` runtime request also
 resolves the forwarded better-auth session cookie and checks
@@ -37,9 +37,9 @@ opt into `app.bypass_rls`.
 
 Current built-in roles:
 
-| Role | Allowed |
-| --- | --- |
-| `owner` | Read, write, and delete all admin resources |
+| Role    | Allowed                                                                                                                                                                                    |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `owner` | Read, write, and delete all admin resources                                                                                                                                                |
 | `admin` | Read all admin resources, including privacy exports; create/update tenants, memberships, API keys, and budgets; cannot delete tenants, remove memberships, revoke API keys, or erase users |
 
 Resources covered by the built-in policy:
@@ -84,23 +84,25 @@ sign-up or magic-link flow for credentials.
 Customer sign-up is separate:
 
 - `apps/customer-app/src/lib/auth.ts` provisions a tenant, owner
-  membership, billing customer row, and one-shot API key.
+  membership, and billing customer row. The app mints runtime credentials
+  internally when the chat needs them; customers do not manage API keys in
+  the SupportDesk UI.
 - Customer users are tenant owners in their product tenant.
 - Customer users are not dashboard operators unless their email is also
   present in `suite_operators`.
 
 ## Enterprise SSO / SAML
 
-AF Stack's dashboard SSO entrypoint is OIDC. SAML is supported through a
+BackAI's dashboard SSO entrypoint is OIDC. SAML is supported through a
 broker:
 
 - **Self-hosted**: Authentik accepts SAML from the enterprise IdP and
-  exposes an OIDC application to AF Stack.
+  exposes an OIDC application to BackAI.
 - **Managed**: WorkOS owns the SAML/OIDC broker and exposes the same
-  OIDC shape to AF Stack.
+  OIDC shape to BackAI.
 
 This keeps SAML XML parsing, signing-certificate rollover, and IdP
-metadata drift out of the Next.js app. AF Stack keeps only better-auth
+metadata drift out of the Next.js app. BackAI keeps only better-auth
 sessions in Postgres.
 
 Set these env vars on the dashboard and customer-app services:
@@ -114,7 +116,7 @@ AF_STACK_SSO_CLIENT_SECRET=...
 AF_STACK_SSO_SCOPES="openid email profile"
 ```
 
-`AF_STACK_SSO_DISCOVERY_URL` is optional. When omitted, AF Stack uses:
+`AF_STACK_SSO_DISCOVERY_URL` is optional. When omitted, BackAI uses:
 
 ```text
 <AF_STACK_SSO_ISSUER>/.well-known/openid-configuration

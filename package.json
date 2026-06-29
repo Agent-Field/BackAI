@@ -2,7 +2,7 @@
   "name": "af-stack",
   "version": "0.0.1",
   "private": true,
-  "description": "The open backend platform for the AI era. Self-host AgentField with everything else needed to ship a real product.",
+  "description": "The open-source AI app template with the backend already wired.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -16,6 +16,7 @@
   "packageManager": "pnpm@9.15.0",
   "scripts": {
     "generate:brand": "node scripts/generate-brand.mjs",
+    "preflight": "node scripts/preflight.mjs",
     "dev": "pnpm -r --parallel run dev",
     "build": "pnpm run generate:brand && pnpm -r run build",
     "test": "pnpm -r run test",

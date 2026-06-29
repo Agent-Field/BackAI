@@ -18,7 +18,9 @@ import (
 	"time"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/activity"
+	adapterregistry "github.com/Agent-Field/backai/services/runtime/internal/adapters/registry"
 	"github.com/Agent-Field/backai/services/runtime/internal/agentfield"
+	"github.com/Agent-Field/backai/services/runtime/internal/appmetrics"
 	"github.com/Agent-Field/backai/services/runtime/internal/audit"
 	"github.com/Agent-Field/backai/services/runtime/internal/billing"
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
@@ -39,7 +41,12 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/notifications"
 	"github.com/Agent-Field/backai/services/runtime/internal/oauth"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
+	obserrors "github.com/Agent-Field/backai/services/runtime/internal/observability/errors"
+	"github.com/Agent-Field/backai/services/runtime/internal/observability/logs"
+	"github.com/Agent-Field/backai/services/runtime/internal/observability/metrics"
+	"github.com/Agent-Field/backai/services/runtime/internal/observability/traces"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
+	"github.com/Agent-Field/backai/services/runtime/internal/probe"
 	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
 	"github.com/Agent-Field/backai/services/runtime/internal/sandbox"
 	"github.com/Agent-Field/backai/services/runtime/internal/search"
@@ -157,6 +164,12 @@ type Server struct {
 	// toolAdapters powers built-in adapter enablement and stateless
 	// calls. AgentField owns agent tool-call spans/traces.
 	toolAdapters *tooladapters.Service
+	// adapterRegistry is the runtime-owned inventory of backend adapter
+	// slots surfaced to the operator dashboard.
+	adapterRegistry *adapterregistry.Registry
+	probeRegistry   *probe.Registry
+	featureConfig   config.FeatureConfig
+	featureWarnings []config.ValidationError
 	// toolsRegistry is the strict-interface native tool surface
 	// (internal/tools). Construction in main.go via tools.BuildRegistry
 	// at boot; nil ⇒ list returns empty + mutations/invokes return 503.
@@ -180,6 +193,18 @@ type Server struct {
 	// reads from. nil ⇒ the endpoint serves an empty list. main.go
 	// constructs one at boot and tees the structured logger into it.
 	logRing *logger.Ring
+	// logsStore is the active logs adapter slot. It defaults to the ring
+	// adapter and may be Loki or remote when configured.
+	logsStore logs.Store
+	// tracesStore is the active traces adapter slot. It defaults to the empty
+	// adapter and may be Tempo or remote when configured.
+	tracesStore traces.Store
+	// metricsStore is the active metrics adapter slot. It defaults to the none
+	// adapter and may be Prometheus or remote when configured.
+	metricsStore metrics.Store
+	// errorsStore is the active errors adapter slot. It defaults to logfilter
+	// and may be GlitchTip or remote when configured.
+	errorsStore obserrors.Store
 	// version is the runtime version label surfaced in
 	// /api/v1/metrics/summary. Defaults to "dev" when empty.
 	version string
@@ -313,6 +338,12 @@ type Deps struct {
 	// ToolAdapters is the built-in agent tool adapter service. nil =
 	// list returns empty; mutations/calls return 503.
 	ToolAdapters *tooladapters.Service
+	// AdapterRegistry inventories the runtime's configured adapter slots.
+	// nil means /api/v1/admin/adapters returns an empty slot list.
+	AdapterRegistry *adapterregistry.Registry
+	ProbeRegistry   *probe.Registry
+	FeatureConfig   config.FeatureConfig
+	FeatureWarnings []config.ValidationError
 	// ToolsRegistry is the strict-interface native tool surface. nil =
 	// /api/v1/tools/native list returns empty; enable/invoke return 503.
 	ToolsRegistry *tools.Registry
@@ -330,6 +361,18 @@ type Deps struct {
 	// LogRing is the in-memory log buffer the /api/v1/logs endpoint
 	// reads from. Constructed in main.go and shared with the logger.
 	LogRing *logger.Ring
+	// LogsStore is the active logs adapter. When nil, New falls back to the
+	// compatibility ring path and the admin endpoint serves an empty page.
+	LogsStore logs.Store
+	// TracesStore is the active traces adapter. When nil, trace search serves
+	// an empty page and trace detail returns traces_no_backend.
+	TracesStore traces.Store
+	// MetricsStore is the active metrics adapter. When nil, admin metrics
+	// queries return metrics_no_backend.
+	MetricsStore metrics.Store
+	// ErrorsStore is the active errors adapter. When nil, admin errors queries
+	// return errors_no_backend.
+	ErrorsStore obserrors.Store
 	// Version is the runtime version string surfaced via
 	// /api/v1/metrics/summary. Defaults to "dev".
 	Version string
@@ -398,6 +441,10 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		mcpStore:        deps.MCPStore,
 		crons:           deps.Crons,
 		toolAdapters:    deps.ToolAdapters,
+		adapterRegistry: deps.AdapterRegistry,
+		probeRegistry:   deps.ProbeRegistry,
+		featureConfig:   deps.FeatureConfig,
+		featureWarnings: deps.FeatureWarnings,
 		toolsRegistry:   deps.ToolsRegistry,
 		oauthManager:    deps.OAuthManager,
 		oauthFactory:    deps.OAuthFactory,
@@ -405,6 +452,10 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		approvals:       deps.Approvals,
 		metricsRing:     newMetricsRing(MetricsRingSize),
 		logRing:         deps.LogRing,
+		logsStore:       deps.LogsStore,
+		tracesStore:     deps.TracesStore,
+		metricsStore:    deps.MetricsStore,
+		errorsStore:     deps.ErrorsStore,
 		version:         deps.Version,
 	}
 	if s.rbac == nil {
@@ -556,6 +607,18 @@ func (s *Server) registerRoutes() {
 	s.openapi.Register("GET", "/api/v1/runs", openapi.RouteMeta{
 		Summary: "List recent agent runs", Tags: []string{"dashboard"},
 	})
+	s.mux.HandleFunc("GET /api/v1/reasoners/analytics", s.handleReasonersAnalytics)
+	s.openapi.Register("GET", "/api/v1/reasoners/analytics", openapi.RouteMeta{
+		Summary: "Reasoner cost, latency, and error analytics", Tags: []string{"dashboard"},
+	})
+	s.mux.HandleFunc("GET /api/v1/tools/usage", s.handleToolsUsage)
+	s.openapi.Register("GET", "/api/v1/tools/usage", openapi.RouteMeta{
+		Summary: "Native and MCP tool usage analytics", Tags: []string{"dashboard"},
+	})
+	s.mux.HandleFunc("GET /api/v1/oauth/refresh-history", s.handleOAuthRefreshHistory)
+	s.openapi.Register("GET", "/api/v1/oauth/refresh-history", openapi.RouteMeta{
+		Summary: "OAuth refresh attempt history", Tags: []string{"oauth"},
+	})
 	s.mux.HandleFunc("GET /api/v1/runs/{id}/events", s.handleRunEvents)
 	s.openapi.Register("GET", "/api/v1/runs/{id}/events", openapi.RouteMeta{
 		Summary: "Subscribe to AgentField run events", Tags: []string{"agents"},
@@ -659,6 +722,24 @@ func (s *Server) registerRoutes() {
 	// wired (the latter is Phase 6.1's responsibility).
 	s.registerAdminRoutes()
 	s.registerAdminOpenAPI()
+	s.registerAdminAdapterRoutes()
+	s.registerAdminAdapterOpenAPI()
+	s.registerAdminServicesRoutes()
+	s.registerAdminServicesOpenAPI()
+	s.registerAdminEventsRoutes()
+	s.registerAdminEventsOpenAPI()
+	s.registerAdminAnchorsRoutes()
+	s.registerAdminAnchorsOpenAPI()
+	s.registerAdminDemoRoutes()
+	s.registerAdminDemoOpenAPI()
+	s.registerAdminFeaturesRoutes()
+	s.registerAdminFeaturesOpenAPI()
+	s.registerDBHealthRoutes()
+	s.registerDBHealthOpenAPI()
+	s.registerLLMProviderHealthRoutes()
+	s.registerLLMProviderHealthOpenAPI()
+	s.registerAdminBrandRoutes()
+	s.registerAdminBrandOpenAPI()
 
 	// GDPR/data-rights endpoints for AF Stack-held app/backend records.
 	// AgentField-owned runs/spans/traces/sessions/memory stay in
@@ -756,11 +837,23 @@ func (s *Server) registerRoutes() {
 	// is available even without a DB.
 	s.registerMetricsRoutes()
 	s.registerMetricsOpenAPI()
+	s.registerAdminMetricsRoutes()
+	s.registerAdminMetricsOpenAPI()
+
+	// Errors adapter slot. The default logfilter adapter groups error logs with
+	// volatile status overrides; GlitchTip/remote activate by config.
+	s.registerAdminErrorsRoutes()
+	s.registerAdminErrorsOpenAPI()
 
 	// Logs (Phase 12.2). When no ring is wired the endpoint serves an
 	// empty array; otherwise returns the most-recent buffered lines.
 	s.registerLogsRoutes()
 	s.registerLogsOpenAPI()
+
+	// Traces adapter slot. The default empty adapter serves zero-state search
+	// and reports no backend for trace detail; Tempo/remote activate by config.
+	s.registerTraceRoutes()
+	s.registerTraceOpenAPI()
 
 	if s.tel != nil {
 		s.mux.Handle("GET /metrics", s.tel.MetricsHandler())
@@ -1053,6 +1146,17 @@ func (s *Server) logGatewayRequest(
 	executionID string,
 	startedAt time.Time,
 ) {
+	// backai_runs_total intentionally uses this hook because /api/v1/runs
+	// is also sourced from suite_gateway_requests filtered to agent execute
+	// endpoints. This keeps the metric and dashboard on one terminal source.
+	if strings.HasPrefix(endpoint, "/api/v1/execute/") {
+		metricStatus := "failed"
+		if status >= 200 && status < 400 {
+			metricStatus = "succeeded"
+		}
+		appmetrics.ObserveRun(agentFromEndpoint(endpoint), metricStatus)
+	}
+
 	if s.db == nil || s.db.Pool == nil {
 		return
 	}

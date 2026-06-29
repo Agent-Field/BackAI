@@ -1,6 +1,6 @@
 # User Activity Log
 
-AF Stack includes a tenant-scoped activity log for product events in
+BackAI includes a tenant-scoped activity log for product events in
 the app you build on the stack.
 
 Use it for customer-facing events:

@@ -1,6 +1,6 @@
 # Storage Transforms
 
-AF Stack can transform image objects while serving `GET /api/v1/storage/{key}`.
+BackAI can transform image objects while serving `GET /api/v1/storage/{key}`.
 The original object is not modified. Uploads, signed URLs, and list metadata
 continue to operate on the stored object.
 

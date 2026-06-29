@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -32,9 +33,19 @@ const refreshSkew = 60 * time.Second
 // rely on RLS for the tenant scope — RLS is a defense-in-depth layer,
 // not the authority). Vault.Put / Get use the tenant id explicitly.
 type Manager struct {
-	pool  *pgxpool.Pool
-	vault *secrets.Vault
-	log   *slog.Logger
+	pool      *pgxpool.Pool
+	vault     *secrets.Vault
+	log       *slog.Logger
+	refreshCh chan refreshLogEvent
+}
+
+type refreshLogEvent struct {
+	TenantID    string
+	Provider    string
+	UserID      string
+	Status      string
+	ErrorCode   string
+	AttemptedAt time.Time
 }
 
 // NewManager constructs a Manager. Both pool and vault must be non-nil
@@ -50,7 +61,9 @@ func NewManager(pool *pgxpool.Pool, vault *secrets.Vault, log *slog.Logger) (*Ma
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Manager{pool: pool, vault: vault, log: log}, nil
+	m := &Manager{pool: pool, vault: vault, log: log, refreshCh: make(chan refreshLogEvent, 1024)}
+	go m.runRefreshLog()
+	return m, nil
 }
 
 // vaultKey returns the secrets-vault key for a token. Refresh tokens
@@ -200,10 +213,24 @@ func (m *Manager) Token(
 		}
 		refresh, err := m.vault.Get(ctx, tenantID, *row.RefreshTokenRef)
 		if err != nil {
+			m.recordRefreshAttempt(ctx, refreshLogEvent{
+				TenantID:  tenantID,
+				UserID:    userID,
+				Provider:  provider,
+				Status:    "failed",
+				ErrorCode: "refresh_token_load_failed",
+			})
 			return TokenSet{}, fmt.Errorf("oauth: load refresh token from vault: %w", err)
 		}
 		next, err := p.Refresh(ctx, string(refresh))
 		if err != nil {
+			m.recordRefreshAttempt(ctx, refreshLogEvent{
+				TenantID:  tenantID,
+				UserID:    userID,
+				Provider:  provider,
+				Status:    "failed",
+				ErrorCode: refreshErrorCode(err),
+			})
 			return TokenSet{}, fmt.Errorf("oauth: refresh failed: %w", err)
 		}
 		// Providers vary: Google returns a new refresh token only on
@@ -217,12 +244,99 @@ func (m *Manager) Token(
 			next.Scopes = row.Scopes
 		}
 		if err := m.StoreTokens(ctx, tenantID, userID, provider, next); err != nil {
+			m.recordRefreshAttempt(ctx, refreshLogEvent{
+				TenantID:  tenantID,
+				UserID:    userID,
+				Provider:  provider,
+				Status:    "failed",
+				ErrorCode: "refresh_store_failed",
+			})
 			return TokenSet{}, err
 		}
+		m.recordRefreshAttempt(ctx, refreshLogEvent{
+			TenantID: tenantID,
+			UserID:   userID,
+			Provider: provider,
+			Status:   "success",
+		})
 		return next, nil
 	}
 
 	return ts, nil
+}
+
+func (m *Manager) recordRefreshAttempt(_ context.Context, ev refreshLogEvent) {
+	if m == nil || m.pool == nil || m.refreshCh == nil {
+		return
+	}
+	if ev.AttemptedAt.IsZero() {
+		ev.AttemptedAt = time.Now().UTC()
+	}
+	select {
+	case m.refreshCh <- ev:
+	default:
+		m.log.Warn("oauth: dropping refresh history event; buffer full",
+			"tenant_id", ev.TenantID,
+			"provider", ev.Provider,
+			"status", ev.Status,
+		)
+	}
+}
+
+func (m *Manager) runRefreshLog() {
+	for ev := range m.refreshCh {
+		m.insertRefreshLog(ev)
+	}
+}
+
+func (m *Manager) insertRefreshLog(ev refreshLogEvent) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	tx, err := m.pool.Begin(ctx)
+	if err != nil {
+		m.log.Warn("oauth: refresh history begin failed", "error", err)
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		m.log.Warn("oauth: refresh history bypass failed", "error", err)
+		return
+	}
+	var errorCode *string
+	if ev.ErrorCode != "" {
+		errorCode = &ev.ErrorCode
+	}
+	_, err = tx.Exec(ctx, `
+        insert into suite_oauth_refresh_log
+          (tenant_id, provider, user_id, status, error_code, attempted_at)
+        values ($1, $2, $3, $4, $5, $6)
+    `, ev.TenantID, ev.Provider, ev.UserID, ev.Status, errorCode, ev.AttemptedAt)
+	if err != nil {
+		m.log.Warn("oauth: refresh history insert failed",
+			"tenant_id", ev.TenantID,
+			"provider", ev.Provider,
+			"status", ev.Status,
+			"error", err,
+		)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		m.log.Warn("oauth: refresh history commit failed", "error", err)
+	}
+}
+
+func refreshErrorCode(err error) string {
+	if err == nil {
+		return ""
+	}
+	code := strings.TrimSpace(err.Error())
+	if code == "" {
+		return "refresh_failed"
+	}
+	if len(code) > 160 {
+		code = code[:160]
+	}
+	return code
 }
 
 // List returns the active (non-revoked) connections for (tenantID,

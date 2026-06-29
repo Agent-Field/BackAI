@@ -12,7 +12,10 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/Agent-Field/backai/services/runtime/internal/probe"
 )
 
 // LiteLLMAdmin is a thin HTTP client over LiteLLM's admin API.
@@ -38,6 +41,12 @@ type LiteLLMAdmin struct {
 	baseURL    string
 	masterKey  string
 	httpClient *http.Client
+
+	mu             sync.RWMutex
+	keyMgmt        KeyMgmt
+	keyMgmtProbed  bool
+	keyMgmtLastErr string
+	probes         *probe.Registry
 }
 
 // NewLiteLLMAdmin constructs an admin client. baseURL is the LiteLLM
@@ -54,6 +63,19 @@ func NewLiteLLMAdmin(baseURL, masterKey string) *LiteLLMAdmin {
 	}
 }
 
+// WithProbeRegistry connects the shared capability-probe registry. The
+// public key-management methods remain on LiteLLMAdmin so Block 1 callers do
+// not change, but the registry owns the actual /key/info probe.
+func (a *LiteLLMAdmin) WithProbeRegistry(reg *probe.Registry) *LiteLLMAdmin {
+	if a == nil {
+		return nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.probes = reg
+	return a
+}
+
 // Configured returns true when both baseURL and masterKey are set.
 // Tenancy code uses this to decide whether to attempt LiteLLM mirroring
 // at all — in environments without LiteLLM the suite_api_keys row is
@@ -64,6 +86,119 @@ func (a *LiteLLMAdmin) Configured() bool {
 		return false
 	}
 	return a.baseURL != "" && a.masterKey != ""
+}
+
+// KeyMgmt is the probed operational mode of LiteLLM's admin key surface.
+type KeyMgmt string
+
+const (
+	KeyMgmtUnknown     KeyMgmt = "unknown"
+	KeyMgmtStateless   KeyMgmt = "stateless"
+	KeyMgmtVirtualKeys KeyMgmt = "virtual_keys"
+)
+
+// VirtualKeysActive reports whether the cached boot-time probe confirmed
+// LiteLLM can create/read virtual keys. Unknown is deliberately false.
+func (a *LiteLLMAdmin) VirtualKeysActive() bool {
+	if a == nil {
+		return false
+	}
+	if mode, _, ok := a.keyManagementFromProbe(); ok {
+		return mode == KeyMgmtVirtualKeys
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.keyMgmt == KeyMgmtVirtualKeys
+}
+
+// KeyManagement returns the cached probe result and last probe error text.
+func (a *LiteLLMAdmin) KeyManagement() (KeyMgmt, string) {
+	if a == nil {
+		return KeyMgmtUnknown, ""
+	}
+	if mode, errText, ok := a.keyManagementFromProbe(); ok {
+		return mode, errText
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if !a.keyMgmtProbed {
+		return KeyMgmtUnknown, a.keyMgmtLastErr
+	}
+	return a.keyMgmt, a.keyMgmtLastErr
+}
+
+// ProbeKeyManagement detects whether the LiteLLM sidecar has its
+// virtual-key database connected. Stateless LiteLLM still handles model
+// routing through the master key, but key issue/rotate must not assume
+// /key/generate is available.
+func (a *LiteLLMAdmin) ProbeKeyManagement(ctx context.Context) (KeyMgmt, error) {
+	if !a.Configured() {
+		a.setKeyManagement(KeyMgmtStateless, "")
+		return KeyMgmtStateless, nil
+	}
+	a.mu.RLock()
+	reg := a.probes
+	a.mu.RUnlock()
+	var (
+		res probe.Result
+		ok  bool
+	)
+	if reg != nil {
+		res, ok = reg.Run(ctx, probe.LiteLLMVirtualKeysProbeID)
+	}
+	if !ok {
+		p := probe.NewLiteLLMVirtualKeysProbe(a.baseURL, a.masterKey, 0)
+		var err error
+		res, err = p.Run(ctx)
+		if err != nil {
+			res.LastErr = err
+		}
+	}
+	mode, errText := keyManagementFromProbeResult(res)
+	a.setKeyManagement(mode, errText)
+	if res.LastErr != nil {
+		return mode, res.LastErr
+	}
+	return mode, nil
+}
+
+func (a *LiteLLMAdmin) setKeyManagement(mode KeyMgmt, lastErr string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.keyMgmt = mode
+	a.keyMgmtProbed = true
+	a.keyMgmtLastErr = lastErr
+}
+
+func (a *LiteLLMAdmin) keyManagementFromProbe() (KeyMgmt, string, bool) {
+	a.mu.RLock()
+	reg := a.probes
+	a.mu.RUnlock()
+	if reg == nil {
+		return KeyMgmtUnknown, "", false
+	}
+	res, ok := reg.Get(probe.LiteLLMVirtualKeysProbeID)
+	if !ok {
+		return KeyMgmtUnknown, "", false
+	}
+	mode, errText := keyManagementFromProbeResult(res)
+	return mode, errText, true
+}
+
+func keyManagementFromProbeResult(res probe.Result) (KeyMgmt, string) {
+	errText := ""
+	if res.LastErr != nil {
+		errText = res.LastErr.Error()
+	}
+	active, _ := res.Value.(bool)
+	switch {
+	case active:
+		return KeyMgmtVirtualKeys, errText
+	case res.Severity == probe.SeverityUnavailable && errText != "":
+		return KeyMgmtUnknown, errText
+	default:
+		return KeyMgmtStateless, errText
+	}
 }
 
 // ─── Wire shapes ─────────────────────────────────────────────────────────

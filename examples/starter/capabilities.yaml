@@ -1,0 +1,24 @@
+id: starter
+name: Starter
+profile: neutral-fork-basis
+default_path: false
+summary: Smallest copyable set of product extension surfaces.
+requires:
+  provider_key: optional
+  auth: inherited
+  multi_tenancy: inherited
+  billing: optional
+  storage: false
+  sandbox: false
+  github: false
+demonstrates:
+  - agent
+  - customer_app_page
+  - dashboard_plugin
+  - workload_module
+deploy:
+  compose: copy_into_root_stack
+  railway: copy_into_root_template
+notes:
+  - Copy pieces into a fork rather than running this as a standalone product.
+  - Use this when SupportDesk AI is too domain-specific for your starting point.

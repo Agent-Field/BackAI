@@ -1,6 +1,6 @@
 # Theming and Branding
 
-AF Stack branding starts in root [`brand.yaml`](../brand.yaml). For a
+BackAI branding starts in root [`brand.yaml`](../brand.yaml). For a
 new fork, prefer the CLI:
 
 ```bash

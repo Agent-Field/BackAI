@@ -1,4 +1,4 @@
-# Example walk: Shipwright (SWE-AF SaaS)
+# Example Walk: Shipwright
 
 Validation workload #2: the **heavy AI** case. Sandbox-critical, multi-tenant
 with untrusted code, long-running agent fan-outs.
@@ -73,7 +73,7 @@ shipwright/
 5. **billing** module checks budget → OK
 6. Handler persists build, calls `swe-planner.build` async
 7. **AF** queues the call in its durable queue
-8. SWE-AF planner agent reads goal, spawns architect → N coders → QA → reviewer
+8. Coding-agent planner reads goal, spawns architect -> N coders -> QA -> reviewer
 9. Each coder agent calls `app.harness("...", provider="claude-code")`
 10. Claude Code, when it runs `Bash`, calls `app.sandbox.run(...)` →
     **sandbox** module routes to Firecracker pool
@@ -92,7 +92,7 @@ Single build touches: identity → MT → gateway → AF (heavy) → llm-gateway
 sandbox (heavy) → git-workload → notifications → billing/metering →
 webhooks-in. **Ten modules in concert.**
 
-Critically: SWE-AF's existing code did not change. `app.sandbox.run()`
+Critically: the coding-agent code did not change. `app.sandbox.run()`
 absorbed the difference between dev (Docker) and prod (Firecracker).
 
 ## Code samples
@@ -102,7 +102,7 @@ absorbed the difference between dev (Docker) and prod (Firecracker).
 @app.reasoner()
 async def estimate_build_cost(goal: dict) -> dict:
     estimate = await app.ai(
-        system="Estimate USD cost for a SWE-AF run.",
+        system="Estimate USD cost for a coding-agent run.",
         user=f"Goal: {goal['text']}\nRepo size: {goal['loc']} LOC",
         schema=CostEstimate,
     )
@@ -135,7 +135,7 @@ async def create_build(body: dict):
     return {"build_id": build.id, "estimate_usd": estimate["estimated_usd"]}
 ```
 
-**Sandbox call (unchanged from SWE-AF's original code):**
+**Sandbox call (unchanged from the coding-agent code):**
 ```python
 result = await app.sandbox.run(
     image="node:20-alpine",
@@ -192,4 +192,4 @@ None are blockers. All are documentation, not redesign.
 - Heavy AF usage (~20 agents) sits alongside custom agents without conflict
 - Suite primitives compose: 10 modules touched per build, the dev's mental
   load was 3-4
-- The "import SWE-AF as a module" mechanism is the key to viral reuse
+- The "import the domain app as a module" mechanism is the key to reuse

@@ -17,7 +17,7 @@ export function middleware(request: NextRequest) {
     return NextResponse.next()
   }
 
-  // Root: send to dashboard if signed in, sign-in otherwise.
+  // Root: send to the customer help center if signed in, sign-in otherwise.
   const sessionCookie = getSessionCookie(request)
   if (!sessionCookie) {
     const url = request.nextUrl.clone()

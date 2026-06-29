@@ -243,5 +243,5 @@ services/runtime/internal/modules/<your-id>/
 See `services/runtime/internal/modules/modules.go` for the `Module`
 interface contract. Registration happens in
 `services/runtime/cmd/af-stack/main.go`. Don't add Go modules without
-reading `STRATEGY.md` first — eventually is when this becomes the canonical
+reading `development/strategy.md` first — eventually is when this becomes the canonical
 shape.

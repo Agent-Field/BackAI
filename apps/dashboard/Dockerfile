@@ -20,7 +20,7 @@ RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
 COPY --from=deps /app /app
 COPY apps/dashboard apps/dashboard
-COPY BRAND.yaml brand.yaml
+COPY brand.yaml brand.yaml
 COPY scripts/generate-brand.mjs scripts/generate-brand.mjs
 COPY tsconfig.base.json ./
 

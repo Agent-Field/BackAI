@@ -1,6 +1,7 @@
 # Deploy Internals
 
-How the AF Stack runtime behaves under Kubernetes / Fly / any orchestrator that sends SIGTERM and probes `/health` + `/ready`. Phase 14.3.
+How the BackAI runtime behaves under Kubernetes / Fly / any orchestrator
+that sends SIGTERM and probes `/health` + `/ready`.
 
 ## Probes
 
@@ -65,7 +66,9 @@ Response body during drain:
 }
 ```
 
-Top-level `status` and `since_s` are probe-friendly (kubectl describe pod surfaces them). The `error` envelope mirrors the standard Phase 6 contract so SDKs can branch on `error.code == "NOT_READY"`.
+Top-level `status` and `since_s` are probe-friendly. The `error`
+envelope mirrors the standard runtime API contract so SDKs can branch on
+`error.code == "NOT_READY"`.
 
 Kubernetes config:
 

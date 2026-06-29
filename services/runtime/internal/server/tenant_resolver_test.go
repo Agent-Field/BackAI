@@ -62,7 +62,7 @@ func runThroughResolver(
 // gets the seeded default tenant id and proceeds.
 func TestResolverMultiTenancyOff(t *testing.T) {
 	s := newResolverTestServer(t, false)
-	req := httptest.NewRequest("GET", "/api/v1/secrets", nil)
+	req := httptest.NewRequest("GET", "/api/v1/private", nil)
 	rec, ctx := runThroughResolver(t, s, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 with MT off, got %d body=%s", rec.Code, rec.Body.String())
@@ -75,10 +75,10 @@ func TestResolverMultiTenancyOff(t *testing.T) {
 	}
 }
 
-// TestResolverPublicPaths confirms /health, /ready, /metrics, and the
-// dashboard read prefixes skip resolution even when MT is on. Without
-// this, the dashboard's first load would 401 before the operator logs
-// in.
+// TestResolverPublicPaths confirms /health, /ready, /metrics, exact
+// agent discovery, and the dashboard read prefixes skip resolution
+// even when MT is on. Without this, the dashboard's first load would
+// 401 before the operator logs in.
 func TestResolverPublicPaths(t *testing.T) {
 	s := newResolverTestServer(t, true)
 	cases := []string{
@@ -90,6 +90,8 @@ func TestResolverPublicPaths(t *testing.T) {
 		"/api/v1/runs?limit=10",
 		"/api/v1/home/overview",
 		"/api/v1/modules",
+		"/api/v1/secrets",
+		"/api/v1/config/flags",
 	}
 	for _, path := range cases {
 		req := httptest.NewRequest("GET", path, nil)
@@ -110,7 +112,7 @@ func TestResolverPublicPaths(t *testing.T) {
 // MT on + no credentials -> 401 with the standard envelope.
 func TestResolverDeniesUnauthenticatedWhenMTOn(t *testing.T) {
 	s := newResolverTestServer(t, true)
-	req := httptest.NewRequest("GET", "/api/v1/secrets", nil)
+	req := httptest.NewRequest("GET", "/api/v1/private", nil)
 	rec, ctx := runThroughResolver(t, s, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d body=%s", rec.Code, rec.Body.String())
@@ -131,7 +133,7 @@ func TestResolverDeniesUnauthenticatedWhenMTOn(t *testing.T) {
 // wire response.
 func TestResolverInvalidBearerReturns401(t *testing.T) {
 	s := newResolverTestServer(t, true)
-	req := httptest.NewRequest("GET", "/api/v1/secrets", nil)
+	req := httptest.NewRequest("GET", "/api/v1/private", nil)
 	req.Header.Set("Authorization", "Bearer not-a-real-token")
 	rec, _ := runThroughResolver(t, s, req)
 	if rec.Code != http.StatusUnauthorized {
@@ -154,16 +156,17 @@ func TestResolverIsPublicPath(t *testing.T) {
 		{"/metrics", true},
 		{"/openapi.json", true},
 		{"/api/v1/agents", true},
-		{"/api/v1/agents/foo", true}, // sub-path matches via prefix
+		{"/api/v1/agents/foo", false},
 		{"/api/v1/runs", true},
 		{"/api/v1/home/overview", true},
 		{"/api/v1/cost", true},
 		{"/api/v1/modules", true},
 		{"/api/v1/queues", true},
-		{"/api/v1/admin/tenants", true},   // admin gates itself
-		{"/api/v1/db/tables", true},       // DB studio is dashboard-gated
-		{"/api/v1/db/sql", true},          // DB studio is dashboard-gated
-		{"/api/v1/secrets", false},
+		{"/api/v1/admin/tenants", true}, // admin gates itself
+		{"/api/v1/db/tables", true},     // DB studio is dashboard-gated
+		{"/api/v1/db/sql", true},        // DB studio is dashboard-gated
+		{"/api/v1/secrets", true},
+		{"/api/v1/config/flags", true},
 		{"/api/v1/storage", false},
 		{"/api/v1/jobs", false},
 		{"/randompath", false},

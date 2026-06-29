@@ -24,6 +24,7 @@ func newTestLogger() *slog.Logger {
 type fakeMirror struct {
 	mu          sync.Mutex
 	configured  bool
+	virtualKeys bool
 	genCalls    []LiteLLMKeyConfig
 	deleteCalls []string
 	updateCalls []struct {
@@ -40,6 +41,9 @@ type fakeMirror struct {
 }
 
 func (f *fakeMirror) Configured() bool { return f.configured }
+func (f *fakeMirror) VirtualKeysActive() bool {
+	return f.configured && f.virtualKeys
+}
 func (f *fakeMirror) GenerateKey(ctx context.Context, cfg LiteLLMKeyConfig) (LiteLLMKeyInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

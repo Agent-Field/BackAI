@@ -23,6 +23,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/Agent-Field/backai/services/runtime/internal/appmetrics"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -54,6 +55,7 @@ func NewRecorder(pool *pgxpool.Pool, log *slog.Logger) *Recorder {
 // /api/v1/llm/*. Failures are logged at Warn so operators still see
 // them; counters in observability/ will surface persistent drops.
 func (r *Recorder) Record(ctx context.Context, ev Event) error {
+	appmetrics.ObserveCostUSD(ev.TenantID, ev.Model, ev.Agent, ev.CostUSD)
 	if r == nil || r.pool == nil {
 		// No DB wired: silently drop. The dashboard renders zeros.
 		return nil
@@ -74,7 +76,11 @@ func (r *Recorder) Record(ctx context.Context, ev Event) error {
 	// Empty strings become NULL via *string. tenantPtr / apiKeyPtr go
 	// to the FK columns; both have ON DELETE SET NULL so a deleted
 	// tenant/key doesn't break aggregation of historical events.
-	var tenantPtr, apiKeyPtr, agentPtr *string
+	var requestPtr, tenantPtr, apiKeyPtr, agentPtr, reasonerPtr, errorCodePtr *string
+	if ev.RequestID != "" {
+		rid := ev.RequestID
+		requestPtr = &rid
+	}
 	if ev.TenantID != "" {
 		tid := ev.TenantID
 		tenantPtr = &tid
@@ -86,6 +92,14 @@ func (r *Recorder) Record(ctx context.Context, ev Event) error {
 	if ev.Agent != "" {
 		ag := ev.Agent
 		agentPtr = &ag
+	}
+	if ev.Reasoner != "" {
+		reasoner := ev.Reasoner
+		reasonerPtr = &reasoner
+	}
+	if ev.ErrorCode != "" {
+		errorCode := ev.ErrorCode
+		errorCodePtr = &errorCode
 	}
 
 	// Use a short-lived write context so a slow PG can't tie up the
@@ -100,16 +114,18 @@ func (r *Recorder) Record(ctx context.Context, ev Event) error {
 
 	_, err := r.pool.Exec(writeCtx, `
         insert into suite_cost_events
-            (tenant_id, api_key_id, model, provider, agent,
+            (request_id, tenant_id, api_key_id, model, provider, agent, reasoner,
              prompt_tokens, completion_tokens, total_tokens,
-             cost_usd, cached, latency_ms, occurred_at, modality)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+             cost_usd, cached, latency_ms, occurred_at, modality, status_code, error_code)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
     `,
+		requestPtr,
 		tenantPtr,
 		apiKeyPtr,
 		ev.Model,
 		ev.Provider,
 		agentPtr,
+		reasonerPtr,
 		ev.PromptTokens,
 		ev.CompletionTokens,
 		total,
@@ -118,6 +134,8 @@ func (r *Recorder) Record(ctx context.Context, ev Event) error {
 		ev.LatencyMS,
 		occurredAt,
 		modality,
+		ev.StatusCode,
+		errorCodePtr,
 	)
 	if err != nil {
 		r.log.Warn("cost: ledger write failed",

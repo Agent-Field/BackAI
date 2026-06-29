@@ -18,5 +18,5 @@ const sizes = await page.evaluate(() => ({
   viewportWidth: window.innerWidth,
 }))
 console.log(sizes)
-await page.screenshot({ path: "/Users/santoshkumarradha/Documents/agentfield/code/platform/af-stack/dashboard-screenshots/db-debug.png", fullPage: false })
+await page.screenshot({ path: "/Users/santoshkumarradha/Documents/agentfield/code/platform/af-stack/docs/assets/dashboard-screenshots/db-debug.png", fullPage: false })
 await browser.close()

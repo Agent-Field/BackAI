@@ -151,6 +151,9 @@ export const RunSchema = z.object({
   agent: z.string(),
   status: z.enum(["queued", "running", "succeeded", "failed", "cancelled"]),
   tenant_id: z.string().optional(),
+  // Joined via suite_tenants in the runs handler so the dashboard can
+  // render a friendly tenant name without a second round trip.
+  tenant_name: z.string().optional(),
   started_at: z.string(),
   duration_ms: z.number().optional(),
   cost_usd: z.number().optional(),
@@ -193,6 +196,9 @@ export type RunOverview = z.infer<typeof RunOverviewSchema>
 export const RunAgentFieldSchema = z.object({
   overview: RunOverviewSchema,
   agentfield_url: z.string(),
+  // Browser-friendly UI deep link for "Open in AgentField". `details_url`
+  // still points at the JSON API for programmatic consumers.
+  ui_url: z.string().optional(),
   details_url: z.string(),
   actions_available: z.array(z.string()),
 })
@@ -240,11 +246,32 @@ export const CostSummarySchema = z.object({
 })
 export type CostSummary = z.infer<typeof CostSummarySchema>
 
+// Per-tenant budgets folded into a single scalar summary for the Home
+// "Budget consumed %" tile. Closes Gap 4 from
+// development/ux/required-backend-gaps.md.
+export const BudgetsAggregateSchema = z.object({
+  tenants_at_risk: z.number(),
+  avg_consumed_pct: z.number(),
+  tenant_count: z.number(),
+})
+export type BudgetsAggregate = z.infer<typeof BudgetsAggregateSchema>
+
 export const HomeOverviewSchema = z.object({
   requests_per_minute: z.number(),
   error_rate: z.number(),
   cost_today_usd: z.number(),
   queue_depth: z.number(),
+  // live_runs + failed_runs_last_24h + budgets_aggregate close Gaps 1–4
+  // from development/ux/required-backend-gaps.md. See dashboard.go for the
+  // server-side sources.
+  live_runs: z.number(),
+  failed_runs_last_24h: z.number(),
+  budgets_aggregate: BudgetsAggregateSchema,
+  // Server-side computed delta-vs-prior-window (4h vs 4h prior). Direction-
+  // semantics (good vs bad) are tile-specific and handled in the dashboard.
+  request_delta_pct: z.number(),
+  error_delta_pct: z.number(),
+  cost_delta_pct: z.number(),
   request_sparkline: z.array(z.number()),
   error_sparkline: z.array(z.number()),
   cost_sparkline: z.array(z.number()),
@@ -270,9 +297,60 @@ export const HomeOverviewSchema = z.object({
 })
 export type HomeOverview = z.infer<typeof HomeOverviewSchema>
 
+// Unified admin events feed (Gap 5). One row per event across runs,
+// webhook deliveries, system alerts, and the customer-facing activity log,
+// chronologically sorted server-side.
+export const AdminEventSchema = z.object({
+  kind: z.string(),
+  id: z.string(),
+  severity: z.enum(["info", "warning", "critical"]),
+  title: z.string(),
+  description: z.string().optional(),
+  source: z.enum(["runs", "webhooks", "activity", "alerts"]),
+  resource_id: z.string().optional(),
+  occurred_at: z.string(),
+})
+export type AdminEvent = z.infer<typeof AdminEventSchema>
+
+export const AdminEventListSchema = z.object({
+  events: z.array(AdminEventSchema),
+})
+export type AdminEventList = z.infer<typeof AdminEventListSchema>
+
+// Top-bar anchors — single round-trip for Inbox count + Cost today +
+// Health dot, polled on every page. Closes Gap 6.
+//
+// `inbox_has_critical` lights the badge red when at least one inbox item
+// is critical severity. Today only the AgentField/DB unhealthy probes
+// raise critical; approvals are watch-level.
+export const AdminAnchorsSchema = z.object({
+  inbox_pending: z.number(),
+  inbox_has_critical: z.boolean(),
+  cost_today_usd: z.number(),
+  // Same-wall-clock-window spend yesterday so the Cost anchor can render
+  // a delta indicator without a second round trip.
+  cost_yesterday_same_window_usd: z.number(),
+  health: z.enum(["healthy", "degraded", "down"]),
+})
+export type AdminAnchors = z.infer<typeof AdminAnchorsSchema>
+
+// Demo-data seeder response. Inserts/Removes are per-table counts so the
+// dashboard can render "seeded N rows" toasts.
+export const DemoSeedCountsSchema = z.object({
+  gateway_requests: z.number(),
+  cost_events: z.number(),
+  webhook_deliveries: z.number(),
+  activity_entries: z.number(),
+})
+export const DemoSeedResponseSchema = z.object({
+  inserted: DemoSeedCountsSchema,
+  removed: DemoSeedCountsSchema,
+})
+export type DemoSeedResponse = z.infer<typeof DemoSeedResponseSchema>
+
 export const LogLineSchema = z.object({
   ts: z.string(),
-  level: z.enum(["debug", "info", "warn", "error"]),
+  level: z.enum(["debug", "info", "warn", "error", "fatal"]),
   service: z.string(),
   msg: z.string(),
   request_id: z.string().optional(),
@@ -280,6 +358,115 @@ export const LogLineSchema = z.object({
   agent: z.string().optional(),
 })
 export type LogLine = z.infer<typeof LogLineSchema>
+
+export const LogListSchema = z.object({
+  logs: z.array(LogLineSchema),
+  total: z.number().optional(),
+  next_cursor: z.string().optional(),
+  has_more: z.boolean().optional(),
+})
+export type LogList = z.infer<typeof LogListSchema>
+
+export const LogCapabilitiesSchema = z.object({
+  supports_tail: z.boolean().default(false),
+  supports_full_text: z.boolean().default(false),
+  supports_regex_search: z.boolean().default(false),
+  supports_trace_id: z.boolean().default(false),
+  native_query_lang: z.string().default(""),
+  retention_days: z.number().default(0),
+  max_entries_per_page: z.number().default(0),
+})
+export type LogCapabilities = z.infer<typeof LogCapabilitiesSchema>
+
+export const TraceSummarySchema = z.object({
+  trace_id: z.string(),
+  root_service: z.string().default("unknown"),
+  root_operation: z.string().default("trace"),
+  start_time: z.string().default(""),
+  duration_ms: z.number().default(0),
+  span_count: z.number().default(0),
+  status: z.string().default("unset"),
+})
+export type TraceSummary = z.infer<typeof TraceSummarySchema>
+
+export const SpanEventSchema = z.object({
+  ts: z.string().default(""),
+  name: z.string(),
+  attributes: z.record(z.string(), z.unknown()).optional(),
+})
+
+export const SpanSchema = z.object({
+  span_id: z.string(),
+  parent_span_id: z.string().default(""),
+  service: z.string().default("unknown"),
+  operation: z.string().default("span"),
+  start_time: z.string().default(""),
+  duration_ms: z.number().default(0),
+  status: z.string().default("unset"),
+  attributes: z.record(z.string(), z.unknown()).optional(),
+  events: z.array(SpanEventSchema).optional(),
+})
+export type TraceSpan = z.infer<typeof SpanSchema>
+
+export const TraceSearchSchema = z.object({
+  traces: z.array(TraceSummarySchema),
+  total: z.number().optional(),
+  has_more: z.boolean().optional(),
+})
+export type TraceSearch = z.infer<typeof TraceSearchSchema>
+
+export const TraceDetailSchema = z.object({
+  trace_id: z.string(),
+  spans: z.array(SpanSchema),
+})
+export type TraceDetail = z.infer<typeof TraceDetailSchema>
+
+export const TraceCapabilitiesSchema = z.object({
+  supports_traceql: z.boolean().default(false),
+  supports_tag_search: z.boolean().default(false),
+  native_query_lang: z.string().default(""),
+  retention_hours: z.number().default(0),
+  max_results_per_query: z.number().default(0),
+})
+export type TraceCapabilities = z.infer<typeof TraceCapabilitiesSchema>
+
+export const ErrorGroupSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  service: z.string(),
+  status: z.enum(["open", "muted", "resolved"]),
+  count: z.number().default(0),
+  user_count: z.number().optional(),
+  first_seen: z.string().default(""),
+  last_seen: z.string().default(""),
+  fingerprint: z.string().optional(),
+  permalink: z.string().optional(),
+  culprit: z.string().optional(),
+  sample_event: z.record(z.string(), z.unknown()).optional(),
+})
+export type ErrorGroup = z.infer<typeof ErrorGroupSchema>
+
+export const ErrorListSchema = z.object({
+  groups: z.array(ErrorGroupSchema),
+  total: z.number().optional(),
+  next_cursor: z.string().optional(),
+  has_more: z.boolean().optional(),
+})
+export type ErrorList = z.infer<typeof ErrorListSchema>
+
+export const ErrorCapabilitiesSchema = z.object({
+  supports_list: z.boolean().default(false),
+  supports_get: z.boolean().default(false),
+  supports_mute: z.boolean().default(false),
+  supports_resolve: z.boolean().default(false),
+  supports_ingest: z.boolean().default(false),
+  supports_alerting: z.boolean().default(false),
+  native_query_lang: z.string().default(""),
+  retention_days: z.number().default(0),
+  persistence: z.string().default(""),
+  max_groups_per_page: z.number().default(0),
+})
+export type ErrorCapabilities = z.infer<typeof ErrorCapabilitiesSchema>
 
 export const QueueSummarySchema = z.object({
   pending: z.number(),
@@ -556,6 +743,54 @@ export const NotificationListSchema = z.object({
   has_more: z.boolean(),
 })
 export type NotificationList = z.infer<typeof NotificationListSchema>
+
+export const NotificationMutePatternSchema = z.object({
+  kind: z.string(),
+  recipient: z.string(),
+  template: z.string(),
+  category: z.string(),
+})
+export type NotificationMutePattern = z.infer<typeof NotificationMutePatternSchema>
+
+export const NotificationMuteSchema = z.object({
+  id: z.string(),
+  tenant_id: z.string().nullable(),
+  pattern: NotificationMutePatternSchema,
+  reason: z.string().nullable(),
+  expires_at: z.string().nullable(),
+  created_by: z.string().nullable(),
+  created_at: z.string(),
+})
+export type NotificationMute = z.infer<typeof NotificationMuteSchema>
+
+export const NotificationMuteListSchema = z.object({
+  mutes: z.array(NotificationMuteSchema),
+})
+export type NotificationMuteList = z.infer<typeof NotificationMuteListSchema>
+
+export const NotificationChannelSchema = z.object({
+  id: z.string(),
+  kind: NotificationKindSchema,
+  config_json: z.record(z.string(), z.unknown()),
+  enabled: z.boolean(),
+  source: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+})
+export type NotificationChannel = z.infer<typeof NotificationChannelSchema>
+
+export const NotificationChannelListSchema = z.object({
+  channels: z.array(NotificationChannelSchema),
+})
+export type NotificationChannelList = z.infer<typeof NotificationChannelListSchema>
+
+export const CreateNotificationMuteInputSchema = z.object({
+  tenant_id: z.string().optional(),
+  pattern: NotificationMutePatternSchema,
+  reason: z.string().optional(),
+  expires_at: z.string().optional(),
+})
+export type CreateNotificationMuteInput = z.infer<typeof CreateNotificationMuteInputSchema>
 
 export const SendNotificationInputSchema = z.object({
   kind: NotificationKindSchema.default("email"),
@@ -1085,6 +1320,51 @@ export const DBTableListSchema = z.object({
 })
 export type DBTableList = z.infer<typeof DBTableListSchema>
 
+export const DBHealthSchema = z.object({
+  available: z.boolean(),
+  reason: z.string().optional(),
+  connections: z.object({
+    active: z.number(),
+    idle: z.number(),
+    max: z.number(),
+  }),
+  cache_hit_ratio: z.number(),
+  slow_queries: z.array(
+    z.object({
+      query: z.string(),
+      calls: z.number(),
+      mean_ms: z.number(),
+      total_ms: z.number(),
+    }),
+  ),
+  largest_tables: z.array(
+    z.object({
+      schema: z.string(),
+      table: z.string(),
+      size_bytes: z.number(),
+      row_count: z.number(),
+    }),
+  ),
+  vacuum_status: z.array(
+    z.object({
+      table: z.string(),
+      last_vacuum: z.string().nullable(),
+      dead_tuples: z.number(),
+    }),
+  ),
+  locks: z.array(
+    z.object({
+      pid: z.number(),
+      mode: z.string(),
+      granted: z.boolean(),
+      relation: z.string().optional(),
+      age_ms: z.number(),
+    }),
+  ),
+  checked_at: z.string(),
+})
+export type DBHealth = z.infer<typeof DBHealthSchema>
+
 export const DBColumnSchema = z.object({
   name: z.string(),
   data_type: z.string(),
@@ -1211,10 +1491,29 @@ export const MemorySearchResultSchema = z.object({
 })
 export type MemorySearchResult = z.infer<typeof MemorySearchResultSchema>
 
+export const SearchIndexStatSchema = z.object({
+  schema: z.string(),
+  table: z.string(),
+  index: z.string(),
+  size_bytes: z.number(),
+  index_scans: z.number(),
+  rows_read: z.number(),
+  rows_fetched: z.number(),
+  last_vacuum: z.string().nullable(),
+  definition: z.string(),
+})
+export type SearchIndexStat = z.infer<typeof SearchIndexStatSchema>
+
+export const SearchIndexStatsSchema = z.object({
+  indexes: z.array(SearchIndexStatSchema),
+})
+export type SearchIndexStats = z.infer<typeof SearchIndexStatsSchema>
+
 // ─── LLM Gateway + Cost (Phase 7) ─────────────────────────────────────────
 
 export const CostEventSchema = z.object({
   id: z.string(),
+  request_id: z.string().nullable().optional(),
   tenant_id: z.string().nullable(),
   api_key_id: z.string().nullable(),
   model: z.string(),
@@ -1236,6 +1535,69 @@ export const CostEventListSchema = z.object({
   has_more: z.boolean(),
 })
 export type CostEventList = z.infer<typeof CostEventListSchema>
+
+export const AnalyticsWindowSchema = z.object({
+  from: z.string(),
+  to: z.string(),
+})
+
+export const ReasonerAnalyticsRowSchema = z.object({
+  agent: z.string(),
+  reasoner: z.string(),
+  calls: z.number(),
+  errors: z.number(),
+  error_rate: z.number(),
+  avg_latency_ms: z.number(),
+  cost_usd: z.number(),
+  last_called_at: z.string().optional(),
+  top_caller_agent: z.string().optional(),
+})
+export const ReasonerAnalyticsSchema = z.object({
+  reasoners: z.array(ReasonerAnalyticsRowSchema),
+  window: AnalyticsWindowSchema,
+})
+export type ReasonerAnalytics = z.infer<typeof ReasonerAnalyticsSchema>
+
+export const ToolUsageRowSchema = z.object({
+  tool_name: z.string(),
+  transport: z.string(),
+  calls: z.number(),
+  errors: z.number(),
+  error_rate: z.number(),
+  avg_duration_ms: z.number(),
+  top_caller_agent: z.string().optional(),
+  last_called_at: z.string().optional(),
+})
+export const ToolUsageSchema = z.object({
+  tools: z.array(ToolUsageRowSchema),
+  window: AnalyticsWindowSchema,
+})
+export type ToolUsage = z.infer<typeof ToolUsageSchema>
+
+export const OAuthRefreshHistoryEventSchema = z.object({
+  id: z.string(),
+  tenant_id: z.string(),
+  provider: z.string(),
+  user_id: z.string().nullable(),
+  status: z.string(),
+  error_code: z.string().nullable(),
+  attempted_at: z.string(),
+})
+export const OAuthRefreshHistorySchema = z.object({
+  events: z.array(OAuthRefreshHistoryEventSchema),
+})
+export type OAuthRefreshHistory = z.infer<typeof OAuthRefreshHistorySchema>
+
+export const SQLHistoryEntrySchema = z.object({
+  id: z.string(),
+  user_id: z.string(),
+  query: z.string(),
+  executed_at: z.string(),
+})
+export const SQLHistorySchema = z.object({
+  history: z.array(SQLHistoryEntrySchema),
+})
+export type SQLHistory = z.infer<typeof SQLHistorySchema>
 
 export const BudgetSchema = z.object({
   tenant_id: z.string(),
@@ -1284,6 +1646,12 @@ export const CacheStatsSchema = z.object({
   entries: z.number(),
 })
 export type CacheStats = z.infer<typeof CacheStatsSchema>
+
+export const CacheFlushSchema = z.object({
+  flushed: z.boolean(),
+  deleted_rows: z.number(),
+})
+export type CacheFlush = z.infer<typeof CacheFlushSchema>
 
 // ─── Tenancy (Phase 6) ────────────────────────────────────────────────────
 
@@ -1587,6 +1955,40 @@ export const MetricsSummarySchema = z.object({
 })
 export type MetricsSummary = z.infer<typeof MetricsSummarySchema>
 
+export const MetricsInstantSampleSchema = z.object({
+  metric: z.record(z.string(), z.string()),
+  value: z.number(),
+  ts: z.string(),
+})
+
+export const MetricsRangeSampleSchema = z.object({
+  metric: z.record(z.string(), z.string()),
+  values: z.array(z.object({ ts: z.string(), value: z.number() })),
+})
+
+export const MetricsInstantResponseSchema = z.object({
+  samples: z.array(MetricsInstantSampleSchema),
+  total: z.number().optional(),
+})
+
+export const MetricsRangeResponseSchema = z.object({
+  series: z.array(MetricsRangeSampleSchema),
+  total: z.number().optional(),
+})
+
+export const MetricsCapabilitiesSchema = z.object({
+  supports_instant_query: z.boolean().default(false),
+  supports_range_query: z.boolean().default(false),
+  supports_container_metrics: z.boolean().default(false),
+  native_query_lang: z.string().default(""),
+  retention_hours: z.number().default(0),
+  max_series_per_query: z.number().default(0),
+})
+
+export type MetricsInstantResponse = z.infer<typeof MetricsInstantResponseSchema>
+export type MetricsRangeResponse = z.infer<typeof MetricsRangeResponseSchema>
+export type MetricsCapabilities = z.infer<typeof MetricsCapabilitiesSchema>
+
 // ─── Plugin manifest (Phase 12.3) ────────────────────────────────────────
 //
 // Dashboard plugins are TS files dropped into apps/dashboard/plugins/.
@@ -1679,6 +2081,156 @@ export const ApprovalListSchema = z.object({
   has_more: z.boolean(),
 })
 export type ApprovalList = z.infer<typeof ApprovalListSchema>
+
+export const OAuthProviderSchema = z.object({
+  provider: z.string(),
+  configured: z.boolean().optional(),
+  scopes: z.array(z.string()).optional(),
+  auth_url: z.string().nullable().optional(),
+})
+export type OAuthProvider = z.infer<typeof OAuthProviderSchema>
+
+export const OAuthProviderListSchema = z.object({
+  providers: z.array(OAuthProviderSchema),
+})
+export type OAuthProviderList = z.infer<typeof OAuthProviderListSchema>
+
+export const OAuthConnectionSchema = z.object({
+  id: z.string().optional(),
+  tenant_id: z.string().nullable().optional(),
+  provider: z.string(),
+  user_id: z.string().nullable().optional(),
+  account_id: z.string().nullable().optional(),
+  scopes: z.array(z.string()).optional(),
+  status: z.string().optional(),
+  expires_at: z.string().nullable().optional(),
+  created_at: z.string().optional(),
+  updated_at: z.string().optional(),
+})
+export type OAuthConnection = z.infer<typeof OAuthConnectionSchema>
+
+export const OAuthConnectionListSchema = z.object({
+  connections: z.array(OAuthConnectionSchema),
+})
+export type OAuthConnectionList = z.infer<typeof OAuthConnectionListSchema>
+
+export const AdapterRegistryStatusSchema = z.enum([
+  "healthy",
+  "degraded",
+  "unhealthy",
+  "unknown",
+])
+export const AdapterRegistryKindSchema = z.enum(["builtin", "remote", "none"])
+export const AdapterRegistryActiveSchema = z.object({
+  name: z.string(),
+  version: z.string().optional(),
+  status: AdapterRegistryStatusSchema,
+  kind: AdapterRegistryKindSchema,
+  capabilities: z.record(z.string(), z.unknown()).optional(),
+  last_error: z.string().optional(),
+})
+export const AdapterRegistrySlotSchema = z.object({
+  slot: z.string(),
+  tier: z.number(),
+  active: AdapterRegistryActiveSchema,
+  available_builtin: z.array(z.string()).optional(),
+  swap_method: z.string(),
+  swap_env: z.string().optional(),
+  admin_ui: z.string().optional(),
+})
+export type AdapterRegistrySlot = z.infer<typeof AdapterRegistrySlotSchema>
+
+export const AdapterRegistrySchema = z.object({
+  slots: z.array(AdapterRegistrySlotSchema),
+})
+export type AdapterRegistry = z.infer<typeof AdapterRegistrySchema>
+
+export const AdminServiceSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  kind: z.string(),
+  status: z.string(),
+  version: z.string().optional(),
+  host: z.string().optional(),
+  port: z.number().nullable(),
+  admin_url: z.string().nullable(),
+  purpose: z.string(),
+  checked_at: z.string(),
+})
+export type AdminService = z.infer<typeof AdminServiceSchema>
+
+export const AdminServiceListSchema = z.object({
+  services: z.array(AdminServiceSchema),
+})
+export type AdminServiceList = z.infer<typeof AdminServiceListSchema>
+
+export const FeatureCapabilityStatusSchema = z.enum([
+  "ok",
+  "degraded",
+  "not_configured",
+  "unavailable",
+])
+export const FeatureDetailSchema = z.object({
+  key: z.string(),
+  value: z.unknown(),
+  severity: z.string(),
+  message: z.string(),
+})
+export const FeatureEntrySchema = z.object({
+  enabled: z.boolean().optional(),
+  virtual_keys: z.boolean().optional(),
+  spend_tracking: z.boolean().optional(),
+  adapter: z.string().optional(),
+  backend: z.string().optional(),
+  container_metrics: z.boolean().optional(),
+  capability_status: FeatureCapabilityStatusSchema,
+  details: z.array(FeatureDetailSchema).optional(),
+})
+export const FeatureValidationWarningSchema = z.object({
+  feature: z.string(),
+  level: z.string(),
+  message: z.string(),
+  remediation: z.string(),
+})
+export const FeaturesResponseSchema = z.object({
+  preset: z.string(),
+  features: z.record(z.string(), FeatureEntrySchema),
+  validator_warnings: z.array(FeatureValidationWarningSchema),
+})
+export type FeaturesResponse = z.infer<typeof FeaturesResponseSchema>
+
+export const ProviderHealthSchema = z.object({
+  provider: z.string(),
+  status: z.string(),
+  availability_pct: z.number(),
+  observations: z.number(),
+  median_latency_ms: z.number(),
+  p95_latency_ms: z.number(),
+  last_observed_at: z.string().nullable(),
+  latency_buckets: z.record(z.string(), z.number()),
+})
+export type ProviderHealth = z.infer<typeof ProviderHealthSchema>
+
+export const ProviderHealthListSchema = z.object({
+  providers: z.array(ProviderHealthSchema),
+  window: z.string(),
+})
+export type ProviderHealthList = z.infer<typeof ProviderHealthListSchema>
+
+export const BrandResponseSchema = z.object({
+  brand: z.record(z.string(), z.unknown()),
+  override: z.record(z.string(), z.unknown()).optional(),
+  source: z.string(),
+  updated_at: z.string().nullable(),
+  apply: z.string(),
+  brand_yaml_path: z.string(),
+})
+export type BrandResponse = z.infer<typeof BrandResponseSchema>
+
+export const BrandUpdateInputSchema = z.object({
+  brand: z.record(z.string(), z.unknown()),
+})
+export type BrandUpdateInput = z.infer<typeof BrandUpdateInputSchema>
 
 // ─── Shipwright task factory (Phase 3 Tier 1) ─────────────────────────────
 //
@@ -1791,16 +2343,93 @@ export const api = {
         RunActionResultSchema,
       ),
   },
-  cost: (params?: { from?: string; to?: string }) => {
+  cost: (params?: { from?: string; to?: string; tenant?: string }) => {
     const qs = new URLSearchParams()
     if (params?.from) qs.set("from", params.from)
     if (params?.to) qs.set("to", params.to)
+    if (params?.tenant) qs.set("tenant", params.tenant)
     const q = qs.toString()
     return request(`/api/v1/cost${q ? "?" + q : ""}`, undefined, CostSummarySchema)
   },
   home: () => request("/api/v1/home/overview", undefined, HomeOverviewSchema),
   modulesState: () => request("/api/v1/modules", undefined, ModulesStateSchema),
   queue: () => request("/api/v1/queues/summary", undefined, QueueSummarySchema),
+  logs: (params?: {
+    level?: string
+    service?: string
+    tenant?: string
+    search?: string
+    limit?: number
+    offset?: number
+  }) => {
+    const qs = new URLSearchParams()
+    if (params?.level) qs.set("level", params.level)
+    if (params?.service) qs.set("service", params.service)
+    if (params?.tenant) qs.set("tenant", params.tenant)
+    if (params?.search) qs.set("search", params.search)
+    if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+    if (params?.offset !== undefined) qs.set("offset", String(params.offset))
+    const q = qs.toString()
+    return request(`/api/v1/admin/logs${q ? "?" + q : ""}`, undefined, LogListSchema)
+  },
+  logsCapabilities: () =>
+    request("/api/v1/admin/logs/capabilities", undefined, LogCapabilitiesSchema),
+  traces: {
+    list: (params?: {
+      service?: string
+      operation?: string
+      status?: string
+      from?: string
+      to?: string
+      duration_gt?: string
+      limit?: number
+    }) => {
+      const qs = new URLSearchParams()
+      if (params?.service) qs.set("service", params.service)
+      if (params?.operation) qs.set("operation", params.operation)
+      if (params?.status) qs.set("status", params.status)
+      if (params?.from) qs.set("from", params.from)
+      if (params?.to) qs.set("to", params.to)
+      if (params?.duration_gt) qs.set("duration_gt", params.duration_gt)
+      if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+      const q = qs.toString()
+      return request(`/api/v1/admin/traces${q ? "?" + q : ""}`, undefined, TraceSearchSchema)
+    },
+    get: (traceId: string) =>
+      request(`/api/v1/admin/traces/${encodeURIComponent(traceId)}`, undefined, TraceDetailSchema),
+    capabilities: () =>
+      request("/api/v1/admin/traces/capabilities", undefined, TraceCapabilitiesSchema),
+  },
+  errors: {
+    list: (params?: {
+      status?: "open" | "muted" | "resolved"
+      service?: string
+      tenant_id?: string
+      since?: string
+      limit?: number
+      cursor?: string
+    }) => {
+      const qs = new URLSearchParams()
+      if (params?.status) qs.set("status", params.status)
+      if (params?.service) qs.set("service", params.service)
+      if (params?.tenant_id) qs.set("tenant_id", params.tenant_id)
+      if (params?.since) qs.set("since", params.since)
+      if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+      if (params?.cursor) qs.set("cursor", params.cursor)
+      const q = qs.toString()
+      return request(`/api/v1/admin/errors${q ? "?" + q : ""}`, undefined, ErrorListSchema)
+    },
+    get: (id: string) =>
+      request(`/api/v1/admin/errors/${encodeURIComponent(id)}`, undefined, ErrorGroupSchema),
+    capabilities: () =>
+      request("/api/v1/admin/errors/capabilities", undefined, ErrorCapabilitiesSchema),
+    mute: (id: string) =>
+      request(`/api/v1/admin/errors/${encodeURIComponent(id)}/mute`, { method: "POST" }, ErrorGroupSchema),
+    resolve: (id: string) =>
+      request(`/api/v1/admin/errors/${encodeURIComponent(id)}/resolve`, { method: "POST" }, ErrorGroupSchema),
+    reopen: (id: string) =>
+      request(`/api/v1/admin/errors/${encodeURIComponent(id)}/reopen`, { method: "POST" }, ErrorGroupSchema),
+  },
 
   // ─── Jobs ───
 	  jobs: {
@@ -1942,6 +2571,38 @@ export const api = {
         { method: "POST", json: input },
         NotificationSchema,
       ),
+    mutes: {
+      list: (params?: { tenant?: string }) => {
+        const qs = params?.tenant
+          ? `?tenant=${encodeURIComponent(params.tenant)}`
+          : ""
+        return request(
+          `/api/v1/notifications/mutes${qs}`,
+          undefined,
+          NotificationMuteListSchema,
+        )
+      },
+      create: (input: CreateNotificationMuteInput) =>
+        request(
+          "/api/v1/notifications/mutes",
+          { method: "POST", json: input },
+          NotificationMuteSchema,
+        ),
+      delete: (id: string) =>
+        request(
+          `/api/v1/notifications/mutes/${encodeURIComponent(id)}`,
+          { method: "DELETE" },
+          z.object({ deleted: z.boolean() }),
+        ),
+    },
+    channels: {
+      list: () =>
+        request(
+          "/api/v1/notifications/channels",
+          undefined,
+          NotificationChannelListSchema,
+        ),
+    },
   },
 
   // ─── Webhooks (Phase 10.2 + 10.3) ───
@@ -2003,6 +2664,37 @@ export const api = {
         `/api/v1/webhooks/deliveries/${id}/retry`,
         { method: "POST" },
         WebhookDeliverySchema,
+      ),
+  },
+
+  oauth: {
+    connections: () =>
+      request("/api/v1/oauth/connections", undefined, OAuthConnectionListSchema),
+    providers: () =>
+      request("/api/v1/oauth/providers", undefined, OAuthProviderListSchema),
+    refreshHistory: (params?: { provider?: string; tenant_id?: string; limit?: number }) => {
+      const qs = new URLSearchParams()
+      if (params?.provider) qs.set("provider", params.provider)
+      if (params?.tenant_id) qs.set("tenant_id", params.tenant_id)
+      if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+      const q = qs.toString()
+      return request(
+        `/api/v1/oauth/refresh-history${q ? "?" + q : ""}`,
+        undefined,
+        OAuthRefreshHistorySchema,
+      )
+    },
+    authorize: (provider: string) =>
+      request(
+        `/api/v1/oauth/${encodeURIComponent(provider)}/authorize`,
+        { method: "POST" },
+        z.record(z.string(), z.unknown()),
+      ),
+    revoke: (provider: string) =>
+      request(
+        `/api/v1/oauth/${encodeURIComponent(provider)}`,
+        { method: "DELETE" },
+        z.object({ deleted: z.boolean().optional(), revoked: z.boolean().optional() }),
       ),
   },
 
@@ -2082,6 +2774,8 @@ export const api = {
         { method: "POST", json: input },
         InvokeNativeToolResultSchema,
       ),
+    usage: () =>
+      request("/api/v1/tools/usage", undefined, ToolUsageSchema),
   },
 
   // ─── MCP servers + tools (Phase 11.1) ───
@@ -2204,6 +2898,12 @@ export const api = {
         { method: "PUT", json: { is_active: isActive } },
         CronSchema,
       ),
+    trigger: (id: string) =>
+      request(
+        `/api/v1/crons/${encodeURIComponent(id)}/trigger`,
+        { method: "POST" },
+        JobSchema,
+      ),
     delete: (id: string) =>
       request(
         `/api/v1/crons/${encodeURIComponent(id)}`,
@@ -2212,9 +2912,28 @@ export const api = {
       ),
   },
 
-  // ─── Metrics (Phase 12.2) ───
-  metrics: () =>
-    request("/api/v1/metrics/summary", undefined, MetricsSummarySchema),
+  // ─── Metrics (Phase 12.2 + Block 5 adapter) ───
+  metrics: Object.assign(
+    () => request("/api/v1/metrics/summary", undefined, MetricsSummarySchema),
+    {
+      summary: () => request("/api/v1/metrics/summary", undefined, MetricsSummarySchema),
+      capabilities: () => request("/api/v1/admin/metrics/capabilities", undefined, MetricsCapabilitiesSchema),
+      query: (params: { promql: string; at?: string }) => {
+        const qs = new URLSearchParams({ promql: params.promql })
+        if (params.at) qs.set("at", params.at)
+        return request(`/api/v1/admin/metrics/query?${qs}`, undefined, MetricsInstantResponseSchema)
+      },
+      range: (params: { promql: string; from: string; to: string; step?: string }) => {
+        const qs = new URLSearchParams({
+          promql: params.promql,
+          from: params.from,
+          to: params.to,
+        })
+        if (params.step) qs.set("step", params.step)
+        return request(`/api/v1/admin/metrics/range?${qs}`, undefined, MetricsRangeResponseSchema)
+      },
+    },
+  ),
 
   // ─── Plugins (Phase 12.3) ───
   plugins: () => request("/api/v1/plugins", undefined, PluginListSchema),
@@ -2222,6 +2941,7 @@ export const api = {
   // ─── Database studio + memory (Phase 8) ───
   db: {
     tables: () => request("/api/v1/db/tables", undefined, DBTableListSchema),
+    health: () => request("/api/v1/admin/db/health", undefined, DBHealthSchema),
     table: (schema: string, name: string) =>
       request(
         `/api/v1/db/tables/${encodeURIComponent(schema)}/${encodeURIComponent(name)}`,
@@ -2239,6 +2959,12 @@ export const api = {
     },
     sql: (input: SQLRunRequest) =>
       request("/api/v1/db/sql", { method: "POST", json: input }, SQLRunResultSchema),
+    sqlHistory: () =>
+      request("/api/v1/db/sql/history", undefined, SQLHistorySchema),
+  },
+  reasoners: {
+    analytics: () =>
+      request("/api/v1/reasoners/analytics", undefined, ReasonerAnalyticsSchema),
   },
   memory: {
     list: (params?: {
@@ -2288,15 +3014,31 @@ export const api = {
         MemorySearchResultSchema,
       ),
   },
+  search: {
+    indexes: () =>
+      request("/api/v1/search/indexes", undefined, SearchIndexStatsSchema),
+  },
 
   // ─── LLM gateway + cost (Phase 7) ───
   llm: {
     models: () => request("/api/v1/llm/models", undefined, LLMModelListSchema),
     cacheStats: () =>
       request("/api/v1/llm/cache/stats", undefined, CacheStatsSchema),
+    cacheFlush: (params?: { tenant?: string; prompt_hash?: string }) => {
+      const qs = new URLSearchParams()
+      if (params?.tenant) qs.set("tenant", params.tenant)
+      if (params?.prompt_hash) qs.set("prompt_hash", params.prompt_hash)
+      const q = qs.toString()
+      return request(
+        `/api/v1/llm/cache/flush${q ? "?" + q : ""}`,
+        { method: "POST" },
+        CacheFlushSchema,
+      )
+    },
   },
   costEvents: (params?: {
     tenant?: string
+    request_id?: string
     model?: string
     from?: string
     to?: string
@@ -2305,6 +3047,7 @@ export const api = {
   }) => {
     const qs = new URLSearchParams()
     if (params?.tenant) qs.set("tenant", params.tenant)
+    if (params?.request_id) qs.set("request_id", params.request_id)
     if (params?.model) qs.set("model", params.model)
     if (params?.from) qs.set("from", params.from)
     if (params?.to) qs.set("to", params.to)
@@ -2335,6 +3078,80 @@ export const api = {
 
   // ─── Tenancy (admin) ───
   admin: {
+    adapters: {
+      list: () =>
+        request("/api/v1/admin/adapters", undefined, AdapterRegistrySchema),
+    },
+    services: {
+      list: () =>
+        request("/api/v1/admin/services", undefined, AdminServiceListSchema),
+    },
+    // Top-bar anchors (Inbox / Cost / Health). One round-trip per page
+    // navigation. Closes Gap 6 from required-backend-gaps.md.
+    anchors: {
+      get: () =>
+        request("/api/v1/admin/anchors", undefined, AdminAnchorsSchema),
+    },
+    // Demo-mode seeder. POST inserts ~200 gateway requests, ~20 cost
+    // events, ~6 webhook deliveries and ~30 activity entries spread
+    // across the last 24h so a fresh fork's Home page renders with shape
+    // instead of zeros. All rows are flagged so re-seeding wipes prior
+    // demo data cleanly.
+    demo: {
+      seed: (params?: { reset?: boolean }) =>
+        request(
+          "/api/v1/admin/demo/seed",
+          { method: "POST", json: params ?? {} },
+          DemoSeedResponseSchema,
+        ),
+    },
+    // Unified activity feed across runs, webhooks, system alerts and the
+    // customer-facing activity log. Closes Gap 5 from
+    // development/ux/required-backend-gaps.md. Server-side merge + sort.
+    events: {
+      list: (params?: { limit?: number; kind?: string }) => {
+        const qs = new URLSearchParams()
+        if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+        if (params?.kind) qs.set("kind", params.kind)
+        const q = qs.toString()
+        return request(
+          `/api/v1/admin/events${q ? "?" + q : ""}`,
+          undefined,
+          AdminEventListSchema,
+        )
+      },
+    },
+    features: {
+      get: () =>
+        request("/api/v1/admin/features", undefined, FeaturesResponseSchema),
+    },
+    llm: {
+      providerHealth: (params?: { window?: string }) => {
+        const qs = params?.window
+          ? `?window=${encodeURIComponent(params.window)}`
+          : ""
+        return request(
+          `/api/v1/admin/llm/provider-health${qs}`,
+          undefined,
+          ProviderHealthListSchema,
+        )
+      },
+    },
+    brand: {
+      get: () => request("/api/v1/admin/brand", undefined, BrandResponseSchema),
+      update: (input: BrandUpdateInput) =>
+        request(
+          "/api/v1/admin/brand",
+          { method: "PUT", json: input },
+          BrandResponseSchema,
+        ),
+      reset: () =>
+        request(
+          "/api/v1/admin/brand",
+          { method: "DELETE" },
+          BrandResponseSchema,
+        ),
+    },
     tenants: {
       list: () =>
         request("/api/v1/admin/tenants", undefined, TenantListSchema),
@@ -2431,6 +3248,12 @@ export const api = {
           `/api/v1/admin/keys/${id}`,
           { method: "DELETE" },
           z.object({ revoked: z.boolean() }),
+        ),
+      rotate: (id: string) =>
+        request(
+          `/api/v1/admin/keys/${encodeURIComponent(id)}/rotate`,
+          { method: "POST" },
+          IssuedAPIKeySchema,
         ),
       spend: (id: string) =>
         request(
