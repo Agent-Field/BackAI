@@ -151,7 +151,7 @@ const GROUPS: NavGroup[] = [
     id: "platform",
     label: "Platform",
     items: [
-      { id: "adapters", label: "Adapters", href: "/platform/adapters", icon: Server, comingSoon: true },
+      { id: "adapters", label: "Adapters", href: "/platform/adapters", icon: Server },
       { id: "secrets", label: "Secrets", href: "/platform/secrets", icon: KeyRound, comingSoon: true },
       { id: "features", label: "Features", href: "/platform/features", icon: Globe2, comingSoon: true },
       { id: "settings", label: "Settings", href: "/platform/settings", icon: Settings, comingSoon: true },
