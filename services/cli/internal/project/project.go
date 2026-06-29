@@ -98,6 +98,8 @@ func RunAdapter(args []string, stdout, stderr io.Writer) error {
 	switch args[0] {
 	case "list", "ls":
 		return runAdapterList(args[1:], stdout, stderr)
+	case "new":
+		return runAdapterNew(args[1:], stdout, stderr)
 	default:
 		return fmt.Errorf("adapter: unknown subcommand %q", args[0])
 	}
