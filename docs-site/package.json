@@ -12,7 +12,7 @@
     "inject-samples": "node ./scripts/inject-code-samples.mjs"
   },
   "dependencies": {
-    "@astrojs/mdx": "^4.0.0",
+    "@astrojs/mdx": "^7.0.0",
     "@astrojs/react": "^5.0.7",
     "@astrojs/starlight": "^0.30.0",
     "@scalar/api-reference-react": "^0.9.42",
