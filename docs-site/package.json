@@ -14,12 +14,12 @@
   "dependencies": {
     "@astrojs/mdx": "^4.0.0",
     "@astrojs/react": "^5.0.7",
-    "@astrojs/starlight": "^0.30.0",
-    "@scalar/api-reference-react": "^0.9.42",
+    "@astrojs/starlight": "^0.41.1",
+    "@scalar/api-reference-react": "^0.9.49",
     "astro": "^5.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "sharp": "^0.33.0"
+    "sharp": "^0.35.2"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
