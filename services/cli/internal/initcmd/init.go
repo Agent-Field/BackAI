@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package initcmd implements the `af-stack init` fork-bootstrap command.
+// Package initcmd implements `af-stack init`: the canonical CLI-first command
+// scaffolds a new project that consumes the stack (scaffold.go), while the
+// legacy fork-branding flow lives behind --brand (this file).
 package initcmd
 
 import (
@@ -71,8 +73,31 @@ var hexColorRE = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 var composeNodeIDRE = regexp.MustCompile(`(?m)^\s+NODE_ID:\s*([A-Za-z0-9_.-]+)\s*$`)
 
 // Run handles `af-stack init`.
+//
+// The canonical, CLI-first behavior scaffolds a NEW project that consumes the
+// stack (see runScaffold). The legacy fork-branding flow — which re-themes an
+// existing AF Stack checkout in place — now lives behind the explicit --brand
+// flag, so it stays available to power users who fork the monorepo.
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("af-stack init", flag.ContinueOnError)
+	brandMode := false
+	filtered := make([]string, 0, len(args))
+	for _, a := range args {
+		if a == "--brand" || a == "-brand" {
+			brandMode = true
+			continue
+		}
+		filtered = append(filtered, a)
+	}
+	if !brandMode {
+		return runScaffold(filtered, stdin, stdout, stderr)
+	}
+	return runBrand(filtered, stdin, stdout, stderr)
+}
+
+// runBrand re-themes an existing AF Stack checkout in place (the legacy
+// `af-stack init` behavior, now reached via --brand).
+func runBrand(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("af-stack init --brand", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	name := fs.String("name", "", "project display name, e.g. DocuChat")
 	color := fs.String("color", "", "primary brand color as #RRGGBB")
