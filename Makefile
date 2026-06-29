@@ -1,5 +1,6 @@
 .PHONY: help preflight dev test test-go test-py test-ts lint lint-go lint-py lint-ts \
-        build build-go build-dashboard build-images \
+        build build-go build-cli build-runtime build-dashboard build-images \
+        install-cli smoke-cli \
         up down logs clean install-deps fmt
 
 # Default target
@@ -18,7 +19,9 @@ help:
 	@echo "  make test-ts        Run TypeScript tests"
 	@echo "  make lint           Run all linters"
 	@echo "  make fmt            Auto-format all code"
-	@echo "  make build          Build all artifacts"
+	@echo "  make build          Build all artifacts (CLI + runtime + dashboard)"
+	@echo "  make build-cli      Build the af-stack CLI -> bin/af-stack"
+	@echo "  make install-cli    Install the af-stack CLI onto your PATH (go install)"
 	@echo "  make clean          Remove build artifacts and caches"
 
 install-deps:
@@ -84,13 +87,43 @@ fmt:
 	@echo "==> Formatting TS"
 	@command -v pnpm >/dev/null && pnpm -r format 2>/dev/null || true
 
-build: build-go build-dashboard
+build: build-cli build-runtime build-dashboard
 	@echo "==> Build complete"
 
-build-go:
-	@echo "==> Building Go binary"
+# The af-stack CLI is the canonical, user-facing binary: `af-stack init`,
+# `af-stack dev`, `af-stack agent new`, etc. It is the front door of the stack,
+# so `bin/af-stack` resolves to the CLI (not the runtime server). This build is
+# strict — a broken CLI fails the build rather than being silently skipped.
+build-cli:
+	@echo "==> Building af-stack CLI -> bin/af-stack"
 	@mkdir -p bin
-	@go build -o bin/af-stack ./services/runtime/cmd/af-stack 2>/dev/null || echo "(runtime not implemented yet)"
+	@go build -o bin/af-stack ./services/cli/cmd/af-stack
+
+# The runtime server normally runs inside docker compose (its own Dockerfile
+# builds /usr/local/bin/af-stack in-container). This target builds it for local,
+# non-container runs under a distinct name so it can't shadow the CLI binary.
+build-runtime:
+	@echo "==> Building af-stack runtime server -> bin/af-stack-runtime"
+	@mkdir -p bin
+	@go build -o bin/af-stack-runtime ./services/runtime/cmd/af-stack 2>/dev/null || echo "(runtime build skipped)"
+
+# Back-compat alias for the old single Go build target.
+build-go: build-cli build-runtime
+
+# Put `af-stack` on your PATH (lands in $(go env GOBIN) or $(go env GOPATH)/bin).
+install-cli:
+	@echo "==> Installing af-stack CLI via go install"
+	@go install ./services/cli/cmd/af-stack
+	@echo "    Installed. Ensure your Go bin dir is on PATH, then run: af-stack help"
+
+# Smoke-test that the built CLI is actually the CLI (regression guard for the
+# binary-name collision: the front-door command must not error 'unknown command').
+smoke-cli: build-cli
+	@echo "==> Smoke-testing bin/af-stack"
+	@bin/af-stack version
+	@bin/af-stack help >/dev/null
+	@bin/af-stack init --help >/dev/null 2>&1 || true
+	@echo "    CLI smoke OK"
 
 build-dashboard:
 	@echo "==> Building dashboard"
