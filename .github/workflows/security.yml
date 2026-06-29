@@ -9,6 +9,15 @@ on:
     # 03:00 UTC every Monday so security issues surface before a workweek.
     - cron: '0 3 * * 1'
 
+# This repo is currently PRIVATE without GitHub Advanced Security, so the
+# code-scanning SARIF upload API (github/codeql-action/upload-sarif) returns
+# 403 "Resource not accessible by integration". To keep this workflow green and
+# useful without GHAS:
+#   - gosec / trivy run as scanners and publish their SARIF as downloadable
+#     build artifacts + a job summary (no code-scanning upload).
+#   - npm audit / pip-audit remain hard, blocking dependency gates.
+#   - CodeQL only runs when the repo is public (it inherently uploads to
+#     code-scanning), so it auto-activates at open-source launch.
 permissions:
   contents: read
   security-events: write
@@ -27,13 +36,24 @@ jobs:
         uses: securego/gosec@master
         with:
           # Standard rule set; the high-noise rules (G104 for unchecked
-          # errors) are excluded so the gate is meaningful.
+          # errors) are excluded so the report is meaningful. -no-fail keeps
+          # this report-only — the SARIF artifact below carries the findings.
           args: '-fmt sarif -out gosec.sarif -no-fail -exclude G104 ./services/...'
-      - name: Upload SARIF
-        uses: github/codeql-action/upload-sarif@v3
+      - name: Summarize high-severity findings
         if: always()
+        run: |
+          if [ -f gosec.sarif ]; then
+            high=$(python3 -c "import json;d=json.load(open('gosec.sarif'));r=d['runs'][0];rules={x['id']:x for x in r['tool']['driver'].get('rules',[])};print(sum(1 for x in r['results'] if (x.get('level')=='error')))" 2>/dev/null || echo '?')
+            echo "### gosec — $high error-level finding(s)" >> "$GITHUB_STEP_SUMMARY"
+            echo "Full SARIF is attached as the \`gosec-sarif\` artifact." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          sarif_file: gosec.sarif
+          name: gosec-sarif
+          path: gosec.sarif
+          if-no-files-found: ignore
 
   npm-audit:
     name: npm audit
@@ -80,23 +100,50 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Trivy
+      - name: Trivy (table to log + summary)
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: fs
           scan-ref: .
           severity: 'HIGH,CRITICAL'
-          format: sarif
-          output: trivy.sarif
+          scanners: vuln
+          format: table
           ignore-unfixed: true
-      - name: Upload SARIF
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
+          output: trivy.txt
+      - name: Trivy (SARIF artifact)
+        uses: aquasecurity/trivy-action@master
         with:
-          sarif_file: trivy.sarif
+          scan-type: fs
+          scan-ref: .
+          severity: 'HIGH,CRITICAL'
+          scanners: vuln
+          format: sarif
+          ignore-unfixed: true
+          output: trivy.sarif
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### trivy fs scan (HIGH/CRITICAL, fixed-only)"
+            echo '```'
+            cat trivy.txt 2>/dev/null || echo "(no report produced)"
+            echo '```'
+            echo "Full SARIF is attached as the \`trivy-sarif\` artifact."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-sarif
+          path: trivy.sarif
+          if-no-files-found: ignore
 
   codeql:
     name: CodeQL
+    # CodeQL inherently uploads to GitHub code-scanning, which needs Advanced
+    # Security on a private repo. Run it only once the repo is public, where
+    # code scanning is free — so it auto-activates at open-source launch.
+    if: ${{ github.event.repository.private == false }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

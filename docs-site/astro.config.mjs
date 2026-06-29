@@ -25,9 +25,9 @@ export default defineConfig({
       description: "The open backend for the AI era",
       // Drop a logo.svg in src/assets later if desired:
       //   logo: { src: "./src/assets/logo.svg" }
-      social: {
-        github: GITHUB_REPO,
-      },
+      // Starlight 0.32+ takes `social` as an array of icon links
+      // (was an object keyed by platform in <=0.31).
+      social: [{ icon: "github", label: "GitHub", href: GITHUB_REPO }],
       editLink: {
         baseUrl: GITHUB_EDIT_BASE,
       },
