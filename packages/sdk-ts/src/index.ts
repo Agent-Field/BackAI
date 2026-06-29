@@ -305,6 +305,10 @@ export {
   type MeterOptions as BillingMeterOptions,
 } from "./billing.js"
 
+// ─── Auth identity ────────────────────────────────────────────────────────
+
+export { auth, whoami as authWhoami, type WhoAmI } from "./auth.js"
+
 // ─── Notifications (Phase 10.1) ───────────────────────────────────────────
 
 export {
@@ -496,11 +500,13 @@ import { harnesses } from "./harnesses.js"
 import { oauth } from "./oauth.js"
 import { shipwright } from "./shipwright.js"
 import { approvals } from "./approvals.js"
+import { auth } from "./auth.js"
 
 /** Top-level namespace: `suite.agents.*`, `suite.approvals.*`, `suite.shipwright.*`, `suite.search(...)`, `suite.searchIndex.*`, `suite.activity.*`, `suite.flags.*`, `suite.runs.*`, `suite.jobs.*`, `suite.secrets.*`, `suite.storage.*`, `suite.llm.*`, `suite.cost.*`, `suite.memory.*`, `suite.sandbox.*`, `suite.notifications.*`, `suite.webhooks.*`, `suite.billing.*`, `suite.tools.*`, `suite.admin.*`. */
 export const suite = {
 	agents,
 	approvals,
+	auth,
 	shipwright,
 	search,
   searchIndex,
