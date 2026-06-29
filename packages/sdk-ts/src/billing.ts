@@ -144,19 +144,15 @@ export async function portalLink(
 
 // ---------- in-process verbs (parity with the Python SDK) ----------
 
-export interface MeterOptions {
+export interface MeterOptions extends HttpOptions {
   tenantId?: string
 }
 
 /** Record `qty` units of `name` for the tenant's current period.
  *
- * The SDK exposes this as a no-op when called without a tenant id
- * (matching the runtime's behaviour). The runtime owns the cost
- * computation — the SDK forwards the increment.
- *
- * Phase 10.4 keeps this as a client-side placeholder; Phase 10.5
- * will add `POST /api/v1/billing/meter` and switch this method to
- * call it.
+ * The runtime owns the cost computation — the SDK forwards the increment to
+ * `POST /api/v1/billing/meter`. When `tenantId` is omitted the runtime uses
+ * the authenticated caller's tenant (the normal app-code path).
  */
 export async function meter(
   name: string,
@@ -169,10 +165,10 @@ export async function meter(
   if (qty < 0) {
     throw new Error("qty must be non-negative")
   }
-  // No-op until Phase 10.5 lands the explicit endpoint. The runtime
-  // already accumulates meters from in-process call sites (sandbox
-  // cpu-seconds, LLM tokens).
-  void opts
+  const { tenantId, ...http } = opts
+  const body: Record<string, unknown> = { name, qty }
+  if (tenantId !== undefined && tenantId !== "") body.tenant_id = tenantId
+  await request<void>("POST", "/billing/meter", body, http)
 }
 
 const PLAN_CAPS: Record<string, number> = {
