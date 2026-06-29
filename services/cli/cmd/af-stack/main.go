@@ -8,7 +8,8 @@
 //
 // Currently shipped subcommands:
 //
-//	af-stack init --name "DocuChat" --color "#0A66C2"  Brand this fork
+//	af-stack init my-app                              Scaffold a new app on the stack
+//	af-stack init --brand --name "DocuChat"           Re-theme a fork (power-user path)
 //	af-stack dev                                      Start local compose dev loop
 //	af-stack agent new <name>                         Scaffold an AgentField agent
 //	af-stack module new <id>                          Scaffold a workload module
@@ -34,17 +35,34 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/Agent-Field/backai/services/cli/internal/client"
 	"github.com/Agent-Field/backai/services/cli/internal/initcmd"
 	"github.com/Agent-Field/backai/services/cli/internal/mcp"
 	"github.com/Agent-Field/backai/services/cli/internal/project"
+	"github.com/Agent-Field/backai/services/cli/internal/telemetry"
 )
 
 const version = "0.0.1"
 
 func main() {
-	if err := run(); err != nil {
+	// The global --no-telemetry flag may appear anywhere; strip it before
+	// dispatch so subcommand flag parsers never see it.
+	optOut, args := extractNoTelemetry(os.Args[1:])
+
+	tel := telemetry.New(version, optOut, os.Stderr)
+	cmdName := "help"
+	if len(args) > 0 {
+		cmdName = args[0]
+	}
+	start := time.Now()
+
+	err := run(args)
+
+	tel.Emit(context.Background(), cmdName, err == nil, time.Since(start))
+
+	if err != nil {
 		var apiErr *client.APIError
 		if errors.As(err, &apiErr) {
 			fmt.Fprintln(os.Stderr, apiErr.Error())
@@ -55,14 +73,29 @@ func main() {
 	}
 }
 
-func run() error {
-	if len(os.Args) < 2 {
+// extractNoTelemetry removes the global --no-telemetry flag from args and
+// reports whether it was present.
+func extractNoTelemetry(args []string) (bool, []string) {
+	optOut := false
+	out := make([]string, 0, len(args))
+	for _, a := range args {
+		if a == "--no-telemetry" {
+			optOut = true
+			continue
+		}
+		out = append(out, a)
+	}
+	return optOut, out
+}
+
+func run(args []string) error {
+	if len(args) < 1 {
 		writeUsage(os.Stderr)
 		return errors.New("missing command")
 	}
 
-	cmd := os.Args[1]
-	rest := os.Args[2:]
+	cmd := args[0]
+	rest := args[1:]
 
 	switch cmd {
 	case "version", "--version", "-v":
@@ -115,7 +148,7 @@ Usage:
   af-stack <command> [args...]
 
 Commands:
-  init       Brand this fork and generate app theme files
+  init       Scaffold a new app on the AF Stack backend (use --brand to re-theme a fork)
   dev        Start docker compose for local development
   agent      Agent scaffold commands
   module     Workload module scaffold commands
@@ -127,7 +160,8 @@ Commands:
   version    Print the CLI version
 
 Examples:
-  af-stack init --name "DocuChat" --color "#0A66C2" --logo ./logo.png
+  af-stack init my-app                              # scaffold a new project that consumes the stack
+  af-stack init --brand --name "DocuChat" --color "#0A66C2"   # re-theme a fork (power-user path)
   af-stack dev --detach
   af-stack agent new researcher
   af-stack module new notes
@@ -139,7 +173,12 @@ Examples:
   af-stack mcp add github --transport stdio --command "uvx mcp-server-github" --env GITHUB_TOKEN=secret:github_token
   af-stack mcp call github search_repos --json '{"q":"agentfield"}'
 
+Global flags:
+  --no-telemetry     Disable anonymous usage telemetry for this run
+
 Environment:
-  AF_STACK_URL       Runtime base URL (default http://localhost:8080)
-  AF_STACK_API_KEY   Bearer token used as authorization (optional)`)
+  AF_STACK_URL            Runtime base URL (default http://localhost:8080)
+  AF_STACK_API_KEY        Bearer token used as authorization (optional)
+  AF_STACK_TELEMETRY=0    Disable anonymous usage telemetry (see TELEMETRY.md)
+  AF_STACK_TELEMETRY_URL  Telemetry collection endpoint (unset = telemetry off)`)
 }
