@@ -3,11 +3,13 @@
 package secrets
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -114,6 +116,27 @@ func (c *Cipher) KeyID() string { return c.keyID }
 // DevMode reports whether the cipher was constructed from the dev seed.
 // Useful for the dashboard's "you're in dev" badge.
 func (c *Cipher) DevMode() bool { return c.devMode }
+
+// Preflight proves the cipher can seal AND open a probe value — catching
+// a key that parsed but can't actually round-trip (e.g. a cloud KMS data
+// key that unwrapped to the wrong length, or a corrupted AEAD). Boot
+// calls this so a broken KEK fails at startup, not on the first secret
+// write. Cheap: one in-memory AES-GCM round-trip.
+func (c *Cipher) Preflight() error {
+	probe := []byte("af-stack-kms-preflight-v1")
+	sealed, err := c.Encrypt(probe)
+	if err != nil {
+		return fmt.Errorf("secrets: kms preflight encrypt: %w", err)
+	}
+	opened, err := c.Decrypt(sealed)
+	if err != nil {
+		return fmt.Errorf("secrets: kms preflight decrypt: %w", err)
+	}
+	if !bytes.Equal(opened, probe) {
+		return errors.New("secrets: kms preflight round-trip mismatch")
+	}
+	return nil
+}
 
 // Encrypt produces a ciphertext of the form:
 //

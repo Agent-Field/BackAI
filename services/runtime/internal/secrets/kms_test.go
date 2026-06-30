@@ -83,3 +83,37 @@ func TestCipherFromUnwrappedDataKeyRejectsWrongSize(t *testing.T) {
 		t.Fatal("expected short data key error")
 	}
 }
+
+// ─── S6: KMSConfigured intent predicate ───────────────────────────────────
+
+// TestKMSConfigured locks the production-intent predicate that decides
+// whether a KEK load failure is fatal (operator configured KMS) or a
+// soft degrade (zero-config dev path).
+func TestKMSConfigured(t *testing.T) {
+	cases := []struct {
+		name     string
+		provider string
+		key      string
+		want     bool
+	}{
+		{"unset everything -> dev", "", "", false},
+		{"env provider, no key -> dev", "env", "", false},
+		{"dev sentinel key -> dev", "", devKEKSentinel, false},
+		{"dev sentinel, mixed case -> dev", "", "DEV-SECRET-CHANGE-ME", false},
+		{"real hex key -> configured", "", strings.Repeat("ab", 32), true},
+		{"env provider + real key -> configured", "env", strings.Repeat("ab", 32), true},
+		{"aws provider -> configured", "aws", "", true},
+		{"gcp provider -> configured", "gcp", "", true},
+		{"azure provider -> configured", "azure", "", true},
+		{"typo provider -> configured (fail loud)", "awss", "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AF_STACK_KMS_PROVIDER", tc.provider)
+			t.Setenv("AF_STACK_KMS_KEY", tc.key)
+			if got := KMSConfigured(); got != tc.want {
+				t.Fatalf("KMSConfigured() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

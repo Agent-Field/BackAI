@@ -57,6 +57,31 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 	}
 }
 
+// TestPreflightRoundTrips confirms the S6 boot self-test passes for a
+// valid cipher (and for the deterministic dev KEK), so a healthy key
+// never trips the fatal boot path.
+func TestPreflightRoundTrips(t *testing.T) {
+	if err := newRandomCipher(t).Preflight(); err != nil {
+		t.Fatalf("Preflight on a valid random cipher: %v", err)
+	}
+	dev, err := LoadKEK(nil) // unset env -> dev KEK
+	if err != nil {
+		t.Fatalf("LoadKEK dev: %v", err)
+	}
+	if err := dev.Preflight(); err != nil {
+		t.Fatalf("Preflight on dev KEK: %v", err)
+	}
+}
+
+// TestPreflightFailsOnUninitialisedCipher confirms a cipher with no AEAD
+// is reported broken rather than silently passing preflight.
+func TestPreflightFailsOnUninitialisedCipher(t *testing.T) {
+	var c Cipher // zero value, no aead
+	if err := c.Preflight(); err == nil {
+		t.Fatal("expected preflight to fail on an uninitialised cipher")
+	}
+}
+
 func TestEncryptProducesDifferentCiphertextEachCall(t *testing.T) {
 	// Random nonce per call means identical plaintexts must produce
 	// distinct ciphertexts. This is what makes Rotate effective.

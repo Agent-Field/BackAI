@@ -27,6 +27,29 @@ const (
 	KMSProviderAzure = "azure"
 )
 
+// KMSConfigured reports whether the operator has explicitly opted into
+// real (non-dev) key management. When true, a LoadCipher/Preflight
+// failure must be fatal at boot rather than silently disabling the
+// vault — the operator signalled production intent, so a broken key is
+// a misconfiguration to surface, not a soft fallback.
+//
+// True when AF_STACK_KMS_PROVIDER names anything other than the local
+// env provider (including a typo, which we'd rather fail loudly on), or
+// when AF_STACK_KMS_KEY holds a non-empty value that isn't the dev
+// sentinel. False for the zero-config dev path (unset / sentinel key,
+// env provider), which boots a dev KEK.
+func KMSConfigured() bool {
+	provider := strings.ToLower(strings.TrimSpace(os.Getenv("AF_STACK_KMS_PROVIDER")))
+	if provider != "" && provider != KMSProviderEnv && provider != "local" {
+		return true
+	}
+	key := strings.TrimSpace(os.Getenv("AF_STACK_KMS_KEY"))
+	if key != "" && !strings.EqualFold(key, devKEKSentinel) {
+		return true
+	}
+	return false
+}
+
 // LoadCipher builds the vault cipher from the configured KMS provider.
 //
 // AF_STACK_KMS_PROVIDER=env preserves the legacy AF_STACK_KMS_KEY path.
