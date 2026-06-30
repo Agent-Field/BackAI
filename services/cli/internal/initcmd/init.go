@@ -77,11 +77,22 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	name := fs.String("name", "", "project display name, e.g. DocuChat")
 	color := fs.String("color", "", "primary brand color as #RRGGBB")
 	logo := fs.String("logo", "", "logo file to copy into both app public directories")
+	template := fs.String("template", TemplateNode,
+		"scaffold template: node (rebrand only) | coding-agent (rebrand + a real coding agent)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
 		return fmt.Errorf("init: unexpected argument %q", fs.Arg(0))
+	}
+
+	tmpl := strings.TrimSpace(strings.ToLower(*template))
+	if tmpl == "" {
+		tmpl = TemplateNode
+	}
+	if !validTemplate(tmpl) {
+		return fmt.Errorf("init: unknown --template %q (want one of: %s)",
+			*template, strings.Join(knownTemplates, ", "))
 	}
 
 	projectName := strings.TrimSpace(*name)
@@ -159,10 +170,22 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return err
 	}
 
-	fmt.Fprintf(stdout, "Initialized AF Stack fork for %s\n", projectName)
+	var templateSummary string
+	if tmpl == TemplateCodingAgent {
+		created, skipped, err := scaffoldCodingAgent(root)
+		if err != nil {
+			return err
+		}
+		templateSummary = summariseTemplateScaffold(tmpl, created, skipped)
+	}
+
+	fmt.Fprintf(stdout, "Initialized AF Stack fork for %s (template: %s)\n", projectName, tmpl)
 	fmt.Fprintf(stdout, "- brand.yaml updated\n")
 	fmt.Fprintf(stdout, "- brand CSS/modules regenerated\n")
 	fmt.Fprintf(stdout, "- default agent node_id set to %s\n", slug)
+	if templateSummary != "" {
+		fmt.Fprint(stdout, templateSummary)
+	}
 	return nil
 }
 
