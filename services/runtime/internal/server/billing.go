@@ -68,8 +68,11 @@ type portalLinkRequest struct {
 }
 
 // meterRequest is the body for POST /billing/meter. tenant_id is optional —
-// when omitted, the authenticated caller's tenant (from the API key) is used,
-// which is the normal app-code path.
+// pass it to attribute usage to a specific tenant (the multi-tenant app-code
+// path). When omitted, the runtime's default tenant is used, which is the
+// normal single-tenant path. /api/v1/billing is a dashboard-auth surface and
+// does not resolve the API key to a tenant in v1, so multi-tenant callers
+// must pass tenant_id explicitly.
 type meterRequest struct {
 	Name     string  `json:"name"`
 	Qty      float64 `json:"qty"`
@@ -325,14 +328,17 @@ func (s *Server) handleBillingMeter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Tenant precedence: explicit body tenant_id (multi-tenant app code) >
+	// resolved context tenant (if this route ever runs behind tenant auth) >
+	// the runtime's default tenant. Billing is a public/dashboard-auth prefix
+	// so the API key is not resolved here; single-tenant deployments meter
+	// under the default tenant, matching notifications/send.
 	tenantID := strings.TrimSpace(in.TenantID)
 	if tenantID == "" {
 		tenantID = tenantctx.TenantID(ctx)
 	}
 	if tenantID == "" {
-		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED",
-			"tenant_id is required (no authenticated tenant in context)", nil)
-		return
+		tenantID = s.defaultTenant(r)
 	}
 
 	if err := s.billing.Meter(ctx, in.Name, in.Qty, tenantID); err != nil {
