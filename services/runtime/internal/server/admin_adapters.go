@@ -7,10 +7,14 @@ import (
 
 	adapterregistry "github.com/Agent-Field/backai/services/runtime/internal/adapters/registry"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
+	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
 )
 
 func (s *Server) registerAdminAdapterRoutes() {
-	s.mux.HandleFunc("GET /api/v1/admin/adapters", s.handleAdminListAdapters)
+	// The adapter registry exposes which backends are wired and their env
+	// knobs; operator-gated so it isn't readable unauthenticated.
+	s.mux.HandleFunc("GET /api/v1/admin/adapters",
+		s.operatorGuard(rbac.ResourceAdminAdapters, s.handleAdminListAdapters))
 }
 
 func (s *Server) handleAdminListAdapters(w http.ResponseWriter, r *http.Request) {

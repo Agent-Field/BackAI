@@ -118,6 +118,10 @@ type Server struct {
 	// opt into app.bypass_rls. nil means admin calls are denied once
 	// the module/store gates pass.
 	rbac *rbac.Enforcer
+	// operatorResolver resolves the operator principal from a request's
+	// better-auth session. It defaults to s.resolveOperatorPrincipal; tests
+	// inject a fake to exercise the operator-gated surfaces without a DB.
+	operatorResolver func(context.Context, *http.Request) (operatorPrincipal, error)
 	// sandbox powers /api/v1/sandbox/*. nil = endpoints either return
 	// 503 SANDBOX_NOT_CONFIGURED (mutating) or tolerant empty
 	// responses (reads).
@@ -461,6 +465,7 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 	if s.rbac == nil {
 		s.rbac = rbac.NewDefault()
 	}
+	s.operatorResolver = s.resolveOperatorPrincipal
 	if deps.DB != nil {
 		s.audit = audit.New(deps.DB.Pool, log)
 	} else {

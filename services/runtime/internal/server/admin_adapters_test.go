@@ -3,6 +3,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,18 @@ import (
 	adapterregistry "github.com/Agent-Field/backai/services/runtime/internal/adapters/registry"
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
 )
+
+// withOperator injects a fake authenticated operator with the given role,
+// bypassing the better-auth/DB lookup so handler tests can exercise the
+// authorized path. Pass "" to simulate an unauthenticated request.
+func withOperator(srv *Server, role string) {
+	srv.operatorResolver = func(context.Context, *http.Request) (operatorPrincipal, error) {
+		if role == "" {
+			return operatorPrincipal{}, errNoSession
+		}
+		return operatorPrincipal{UserID: "op-1", Email: "op@example.com", Role: role}, nil
+	}
+}
 
 func TestAdminAdaptersEndpointReturnsRegistry(t *testing.T) {
 	reg := adapterregistry.New()
@@ -25,6 +38,7 @@ func TestAdminAdaptersEndpointReturnsRegistry(t *testing.T) {
 		SwapEnv:      "AF_STACK_SANDBOX_ADAPTER",
 	})
 	srv := New(config.Default(), slog.Default(), Deps{AdapterRegistry: reg})
+	withOperator(srv, "owner")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/adapters", nil)
 	rec := httptest.NewRecorder()
@@ -49,6 +63,7 @@ func TestAdminAdaptersEndpointReturnsRegistry(t *testing.T) {
 
 func TestAdminAdaptersEndpointDegradesToEmptyList(t *testing.T) {
 	srv := New(config.Default(), slog.Default(), Deps{})
+	withOperator(srv, "owner")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/adapters", nil)
 	rec := httptest.NewRecorder()
@@ -62,6 +77,20 @@ func TestAdminAdaptersEndpointDegradesToEmptyList(t *testing.T) {
 	}
 	if len(out.Slots) != 0 {
 		t.Fatalf("slots = %d, want 0", len(out.Slots))
+	}
+}
+
+// TestAdminAdaptersRequiresOperator locks the S1 contract: the adapter
+// registry is not readable without an operator session.
+func TestAdminAdaptersRequiresOperator(t *testing.T) {
+	srv := New(config.Default(), slog.Default(), Deps{AdapterRegistry: adapterregistry.New()})
+	withOperator(srv, "") // unauthenticated
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/adapters", nil)
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401; body = %s", rec.Code, rec.Body.String())
 	}
 }
 

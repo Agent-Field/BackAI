@@ -28,6 +28,12 @@ const (
 	ResourceAdminBudgets     = "admin:budgets"
 	ResourceAdminAudit       = "admin:audit"
 	ResourceAdminPrivacy     = "admin:privacy"
+	// ResourceAdminDB guards the DB-studio surface (/api/v1/db/*), which can
+	// run arbitrary SQL. ResourceAdminAdapters guards the adapter-registry
+	// view (/api/v1/admin/adapters). Both are matched by the admin:* policy
+	// rules below: owner gets read|write|delete, admin gets read.
+	ResourceAdminDB       = "admin:db"
+	ResourceAdminAdapters = "admin:adapters"
 )
 
 const casbinModel = `
