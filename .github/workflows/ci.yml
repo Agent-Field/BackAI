@@ -93,23 +93,19 @@ jobs:
           # missing `covdata`, breaking `go test -cover` on no-test packages.
           go-version-file: go.mod
           cache: true
-      # ADVISORY (continue-on-error) until the golangci v2 migration lands.
-      # The repo's .golangci.yml is v1-schema, so we must run golangci-lint v1
-      # (v2 "latest" cannot parse it). But the last v1 line (v1.64.8) cannot
-      # analyze code under the go 1.25 toolchain go.mod now requires — it exits
-      # non-zero with an internal typecheck error rather than reporting issues.
-      # Migrating .golangci.yml to the v2 schema + bumping to golangci-lint v2
-      # (which supports go 1.25) and re-enabling this as blocking is tracked in
-      # S7. `go vet` + `go build` + `go test` remain the enforced Go gates.
-      - name: golangci-lint
-        continue-on-error: true
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: v1.64.8
-          args: --timeout=5m
-          only-new-issues: true
+      # golangci-lint is temporarily out of the gate. The repo's .golangci.yml
+      # is v1-schema, so only golangci-lint v1 can parse it — but the last v1
+      # line (v1.64.8) cannot analyze code under the go 1.25 toolchain that
+      # go.mod requires (it exits with an internal typecheck error rather than
+      # reporting issues). go 1.25 support lives in golangci-lint v2, which
+      # needs the v2 config schema. Migrating .golangci.yml to v2 + bumping the
+      # action and restoring this as a blocking gate is tracked in S7.
+      # Until then go vet + go build are the enforced static checks (alongside
+      # the race-enabled test suite in test-go).
       - name: go vet
         run: go vet ./...
+      - name: go build
+        run: go build ./...
 
   test-go:
     name: Test (Go)
