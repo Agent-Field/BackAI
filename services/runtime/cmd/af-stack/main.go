@@ -906,11 +906,26 @@ func main() {
 	var vault *secrets.Vault
 	if database != nil && database.Pool != nil {
 		cipher, kekErr := secrets.LoadCipher(ctx, log)
-		if kekErr != nil {
-			log.Error("secrets: KMS load failed; secrets vault disabled",
+		// KMS preflight: a cipher that parses but can't round-trip is as
+		// broken as one that failed to load — fold a preflight failure
+		// into kekErr so the boot decision treats both the same.
+		if kekErr == nil {
+			if pfErr := cipher.Preflight(); pfErr != nil {
+				kekErr = pfErr
+			}
+		}
+		switch kmsBootDecision(kekErr, secrets.KMSConfigured()) {
+		case kmsFatal:
+			log.Error("refusing to start: KMS is configured but the key could not be loaded — secrets, OAuth tokens, and webhook verification would be silently unavailable",
+				"error", kekErr,
+				"fix", "set AF_STACK_KMS_KEY to 32 random bytes hex-encoded (or fix AF_STACK_KMS_PROVIDER + the cloud data key), or unset them to boot with the dev key")
+			database.Close()
+			os.Exit(1)
+		case kmsDegrade:
+			log.Error("secrets: KMS load failed; secrets vault disabled (no KMS explicitly configured)",
 				"error", kekErr,
 			)
-		} else {
+		case kmsServe:
 			vault, err = secrets.New(database.Pool, cipher, log)
 			if err != nil {
 				log.Error("secrets: vault init failed", "error", err)
@@ -2148,6 +2163,29 @@ func rlsBootDecision(canBypass, mtEnabled, override bool) rlsDecision {
 		return rlsFatal
 	}
 	return rlsWarn
+}
+
+// kmsDecision is the boot-time outcome for the secrets KEK.
+type kmsDecision int
+
+const (
+	kmsServe   kmsDecision = iota // cipher loaded + preflighted -> serve the vault
+	kmsDegrade                    // load failed but no KMS configured -> dev/optional, vault disabled
+	kmsFatal                      // load failed AND KMS explicitly configured -> refuse to start
+)
+
+// kmsBootDecision is the pure policy for the secrets vault KEK: a load or
+// preflight failure is fatal only when the operator explicitly configured
+// KMS (so a silently-disabled vault can't masquerade as a healthy boot);
+// otherwise it degrades to a disabled vault. A clean load always serves.
+func kmsBootDecision(loadErr error, kmsConfigured bool) kmsDecision {
+	if loadErr == nil {
+		return kmsServe
+	}
+	if kmsConfigured {
+		return kmsFatal
+	}
+	return kmsDegrade
 }
 
 func assertTenantSafeRole(ctx context.Context, cfg config.Config, database *db.DB, log *slog.Logger) {
