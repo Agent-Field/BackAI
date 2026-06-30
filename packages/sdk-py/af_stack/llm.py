@@ -33,7 +33,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import _http
 
-
 # ─── Pydantic mirrors of LLM gateway schemas ──────────────────────────────
 
 
@@ -121,9 +120,7 @@ async def chat(
         payload["stream"] = True
         return _stream_chat(payload, headers=headers)
 
-    body = await _http.request_json(
-        "POST", "/llm/chat/completions", json=payload, headers=headers
-    )
+    body = await _http.request_json("POST", "/llm/chat/completions", json=payload, headers=headers)
     return body or {}
 
 
@@ -167,9 +164,7 @@ async def embed(
         if v is not None:
             payload[k] = v
     headers = {"X-AF-Reasoner": reasoner} if reasoner else None
-    body = await _http.request_json(
-        "POST", "/llm/embeddings", json=payload, headers=headers
-    )
+    body = await _http.request_json("POST", "/llm/embeddings", json=payload, headers=headers)
     return body or {}
 
 

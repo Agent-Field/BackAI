@@ -112,9 +112,7 @@ async def search(
         raise ValueError("search query must be a non-empty string")
     if mode not in _ALLOWED_MODES:
         allowed = ", ".join(_ALLOWED_MODES)
-        raise ValueError(
-            f"search mode must be one of: {allowed}; got {mode!r}"
-        )
+        raise ValueError(f"search mode must be one of: {allowed}; got {mode!r}")
     if limit < 1 or limit > 100:
         raise ValueError("limit must be between 1 and 100")
     if offset < 0:
@@ -182,9 +180,7 @@ async def delete(  # noqa: A001 — mirrors the JS `searchIndex.delete()` ergono
     if not isinstance(namespace, str) or namespace == "":
         raise ValueError("search document namespace must be a non-empty string")
 
-    path = (
-        f"/search/documents/{quote(namespace, safe='')}/{quote(key, safe='')}"
-    )
+    path = f"/search/documents/{quote(namespace, safe='')}/{quote(key, safe='')}"
     raw = await _http.request_json("DELETE", path)
     if not isinstance(raw, dict):
         return True

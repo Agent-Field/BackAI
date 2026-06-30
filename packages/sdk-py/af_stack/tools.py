@@ -224,9 +224,7 @@ async def add_mcp_server(
         raise ValueError("mcp server name must be a non-empty string")
     if transport not in _ALLOWED_TRANSPORTS:
         allowed = ", ".join(_ALLOWED_TRANSPORTS)
-        raise ValueError(
-            f"transport must be one of: {allowed}; got {transport!r}"
-        )
+        raise ValueError(f"transport must be one of: {allowed}; got {transport!r}")
     if transport == "stdio":
         if not command:
             raise ValueError("stdio transport requires a non-empty command list")

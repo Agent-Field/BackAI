@@ -29,14 +29,12 @@ from __future__ import annotations
 
 import os
 from contextlib import asynccontextmanager
-from typing import Any
 
 import httpx
 import psycopg
 from fastapi import FastAPI, Header, HTTPException
 from psycopg.rows import dict_row
 from pydantic import BaseModel
-
 
 # ─── Config ──────────────────────────────────────────────────────────────
 
@@ -70,9 +68,7 @@ app = FastAPI(
 # ─── Tenant resolver (REQUIRED for every route that touches data) ────────
 
 
-def _require_tenant(
-    tenant_id: str | None, user_id: str | None
-) -> tuple[str, str]:
+def _require_tenant(tenant_id: str | None, user_id: str | None) -> tuple[str, str]:
     """Extract + validate the per-request tenant + user."""
     tenant_id = (tenant_id or "").strip()
     user_id = (user_id or "").strip()
@@ -91,13 +87,9 @@ async def _tenant_conn(tenant_id: str):
     connection can't leak it to the next caller. ALWAYS go through this
     helper for any query that hits tenant-scoped tables.
     """
-    async with await psycopg.AsyncConnection.connect(
-        DATABASE_URL, row_factory=dict_row
-    ) as conn:
+    async with await psycopg.AsyncConnection.connect(DATABASE_URL, row_factory=dict_row) as conn:
         async with conn.transaction():
-            await conn.execute(
-                "SELECT set_config('app.tenant_id', %s, true)", (tenant_id,)
-            )
+            await conn.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant_id,))
             yield conn
 
 

@@ -91,9 +91,7 @@ async def test_set_accepts_pydantic_input() -> None:
         route = router.put(f"{BASE}/admin/budgets").mock(
             return_value=httpx.Response(200, json=_budget_row(monthly_usd=50.0))
         )
-        result = await budgets.set(
-            SetBudgetInput(tenant_id="t-acme", monthly_usd=50.0)
-        )
+        result = await budgets.set(SetBudgetInput(tenant_id="t-acme", monthly_usd=50.0))
     assert result.monthly_usd == 50.0
     body = route.calls.last.request.read().decode()
     # default threshold should be serialised (80.0).
@@ -121,9 +119,7 @@ async def test_budget_exceeded_surfaces_as_error() -> None:
         }
     }
     with respx.mock(assert_all_called=True) as router:
-        router.put(f"{BASE}/admin/budgets").mock(
-            return_value=httpx.Response(402, json=body)
-        )
+        router.put(f"{BASE}/admin/budgets").mock(return_value=httpx.Response(402, json=body))
         with pytest.raises(AFStackError) as exc:
             await budgets.set({"tenant_id": "t-acme", "monthly_usd": 10.0})
     assert exc.value.code == "BUDGET_EXCEEDED"

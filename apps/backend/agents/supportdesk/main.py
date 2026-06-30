@@ -68,9 +68,7 @@ async def reply_plan(
     """Create a structured support-reply plan from smaller reasoners."""
 
     issue_task = app.call(_agent_reasoner("classify_issue"), ticket=ticket, model=model)
-    facts_task = app.call(
-        _agent_reasoner("extract_customer_facts"), ticket=ticket, model=model
-    )
+    facts_task = app.call(_agent_reasoner("extract_customer_facts"), ticket=ticket, model=model)
     issue, facts = await asyncio.gather(issue_task, facts_task)
 
     category = _text(issue.get("category")) or "general"
@@ -154,9 +152,7 @@ async def classify_issue(ticket: str, model: str | None = None) -> dict[str, Any
 
 
 @router.reasoner(tags=["facts"])
-async def extract_customer_facts(
-    ticket: str, model: str | None = None
-) -> dict[str, Any]:
+async def extract_customer_facts(ticket: str, model: str | None = None) -> dict[str, Any]:
     """Extract concrete facts the final reply should preserve."""
 
     emails = re.findall(r"[\w.+-]+@[\w-]+\.[\w.-]+", ticket)

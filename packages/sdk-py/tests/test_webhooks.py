@@ -136,9 +136,7 @@ async def test_list_returns_paginated_deliveries() -> None:
 async def test_list_passes_filters_as_query_params() -> None:
     with respx.mock(assert_all_called=True) as router:
         route = router.get(f"{BASE}/webhooks/deliveries").mock(
-            return_value=httpx.Response(
-                200, json={"deliveries": [], "total": 0, "has_more": False}
-            )
+            return_value=httpx.Response(200, json={"deliveries": [], "total": 0, "has_more": False})
         )
         await webhooks.list(
             direction="outbound",

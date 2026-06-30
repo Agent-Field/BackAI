@@ -212,9 +212,7 @@ async def list(  # noqa: A001 — mirrors the JS `sandbox.list()` ergonomics
     if status is not None:
         params["status"] = status
     body = await _http.request_json("GET", "/sandbox/runs", params=params)
-    return SandboxRunList.model_validate(
-        body or {"runs": [], "total": 0, "has_more": False}
-    )
+    return SandboxRunList.model_validate(body or {"runs": [], "total": 0, "has_more": False})
 
 
 async def get(id: str) -> SandboxRun:

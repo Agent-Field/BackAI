@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -48,7 +48,7 @@ provides-extras = ["dev"]
 [[package]]
 name = "af-stack-backend"
 version = "0.0.1"
-source = { editable = "apps/backend" }
+source = { virtual = "apps/backend" }
 dependencies = [
     { name = "af-stack" },
 ]
@@ -60,6 +60,22 @@ requires-dist = [{ name = "af-stack", editable = "packages/sdk-py" }]
 name = "af-stack-workspace"
 version = "0.0.1"
 source = { virtual = "." }
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "respx" },
+]
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-asyncio", specifier = ">=0.24" },
+    { name = "respx", specifier = ">=0.21" },
+]
 
 [[package]]
 name = "annotated-types"

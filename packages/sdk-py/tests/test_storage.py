@@ -198,9 +198,7 @@ async def test_list_returns_objects_and_paging() -> None:
         "next_token": "page_2",
     }
     with respx.mock(assert_all_called=True) as router:
-        route = router.get(f"{BASE}/storage").mock(
-            return_value=httpx.Response(200, json=payload)
-        )
+        route = router.get(f"{BASE}/storage").mock(return_value=httpx.Response(200, json=payload))
         listing = await storage.list(prefix="reports/", limit=10)
 
     assert listing.prefix == "reports/"

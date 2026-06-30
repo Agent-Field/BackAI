@@ -165,9 +165,7 @@ async def translate(
 # ─── helpers ──────────────────────────────────────────────────────────────
 
 
-async def _post_for_bytes(
-    path: str, payload: dict[str, Any]
-) -> tuple[bytes, str]:
+async def _post_for_bytes(path: str, payload: dict[str, Any]) -> tuple[bytes, str]:
     client = _http.get_client()
     response = await client.request(
         "POST",
@@ -214,9 +212,7 @@ async def _stt_call(
     client = _http.get_client()
     headers = {k: v for k, v in _http._build_headers().items() if k != "accept"}
     headers["accept"] = "application/json"
-    response = await client.request(
-        "POST", path, data=data, files=files, headers=headers
-    )
+    response = await client.request("POST", path, data=data, files=files, headers=headers)
     _http._raise_for_error(response)
     body = response.json()
     if isinstance(body, dict):

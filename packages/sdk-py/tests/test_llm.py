@@ -95,7 +95,7 @@ async def test_chat_streaming_yields_deltas_and_stops_on_done() -> None:
         'data: {"id":"chatcmpl-1","choices":[{"delta":{"content":"Hel"}}]}\n\n'
         'data: {"id":"chatcmpl-1","choices":[{"delta":{"content":"lo"}}]}\n\n'
         'data: {"id":"chatcmpl-1","choices":[{"delta":{"content":"!"}}]}\n\n'
-        'data: [DONE]\n\n'
+        "data: [DONE]\n\n"
     )
     with respx.mock(assert_all_called=True) as router:
         router.post(f"{BASE}/llm/chat/completions").mock(
@@ -174,9 +174,7 @@ async def test_models_parses_typed_response() -> None:
         ]
     }
     with respx.mock(assert_all_called=True) as router:
-        router.get(f"{BASE}/llm/models").mock(
-            return_value=httpx.Response(200, json=body)
-        )
+        router.get(f"{BASE}/llm/models").mock(return_value=httpx.Response(200, json=body))
         result = await llm.models()
     assert len(result.models) == 1
     m = result.models[0]
@@ -195,9 +193,7 @@ async def test_cache_stats_returns_typed_model() -> None:
         "entries": 12,
     }
     with respx.mock(assert_all_called=True) as router:
-        router.get(f"{BASE}/llm/cache/stats").mock(
-            return_value=httpx.Response(200, json=body)
-        )
+        router.get(f"{BASE}/llm/cache/stats").mock(return_value=httpx.Response(200, json=body))
         result = await llm.cache_stats()
     assert result.total_calls == 100
     assert result.hit_rate == 0.3

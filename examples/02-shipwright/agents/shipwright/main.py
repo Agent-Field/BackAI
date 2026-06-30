@@ -75,44 +75,32 @@ async def execute_task(payload: dict) -> dict:
     print(f"[shipwright] starting task title={title!r} issue={issue_url!r}", flush=True)
 
     steps_template = [
-        ("Parse GitHub issue", 1.5,
-         f"Fetched {issue_url} - classified as bug-fix"),
-        ("Clone target repository", 1.5,
-         "git clone -> /work - checked out main"),
-        ("Read relevant source files", 2.0,
-         "5 files - 412 lines reviewed"),
-        ("Generate change plan", 2.0,
-         "Plan: rename method - add nil-check - cover with unit test"),
-        ("Apply changes", 1.5,
-         "3 files modified - diff cached"),
-        ("Run test suite", 1.0,
-         "12 passed - 0 failed - 8s"),
-        ("Open pull request", 0.5,
-         "PR #142 opened against main"),
+        ("Parse GitHub issue", 1.5, f"Fetched {issue_url} - classified as bug-fix"),
+        ("Clone target repository", 1.5, "git clone -> /work - checked out main"),
+        ("Read relevant source files", 2.0, "5 files - 412 lines reviewed"),
+        ("Generate change plan", 2.0, "Plan: rename method - add nil-check - cover with unit test"),
+        ("Apply changes", 1.5, "3 files modified - diff cached"),
+        ("Run test suite", 1.0, "12 passed - 0 failed - 8s"),
+        ("Open pull request", 0.5, "PR #142 opened against main"),
     ]
 
     steps: list[Step] = []
     for idx, (step_title, duration, detail) in enumerate(steps_template, start=1):
         await asyncio.sleep(duration)
-        steps.append(Step(idx=idx, title=step_title, status="completed",
-                          detail=detail))
-        print(f"[shipwright] step {idx}/{len(steps_template)}: {step_title}",
-              flush=True)
+        steps.append(Step(idx=idx, title=step_title, status="completed", detail=detail))
+        print(f"[shipwright] step {idx}/{len(steps_template)}: {step_title}", flush=True)
 
-    summary = (
-        f"Reviewed {issue_url}. Plan executed: 3 files edited, 12 tests pass, "
-        f"PR opened."
-    )
+    summary = f"Reviewed {issue_url}. Plan executed: 3 files edited, 12 tests pass, PR opened."
     diff = (
         "diff --git a/src/handler.go b/src/handler.go\n"
         "--- a/src/handler.go\n"
         "+++ b/src/handler.go\n"
         "@@ -42,7 +42,11 @@ func handle(ctx context.Context, req Request) error {\n"
         "     if req.User == nil {\n"
-        "-        return errors.New(\"missing user\")\n"
+        '-        return errors.New("missing user")\n'
         "+        return ErrMissingUser\n"
         "     }\n"
-        "     if req.Body == \"\" {\n"
+        '     if req.Body == "" {\n'
         "+        return ErrEmptyBody\n"
         "+    }\n"
         "     return processRequest(ctx, req)\n"
@@ -155,12 +143,10 @@ def _status(bins: list[str], envs: list[str]) -> str:
 @app.reasoner()
 async def __capabilities__(_: dict[str, Any]) -> dict[str, Any]:
     harnesses = [
-        {"provider": p, "status": _status(b, e), "binaries": b}
-        for p, b, e in _HARNESS_SPECS
+        {"provider": p, "status": _status(b, e), "binaries": b} for p, b, e in _HARNESS_SPECS
     ]
     mcp_runners = [
-        {"name": b, "status": "ready" if shutil.which(b) else "missing"}
-        for b in _MCP_RUNNERS
+        {"name": b, "status": "ready" if shutil.which(b) else "missing"} for b in _MCP_RUNNERS
     ]
     return {"harnesses": harnesses, "mcp_runners": mcp_runners}
 

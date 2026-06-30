@@ -65,9 +65,7 @@ async def test_search_posts_query_with_defaults() -> None:
         "duration_ms": 42,
     }
     with respx.mock(assert_all_called=True) as router:
-        route = router.post(f"{BASE}/search").mock(
-            return_value=httpx.Response(200, json=payload)
-        )
+        route = router.post(f"{BASE}/search").mock(return_value=httpx.Response(200, json=payload))
         result = await search.search("hello")
 
     assert isinstance(result, SearchResult)
@@ -92,9 +90,7 @@ async def test_search_posts_query_with_defaults() -> None:
 async def test_search_posts_optional_namespace_and_filter() -> None:
     with respx.mock(assert_all_called=True) as router:
         route = router.post(f"{BASE}/search").mock(
-            return_value=httpx.Response(
-                200, json={"hits": [], "mode": "fts", "duration_ms": 5}
-            )
+            return_value=httpx.Response(200, json={"hits": [], "mode": "fts", "duration_ms": 5})
         )
         await search.search(
             "hello",
@@ -134,9 +130,7 @@ async def test_search_raises_on_structured_error() -> None:
         }
     }
     with respx.mock(assert_all_called=True) as router:
-        router.post(f"{BASE}/search").mock(
-            return_value=httpx.Response(503, json=error_body)
-        )
+        router.post(f"{BASE}/search").mock(return_value=httpx.Response(503, json=error_body))
         with pytest.raises(AFStackError) as exc:
             await search.search("vec", mode="vector")
     assert exc.value.code == "EMBEDDER_NOT_CONFIGURED"

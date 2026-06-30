@@ -14,7 +14,6 @@ import tempfile
 import tomllib
 from typing import Any
 
-
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
@@ -34,7 +33,7 @@ def require_file(path: pathlib.Path | str) -> pathlib.Path:
 
 
 def run(cmd: list[str], *, cwd: pathlib.Path = ROOT) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(cmd, cwd=cwd, text=True, capture_output=True, check=False)
+    return subprocess.run(cmd, cwd=cwd, text=True, capture_output=True, check=False)  # noqa: S603 - runs fixed deploy CLIs
 
 
 def require(condition: bool, message: str) -> None:
@@ -56,14 +55,20 @@ def check_helm() -> list[str]:
     require_file("deploy/helm/af-stack/values-dev.yaml")
     require_file("deploy/helm/af-stack/values-prod.yaml")
 
-    runtime_deploy = require_file("deploy/helm/af-stack/templates/runtime/deployment.yaml").read_text()
-    dashboard_deploy = require_file("deploy/helm/af-stack/templates/dashboard/deployment.yaml").read_text()
+    runtime_deploy = require_file(
+        "deploy/helm/af-stack/templates/runtime/deployment.yaml"
+    ).read_text()
+    dashboard_deploy = require_file(
+        "deploy/helm/af-stack/templates/dashboard/deployment.yaml"
+    ).read_text()
     values = rel("deploy/helm/af-stack/values.yaml").read_text()
     require("/health" in runtime_deploy, "runtime Deployment must define /health liveness probe")
     require("/ready" in runtime_deploy, "runtime Deployment must define /ready readiness probe")
     require("/" in dashboard_deploy, "dashboard Deployment must define root health probe")
     require("service: runtime" in values, "Helm values must route runtime paths")
-    require("/health" in values and "/ready" in values, "Helm values must route runtime health paths")
+    require(
+        "/health" in values and "/ready" in values, "Helm values must route runtime health paths"
+    )
 
     helm = shutil.which("helm")
     if not helm:
@@ -89,7 +94,12 @@ def check_helm() -> list[str]:
     if template.returncode != 0:
         raise CheckError(f"helm template failed:\n{template.stdout}\n{template.stderr}")
     rendered = template.stdout
-    for needle in ("kind: Deployment", "name: af-stack-runtime", "name: af-stack-dashboard", "path: /ready"):
+    for needle in (
+        "kind: Deployment",
+        "name: af-stack-runtime",
+        "name: af-stack-dashboard",
+        "path: /ready",
+    ):
         require(needle in rendered, f"helm template output missing {needle!r}")
     messages.append("helm lint/template passed")
     return messages
@@ -102,17 +112,32 @@ def check_fly() -> list[str]:
     runtime = tomllib.loads(runtime_path.read_text())
     dashboard = tomllib.loads(dashboard_path.read_text())
 
-    require(runtime.get("build", {}).get("dockerfile") == "services/runtime/Dockerfile", "Fly runtime Dockerfile mismatch")
-    require(dashboard.get("build", {}).get("dockerfile") == "apps/dashboard/Dockerfile", "Fly dashboard Dockerfile mismatch")
+    require(
+        runtime.get("build", {}).get("dockerfile") == "services/runtime/Dockerfile",
+        "Fly runtime Dockerfile mismatch",
+    )
+    require(
+        dashboard.get("build", {}).get("dockerfile") == "apps/dashboard/Dockerfile",
+        "Fly dashboard Dockerfile mismatch",
+    )
 
     runtime_services = runtime.get("services", [])
-    require(runtime_services and runtime_services[0].get("internal_port") == 8080, "Fly runtime must expose internal port 8080")
+    require(
+        runtime_services and runtime_services[0].get("internal_port") == 8080,
+        "Fly runtime must expose internal port 8080",
+    )
     runtime_checks = runtime_services[0].get("http_checks", [])
     runtime_paths = {check.get("path") for check in runtime_checks}
-    require({"/health", "/ready"}.issubset(runtime_paths), "Fly runtime must define /health and /ready checks")
+    require(
+        {"/health", "/ready"}.issubset(runtime_paths),
+        "Fly runtime must define /health and /ready checks",
+    )
 
     dashboard_services = dashboard.get("services", [])
-    require(dashboard_services and dashboard_services[0].get("internal_port") == 3000, "Fly dashboard must expose internal port 3000")
+    require(
+        dashboard_services and dashboard_services[0].get("internal_port") == 3000,
+        "Fly dashboard must expose internal port 3000",
+    )
     dashboard_paths = {check.get("path") for check in dashboard_services[0].get("http_checks", [])}
     require("/" in dashboard_paths, "Fly dashboard must define root health check")
 
@@ -121,7 +146,9 @@ def check_fly() -> list[str]:
         messages.append("flyctl not found; static Fly config validation passed")
         return messages
     if not os.environ.get("FLY_API_TOKEN"):
-        messages.append("flyctl found but FLY_API_TOKEN is not set; skipped credentialed fly config validate")
+        messages.append(
+            "flyctl found but FLY_API_TOKEN is not set; skipped credentialed fly config validate"
+        )
         return messages
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -142,7 +169,9 @@ def check_fly() -> list[str]:
         for config in (runtime_tmp, dashboard_tmp):
             result = run([flyctl, "config", "validate", "--config", str(config)])
             if result.returncode != 0:
-                raise CheckError(f"fly config validate failed for {config.name}:\n{result.stdout}\n{result.stderr}")
+                raise CheckError(
+                    f"fly config validate failed for {config.name}:\n{result.stdout}\n{result.stderr}"
+                )
     messages.append("flyctl config validate passed")
     return messages
 
@@ -159,27 +188,77 @@ def check_railway() -> list[str]:
     dashboard = find_service(services, "dashboard")
     customer = find_service(services, "customer")
 
-    require(postgres.get("source", {}).get("image") == "pgvector/pgvector:pg16", "Railway Postgres must use pgvector PG16")
-    require(agentfield.get("source", {}).get("image") == "agentfield/control-plane:latest", "Railway AgentField image mismatch")
+    require(
+        postgres.get("source", {}).get("image") == "pgvector/pgvector:pg16",
+        "Railway Postgres must use pgvector PG16",
+    )
+    require(
+        agentfield.get("source", {}).get("image") == "agentfield/control-plane:latest",
+        "Railway AgentField image mismatch",
+    )
     require(
         "AGENTFIELD_STORAGE_POSTGRES_URL" in agentfield.get("variables", {}),
         "Railway AgentField must receive database URL",
     )
-    require(litellm.get("build", {}).get("dockerfilePath") == "deploy/railway/litellm.Dockerfile", "Railway LiteLLM Dockerfile mismatch")
-    require(litellm.get("deploy", {}).get("healthcheckPath") == "/health/readiness", "Railway LiteLLM healthcheck must be /health/readiness")
-    require(runtime.get("build", {}).get("dockerfilePath") == "services/runtime/Dockerfile", "Railway runtime Dockerfile mismatch")
-    require(runtime.get("deploy", {}).get("healthcheckPath") == "/health", "Railway runtime healthcheck must be /health")
-    require(dashboard.get("build", {}).get("dockerfilePath") == "apps/dashboard/Dockerfile", "Railway dashboard Dockerfile mismatch")
-    require(dashboard.get("deploy", {}).get("healthcheckPath") == "/", "Railway dashboard healthcheck must be /")
-    require(customer.get("build", {}).get("dockerfilePath") == "apps/customer-app/Dockerfile", "Railway customer app Dockerfile mismatch")
-    require(customer.get("deploy", {}).get("healthcheckPath") == "/", "Railway customer app healthcheck must be /")
-    require("AF_STACK_DATABASE_URL" in runtime.get("variables", {}), "Railway runtime must receive database URL")
-    require("AF_STACK_AGENTFIELD_URL" in runtime.get("variables", {}), "Railway runtime must receive AgentField URL")
-    require("AF_STACK_LITELLM_URL" in runtime.get("variables", {}), "Railway runtime must receive LiteLLM URL")
-    require("AF_STACK_DEMO_MODE" in runtime.get("variables", {}), "Railway runtime must set demo mode")
-    require("DATABASE_URL" in dashboard.get("variables", {}), "Railway dashboard must receive database URL")
-    require("DATABASE_URL" in customer.get("variables", {}), "Railway customer app must receive database URL")
-    require("RUNTIME_URL" in customer.get("variables", {}), "Railway customer app must receive runtime URL")
+    require(
+        litellm.get("build", {}).get("dockerfilePath") == "deploy/railway/litellm.Dockerfile",
+        "Railway LiteLLM Dockerfile mismatch",
+    )
+    require(
+        litellm.get("deploy", {}).get("healthcheckPath") == "/health/readiness",
+        "Railway LiteLLM healthcheck must be /health/readiness",
+    )
+    require(
+        runtime.get("build", {}).get("dockerfilePath") == "services/runtime/Dockerfile",
+        "Railway runtime Dockerfile mismatch",
+    )
+    require(
+        runtime.get("deploy", {}).get("healthcheckPath") == "/health",
+        "Railway runtime healthcheck must be /health",
+    )
+    require(
+        dashboard.get("build", {}).get("dockerfilePath") == "apps/dashboard/Dockerfile",
+        "Railway dashboard Dockerfile mismatch",
+    )
+    require(
+        dashboard.get("deploy", {}).get("healthcheckPath") == "/",
+        "Railway dashboard healthcheck must be /",
+    )
+    require(
+        customer.get("build", {}).get("dockerfilePath") == "apps/customer-app/Dockerfile",
+        "Railway customer app Dockerfile mismatch",
+    )
+    require(
+        customer.get("deploy", {}).get("healthcheckPath") == "/",
+        "Railway customer app healthcheck must be /",
+    )
+    require(
+        "AF_STACK_DATABASE_URL" in runtime.get("variables", {}),
+        "Railway runtime must receive database URL",
+    )
+    require(
+        "AF_STACK_AGENTFIELD_URL" in runtime.get("variables", {}),
+        "Railway runtime must receive AgentField URL",
+    )
+    require(
+        "AF_STACK_LITELLM_URL" in runtime.get("variables", {}),
+        "Railway runtime must receive LiteLLM URL",
+    )
+    require(
+        "AF_STACK_DEMO_MODE" in runtime.get("variables", {}), "Railway runtime must set demo mode"
+    )
+    require(
+        "DATABASE_URL" in dashboard.get("variables", {}),
+        "Railway dashboard must receive database URL",
+    )
+    require(
+        "DATABASE_URL" in customer.get("variables", {}),
+        "Railway customer app must receive database URL",
+    )
+    require(
+        "RUNTIME_URL" in customer.get("variables", {}),
+        "Railway customer app must receive runtime URL",
+    )
     return ["Railway JSON parsed and required BackAI services validated"]
 
 
@@ -193,26 +272,44 @@ def check_render() -> list[str]:
             raise CheckError(f"Render YAML parse failed:\n{parsed.stdout}\n{parsed.stderr}")
 
     for pattern, message in (
-        (r"databases:\s*\n\s*-\s+name:\s+af-stack-postgres", "Render must define af-stack-postgres database"),
+        (
+            r"databases:\s*\n\s*-\s+name:\s+af-stack-postgres",
+            "Render must define af-stack-postgres database",
+        ),
         (r"name:\s+af-stack-runtime", "Render must define runtime service"),
         (r"dockerfilePath:\s+\./services/runtime/Dockerfile", "Render runtime Dockerfile mismatch"),
         (r"healthCheckPath:\s+/health", "Render runtime health check must be /health"),
         (r"name:\s+af-stack-dashboard", "Render must define dashboard service"),
         (r"dockerfilePath:\s+\./apps/dashboard/Dockerfile", "Render dashboard Dockerfile mismatch"),
         (r"healthCheckPath:\s+/", "Render dashboard health check must be /"),
-        (r"fromDatabase:\s*\n\s*name:\s+af-stack-postgres", "Render services must use managed Postgres"),
+        (
+            r"fromDatabase:\s*\n\s*name:\s+af-stack-postgres",
+            "Render services must use managed Postgres",
+        ),
     ):
         require(re.search(pattern, text), message)
-    return ["Render Blueprint parsed/contract-checked" if ruby else "Render Blueprint contract-checked"]
+    return [
+        "Render Blueprint parsed/contract-checked" if ruby else "Render Blueprint contract-checked"
+    ]
 
 
 def check_prod_compose() -> list[str]:
     path = require_file("docker-compose.prod.yml")
     text = path.read_text()
     caddyfile = require_file("deploy/caddy/Caddyfile").read_text()
-    for needle in ("caddy:", "agentfield:", "runtime:", "dashboard:", "AF_STACK_DATABASE_URL", "AF_STACK_S3_ADAPTER: s3"):
+    for needle in (
+        "caddy:",
+        "agentfield:",
+        "runtime:",
+        "dashboard:",
+        "AF_STACK_DATABASE_URL",
+        "AF_STACK_S3_ADAPTER: s3",
+    ):
         require(needle in text, f"prod compose missing {needle!r}")
-    require("/health" in caddyfile and "/ready" in caddyfile, "prod Caddyfile must expose runtime health endpoints")
+    require(
+        "/health" in caddyfile and "/ready" in caddyfile,
+        "prod Caddyfile must expose runtime health endpoints",
+    )
     require(
         not re.search(r"^\s*-\s*/var/run/docker\.sock\b", text, re.MULTILINE),
         "prod compose must not mount docker.sock",

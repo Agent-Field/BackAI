@@ -72,9 +72,7 @@ async def update(
     if not id:
         raise ValueError("tenant id must be a non-empty string")
     payload = _as_dict(input, UpdateTenantInput)
-    body = await _http.request_json(
-        "PATCH", f"/admin/tenants/{quote(id, safe='')}", json=payload
-    )
+    body = await _http.request_json("PATCH", f"/admin/tenants/{quote(id, safe='')}", json=payload)
     return Tenant.model_validate(body or {})
 
 

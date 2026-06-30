@@ -54,9 +54,7 @@ async def reset_http_client(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_list_parses_rows() -> None:
     payload = {"crons": [_row(), _row(id="cron_def", name="weekly")]}
     with respx.mock(assert_all_called=True) as router:
-        route = router.get(f"{BASE}/crons").mock(
-            return_value=httpx.Response(200, json=payload)
-        )
+        route = router.get(f"{BASE}/crons").mock(return_value=httpx.Response(200, json=payload))
         result = await crons.list()
     assert isinstance(result, CronList)
     assert [c.id for c in result.crons] == ["cron_abc", "cron_def"]
@@ -75,9 +73,7 @@ async def test_list_passes_tenant_filter() -> None:
 
 async def test_list_handles_empty_body() -> None:
     with respx.mock(assert_all_called=True) as router:
-        router.get(f"{BASE}/crons").mock(
-            return_value=httpx.Response(200, json={"crons": []})
-        )
+        router.get(f"{BASE}/crons").mock(return_value=httpx.Response(200, json={"crons": []}))
         result = await crons.list()
     assert result.crons == []
 
@@ -87,9 +83,7 @@ async def test_list_handles_empty_body() -> None:
 
 async def test_create_posts_payload_and_parses_row() -> None:
     with respx.mock(assert_all_called=True) as router:
-        route = router.post(f"{BASE}/crons").mock(
-            return_value=httpx.Response(200, json=_row())
-        )
+        route = router.post(f"{BASE}/crons").mock(return_value=httpx.Response(200, json=_row()))
         result = await crons.create(
             "nightly-rollup",
             "rollup",
@@ -112,9 +106,7 @@ async def test_create_posts_payload_and_parses_row() -> None:
 
 async def test_create_omits_optional_fields_when_not_supplied() -> None:
     with respx.mock(assert_all_called=True) as router:
-        route = router.post(f"{BASE}/crons").mock(
-            return_value=httpx.Response(200, json=_row())
-        )
+        route = router.post(f"{BASE}/crons").mock(return_value=httpx.Response(200, json=_row()))
         await crons.create("daily", "rollup", "0 6 * * *")
     body = json.loads(route.calls.last.request.read().decode())
     assert body == {
@@ -142,9 +134,7 @@ async def test_create_raises_on_not_configured() -> None:
         }
     }
     with respx.mock(assert_all_called=True) as router:
-        router.post(f"{BASE}/crons").mock(
-            return_value=httpx.Response(503, json=error_body)
-        )
+        router.post(f"{BASE}/crons").mock(return_value=httpx.Response(503, json=error_body))
         with pytest.raises(AFStackError) as exc:
             await crons.create("n", "j", "0 * * * *")
     assert exc.value.code == "CRONS_NOT_CONFIGURED"
@@ -156,9 +146,7 @@ async def test_create_raises_on_not_configured() -> None:
 
 async def test_get_returns_single_row() -> None:
     with respx.mock(assert_all_called=True) as router:
-        router.get(f"{BASE}/crons/cron_abc").mock(
-            return_value=httpx.Response(200, json=_row())
-        )
+        router.get(f"{BASE}/crons/cron_abc").mock(return_value=httpx.Response(200, json=_row()))
         result = await crons.get("cron_abc")
     assert result.id == "cron_abc"
 

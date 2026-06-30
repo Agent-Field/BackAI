@@ -125,9 +125,7 @@ async def customer(tenant_id: str) -> BillingCustomer:
     so callers always get a populated row."""
     if not tenant_id:
         raise ValueError("tenant_id must be a non-empty string")
-    body = await _http.request_json(
-        "GET", f"/billing/customers/{quote(tenant_id, safe='')}"
-    )
+    body = await _http.request_json("GET", f"/billing/customers/{quote(tenant_id, safe='')}")
     return BillingCustomer.model_validate(body or {})
 
 
@@ -150,9 +148,7 @@ async def meters(
     if bucket:
         params["bucket"] = bucket
     body = await _http.request_json("GET", "/billing/meters", params=params)
-    return UsageMeterList.model_validate(
-        body or {"meters": [], "total_cost_usd": 0.0}
-    )
+    return UsageMeterList.model_validate(body or {"meters": [], "total_cost_usd": 0.0})
 
 
 # ─── Write surface ────────────────────────────────────────────────────────
@@ -208,9 +204,7 @@ async def meter(
     _ = (name, qty, tenant_id)
 
 
-async def has_budget(
-    tenant_id: str, additional_usd: float
-) -> bool:
+async def has_budget(tenant_id: str, additional_usd: float) -> bool:
     """Check whether the tenant has room for an additional spend.
 
     Phase 10.4 implements this on the runtime via

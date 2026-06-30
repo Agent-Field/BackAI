@@ -9,10 +9,9 @@ import json
 import os
 import time
 import uuid
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
-from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -26,10 +25,10 @@ START_TIME = time.time()
 
 
 def get_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-async def verify_token(authorization: Optional[str] = Header(None)):
+async def verify_token(authorization: str | None = Header(None)):
     if not REQUIRE_AUTH:
         return
     if not authorization or not authorization.startswith("Bearer "):
@@ -45,17 +44,17 @@ async def verify_token(authorization: Optional[str] = Header(None)):
 
 class RunSpec(BaseModel):
     id: str
-    tenant_id: Optional[str] = None
-    workspace_id: Optional[str] = None
+    tenant_id: str | None = None
+    workspace_id: str | None = None
     image: str
     command: list[str]
-    files: Optional[dict[str, str]] = None
-    env: Optional[dict[str, str]] = None
+    files: dict[str, str] | None = None
+    env: dict[str, str] | None = None
     timeout_s: int
     cpu: int
     memory_gb: int
     network: str
-    allow_egress: Optional[list[str]] = None
+    allow_egress: list[str] | None = None
 
 
 class TerminalResult(BaseModel):
@@ -75,7 +74,11 @@ class TerminalResult(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str = "healthy"
-    started_at: str = Field(default_factory=lambda: datetime.fromtimestamp(START_TIME, tz=timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"))
+    started_at: str = Field(
+        default_factory=lambda: datetime.fromtimestamp(START_TIME, tz=UTC)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
     uptime_seconds: int = Field(default_factory=lambda: int(time.time() - START_TIME))
     dependencies: list[dict] = Field(default_factory=list)
 
@@ -87,25 +90,29 @@ class CapabilityResponse(BaseModel):
     protocol_version: str = "v1"
     vendor: str = "BackAI"
     homepage: str = "https://github.com/Agent-Field/backai/examples/adapters/sandbox-echo-py"
-    capabilities: dict = Field(default_factory=lambda: {
-        "max_timeout_s": 3600,
-        "supports_gpu": False,
-        "supports_network": True,
-        "supports_mounts": True,
-        "supports_streaming": True,
-        "cold_start_ms": 10,
-        "image_pull_required": False,
-        "max_cpu": 64,
-        "max_memory_gb": 128,
-        "network_modes": ["open", "restricted", "isolated"],
-        "allow_egress_supported": False,
-        "artifacts_upload": False,
-    })
+    capabilities: dict = Field(
+        default_factory=lambda: {
+            "max_timeout_s": 3600,
+            "supports_gpu": False,
+            "supports_network": True,
+            "supports_mounts": True,
+            "supports_streaming": True,
+            "cold_start_ms": 10,
+            "image_pull_required": False,
+            "max_cpu": 64,
+            "max_memory_gb": 128,
+            "network_modes": ["open", "restricted", "isolated"],
+            "allow_egress_supported": False,
+            "artifacts_upload": False,
+        }
+    )
 
 
 class InfoResponse(BaseModel):
     admin_ui: str = ""
-    docs: str = "https://github.com/Agent-Field/backai/blob/main/docs/adapters/protocols/sandbox-v1.md"
+    docs: str = (
+        "https://github.com/Agent-Field/backai/blob/main/docs/adapters/protocols/sandbox-v1.md"
+    )
     support_email: str = ""
 
 
@@ -155,19 +162,19 @@ _runs = {}
 
 
 @app.get("/healthz")
-async def healthz(authorization: Optional[str] = Header(None)):
+async def healthz(authorization: str | None = Header(None)):
     await verify_token(authorization)
     return HealthResponse()
 
 
 @app.get("/v1/capabilities")
-async def capabilities(authorization: Optional[str] = Header(None)):
+async def capabilities(authorization: str | None = Header(None)):
     await verify_token(authorization)
     return CapabilityResponse()
 
 
 @app.get("/v1/info")
-async def info(authorization: Optional[str] = Header(None)):
+async def info(authorization: str | None = Header(None)):
     await verify_token(authorization)
     return InfoResponse()
 
@@ -175,9 +182,9 @@ async def info(authorization: Optional[str] = Header(None)):
 @app.post("/v1/runs")
 async def post_runs(
     spec: RunSpec,
-    authorization: Optional[str] = Header(None),
-    x_backai_idempotency_key: Optional[str] = Header(None),
-    x_backai_request_id: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
+    x_backai_idempotency_key: str | None = Header(None),
+    x_backai_request_id: str | None = Header(None),
 ):
     await verify_token(authorization)
 
@@ -198,9 +205,9 @@ async def post_runs(
 @app.post("/v1/runs/stream")
 async def post_runs_stream(
     spec: RunSpec,
-    authorization: Optional[str] = Header(None),
-    x_backai_idempotency_key: Optional[str] = Header(None),
-    x_backai_request_id: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
+    x_backai_idempotency_key: str | None = Header(None),
+    x_backai_request_id: str | None = Header(None),
 ):
     await verify_token(authorization)
 
@@ -239,8 +246,8 @@ async def post_runs_stream(
 @app.get("/v1/runs/{run_id}")
 async def get_run(
     run_id: str,
-    authorization: Optional[str] = Header(None),
-    x_backai_request_id: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
+    x_backai_request_id: str | None = Header(None),
 ):
     await verify_token(authorization)
     if run_id in _runs:
@@ -251,15 +258,15 @@ async def get_run(
 @app.delete("/v1/runs/{run_id}", status_code=204)
 async def delete_run(
     run_id: str,
-    authorization: Optional[str] = Header(None),
-    x_backai_request_id: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
+    x_backai_request_id: str | None = Header(None),
 ):
     await verify_token(authorization)
     pass
 
 
 @app.get("/v1/pool")
-async def pool(authorization: Optional[str] = Header(None)):
+async def pool(authorization: str | None = Header(None)):
     await verify_token(authorization)
     return PoolStats()
 
@@ -290,4 +297,5 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8090)
+
+    uvicorn.run(app, host="0.0.0.0", port=8090)  # noqa: S104 - example dev server

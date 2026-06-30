@@ -171,9 +171,7 @@ async def test_run_raises_on_structured_error() -> None:
         }
     }
     with respx.mock(assert_all_called=True) as router:
-        router.post(f"{BASE}/sandbox/run").mock(
-            return_value=httpx.Response(429, json=error_body)
-        )
+        router.post(f"{BASE}/sandbox/run").mock(return_value=httpx.Response(429, json=error_body))
         with pytest.raises(AFStackError) as exc:
             await sandbox.run("python:3.12-slim", ["python", "-c", "1"])
     assert exc.value.code == "SANDBOX_QUOTA_EXCEEDED"
@@ -216,9 +214,7 @@ async def test_list_sends_filters_as_query_params() -> None:
 async def test_list_omits_unset_filters_and_handles_empty_response() -> None:
     with respx.mock(assert_all_called=True) as router:
         route = router.get(f"{BASE}/sandbox/runs").mock(
-            return_value=httpx.Response(
-                200, json={"runs": [], "total": 0, "has_more": False}
-            )
+            return_value=httpx.Response(200, json={"runs": [], "total": 0, "has_more": False})
         )
         lst = await sandbox.list()
 
@@ -289,9 +285,7 @@ async def test_pool_returns_stats_with_capabilities() -> None:
         "capabilities": _capabilities(),
     }
     with respx.mock(assert_all_called=True) as router:
-        router.get(f"{BASE}/sandbox/pool").mock(
-            return_value=httpx.Response(200, json=payload)
-        )
+        router.get(f"{BASE}/sandbox/pool").mock(return_value=httpx.Response(200, json=payload))
         stats = await sandbox.pool()
     assert stats.adapter == "docker"
     assert stats.warm == 3

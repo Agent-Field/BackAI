@@ -80,8 +80,7 @@ if MODEL is not None:
             return {"error": "missing text"}
         result = await app.ai(
             system=(
-                "Summarize the user's text in one sentence and return "
-                "three practical next steps."
+                "Summarize the user's text in one sentence and return three practical next steps."
             ),
             user=text,
             schema=Summary,

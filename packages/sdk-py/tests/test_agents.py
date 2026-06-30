@@ -41,9 +41,7 @@ async def test_call_sends_post_and_parses_result() -> None:
                 },
             )
         )
-        result = await agents.call(
-            "notable.summarize", {"text": "long doc"}, timeout_s=5.0
-        )
+        result = await agents.call("notable.summarize", {"text": "long doc"}, timeout_s=5.0)
     assert result.execution_id == "exec_abc"
     assert result.output == {"summary": "hello"}
     assert result.status == "done"
@@ -79,9 +77,7 @@ async def test_call_async_returns_handle() -> None:
                 json={"execution_id": "exec_async", "status": "queued"},
             )
         )
-        handle = await agents.call_async(
-            "ns.func", {"x": 1}, webhook_url="https://example.com/cb"
-        )
+        handle = await agents.call_async("ns.func", {"x": 1}, webhook_url="https://example.com/cb")
     assert handle.execution_id == "exec_async"
     assert handle.id == "exec_async"
     assert handle.status == "queued"
@@ -107,9 +103,7 @@ async def test_status_parses_response() -> None:
 
 async def test_cancel_issues_delete_with_reason() -> None:
     with respx.mock(assert_all_called=True) as router:
-        route = router.delete(f"{BASE}/executions/exec_1").mock(
-            return_value=httpx.Response(204)
-        )
+        route = router.delete(f"{BASE}/executions/exec_1").mock(return_value=httpx.Response(204))
         await agents.cancel("exec_1", reason="user-request")
     assert route.calls.last.request.url.params["reason"] == "user-request"
 
@@ -127,9 +121,7 @@ async def test_approve_posts_payload() -> None:
 
 async def test_deny_posts_payload() -> None:
     with respx.mock(assert_all_called=True) as router:
-        route = router.post(f"{BASE}/executions/exec_1/deny").mock(
-            return_value=httpx.Response(204)
-        )
+        route = router.post(f"{BASE}/executions/exec_1/deny").mock(return_value=httpx.Response(204))
         await agents.deny("exec_1", reason="policy", by_user_id="u_1")
     body = route.calls.last.request.read().decode()
     assert "policy" in body
@@ -141,9 +133,7 @@ async def test_pending_approvals_parses_list() -> None:
         {"execution_id": "exec_2", "agent": "ns.func2"},
     ]
     with respx.mock(assert_all_called=True) as router:
-        router.get(f"{BASE}/approvals/pending").mock(
-            return_value=httpx.Response(200, json=payload)
-        )
+        router.get(f"{BASE}/approvals/pending").mock(return_value=httpx.Response(200, json=payload))
         rows = await agents.pending_approvals()
     assert len(rows) == 2
     assert rows[0].execution_id == "exec_1"
@@ -154,9 +144,7 @@ async def test_pending_approvals_parses_list() -> None:
 async def test_pending_approvals_handles_envelope() -> None:
     payload = {"items": [{"execution_id": "exec_a", "agent": "ns.f"}]}
     with respx.mock(assert_all_called=True) as router:
-        router.get(f"{BASE}/approvals/pending").mock(
-            return_value=httpx.Response(200, json=payload)
-        )
+        router.get(f"{BASE}/approvals/pending").mock(return_value=httpx.Response(200, json=payload))
         rows = await agents.pending_approvals()
     assert [r.execution_id for r in rows] == ["exec_a"]
 

@@ -172,9 +172,7 @@ def _to_bytes(data: bytes | IO[bytes]) -> bytes:
         return bytes(data)
     read = getattr(data, "read", None)
     if read is None:
-        raise TypeError(
-            "storage.upload expects bytes or a binary file-like object with read()"
-        )
+        raise TypeError("storage.upload expects bytes or a binary file-like object with read()")
     chunk = read()
     if isinstance(chunk, str):
         raise TypeError(

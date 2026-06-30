@@ -10,7 +10,7 @@ contract).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -53,9 +53,7 @@ async def reset_http_client(monkeypatch: pytest.MonkeyPatch) -> None:
 
 async def test_enqueue_posts_payload_and_parses_job() -> None:
     with respx.mock(assert_all_called=True) as router:
-        route = router.post(f"{BASE}/jobs").mock(
-            return_value=httpx.Response(200, json=_job_row())
-        )
+        route = router.post(f"{BASE}/jobs").mock(return_value=httpx.Response(200, json=_job_row()))
         job = await jobs.enqueue(
             "send-welcome-email",
             {"to": "user@example.com"},
@@ -71,7 +69,7 @@ async def test_enqueue_posts_payload_and_parses_job() -> None:
 
 
 async def test_enqueue_serialises_scheduled_at() -> None:
-    when = datetime(2026, 6, 6, 12, 0, tzinfo=timezone.utc)
+    when = datetime(2026, 6, 6, 12, 0, tzinfo=UTC)
     with respx.mock(assert_all_called=True) as router:
         route = router.post(f"{BASE}/jobs").mock(
             return_value=httpx.Response(200, json=_job_row(state="scheduled"))
@@ -124,9 +122,7 @@ async def test_get_returns_job() -> None:
 async def test_retry_posts_to_retry_endpoint() -> None:
     with respx.mock(assert_all_called=True) as router:
         route = router.post(f"{BASE}/jobs/job_123/retry").mock(
-            return_value=httpx.Response(
-                200, json=_job_row(state="available", attempt=2)
-            )
+            return_value=httpx.Response(200, json=_job_row(state="available", attempt=2))
         )
         job = await jobs.retry("job_123")
     assert job.state == "available"
@@ -168,9 +164,7 @@ async def test_list_sends_filters_as_query_params() -> None:
 async def test_list_omits_unset_filters() -> None:
     with respx.mock(assert_all_called=True) as router:
         route = router.get(f"{BASE}/jobs").mock(
-            return_value=httpx.Response(
-                200, json={"jobs": [], "total": 0, "has_more": False}
-            )
+            return_value=httpx.Response(200, json={"jobs": [], "total": 0, "has_more": False})
         )
         await jobs.list()
     params = route.calls.last.request.url.params
@@ -190,9 +184,7 @@ async def test_enqueue_raises_on_structured_error() -> None:
         }
     }
     with respx.mock(assert_all_called=True) as router:
-        router.post(f"{BASE}/jobs").mock(
-            return_value=httpx.Response(404, json=error_body)
-        )
+        router.post(f"{BASE}/jobs").mock(return_value=httpx.Response(404, json=error_body))
         with pytest.raises(AFStackError) as exc:
             await jobs.enqueue("unknown-job")
     assert exc.value.code == "JOB_NOT_REGISTERED"

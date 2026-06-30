@@ -5,11 +5,9 @@ Minimal adapter for conformance checks. It returns a synthetic log line from
 query and streams one synthetic line over SSE for tail.
 """
 
-import json
 import os
 import time
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -22,10 +20,10 @@ SUPPORTS_TAIL = os.getenv("BACKAI_LOGS_SUPPORTS_TAIL", "true").lower() not in {"
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-async def verify_token(authorization: Optional[str] = Header(None)):
+async def verify_token(authorization: str | None = Header(None)):
     if not REQUIRE_AUTH:
         return
     if not authorization or not authorization.startswith("Bearer "):
@@ -39,23 +37,23 @@ class LogEntry(BaseModel):
     level: str = "info"
     service: str = "logs-echo"
     msg: str = "synthetic log line from logs-echo-py"
-    agent: Optional[str] = None
-    tenant_id: Optional[str] = None
-    request_id: Optional[str] = None
-    trace_id: Optional[str] = None
+    agent: str | None = None
+    tenant_id: str | None = None
+    request_id: str | None = None
+    trace_id: str | None = None
     fields: dict = Field(default_factory=dict)
 
 
 class LogFilter(BaseModel):
     services: list[str] = Field(default_factory=list)
     levels: list[str] = Field(default_factory=list)
-    tenant_id: Optional[str] = None
-    request_id: Optional[str] = None
-    trace_id: Optional[str] = None
-    search: Optional[str] = None
+    tenant_id: str | None = None
+    request_id: str | None = None
+    trace_id: str | None = None
+    search: str | None = None
     search_is_regex: bool = False
     limit: int = 200
-    cursor: Optional[str] = None
+    cursor: str | None = None
 
 
 class LogPage(BaseModel):
@@ -69,18 +67,20 @@ app = FastAPI(title="BackAI Logs v1 Echo Adapter")
 
 @app.get("/health")
 @app.get("/healthz")
-async def healthz(authorization: Optional[str] = Header(None)):
+async def healthz(authorization: str | None = Header(None)):
     await verify_token(authorization)
     return {
         "status": "healthy",
-        "started_at": datetime.fromtimestamp(START_TIME, tz=timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        "started_at": datetime.fromtimestamp(START_TIME, tz=UTC)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z"),
         "uptime_seconds": int(time.time() - START_TIME),
         "dependencies": [],
     }
 
 
 @app.get("/v1/capabilities")
-async def capabilities(authorization: Optional[str] = Header(None)):
+async def capabilities(authorization: str | None = Header(None)):
     await verify_token(authorization)
     return {
         "name": "logs-echo",
@@ -102,13 +102,15 @@ async def capabilities(authorization: Optional[str] = Header(None)):
 
 
 @app.get("/v1/info")
-async def info(authorization: Optional[str] = Header(None)):
+async def info(authorization: str | None = Header(None)):
     await verify_token(authorization)
-    return {"docs": "https://github.com/Agent-Field/backai/blob/main/docs/adapters/protocols/logs-v1.md"}
+    return {
+        "docs": "https://github.com/Agent-Field/backai/blob/main/docs/adapters/protocols/logs-v1.md"
+    }
 
 
 @app.post("/v1/logs/query")
-async def query_logs(filter: LogFilter, authorization: Optional[str] = Header(None)):
+async def query_logs(filter: LogFilter, authorization: str | None = Header(None)):
     await verify_token(authorization)
     entry = LogEntry(
         level=(filter.levels[0] if filter.levels else "info"),
@@ -123,7 +125,7 @@ async def query_logs(filter: LogFilter, authorization: Optional[str] = Header(No
 
 
 @app.get("/v1/logs/tail")
-async def tail_logs(authorization: Optional[str] = Header(None)):
+async def tail_logs(authorization: str | None = Header(None)):
     await verify_token(authorization)
     if not SUPPORTS_TAIL:
         return JSONResponse(

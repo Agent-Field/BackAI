@@ -52,9 +52,8 @@ import os
 from typing import Any
 
 from agentfield import Agent, AIConfig
-from pydantic import BaseModel, Field
-
 from mocks.harness import mock_investigate
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger("researcher")
 logging.basicConfig(
@@ -90,6 +89,7 @@ _init_sentry()
 # pipeline (1 decompose + 5 sub-investigations + 1 synthesis) lands well
 # under a cent for a typical question. Operators can override via
 # RESEARCHER_MODEL.
+
 
 def _select_model() -> str | None:
     override = os.getenv("RESEARCHER_MODEL")
@@ -248,15 +248,11 @@ async def _decompose(question: str, run_id: str) -> list[str]:
         schema=SubQuestionList,
     )
     qs = result.sub_questions[:5]
-    logger.info(
-        "step=decompose run_id=%s produced %d sub-questions", run_id, len(qs)
-    )
+    logger.info("step=decompose run_id=%s produced %d sub-questions", run_id, len(qs))
     return qs
 
 
-async def _investigate(
-    idx: int, sub_question: str, run_id: str
-) -> FindingWithQuestion:
+async def _investigate(idx: int, sub_question: str, run_id: str) -> FindingWithQuestion:
     """Stage 2: one sub-investigation.
 
     Tries the real harness first; falls back to the mock if the harness
@@ -264,9 +260,7 @@ async def _investigate(
     follow citation chains, run tools — the mock just does one ``.ai()``
     summary so the data flow still works end-to-end.
     """
-    logger.info(
-        "step=investigate run_id=%s idx=%d question=%r", run_id, idx, sub_question
-    )
+    logger.info("step=investigate run_id=%s idx=%d question=%r", run_id, idx, sub_question)
 
     if await _harness_available():
         prompt = (
@@ -284,9 +278,7 @@ async def _investigate(
             )
             if result and not result.is_error and result.parsed:
                 finding: Finding = result.parsed
-                logger.info(
-                    "step=investigate run_id=%s idx=%d source=harness ok", run_id, idx
-                )
+                logger.info("step=investigate run_id=%s idx=%d source=harness ok", run_id, idx)
                 return FindingWithQuestion(
                     sub_question=sub_question,
                     summary=finding.summary,
@@ -294,21 +286,23 @@ async def _investigate(
                 )
             logger.info(
                 "step=investigate run_id=%s idx=%d harness returned no parsed result; "
-                "falling back to mock", run_id, idx,
+                "falling back to mock",
+                run_id,
+                idx,
             )
         except Exception as exc:
             # Real-world: a single harness blowing up shouldn't kill the
             # whole research pass. Log and degrade to the mock.
             logger.warning(
                 "step=investigate run_id=%s idx=%d harness raised %s; falling back",
-                run_id, idx, exc,
+                run_id,
+                idx,
+                exc,
             )
 
     # Mock fallback. Single .ai() with the Finding schema.
     finding = await mock_investigate(app, sub_question)
-    logger.info(
-        "step=investigate run_id=%s idx=%d source=mock ok", run_id, idx
-    )
+    logger.info("step=investigate run_id=%s idx=%d source=mock ok", run_id, idx)
     return FindingWithQuestion(
         sub_question=sub_question,
         summary=finding.summary,
@@ -316,9 +310,7 @@ async def _investigate(
     )
 
 
-async def _accumulate(
-    run_id: str, findings: list[FindingWithQuestion]
-) -> None:
+async def _accumulate(run_id: str, findings: list[FindingWithQuestion]) -> None:
     """Stage 3: write findings into AF memory at run scope.
 
     Each finding lands at ``key=finding.<i>`` under the current run's
@@ -329,9 +321,7 @@ async def _accumulate(
     investigation fan-out; otherwise the last finding waits behind the
     first.
     """
-    logger.info(
-        "step=accumulate run_id=%s writing %d findings to memory", run_id, len(findings)
-    )
+    logger.info("step=accumulate run_id=%s writing %d findings to memory", run_id, len(findings))
 
     async def _put(i: int, f: FindingWithQuestion) -> None:
         # ``app.memory.set`` auto-scopes to the current run (workflow
@@ -342,9 +332,7 @@ async def _accumulate(
     await asyncio.gather(*(_put(i, f) for i, f in enumerate(findings)))
 
 
-async def _synthesise(
-    question: str, findings: list[FindingWithQuestion], run_id: str
-) -> Report:
+async def _synthesise(question: str, findings: list[FindingWithQuestion], run_id: str) -> Report:
     """Stage 4: turn the findings into a Report.
 
     Read the findings back out of memory (rather than re-using the local
@@ -386,7 +374,9 @@ async def _synthesise(
     )
     logger.info(
         "step=synthesise run_id=%s confidence=%.2f findings=%d",
-        run_id, report.confidence, len(report.key_findings),
+        run_id,
+        report.confidence,
+        len(report.key_findings),
     )
     return report
 
@@ -414,9 +404,7 @@ async def research(question: str, depth: int = 2) -> dict[str, Any]:
     ec = app._current_execution_context  # type: ignore[attr-defined]
     run_id = getattr(ec, "run_id", "unknown") if ec is not None else "unknown"
 
-    logger.info(
-        "step=start run_id=%s question=%r depth=%d", run_id, question, depth
-    )
+    logger.info("step=start run_id=%s question=%r depth=%d", run_id, question, depth)
 
     if _MODEL is None:
         return {
@@ -440,9 +428,7 @@ async def research(question: str, depth: int = 2) -> dict[str, Any]:
     # 4. Synthesise the final Report
     report = await _synthesise(question, findings, run_id)
 
-    logger.info(
-        "step=done run_id=%s thesis_chars=%d", run_id, len(report.thesis)
-    )
+    logger.info("step=done run_id=%s thesis_chars=%d", run_id, len(report.thesis))
     return report.model_dump()
 
 

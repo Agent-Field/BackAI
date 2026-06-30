@@ -10,7 +10,6 @@ import pytest
 
 from af_stack import oauth, suite
 
-
 RequestCall = dict[str, Any]
 
 
@@ -62,7 +61,9 @@ async def test_authorize_url_posts_scopes_and_return_to(monkeypatch: pytest.Monk
     ]
 
 
-async def test_connected_parses_metadata_without_token_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_connected_parses_metadata_without_token_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls = patch_request_json(
         monkeypatch,
         {

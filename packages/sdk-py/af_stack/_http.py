@@ -108,8 +108,7 @@ def _build_headers(extra: dict[str, str] | None = None) -> dict[str, str]:
     # from the request id. Real OTel SDK will overwrite when present.
     headers.setdefault(
         "traceparent",
-        f"00-{(headers['x-request-id'].replace('req_', '') + '0' * 32)[:32]}"
-        f"-{'0' * 16}-01",
+        f"00-{(headers['x-request-id'].replace('req_', '') + '0' * 32)[:32]}-{'0' * 16}-01",
     )
     if extra:
         headers.update(extra)

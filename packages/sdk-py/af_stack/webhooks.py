@@ -177,9 +177,7 @@ async def retry(id: str) -> WebhookDelivery:
     """
     if not id:
         raise ValueError("webhook delivery id must be a non-empty string")
-    body = await _http.request_json(
-        "POST", f"/webhooks/deliveries/{id}/retry"
-    )
+    body = await _http.request_json("POST", f"/webhooks/deliveries/{id}/retry")
     return WebhookDelivery.model_validate(body or {})
 
 

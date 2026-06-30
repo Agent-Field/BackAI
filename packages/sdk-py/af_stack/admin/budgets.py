@@ -38,9 +38,7 @@ async def get(tenant_id: str) -> Budget:
     """Fetch a single tenant's budget by id."""
     if not tenant_id:
         raise ValueError("tenant_id must be a non-empty string")
-    body = await _http.request_json(
-        "GET", f"/admin/budgets/{quote(tenant_id, safe='')}"
-    )
+    body = await _http.request_json("GET", f"/admin/budgets/{quote(tenant_id, safe='')}")
     return Budget.model_validate(body or {})
 
 
@@ -68,9 +66,7 @@ def _as_dict(value: Any) -> dict[str, Any]:
         return value.model_dump(exclude_none=True)
     if isinstance(value, dict):
         return {k: v for k, v in value.items() if v is not None}
-    raise TypeError(
-        f"input must be SetBudgetInput or dict, got {type(value).__name__}"
-    )
+    raise TypeError(f"input must be SetBudgetInput or dict, got {type(value).__name__}")
 
 
 __all__ = ["get", "list", "set"]

@@ -20,19 +20,15 @@ customer-app polls GET /tasks/{id} for progress.
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from typing import Any
 
 import httpx
 import psycopg
 from fastapi import FastAPI, Header, HTTPException
 from psycopg.rows import dict_row
 from pydantic import BaseModel, Field
-
 
 DATABASE_URL = os.environ["SHIPWRIGHT_DATABASE_URL"]
 RUNTIME_URL = os.getenv("AF_STACK_URL", "http://runtime:8080").rstrip("/")
@@ -90,23 +86,17 @@ def _require_tenant(tenant: str | None, user: str | None) -> tuple[str, str]:
 
 @asynccontextmanager
 async def _tenant_conn(tenant_id: str):
-    async with await psycopg.AsyncConnection.connect(DATABASE_URL,
-                                                      row_factory=dict_row) as conn:
+    async with await psycopg.AsyncConnection.connect(DATABASE_URL, row_factory=dict_row) as conn:
         async with conn.transaction():
-            await conn.execute(
-                "SELECT set_config('app.tenant_id', %s, true)", (tenant_id,)
-            )
+            await conn.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant_id,))
             yield conn
 
 
 @asynccontextmanager
 async def _admin_conn():
-    async with await psycopg.AsyncConnection.connect(DATABASE_URL,
-                                                      row_factory=dict_row) as conn:
+    async with await psycopg.AsyncConnection.connect(DATABASE_URL, row_factory=dict_row) as conn:
         async with conn.transaction():
-            await conn.execute(
-                "SELECT set_config('app.bypass_rls', 'on', true)"
-            )
+            await conn.execute("SELECT set_config('app.bypass_rls', 'on', true)")
             yield conn
 
 
@@ -168,12 +158,12 @@ def _build_payload(issue_url: str, title: str, description: str) -> dict:
             goal = f"{title}\n\n{description}"
         return {"goal": goal, "repo_url": issue_url, "artifacts_dir": ".artifacts"}
     # Stub reasoner signature
-    return {"payload": {"issue_url": issue_url, "title": title,
-                         "description": description}}
+    return {"payload": {"issue_url": issue_url, "title": title, "description": description}}
 
 
-async def _drive_task(task_id: str, tenant_id: str, user_id: str,
-                       issue_url: str, title: str, description: str):
+async def _drive_task(
+    task_id: str, tenant_id: str, user_id: str, issue_url: str, title: str, description: str
+):
     """Run the agent in the background and persist results to the DB.
 
     Branches on AGENT_MODE:
@@ -202,8 +192,7 @@ async def _drive_task(task_id: str, tenant_id: str, user_id: str,
         await _drive_sync(task_id, tenant_id, input_payload, headers)
 
 
-async def _drive_sync(task_id: str, tenant_id: str, input_payload: dict,
-                       headers: dict):
+async def _drive_sync(task_id: str, tenant_id: str, input_payload: dict, headers: dict):
     """Sync agent call. Good for the stub (~10s). Bad for real builds."""
     assert _runtime_client is not None
     try:
@@ -212,13 +201,14 @@ async def _drive_sync(task_id: str, tenant_id: str, input_payload: dict,
             json={"input": input_payload},
             headers=headers,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         await _record_failure(task_id, tenant_id, f"agent call failed: {exc}")
         return
 
     if resp.status_code != 200:
         await _record_failure(
-            task_id, tenant_id,
+            task_id,
+            tenant_id,
             f"agent returned {resp.status_code}: {resp.text[:500]}",
         )
         return
@@ -228,8 +218,7 @@ async def _drive_sync(task_id: str, tenant_id: str, input_payload: dict,
     await _persist_result(task_id, tenant_id, result)
 
 
-async def _drive_async(task_id: str, tenant_id: str, input_payload: dict,
-                        headers: dict):
+async def _drive_async(task_id: str, tenant_id: str, input_payload: dict, headers: dict):
     """Async agent call. Posts to /async/, polls executions/{id} every 5s.
 
     This is the only shape that works for real SWE-AF builds (which can
@@ -243,13 +232,14 @@ async def _drive_async(task_id: str, tenant_id: str, input_payload: dict,
             json={"input": input_payload},
             headers=headers,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         await _record_failure(task_id, tenant_id, f"async dispatch failed: {exc}")
         return
 
     if resp.status_code not in (200, 202):
         await _record_failure(
-            task_id, tenant_id,
+            task_id,
+            tenant_id,
             f"async dispatch returned {resp.status_code}: {resp.text[:500]}",
         )
         return
@@ -259,7 +249,8 @@ async def _drive_async(task_id: str, tenant_id: str, input_payload: dict,
     run_id = body.get("run_id")
     if not execution_id:
         await _record_failure(
-            task_id, tenant_id,
+            task_id,
+            tenant_id,
             f"no execution_id in async dispatch response: {resp.text[:300]}",
         )
         return
@@ -279,16 +270,14 @@ async def _drive_async(task_id: str, tenant_id: str, input_payload: dict,
     max_wait_s = 60 * 60
     elapsed = 0.0
 
-    async with httpx.AsyncClient(base_url=AGENTFIELD_URL,
-                                  timeout=10.0) as af:
+    async with httpx.AsyncClient(base_url=AGENTFIELD_URL, timeout=10.0) as af:
         while elapsed < max_wait_s:
             await asyncio.sleep(poll_interval_s)
             elapsed += poll_interval_s
             try:
                 poll = await af.get(f"/api/v1/executions/{execution_id}")
-            except Exception as exc:  # noqa: BLE001
-                print(f"[shipwright-api] poll error (will retry): {exc}",
-                      flush=True)
+            except Exception as exc:
+                print(f"[shipwright-api] poll error (will retry): {exc}", flush=True)
                 continue
 
             if poll.status_code != 200:
@@ -302,8 +291,7 @@ async def _drive_async(task_id: str, tenant_id: str, input_payload: dict,
             exec_body = poll.json() or {}
             status = (exec_body.get("status") or "").lower()
 
-            if status in ("succeeded", "completed", "failed", "cancelled",
-                          "error"):
+            if status in ("succeeded", "completed", "failed", "cancelled", "error"):
                 result = exec_body.get("result") or exec_body.get("output") or {}
                 if status in ("succeeded", "completed"):
                     await _persist_result(task_id, tenant_id, result)
@@ -314,16 +302,16 @@ async def _drive_async(task_id: str, tenant_id: str, input_payload: dict,
                         or "agent execution failed"
                     )
                     print(
-                        f"[shipwright-api] task {task_id} → {status}: "
-                        f"{str(err)[:200]}",
+                        f"[shipwright-api] task {task_id} → {status}: {str(err)[:200]}",
                         flush=True,
                     )
                     await _record_failure(task_id, tenant_id, str(err))
                 return
 
     await _record_failure(
-        task_id, tenant_id,
-        f"execution timed out after {int(max_wait_s/60)} minutes",
+        task_id,
+        tenant_id,
+        f"execution timed out after {int(max_wait_s / 60)} minutes",
     )
 
 
@@ -345,15 +333,13 @@ async def _persist_result(task_id: str, tenant_id: str, result: dict):
     # SWE-AF shape — translate.
     if not summary and result.get("pr_url"):
         summary = (
-            f"Build completed. PR: {result['pr_url']}\n"
-            f"Build id: {result.get('build_id', '—')}"
+            f"Build completed. PR: {result['pr_url']}\nBuild id: {result.get('build_id', '—')}"
         )
     elif not summary and result.get("repos"):
         repos = result.get("repos") or []
         prs = [r.get("pr_url") for r in repos if r.get("pr_url")]
-        summary = (
-            f"Build completed across {len(repos)} repo(s)."
-            + (f" PRs: {', '.join(prs)}" if prs else "")
+        summary = f"Build completed across {len(repos)} repo(s)." + (
+            f" PRs: {', '.join(prs)}" if prs else ""
         )
 
     if not diff_preview and result.get("diff"):
@@ -366,7 +352,7 @@ async def _persist_result(task_id: str, tenant_id: str, result: dict):
         steps = [
             {
                 "idx": i + 1,
-                "title": t.get("title", f"Task {i+1}"),
+                "title": t.get("title", f"Task {i + 1}"),
                 "status": t.get("status", "completed"),
                 "detail": t.get("description") or t.get("summary"),
             }
@@ -397,8 +383,12 @@ async def _persist_result(task_id: str, tenant_id: str, result: dict):
                        detail = excluded.detail,
                        finished_at = excluded.finished_at""",
                 (
-                    task_id, tenant_id, step["idx"], step["title"],
-                    step.get("status", "completed"), step.get("detail"),
+                    task_id,
+                    tenant_id,
+                    step["idx"],
+                    step["title"],
+                    step.get("status", "completed"),
+                    step.get("detail"),
                 ),
             )
 
@@ -434,14 +424,12 @@ async def create_task(
             """INSERT INTO shipwright_tasks
                (id, tenant_id, user_id, issue_url, title, description, status)
                VALUES (%s, %s, %s, %s, %s, %s, 'queued')""",
-            (task_id, tenant_id, user_id, req.issue_url, req.title,
-             req.description),
+            (task_id, tenant_id, user_id, req.issue_url, req.title, req.description),
         )
 
     # Kick off the agent asynchronously. Don't await — POST returns now.
-    asyncio.create_task(
-        _drive_task(task_id, tenant_id, user_id, req.issue_url, req.title,
-                    req.description)
+    asyncio.create_task(  # noqa: RUF006 - fire-and-forget stub; replaced by real agent in H3
+        _drive_task(task_id, tenant_id, user_id, req.issue_url, req.title, req.description)
     )
 
     return await _load_task(task_id, tenant_id)
@@ -514,9 +502,7 @@ async def stats(
         by_status = {row["status"]: row["n"] for row in rows}
 
         row = await (
-            await conn.execute(
-                """SELECT COUNT(*) AS n FROM shipwright_tasks"""
-            )
+            await conn.execute("""SELECT COUNT(*) AS n FROM shipwright_tasks""")
         ).fetchone()
         total = (row or {}).get("n", 0)
     return {"total": total, "by_status_24h": by_status}

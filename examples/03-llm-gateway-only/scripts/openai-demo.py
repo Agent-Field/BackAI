@@ -40,7 +40,10 @@ def main() -> int:
     resp = client.chat.completions.create(
         model=model,
         messages=[
-            {"role": "system", "content": "You are a terse assistant. Reply in one short sentence."},
+            {
+                "role": "system",
+                "content": "You are a terse assistant. Reply in one short sentence.",
+            },
             {"role": "user", "content": prompt},
         ],
         max_tokens=80,

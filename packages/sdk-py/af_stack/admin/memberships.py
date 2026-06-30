@@ -71,10 +71,7 @@ async def remove(tenant_id: str, user_id: str) -> bool:
         raise ValueError("tenant_id must be a non-empty string")
     if not user_id:
         raise ValueError("user_id must be a non-empty string")
-    path = (
-        f"/admin/memberships/{quote(tenant_id, safe='')}/"
-        f"{quote(user_id, safe='')}"
-    )
+    path = f"/admin/memberships/{quote(tenant_id, safe='')}/{quote(user_id, safe='')}"
     body = await _http.request_json("DELETE", path)
     if not isinstance(body, dict):
         return True

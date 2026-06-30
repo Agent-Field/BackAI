@@ -84,14 +84,10 @@ class PendingApproval(BaseModel):
 def _agent_path(name: str) -> str:
     """Validate ``ns.func`` shape and return the URL path segment."""
     if not name or "." not in name:
-        raise ValueError(
-            f"agent name must be of the form 'namespace.function', got {name!r}"
-        )
+        raise ValueError(f"agent name must be of the form 'namespace.function', got {name!r}")
     ns, _, func = name.partition(".")
     if not ns or not func:
-        raise ValueError(
-            f"agent name must be of the form 'namespace.function', got {name!r}"
-        )
+        raise ValueError(f"agent name must be of the form 'namespace.function', got {name!r}")
     return name
 
 
@@ -164,9 +160,7 @@ async def status(execution_id: str) -> ExecutionStatus:
 async def cancel(execution_id: str, *, reason: str | None = None) -> None:
     """Cancel a running execution."""
     params = {"reason": reason} if reason else None
-    await _http.request_json(
-        "DELETE", f"/executions/{execution_id}", params=params
-    )
+    await _http.request_json("DELETE", f"/executions/{execution_id}", params=params)
 
 
 async def approve(
@@ -181,9 +175,7 @@ async def approve(
         payload["by_user_id"] = by_user_id
     if note is not None:
         payload["note"] = note
-    await _http.request_json(
-        "POST", f"/executions/{execution_id}/approve", json=payload
-    )
+    await _http.request_json("POST", f"/executions/{execution_id}/approve", json=payload)
 
 
 async def deny(
@@ -198,9 +190,7 @@ async def deny(
         payload["reason"] = reason
     if by_user_id is not None:
         payload["by_user_id"] = by_user_id
-    await _http.request_json(
-        "POST", f"/executions/{execution_id}/deny", json=payload
-    )
+    await _http.request_json("POST", f"/executions/{execution_id}/deny", json=payload)
 
 
 async def pending_approvals() -> list[PendingApproval]:

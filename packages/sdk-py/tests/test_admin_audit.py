@@ -49,9 +49,7 @@ async def test_list_returns_page() -> None:
         "has_more": False,
     }
     with respx.mock(assert_all_called=True) as router:
-        router.get(f"{BASE}/admin/audit").mock(
-            return_value=httpx.Response(200, json=page)
-        )
+        router.get(f"{BASE}/admin/audit").mock(return_value=httpx.Response(200, json=page))
         result = await audit.list()
     assert result.total == 2
     assert result.has_more is False
@@ -62,9 +60,7 @@ async def test_list_returns_page() -> None:
 async def test_list_forwards_filters() -> None:
     with respx.mock(assert_all_called=True) as router:
         route = router.get(f"{BASE}/admin/audit").mock(
-            return_value=httpx.Response(
-                200, json={"entries": [], "total": 0, "has_more": False}
-            )
+            return_value=httpx.Response(200, json={"entries": [], "total": 0, "has_more": False})
         )
         await audit.list(
             tenant="t-1",
@@ -87,9 +83,7 @@ async def test_list_serialises_datetimes() -> None:
     when = datetime(2026, 6, 6, 12, 0, tzinfo=UTC)
     with respx.mock(assert_all_called=True) as router:
         route = router.get(f"{BASE}/admin/audit").mock(
-            return_value=httpx.Response(
-                200, json={"entries": [], "total": 0, "has_more": False}
-            )
+            return_value=httpx.Response(200, json={"entries": [], "total": 0, "has_more": False})
         )
         await audit.list(from_=when, to=when)
     params = route.calls.last.request.url.params

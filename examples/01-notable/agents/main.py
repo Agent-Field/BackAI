@@ -69,10 +69,9 @@ app = Agent(
 # after `app` is constructed so the modules can do `from main import app`.
 # Using importlib lets us tolerate the absence of any single reasoner
 # (e.g. someone deletes one) without breaking the others.
-from summarize import main as _summarize  # noqa: E402,F401
 from suggest_tags import main as _suggest_tags  # noqa: E402,F401
+from summarize import main as _summarize  # noqa: E402,F401
 from todo_completer import main as _todo_completer  # noqa: E402,F401
-
 
 if __name__ == "__main__":
     app.run()

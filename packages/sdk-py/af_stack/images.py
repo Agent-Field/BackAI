@@ -173,9 +173,7 @@ async def _multipart_post(
     client = _http.get_client()
     headers = {k: v for k, v in _http._build_headers().items() if k != "accept"}
     headers["accept"] = "application/json"
-    response = await client.request(
-        "POST", path, data=data, files=files, headers=headers
-    )
+    response = await client.request("POST", path, data=data, files=files, headers=headers)
     _http._raise_for_error(response)
     body = response.json() if response.content else {"data": []}
     return ImageGenerationResult.model_validate(body)
