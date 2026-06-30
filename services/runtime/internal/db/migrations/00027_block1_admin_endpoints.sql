@@ -4,6 +4,12 @@
 
 create extension if not exists pg_stat_statements;
 
+-- goose splits statements on ';' unless a block is wrapped in
+-- StatementBegin/End. The DO block below contains internal semicolons,
+-- so without these annotations goose truncates it at the first ';' and
+-- the migration fails on a fresh DB with "unterminated dollar-quoted
+-- string". Keep the wrappers around any multi-statement DO/function body.
+-- +goose StatementBegin
 do $$
 begin
   execute format('grant pg_read_all_stats to %I', current_user);
@@ -13,6 +19,7 @@ exception
   when undefined_object then
     raise warning 'pg_read_all_stats role is not available on this Postgres installation';
 end $$;
+-- +goose StatementEnd
 
 create table if not exists suite_provider_health_log (
   id uuid primary key default gen_random_uuid(),
