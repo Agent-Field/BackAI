@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -137,6 +138,14 @@ func caps(v any) json.RawMessage {
 	}
 	return json.RawMessage(b)
 }
+
+// defaultTenantMonthlyBudgetUSD is the built-in fallback monthly spend
+// ceiling for tenants without an explicit suite_budgets row (the S5
+// runtime spend ceiling). It is a safety net against runaway spend on
+// self-serve signups, not a billing plan — operators set real caps per
+// tenant via /api/v1/admin/budgets, raise this globally with
+// AF_STACK_DEFAULT_MONTHLY_BUDGET_USD, or set that env to 0 to disable.
+const defaultTenantMonthlyBudgetUSD = 100.0
 
 func defaulted(value, fallback string) string {
 	value = strings.TrimSpace(value)
@@ -1097,7 +1106,21 @@ func main() {
 	)
 	if database != nil && database.Pool != nil {
 		costRecorder = cost.NewRecorder(database.Pool, log)
-		costBudgets = cost.NewBudgets(database.Pool, log)
+		// S5 runtime spend ceiling: bound un-budgeted tenants so a
+		// runaway agent loop on a fresh self-serve signup can't run an
+		// unbounded provider bill before any explicit budget is set.
+		// AF_STACK_DEFAULT_MONTHLY_BUDGET_USD overrides the built-in
+		// default; set it to 0 to opt back into unlimited.
+		defaultCeiling := envFloat("AF_STACK_DEFAULT_MONTHLY_BUDGET_USD", defaultTenantMonthlyBudgetUSD)
+		costBudgets = cost.NewBudgets(database.Pool, log).WithDefaultCeilingUSD(defaultCeiling)
+		if defaultCeiling > 0 {
+			log.Info("cost: default per-tenant monthly spend ceiling active",
+				"default_monthly_usd", defaultCeiling,
+				"note", "applies only to tenants without an explicit budget; set AF_STACK_DEFAULT_MONTHLY_BUDGET_USD=0 to disable")
+		} else {
+			log.Warn("cost: no default spend ceiling — tenants without an explicit budget can spend without bound",
+				"fix", "set AF_STACK_DEFAULT_MONTHLY_BUDGET_USD to a positive USD cap")
+		}
 		costAggregate = cost.NewAggregate(database.Pool, log)
 		// LiteLLM is the source of truth for cumulative spend (item #22).
 		// Hand the admin client to the aggregator so the dashboard reads
@@ -1907,6 +1930,21 @@ func envBool(key string, def bool) bool {
 	default:
 		return def
 	}
+}
+
+// envFloat reads a float64 from an env var, returning def when unset or
+// unparseable. A literal "0" is honoured (returns 0), so operators can
+// disable a default-on ceiling.
+func envFloat(key string, def float64) float64 {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return def
+	}
+	return v
 }
 
 func splitEnvList(raw string) []string {
