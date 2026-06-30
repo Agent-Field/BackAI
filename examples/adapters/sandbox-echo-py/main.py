@@ -75,9 +75,11 @@ class TerminalResult(BaseModel):
 class HealthResponse(BaseModel):
     status: str = "healthy"
     started_at: str = Field(
-        default_factory=lambda: datetime.fromtimestamp(START_TIME, tz=UTC)
-        .isoformat(timespec="milliseconds")
-        .replace("+00:00", "Z")
+        default_factory=lambda: (
+            datetime.fromtimestamp(START_TIME, tz=UTC)
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z")
+        )
     )
     uptime_seconds: int = Field(default_factory=lambda: int(time.time() - START_TIME))
     dependencies: list[dict] = Field(default_factory=list)
