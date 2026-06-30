@@ -182,8 +182,9 @@ async def meter(
     """Record ``qty`` units of ``name`` for the tenant's current period.
 
     The runtime owns the cost computation — the SDK forwards the increment
-    to ``POST /api/v1/billing/meter``. When ``tenant_id`` is omitted the
-    runtime uses the authenticated caller's tenant (the normal app path).
+    to ``POST /api/v1/billing/meter``. Pass ``tenant_id`` to attribute usage
+    to a specific tenant; when omitted the runtime meters under its default
+    tenant (the normal single-tenant path).
     """
     if not name:
         raise ValueError("meter name must be a non-empty string")

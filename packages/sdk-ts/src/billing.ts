@@ -151,8 +151,9 @@ export interface MeterOptions extends HttpOptions {
 /** Record `qty` units of `name` for the tenant's current period.
  *
  * The runtime owns the cost computation — the SDK forwards the increment to
- * `POST /api/v1/billing/meter`. When `tenantId` is omitted the runtime uses
- * the authenticated caller's tenant (the normal app-code path).
+ * `POST /api/v1/billing/meter`. Pass `tenantId` to attribute usage to a
+ * specific tenant; when omitted the runtime meters under its default tenant
+ * (the normal single-tenant path).
  */
 export async function meter(
   name: string,
