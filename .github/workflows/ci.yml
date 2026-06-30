@@ -1,8 +1,11 @@
 name: CI
 
-# CI is currently MANUAL-ONLY to conserve resources during early build.
-# To re-enable automatic CI on push/PR, uncomment the `push` and
-# `pull_request` triggers below.
+# CI runs automatically on pushes to main and on PRs targeting main.
+# The fast gates (build, lint, unit tests, compose/deploy config validation,
+# docs) run on every PR. The heavy/real-infra deploy smokes (helm-kind,
+# fly-staging, prod-compose) are OPT-IN: they only run on manual dispatch or on
+# a PR carrying the `deploy-smoke` label, so ordinary PRs never spin up clusters,
+# deploy to Fly, or require the full prod secret set.
 on:
   workflow_dispatch:
     inputs:
@@ -10,10 +13,10 @@ on:
         description: "Run the full Helm kind deploy smoke test"
         required: false
         default: "true"
-  # push:
-  #   branches: [main]
-  # pull_request:
-  #   branches: [main]
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
@@ -90,8 +93,13 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          # Pinned: the repo's .golangci.yml is v1-schema; golangci-lint v2
+          # ("latest") cannot parse it. v1.64.8 matches the config and the
+          # `go: "1.23"` target. only-new-issues grandfathers the pre-existing
+          # lint debt (tracked separately) while failing any NEW issue a PR adds.
+          version: v1.64.8
           args: --timeout=5m
+          only-new-issues: true
       - name: go vet
         run: go vet ./... || true
 
@@ -202,7 +210,8 @@ jobs:
   helm-kind-smoke:
     name: Helm kind smoke
     needs: changes
-    if: needs.changes.outputs.deploy == 'true' && (github.event_name != 'workflow_dispatch' || github.event.inputs.run_helm_kind_smoke == 'true')
+    # Opt-in only: manual dispatch (with the input set) or a `deploy-smoke`-labeled PR.
+    if: needs.changes.outputs.deploy == 'true' && ((github.event_name == 'workflow_dispatch' && github.event.inputs.run_helm_kind_smoke == 'true') || contains(github.event.pull_request.labels.*.name, 'deploy-smoke'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -218,7 +227,9 @@ jobs:
   fly-staging-smoke:
     name: Fly staging smoke
     needs: changes
-    if: needs.changes.outputs.deploy == 'true'
+    # Opt-in only: deploys to REAL Fly infra (needs FLY_API_TOKEN), so never on
+    # an ordinary PR. Manual dispatch or a `deploy-smoke`-labeled PR.
+    if: needs.changes.outputs.deploy == 'true' && (github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'deploy-smoke'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -236,7 +247,9 @@ jobs:
   prod-compose-smoke:
     name: Production compose smoke
     needs: changes
-    if: needs.changes.outputs.deploy == 'true'
+    # Opt-in only: needs the full prod secret set; absent secrets => guaranteed
+    # red on ordinary PRs. Manual dispatch or a `deploy-smoke`-labeled PR.
+    if: needs.changes.outputs.deploy == 'true' && (github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'deploy-smoke'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
