@@ -772,7 +772,7 @@ func main() {
 		} else {
 			log.Info("database connected")
 			migCtx, migCancel := context.WithTimeout(ctx, 60*time.Second)
-			if err := database.Migrate(migCtx); err != nil {
+			if err := runMigrations(migCtx, cfg, database, log); err != nil {
 				log.Error("migrations failed", "error", err)
 				database.Close()
 				migCancel()
@@ -780,6 +780,12 @@ func main() {
 			}
 			migCancel()
 			log.Info("migrations applied")
+			// Tenant-isolation guard: per-tenant RLS is unenforceable if the
+			// serving role can bypass RLS (superuser or BYPASSRLS). Refuse to
+			// start in that state when multi-tenancy is enabled; warn otherwise.
+			assertCtx, assertCancel := context.WithTimeout(ctx, 5*time.Second)
+			assertTenantSafeRole(assertCtx, cfg, database, log)
+			assertCancel()
 			statsCtx, statsCancel := context.WithTimeout(ctx, 5*time.Second)
 			warnIfPGStatsRoleMissing(statsCtx, database.Pool, log)
 			statsCancel()
@@ -2058,6 +2064,77 @@ func warnIfPGStatsRoleMissing(ctx context.Context, pool *pgxpool.Pool, log *slog
 	if !ok {
 		log.Warn("postgres stats visibility is reduced; grant pg_read_all_stats to the runtime DB role for complete DB health and search-index stats")
 	}
+}
+
+// runMigrations applies pending migrations. The serving role may be a
+// restricted NOSUPERUSER/NOBYPASSRLS role with no DDL rights, so when a
+// dedicated privileged migrate URL is configured (AF_STACK_MIGRATE_DATABASE_URL)
+// migrations run over a short-lived pool against THAT url instead of the
+// serving pool. When unset, migrations run over the serving connection — fine
+// for single-role local dev.
+func runMigrations(ctx context.Context, cfg config.Config, serving *db.DB, log *slog.Logger) error {
+	migURL := cfg.Database.MigrateURL
+	if migURL == "" || migURL == cfg.Database.URL {
+		return serving.Migrate(ctx)
+	}
+	log.Info("running migrations via dedicated privileged connection (AF_STACK_MIGRATE_DATABASE_URL)")
+	migDB, err := db.Open(ctx, db.Config{URL: migURL})
+	if err != nil {
+		return fmt.Errorf("open migrate connection: %w", err)
+	}
+	defer migDB.Close()
+	return migDB.Migrate(ctx)
+}
+
+// assertTenantSafeRole enforces that the serving DB role cannot bypass
+// row-level security. A superuser or BYPASSRLS role silently defeats
+// per-tenant RLS, so the moment multi-tenancy is enabled it is fatal (unless
+// explicitly overridden with AF_STACK_ALLOW_INSECURE_DB). With multi-tenancy
+// off it is a warning, so single-tenant local dev still boots.
+type rlsDecision int
+
+const (
+	rlsOK    rlsDecision = iota // role cannot bypass RLS
+	rlsWarn                     // can bypass, but MT off or overridden -> warn + boot
+	rlsFatal                    // can bypass while MT on and no override -> refuse to start
+)
+
+// rlsBootDecision is the pure policy: a role that can bypass RLS is fatal only
+// when multi-tenancy is enabled and not explicitly overridden; otherwise it is
+// a warning. A non-bypassing role is always OK.
+func rlsBootDecision(canBypass, mtEnabled, override bool) rlsDecision {
+	if !canBypass {
+		return rlsOK
+	}
+	if mtEnabled && !override {
+		return rlsFatal
+	}
+	return rlsWarn
+}
+
+func assertTenantSafeRole(ctx context.Context, cfg config.Config, database *db.DB, log *slog.Logger) {
+	rs, err := database.ConnRoleSecurity(ctx)
+	if err != nil {
+		log.Warn("could not verify DB role RLS safety", "error", err)
+		return
+	}
+	mtOn := cfg.Modules.Enabled["multi-tenancy"]
+	override := envBool("AF_STACK_ALLOW_INSECURE_DB", false)
+	switch rlsBootDecision(rs.CanBypassRLS(), mtOn, override) {
+	case rlsOK:
+		log.Info("tenant isolation: serving DB role is RLS-safe", "role", rs.Name)
+		return
+	case rlsFatal:
+		log.Error("refusing to start: the serving DB role can bypass row-level security, so multi-tenant isolation is unenforceable",
+			"role", rs.Name, "superuser", rs.IsSuperuser, "bypassrls", rs.BypassRLS,
+			"fix", "point AF_STACK_DATABASE_URL at a NOSUPERUSER NOBYPASSRLS role and run migrations via AF_STACK_MIGRATE_DATABASE_URL, or set AF_STACK_ALLOW_INSECURE_DB=true to override")
+		database.Close()
+		os.Exit(1)
+	}
+	log.Warn("serving DB role can bypass row-level security; per-tenant isolation is NOT enforced",
+		"role", rs.Name, "superuser", rs.IsSuperuser, "bypassrls", rs.BypassRLS,
+		"multi_tenancy_enabled", mtOn, "override", override,
+		"recommendation", "use a NOSUPERUSER NOBYPASSRLS serving role before enabling multi-tenancy")
 }
 
 // tenancySecretSink adapts *secrets.Vault to the tenancy.SecretSink

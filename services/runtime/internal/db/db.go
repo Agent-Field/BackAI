@@ -64,6 +64,33 @@ func Open(ctx context.Context, cfg Config) (*DB, error) {
 	return &DB{Pool: pool}, nil
 }
 
+// RoleSecurity describes the RLS-relevant attributes of a Postgres role.
+type RoleSecurity struct {
+	Name        string
+	IsSuperuser bool
+	BypassRLS   bool
+}
+
+// CanBypassRLS reports whether the role escapes row-level security. A
+// superuser always bypasses RLS; a role with BYPASSRLS does too. Either makes
+// per-tenant RLS unenforceable, so the runtime must not serve traffic as such
+// a role when multi-tenancy is in play.
+func (rs RoleSecurity) CanBypassRLS() bool { return rs.IsSuperuser || rs.BypassRLS }
+
+// ConnRoleSecurity reports the RLS-relevant attributes of the role this pool
+// authenticates as (current_user).
+func (d *DB) ConnRoleSecurity(ctx context.Context) (RoleSecurity, error) {
+	if d == nil || d.Pool == nil {
+		return RoleSecurity{}, errors.New("db: not initialized")
+	}
+	var rs RoleSecurity
+	q := `select rolname, rolsuper, rolbypassrls from pg_roles where rolname = current_user`
+	if err := d.Pool.QueryRow(ctx, q).Scan(&rs.Name, &rs.IsSuperuser, &rs.BypassRLS); err != nil {
+		return RoleSecurity{}, fmt.Errorf("db: read connection role security: %w", err)
+	}
+	return rs, nil
+}
+
 // Health pings the database with a short timeout. Returns nil on success.
 func (d *DB) Health(ctx context.Context) error {
 	if d == nil || d.Pool == nil {

@@ -168,7 +168,13 @@ type ServerConfig struct {
 
 // DatabaseConfig holds Postgres connection settings.
 type DatabaseConfig struct {
-	URL             string        `yaml:"url"`
+	URL string `yaml:"url"`
+	// MigrateURL is an optional privileged connection used ONLY to run
+	// migrations (DDL). The serving role (URL) should be a NOSUPERUSER
+	// NOBYPASSRLS role so per-tenant RLS is actually enforced; that role
+	// cannot run DDL, so migrations connect via MigrateURL instead. When
+	// empty, migrations run over URL (fine for single-role local dev).
+	MigrateURL      string        `yaml:"migrate_url"`
 	MaxConnections  int           `yaml:"max_connections"`
 	MaxIdleConns    int           `yaml:"max_idle_connections"`
 	ConnMaxLifetime time.Duration `yaml:"conn_max_lifetime"`
@@ -282,6 +288,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("AF_STACK_DATABASE_URL"); v != "" {
 		cfg.Database.URL = v
+	}
+	if v := os.Getenv("AF_STACK_MIGRATE_DATABASE_URL"); v != "" {
+		cfg.Database.MigrateURL = v
 	}
 	if v := os.Getenv("AF_STACK_AGENTFIELD_URL"); v != "" {
 		cfg.AgentField.URL = v
