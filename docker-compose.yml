@@ -18,6 +18,10 @@ services:
       POSTGRES_USER: afstack
       POSTGRES_PASSWORD: afstack
       POSTGRES_MULTIPLE_DATABASES: afstack,agentfield
+      # Provision a restricted NOSUPERUSER NOBYPASSRLS serving role so the
+      # runtime enforces per-tenant RLS (the superuser POSTGRES_USER bypasses
+      # it). See scripts/postgres-init.sh. Dev-only default password.
+      AF_STACK_APP_DB_PASSWORD: ${AF_STACK_APP_DB_PASSWORD:-afstack_app}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
@@ -110,7 +114,11 @@ services:
     environment:
       AF_STACK_HTTP_ADDR: ":8080"
       AF_STACK_METRICS_ADDR: ":9090"
-      AF_STACK_DATABASE_URL: postgres://afstack:afstack@postgres:5432/afstack?sslmode=disable
+      # Serve as the restricted role (real per-tenant RLS); migrate as the
+      # privileged owner (the restricted role has no DDL rights). The runtime
+      # refuses to start as an RLS-bypassing role once multi-tenancy is on.
+      AF_STACK_DATABASE_URL: postgres://afstack_app:${AF_STACK_APP_DB_PASSWORD:-afstack_app}@postgres:5432/afstack?sslmode=disable
+      AF_STACK_MIGRATE_DATABASE_URL: postgres://afstack:afstack@postgres:5432/afstack?sslmode=disable
       AF_STACK_AGENTFIELD_URL: http://agentfield:8080
       # KMS for the secrets vault (envelope encryption). Override in
       # production with `openssl rand -hex 32`.
