@@ -38,8 +38,8 @@ func TestValidate_AppliesDefaults(t *testing.T) {
 	if spec.MemoryGB != sandbox.DefaultMemoryGB {
 		t.Errorf("MemoryGB default = %d, want %d", spec.MemoryGB, sandbox.DefaultMemoryGB)
 	}
-	if spec.Network != sandbox.NetworkRestricted {
-		t.Errorf("Network default = %q, want %q", spec.Network, sandbox.NetworkRestricted)
+	if spec.Network != sandbox.NetworkOpen {
+		t.Errorf("Network default = %q, want %q", spec.Network, sandbox.NetworkOpen)
 	}
 }
 
@@ -114,14 +114,24 @@ func TestValidate_RejectsBadBounds(t *testing.T) {
 	}
 }
 
-func TestValidate_AcceptsAllNetworkModes(t *testing.T) {
+func TestValidate_AcceptsImplementedNetworkModes(t *testing.T) {
 	for _, mode := range []sandbox.NetworkMode{
-		sandbox.NetworkOpen, sandbox.NetworkRestricted, sandbox.NetworkIsolated,
+		sandbox.NetworkOpen, sandbox.NetworkIsolated,
 	} {
 		spec := sandbox.RunSpec{Image: "alpine", Command: []string{"ls"}, Network: mode}
 		if err := spec.Validate(); err != nil {
 			t.Errorf("network %q rejected: %v", mode, err)
 		}
+	}
+}
+
+// TestValidate_RejectsRestrictedNetwork locks the S4 contract: until per-host
+// egress filtering exists, "restricted" is rejected rather than silently
+// granting a full bridge.
+func TestValidate_RejectsRestrictedNetwork(t *testing.T) {
+	spec := sandbox.RunSpec{Image: "alpine", Command: []string{"ls"}, Network: sandbox.NetworkRestricted}
+	if err := spec.Validate(); err == nil {
+		t.Fatal("network=restricted accepted; want rejection until egress filtering is implemented")
 	}
 }
 

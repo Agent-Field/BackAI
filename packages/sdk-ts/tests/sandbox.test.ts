@@ -132,7 +132,7 @@ describe("sandbox.run", () => {
     expect(body.timeout_s).toBe(300)
     expect(body.cpu).toBe(2)
     expect(body.memory_gb).toBe(4)
-    expect(body.network).toBe("restricted")
+    expect(body.network).toBe("open")
     // Optional fields must NOT appear when caller didn't supply them.
     expect("files" in body).toBe(false)
     expect("env" in body).toBe(false)

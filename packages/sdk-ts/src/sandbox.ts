@@ -102,7 +102,8 @@ export interface RunSandboxOptions extends HttpOptions {
   cpu?: number
   /** Memory in GB (1–64, default 4). */
   memoryGb?: number
-  /** Egress policy — defaults to `restricted`. */
+  /** Egress policy — defaults to `open`. `restricted` is not yet supported by
+   * the runtime (it rejects it); use `isolated` for no egress. */
   network?: SandboxNetwork | string
   /** Explicit allow-list of egress hostnames (honoured when network != isolated). */
   allowEgress?: string[]
@@ -141,7 +142,7 @@ export async function run(
     timeoutS = 300,
     cpu = 2,
     memoryGb = 4,
-    network = "restricted",
+    network = "open",
     allowEgress,
     workspaceId,
     ...http

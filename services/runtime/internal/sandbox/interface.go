@@ -56,10 +56,9 @@ func (s Status) IsTerminal() bool {
 
 // NetworkMode controls outbound network access for a run.
 //
-//   - "open"       — no restrictions (use with care)
-//   - "restricted" — only the hosts in RunSpec.AllowEgress reachable
-//                    (Phase 9.1 docker adapter: treated as bridge — see
-//                    docker package doc-comment for the trade-off note)
+//   - "open"       — full egress (the default)
+//   - "restricted" — per-host egress allowlist. NOT YET IMPLEMENTED: Validate
+//                    rejects it rather than silently granting full egress.
 //   - "isolated"   — no network at all
 type NetworkMode string
 
@@ -310,11 +309,17 @@ func (s *RunSpec) Validate() error {
 	}
 	switch s.Network {
 	case "":
-		s.Network = NetworkRestricted
-	case NetworkOpen, NetworkRestricted, NetworkIsolated:
+		// Default to open. Per-host egress filtering ("restricted") is not
+		// implemented yet, and we will not silently grant full egress under
+		// that name (which is what the old default did). Callers that want no
+		// egress must ask for "isolated" explicitly.
+		s.Network = NetworkOpen
+	case NetworkOpen, NetworkIsolated:
 		// ok
+	case NetworkRestricted:
+		return fmt.Errorf("%w: network=restricted is not yet supported (per-host egress filtering is unimplemented); use network=isolated for no egress or network=open for full egress", ErrInvalidSpec)
 	default:
-		return fmt.Errorf("%w: network must be open|restricted|isolated", ErrInvalidSpec)
+		return fmt.Errorf("%w: network must be open|isolated (restricted is not yet supported)", ErrInvalidSpec)
 	}
 	return nil
 }

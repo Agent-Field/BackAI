@@ -351,9 +351,14 @@ func (a *Adapter) ensureImage(ctx context.Context, ref string) error {
 func buildHostConfig(spec sandbox.RunSpec, runtime string) *container.HostConfig {
 	netMode := container.NetworkMode(network.NetworkBridge)
 	switch spec.Network {
-	case sandbox.NetworkOpen, sandbox.NetworkRestricted:
+	case sandbox.NetworkOpen:
 		netMode = container.NetworkMode(network.NetworkBridge)
 	case sandbox.NetworkIsolated:
+		netMode = container.NetworkMode(network.NetworkNone)
+	default:
+		// NetworkRestricted is rejected by RunSpec.Validate (egress filtering
+		// is unimplemented). Should one reach here anyway, fail safe to no
+		// network rather than silently granting a full bridge.
 		netMode = container.NetworkMode(network.NetworkNone)
 	}
 

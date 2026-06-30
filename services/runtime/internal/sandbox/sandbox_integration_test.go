@@ -55,7 +55,7 @@ func TestDocker_EchoSucceeds(t *testing.T) {
 		TimeoutS: 30,
 		CPU:      1,
 		MemoryGB: 1,
-		Network:  sandbox.NetworkRestricted,
+		Network:  sandbox.NetworkOpen,
 	}
 	if err := spec.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)

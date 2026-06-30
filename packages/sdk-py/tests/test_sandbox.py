@@ -91,7 +91,7 @@ async def test_run_posts_payload_with_defaults() -> None:
     assert body["timeout_s"] == 300
     assert body["cpu"] == 2
     assert body["memory_gb"] == 4
-    assert body["network"] == "restricted"
+    assert body["network"] == "open"
     # Optional fields must NOT appear when caller didn't supply them.
     assert "files" not in body
     assert "env" not in body
