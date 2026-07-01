@@ -8,6 +8,11 @@
 This is the real flow: no simulated steps, no hardcoded diff. Given a
 `GH_TOKEN` and a `repo_url`, the agent opens a genuine PR.
 
+> **Auth is a `GH_TOKEN` secret — that's the v1 path.** A GitHub-OAuth
+> "connect your repo" UX is deliberately **backlog**, not shipped: the tenant
+> supplies a PAT with `repo`/PR scope and the agent uses it directly. See the
+> release plan's Backlog section.
+
 ## What's here
 
 ```

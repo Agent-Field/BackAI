@@ -77,7 +77,7 @@ is historical design material. See [`docs/repo-map.md`](docs/repo-map.md).
 | Area        | Pre-wired default                             | Configurable by you                                              |
 | ----------- | --------------------------------------------- | ---------------------------------------------------------------- |
 | Data        | Postgres 16 + pgvector                        | External Postgres, RLS policy shape, workload tables.            |
-| Storage     | MinIO in dev, S3 contract in prod             | S3, R2, GCS, Azure Blob via adapter/env.                         |
+| Storage     | MinIO in dev, S3 contract in prod             | Any S3-compatible store (S3, R2, Tigris, GCS interop) via endpoint/env; other backends via a custom adapter. |
 | Identity    | better-auth, seeded default operator          | OAuth providers, trusted origins, default operator credentials.  |
 | LLM routing | AgentField path + LiteLLM sidecar             | Provider keys, model map, budgets, virtual-key strategy.         |
 | Sandboxes   | Docker in dev, e2b/gVisor/Firecracker options | Adapter choice, limits, provider credentials.                    |
@@ -419,9 +419,10 @@ End-to-end tests:
 Every BackAI deployment ships a managed code-execution sandbox so
 agents and jobs can run arbitrary commands, build artifacts, or test
 generated code without the operator wiring docker into their app code.
-Four pluggable adapters (`docker` for local dev, `firecracker` for
-single-host isolation, `e2b` and `modal` for managed remote sandboxes)
-share one API; each tenant gets its own pool with isolated filesystems,
+Pluggable adapters (`docker` for local dev, `gvisor` for a user-space
+kernel, `firecracker` for single-host microVM isolation, `e2b` for
+managed remote sandboxes, plus a `remote` adapter for any out-of-process
+sandbox sidecar) share one API; each tenant gets its own pool with isolated filesystems,
 egress controls, and timeout/CPU/memory caps. Every run is cost-tracked
 per-tenant alongside LLM spend so a tenant's monthly budget covers both
 inference and compute.

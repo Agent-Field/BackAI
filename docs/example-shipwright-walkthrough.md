@@ -1,5 +1,21 @@
 # Example Walk: Shipwright
 
+> **Status — design vision, not the shipped example.** This document is the
+> aspirational end-state used to pressure-test the platform's module set. The
+> **shipped** demo is simpler and lives at
+> [`examples/02-shipwright/`](../examples/02-shipwright/) — read its
+> [`README`](../examples/02-shipwright/README.md) for what actually runs today.
+>
+> What's real in the shipped example: a **single** `shipwright.build` agent that
+> clones a repo, runs a coding harness (or an honest file-edit fallback), pushes
+> a branch, and opens a **real** PR via the GitHub REST API. Auth to GitHub is a
+> **`GH_TOKEN` secret** the tenant supplies — the "connect a repo" GitHub-OAuth
+> UX described below is explicitly **backlog** (see the release plan's Backlog
+> section), not v1. Also aspirational here and **not** in the shipped example:
+> Firecracker/Flintlock sandboxing (dev uses the `docker` adapter; `firecracker`
+> and `e2b` are options), Lago/Stripe metering, the `swe-af` multi-agent
+> fan-out, and `af-suite import-module`. Treat the flow below as the roadmap.
+
 Validation workload #2: the **heavy AI** case. Sandbox-critical, multi-tenant
 with untrusted code, long-running agent fan-outs.
 
