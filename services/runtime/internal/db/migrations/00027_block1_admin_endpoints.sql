@@ -4,6 +4,7 @@
 
 create extension if not exists pg_stat_statements;
 
+-- +goose StatementBegin
 do $$
 begin
   execute format('grant pg_read_all_stats to %I', current_user);
@@ -13,6 +14,7 @@ exception
   when undefined_object then
     raise warning 'pg_read_all_stats role is not available on this Postgres installation';
 end $$;
+-- +goose StatementEnd
 
 create table if not exists suite_provider_health_log (
   id uuid primary key default gen_random_uuid(),
