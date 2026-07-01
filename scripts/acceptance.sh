@@ -149,17 +149,28 @@ fi
 if [ -z "$CLI_BIN" ]; then
     skip "scaffold" "no af-stack binary and no go toolchain to build one"
 else
-    (cd "$SCAFFOLD_DIR" && "$CLI_BIN" init acme-coder --template coding-agent >/dev/null 2>&1) || true
-    AGENT_MAIN="${SCAFFOLD_DIR}/acme-coder/apps/backend/agents/coding-agent/main.py"
-    ENV_FILE="${SCAFFOLD_DIR}/acme-coder/.env"
-    if [ -f "$AGENT_MAIN" ] && grep -q 'node_id' "$AGENT_MAIN" 2>/dev/null; then
-        if [ -f "$ENV_FILE" ] && grep -qi 'MULTI_TENANCY=true' "$ENV_FILE" 2>/dev/null; then
-            pass "scaffold (coding-agent + multi-tenancy on)"
+    # `af-stack init` rebrands in place inside an AF Stack checkout (it looks
+    # upward for package.json + apps/dashboard + apps/customer-app), taking the
+    # project name via --name. Give it a clean checkout snapshot — tracked files
+    # only, so it's fast and carries no .git/node_modules — and run init there.
+    # The coding-agent template writes under <root>/apps/backend/agents/coding-agent/.
+    FORK_DIR="${SCAFFOLD_DIR}/fork"
+    mkdir -p "$FORK_DIR"
+    if git archive HEAD | tar -x -C "$FORK_DIR" 2>/dev/null; then
+        (cd "$FORK_DIR" && "$CLI_BIN" init --name acme-coder --template coding-agent >/dev/null 2>&1) || true
+        AGENT_MAIN="${FORK_DIR}/apps/backend/agents/coding-agent/main.py"
+        ENV_FILE="${FORK_DIR}/.env"
+        if [ -f "$AGENT_MAIN" ] && grep -q 'node_id' "$AGENT_MAIN" 2>/dev/null; then
+            if [ -f "$ENV_FILE" ] && grep -qi 'MULTI_TENANCY=true' "$ENV_FILE" 2>/dev/null; then
+                pass "scaffold (coding-agent + multi-tenancy on)"
+            else
+                fail "scaffold" "coding-agent scaffolded but .env does not enable multi-tenancy"
+            fi
         else
-            fail "scaffold" "coding-agent scaffolded but .env does not enable multi-tenancy"
+            fail "scaffold" "coding-agent main.py not produced at expected path"
         fi
     else
-        fail "scaffold" "coding-agent main.py not produced at expected path"
+        skip "scaffold" "git archive unavailable (not a git checkout)"
     fi
 fi
 rm -rf "$SCAFFOLD_DIR"
