@@ -4,6 +4,7 @@ package initcmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -85,6 +86,51 @@ func TestInitCodingAgentTemplateScaffolds(t *testing.T) {
 
 	if !strings.Contains(out, "scaffolded coding agent") || !strings.Contains(out, "GH_TOKEN") {
 		t.Fatalf("expected scaffold summary in output:\n%s", out)
+	}
+}
+
+// X2: the coding-agent template drops root-level discovery files so Claude
+// Code auto-loads the skill (CLAUDE.md) + MCP tools (.mcp.json) with no setup.
+func TestInitCodingAgentScaffoldsClaudeAndMcp(t *testing.T) {
+	root := minimalRepo(t)
+	runInit(t, root, "--name", "AcmeCoder", "--template", "coding-agent")
+
+	if !exists(root + "/CLAUDE.md") {
+		t.Fatal("expected root CLAUDE.md")
+	}
+	claude := read(t, root, "CLAUDE.md")
+	for _, want := range []string{"AF Stack skill", "af-stack dev", "coding-agent", "Multi-tenancy is ON"} {
+		if !strings.Contains(claude, want) {
+			t.Fatalf("CLAUDE.md missing %q:\n%s", want, claude)
+		}
+	}
+
+	if !exists(root + "/.mcp.json") {
+		t.Fatal("expected root .mcp.json")
+	}
+	raw := read(t, root, ".mcp.json")
+	var parsed struct {
+		MCPServers map[string]struct {
+			Command string   `json:"command"`
+			Args    []string `json:"args"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		t.Fatalf(".mcp.json is not valid JSON: %v\n%s", err, raw)
+	}
+	gh, ok := parsed.MCPServers["github"]
+	if !ok || gh.Command == "" {
+		t.Fatalf(".mcp.json missing a github MCP server:\n%s", raw)
+	}
+}
+
+// X2: never clobber a user's own root CLAUDE.md / .mcp.json on re-run.
+func TestInitCodingAgentRespectsExistingRootFiles(t *testing.T) {
+	root := minimalRepo(t)
+	write(t, root, "CLAUDE.md", "# my own notes\n")
+	runInit(t, root, "--name", "AcmeCoder", "--template", "coding-agent")
+	if got := read(t, root, "CLAUDE.md"); got != "# my own notes\n" {
+		t.Fatalf("init clobbered an existing CLAUDE.md: %q", got)
 	}
 }
 

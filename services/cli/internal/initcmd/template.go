@@ -77,7 +77,81 @@ func scaffoldCodingAgent(root string) (created []string, skippedExisting bool, e
 		}
 		created = append(created, rel)
 	}
+
+	// X2: agent-first discoverability. Drop root-level files so that opening
+	// the scaffolded project in Claude Code auto-loads the af-stack skill
+	// (CLAUDE.md) and MCP tools (.mcp.json) with zero manual setup.
+	rootFiles := map[string]string{
+		"CLAUDE.md": codingAgentClaudeMd(codingAgentNodeID),
+		".mcp.json": codingAgentMcpJSON(),
+	}
+	for _, name := range []string{"CLAUDE.md", ".mcp.json"} {
+		dest := filepath.Join(root, name)
+		if exists(dest) {
+			skippedExisting = true
+			continue
+		}
+		// #nosec G306 -- world-readable project scaffolding, not secrets.
+		if err := os.WriteFile(dest, []byte(rootFiles[name]), 0o644); err != nil {
+			return nil, skippedExisting, fmt.Errorf("init: write %s: %w", name, err)
+		}
+		created = append(created, name)
+	}
 	return created, skippedExisting, nil
+}
+
+// codingAgentClaudeMd is the root CLAUDE.md Claude Code auto-loads when the
+// scaffolded project is opened. It orients the agent to the layout and the
+// af-stack skill + CLI so guidance surfaces without manual setup (X2).
+func codingAgentClaudeMd(nodeID string) string {
+	return fmt.Sprintf(`# %[1]s — an AF Stack app
+
+This project was scaffolded by `+"`af-stack init --template coding-agent`"+`.
+It is a multi-tenant SaaS backend built on **AF Stack**: a Go runtime gateway,
+a customer web app, an operator dashboard, and an AgentField coding agent.
+
+## Layout
+- `+"`apps/backend/agents/%[1]s/`"+` — the coding agent (Python, node_id %[1]q).
+  Its `+"`run`"+` reasoner clones a repo, runs a harness, and opens a PR.
+- `+"`docker-compose.yml`"+` — the full stack; bring it up with `+"`af-stack dev`"+`.
+- `+"`.env`"+` — local config (multi-tenancy is ON; store secrets, e.g. GH_TOKEN).
+
+## Working on this project
+- Bring the stack up:            `+"`af-stack dev`"+`
+- Manage MCP tool servers:       `+"`af-stack mcp list|add|call`"+`
+- Store a repo credential:       `+"`af-stack mcp add github --transport stdio --command \"uvx mcp-server-github\" --env GITHUB_TOKEN=secret:github_token`"+`
+
+## The AF Stack skill
+If you have the af-stack skill installed, prefer it for anything touching the
+runtime API, SDKs, agents, or the customer app — it carries the canonical
+rules for this stack (edit surfaces, multi-tenancy, boundaries). The CLI
+(`+"`af-stack init/dev/deploy/mcp`"+`) is the primary path; editing the fork
+directly is the fallback.
+
+## Ground rules
+- The runtime owns tenant/auth/billing/secrets; AgentField owns agent runs.
+  Don't reimplement either — call them.
+- Multi-tenancy is ON. Never hardcode a tenant; read it from request context.
+- Secrets belong in the vault (GH_TOKEN etc.), never in code or committed .env.
+`, nodeID)
+}
+
+// codingAgentMcpJSON is the root .mcp.json Claude Code auto-loads. It wires the
+// standard GitHub MCP server, matching the coding agent's GH_TOKEN theme, so an
+// agent working in this project can act on GitHub without manual setup (X2).
+func codingAgentMcpJSON() string {
+	return `{
+  "mcpServers": {
+    "github": {
+      "command": "uvx",
+      "args": ["mcp-server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      }
+    }
+  }
+}
+`
 }
 
 // codingAgentMainPy is an honest coding-agent skeleton: it registers
