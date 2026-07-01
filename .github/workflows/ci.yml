@@ -86,6 +86,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # only-new-issues needs the base ref to diff against.
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           # Match the toolchain go.mod requires (go 1.25.x). Pinning an older
@@ -93,19 +96,21 @@ jobs:
           # missing `covdata`, breaking `go test -cover` on no-test packages.
           go-version-file: go.mod
           cache: true
-      # golangci-lint is temporarily out of the gate. The repo's .golangci.yml
-      # is v1-schema, so only golangci-lint v1 can parse it — but the last v1
-      # line (v1.64.8) cannot analyze code under the go 1.25 toolchain that
-      # go.mod requires (it exits with an internal typecheck error rather than
-      # reporting issues). go 1.25 support lives in golangci-lint v2, which
-      # needs the v2 config schema. Migrating .golangci.yml to v2 + bumping the
-      # action and restoring this as a blocking gate is tracked in S7.
-      # Until then go vet + go build are the enforced static checks (alongside
-      # the race-enabled test suite in test-go).
       - name: go vet
         run: go vet ./...
       - name: go build
         run: go build ./...
+      # golangci-lint v2 (S7): the config was migrated from the v1 schema so it
+      # analyzes the go 1.25 toolchain cleanly again. It is restored as a
+      # blocking gate in only-new-issues mode — the ~106-issue pre-existing
+      # backlog is not gated, but any NEW issue a PR introduces fails the build,
+      # so the debt burns down as files are touched. Run ENFORCE via
+      # `golangci-lint run` locally to see the full backlog.
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.1.6
+          only-new-issues: true
 
   test-go:
     name: Test (Go)
