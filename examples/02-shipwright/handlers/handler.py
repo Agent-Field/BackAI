@@ -8,13 +8,13 @@ This sidecar service owns:
   - GET    /stats            Operator-side metrics (cross-tenant)
 
 The handler accepts x-af-stack-tenant-id + x-af-stack-user-id from the
-runtime's tenant resolver. It calls the AgentField stub agent
-(`shipwright-v2.execute_task`) via the runtime's agents gateway, which routes
-through AgentField -> the customer's LiteLLM virtual key.
+runtime's tenant resolver. It calls the coding agent (`shipwright.build`)
+via the runtime's agents gateway, which routes through AgentField -> the
+customer's LiteLLM virtual key.
 
-The agent runs synchronously (~10s for the stub). The handler runs the
-call in a background asyncio task so the POST returns immediately. The
-customer-app polls GET /tasks/{id} for progress.
+Real builds take minutes, so the handler dispatches async and polls the
+AgentField execution; the POST returns immediately and the customer-app
+polls GET /tasks/{id} for progress.
 """
 
 from __future__ import annotations
@@ -35,21 +35,17 @@ RUNTIME_URL = os.getenv("AF_STACK_URL", "http://runtime:8080").rstrip("/")
 AGENTFIELD_URL = os.getenv("AGENTFIELD_URL", "http://agentfield:8080").rstrip("/")
 
 # SHIPWRIGHT_AGENT controls which agent the workload module dispatches to.
-#   - shipwright-v2.execute_task : the iteration stub (sync, ~10s, no keys)
-#   - swe-planner.build          : the real SWE-AF library (async, minutes,
-#                                  needs ANTHROPIC_API_KEY + GH_TOKEN)
-AGENT_NAME = os.getenv("SHIPWRIGHT_AGENT", "swe-planner.build")
+# The canonical agent call is shipwright.build (node_id=shipwright,
+# reasoner=build) — the real coding agent that clones, runs a harness, and
+# opens a PR. Async is the only sane mode: real builds take minutes.
+AGENT_NAME = os.getenv("SHIPWRIGHT_AGENT", "shipwright.build")
 
 # SHIPWRIGHT_MODE controls the call shape:
 #   - sync  : POST /api/v1/agents/<name> and wait for the response inline
-#             (fine for the stub; bad for real builds that take minutes)
+#             (only viable for fast agents; real builds take minutes)
 #   - async : POST /api/v1/agents/async/<name> and poll executions/<id>
-#             (the only shape that works for real SWE-AF builds)
+#             (the only shape that works for real coding builds)
 AGENT_MODE = os.getenv("SHIPWRIGHT_MODE", "async").lower()
-
-# Auto-pick mode if user explicitly named the stub.
-if AGENT_NAME == "shipwright-v2.execute_task" and os.getenv("SHIPWRIGHT_MODE") is None:
-    AGENT_MODE = "sync"
 
 
 _runtime_client: httpx.AsyncClient | None = None
@@ -140,25 +136,15 @@ class TaskDetail(TaskSummary):
 
 
 def _build_payload(issue_url: str, title: str, description: str) -> dict:
-    """Translate the customer-app form into the configured agent's input.
+    """Translate the customer-app form into the coding agent's input.
 
-    Two reasoner shapes are supported:
-
-      - shipwright-v2.execute_task — takes {"payload": {issue_url, title,
-        description}} and returns the canonical step result.
-      - swe-planner.build — the real SWE-AF. Takes {"goal", "repo_url",
-        "additional_context", ...}. We derive goal from title +
-        description and pass the issue_url as repo_url (SWE-AF clones it
-        if it looks like a repo).
+    The canonical agent is shipwright.build (node_id=shipwright,
+    reasoner=build). It takes the coding envelope {repo_url, title,
+    description, ...}; `issue_url` is the repo to work on. A `goal` alias is
+    also sent for back-compat with workload modules that speak that shape.
     """
-    if AGENT_NAME.endswith(".build") or AGENT_NAME.startswith("swe-planner"):
-        # SWE-AF reasoner signature
-        goal = title
-        if description:
-            goal = f"{title}\n\n{description}"
-        return {"goal": goal, "repo_url": issue_url, "artifacts_dir": ".artifacts"}
-    # Stub reasoner signature
-    return {"payload": {"issue_url": issue_url, "title": title, "description": description}}
+    goal = f"{title}\n\n{description}" if description else title
+    return {"repo_url": issue_url, "title": title, "description": description, "goal": goal}
 
 
 async def _drive_task(

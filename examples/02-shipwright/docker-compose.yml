@@ -6,64 +6,48 @@
 #     -f examples/02-shipwright/docker-compose.yml \
 #     up
 #
-# Two agents are wired in this compose:
+# One agent is wired in this compose:
 #
-#  1. shipwright-agent  — the stub at examples/02-shipwright/agents/shipwright/
-#                         (node_id=shipwright-v2, reasoner=execute_task).
-#                         Simulates 7 steps in ~10s. No API keys needed.
-#                         Good for iterating on the UI.
+#  shipwright-agent — the real coding agent at
+#                     examples/02-shipwright/agents/shipwright/
+#                     (node_id=shipwright, reasoner=build → call shipwright.build).
+#                     Given GH_TOKEN + a repo_url it clones, runs a coding
+#                     harness (or an honest file-edit fallback when no harness
+#                     binary is present), pushes a branch, and opens a real PR.
 #
-#  2. swe-af-agent      — the REAL SWE-AF library at examples/af-swe/.
-#                         (node_id=swe-planner, reasoner=build).
-#                         Needs ANTHROPIC_API_KEY (or CLAUDE_CODE_OAUTH_TOKEN)
-#                         + GH_TOKEN to actually do work, but registers
-#                         either way so the UI can route to it.
-#
-# The workload module (shipwright-api) routes to one of the two via
-# SHIPWRIGHT_AGENT env var. Default: the real SWE-AF. To switch back to
-# the stub for fast iteration: set SHIPWRIGHT_AGENT=shipwright-v2.execute_task.
+# The workload module (shipwright-api) routes to it via the SHIPWRIGHT_AGENT
+# env var. Default: shipwright.build (the canonical agent call).
 
 services:
-  # Stub agent — fast iteration on the UI without burning API credits.
+  # Real coding agent — clone → harness → push → open PR.
   shipwright-agent:
     build:
       context: ./examples/02-shipwright/agents/shipwright
       dockerfile: Dockerfile
     environment:
       AGENTFIELD_SERVER: http://agentfield:8080
-      NODE_ID: shipwright-v2
+      NODE_ID: shipwright
       AGENT_CALLBACK_URL: http://shipwright-agent:8090
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-    depends_on:
-      agentfield:
-        condition: service_started
-    restart: unless-stopped
-
-  # The actual SWE-AF library — full autonomous engineering pipeline.
-  # Builds from /Users/santoshkumarradha/Documents/agentfield/code/examples/af-swe.
-  # Volume mounts the workspaces dir for persistent build artifacts.
-  swe-af-agent:
-    build:
-      context: /Users/santoshkumarradha/Documents/agentfield/code/examples/af-swe
-      dockerfile: Dockerfile
-    environment:
-      AGENTFIELD_SERVER: http://agentfield:8080
-      NODE_ID: swe-planner
-      AGENT_CALLBACK_URL: http://swe-af-agent:8003
-      PORT: 8003
-      # Credentials for real builds. Without these the agent still registers
-      # but actual build calls will fail with a clear error.
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # GitHub credential for clone + PR creation. Without it the agent still
+      # registers, but build calls return a clear "missing_credential".
       GH_TOKEN: ${GH_TOKEN:-}
       GITHUB_TOKEN: ${GH_TOKEN:-}
-      HARNESS_MODEL: ${HARNESS_MODEL:-openrouter/moonshotai/kimi-k2.6}
+      # Runtime base + key for the best-effort completion callback.
+      AF_STACK_URL: http://runtime:8080
+      AF_STACK_API_KEY: ${AF_STACK_API_KEY:-}
+      # Harness selection + credentials (any one enables that harness).
+      SHIPWRIGHT_HARNESS: ${SHIPWRIGHT_HARNESS:-}
+      SHIPWRIGHT_MODEL: ${SHIPWRIGHT_MODEL:-}
+      SHIPWRIGHT_BASE_BRANCH: ${SHIPWRIGHT_BASE_BRANCH:-main}
+      SHIPWRIGHT_DRAFT_PR: ${SHIPWRIGHT_DRAFT_PR:-true}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
     volumes:
-      - swe-af-workspaces:/workspaces
+      - shipwright-workspaces:/workspaces
     depends_on:
       agentfield:
         condition: service_started
@@ -77,10 +61,9 @@ services:
     environment:
       SHIPWRIGHT_DATABASE_URL: postgres://afstack:afstack@postgres:5432/afstack?sslmode=disable
       AF_STACK_URL: http://runtime:8080
-      # Default: route to the real SWE-AF. Override with
-      #   SHIPWRIGHT_AGENT=shipwright-v2.execute_task
-      # in .env to use the iteration stub instead.
-      SHIPWRIGHT_AGENT: ${SHIPWRIGHT_AGENT:-swe-planner.build}
+      # Canonical agent call. All three of runtime default, compose, and the
+      # agent's own node_id.reasoner agree on shipwright.build.
+      SHIPWRIGHT_AGENT: ${SHIPWRIGHT_AGENT:-shipwright.build}
       SHIPWRIGHT_MODE: ${SHIPWRIGHT_MODE:-async}
     ports:
       - "${SHIPWRIGHT_PORT:-38201}:8000"
@@ -113,4 +96,4 @@ services:
     restart: "no"
 
 volumes:
-  swe-af-workspaces:
+  shipwright-workspaces:
