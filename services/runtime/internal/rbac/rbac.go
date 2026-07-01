@@ -34,6 +34,15 @@ const (
 	// rules below: owner gets read|write|delete, admin gets read.
 	ResourceAdminDB       = "admin:db"
 	ResourceAdminAdapters = "admin:adapters"
+
+	// S1b: operator-only control surfaces that previously bypassed the tenant
+	// resolver via publicPrefixes and returned tenant-scoped data with no auth.
+	// All are matched by the admin:* policy rules below.
+	ResourceAdminLogs    = "admin:logs"
+	ResourceAdminSecrets = "admin:secrets"
+	ResourceAdminRuns    = "admin:runs"
+	ResourceAdminCrons   = "admin:crons"
+	ResourceAdminSkills  = "admin:skills"
 )
 
 const casbinModel = `

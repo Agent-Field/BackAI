@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
+	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
 	"github.com/Agent-Field/backai/services/runtime/internal/skills"
 )
 
@@ -51,10 +52,15 @@ type skillListResponse struct {
 // ─── Registration ─────────────────────────────────────────────────────────
 
 func (s *Server) registerSkillsRoutes() {
-	s.mux.HandleFunc("GET /api/v1/skills", s.handleListSkills)
-	s.mux.HandleFunc("POST /api/v1/skills", s.handleInstallSkill)
-	s.mux.HandleFunc("DELETE /api/v1/skills/{id}", s.handleUninstallSkill)
-	s.mux.HandleFunc("POST /api/v1/skills/attach", s.handleAttachSkill)
+	// S1b: skills bypass the tenant resolver (publicPrefixes) and honour an
+	// attacker-controlled ?tenant= filter with no auth (reads AND unauthed
+	// install/uninstall). Gate the whole surface to operators; the dashboard
+	// manages skills via its better-auth session.
+	g := func(h http.HandlerFunc) http.HandlerFunc { return s.operatorGuard(rbac.ResourceAdminSkills, h) }
+	s.mux.HandleFunc("GET /api/v1/skills", g(s.handleListSkills))
+	s.mux.HandleFunc("POST /api/v1/skills", g(s.handleInstallSkill))
+	s.mux.HandleFunc("DELETE /api/v1/skills/{id}", g(s.handleUninstallSkill))
+	s.mux.HandleFunc("POST /api/v1/skills/attach", g(s.handleAttachSkill))
 }
 
 // writeSkillsError maps skills package errors to HTTP responses.

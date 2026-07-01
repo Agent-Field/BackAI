@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/audit"
+	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
 	"github.com/Agent-Field/backai/services/runtime/internal/secrets"
 	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 )
@@ -49,12 +50,18 @@ func (s *Server) defaultTenant(_ *http.Request) string {
 // registerSecretsRoutes wires the secrets endpoints. Called from
 // registerRoutes() in server.go.
 func (s *Server) registerSecretsRoutes() {
-	s.mux.HandleFunc("GET /api/v1/secrets", s.handleListSecrets)
-	s.mux.HandleFunc("GET /api/v1/secrets/{key}", s.handleGetSecretMetadata)
-	s.mux.HandleFunc("PUT /api/v1/secrets/{key}", s.handlePutSecret)
-	s.mux.HandleFunc("DELETE /api/v1/secrets/{key}", s.handleDeleteSecret)
-	s.mux.HandleFunc("POST /api/v1/secrets/{key}/reveal", s.handleRevealSecret)
-	s.mux.HandleFunc("POST /api/v1/secrets/{key}/rotate", s.handleRotateSecret)
+	// S1b: the secrets vault bypasses the tenant resolver (publicPrefixes) and
+	// operates on a single hardcoded tenant — an unauthenticated caller could
+	// list and /reveal plaintext secrets. Gate the whole surface to operators
+	// (the dashboard manages secrets via its better-auth session). Per-tenant
+	// secrets via API key is a separate follow-up.
+	guard := func(res string, h http.HandlerFunc) http.HandlerFunc { return s.operatorGuard(res, h) }
+	s.mux.HandleFunc("GET /api/v1/secrets", guard(rbac.ResourceAdminSecrets, s.handleListSecrets))
+	s.mux.HandleFunc("GET /api/v1/secrets/{key}", guard(rbac.ResourceAdminSecrets, s.handleGetSecretMetadata))
+	s.mux.HandleFunc("PUT /api/v1/secrets/{key}", guard(rbac.ResourceAdminSecrets, s.handlePutSecret))
+	s.mux.HandleFunc("DELETE /api/v1/secrets/{key}", guard(rbac.ResourceAdminSecrets, s.handleDeleteSecret))
+	s.mux.HandleFunc("POST /api/v1/secrets/{key}/reveal", guard(rbac.ResourceAdminSecrets, s.handleRevealSecret))
+	s.mux.HandleFunc("POST /api/v1/secrets/{key}/rotate", guard(rbac.ResourceAdminSecrets, s.handleRotateSecret))
 }
 
 // parseRFC3339 tolerates both RFC3339 and RFC3339Nano so clients can

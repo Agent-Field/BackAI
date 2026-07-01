@@ -613,8 +613,9 @@ func (s *Server) registerRoutes() {
 	})
 
 	// Dashboard read-only endpoints (see internal/server/dashboard.go).
-	// Phase 4: no admin auth gating yet — Phase 6 wires that.
-	s.mux.HandleFunc("GET /api/v1/runs", s.handleListRuns)
+	// S1b: the bulk runs list bypasses the tenant resolver (publicPrefixes) and
+	// honours an attacker-controlled ?tenant= filter — gate it to operators.
+	s.mux.HandleFunc("GET /api/v1/runs", s.operatorGuard(rbac.ResourceAdminRuns, s.handleListRuns))
 	s.openapi.Register("GET", "/api/v1/runs", openapi.RouteMeta{
 		Summary: "List recent agent runs", Tags: []string{"dashboard"},
 	})

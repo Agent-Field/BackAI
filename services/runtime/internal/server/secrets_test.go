@@ -25,7 +25,11 @@ import (
 // /api/v1/secrets/* handler should respond with 503.
 func newSecretsTestServer(t *testing.T) *Server {
 	t.Helper()
-	return newBareTestServer(t)
+	s := newBareTestServer(t)
+	// S1b: the secrets surface is now operator-gated. These tests exercise
+	// handler behaviour past the gate, so inject an authenticated operator.
+	withOperator(s, "owner")
+	return s
 }
 
 func TestListSecretsReturns503WhenVaultMissing(t *testing.T) {
