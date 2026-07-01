@@ -5,6 +5,7 @@ package initcmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -86,6 +87,40 @@ func TestInitCodingAgentTemplateScaffolds(t *testing.T) {
 
 	if !strings.Contains(out, "scaffolded coding agent") || !strings.Contains(out, "GH_TOKEN") {
 		t.Fatalf("expected scaffold summary in output:\n%s", out)
+	}
+}
+
+// Release-blocker regression (R2): a fresh clone that hasn't run `pnpm
+// install` has no node_modules, so `pnpm run generate:brand` fails. That must
+// NOT abort `init --template coding-agent` — brand.yaml (the source of truth)
+// is already written and CSS regenerates at build time, so the coding agent
+// must still be scaffolded and init must exit 0. Before the fix, the fatal
+// generator error aborted init before the scaffold ran, breaking the hero DX.
+func TestInitCodingAgentScaffoldsWhenBrandGeneratorFails(t *testing.T) {
+	root := minimalRepo(t)
+	restoreCwd := chdir(t, root)
+	defer restoreCwd()
+	restoreGen := stubGenerator(t, func(string) error {
+		return errors.New("pnpm: command not found")
+	})
+	defer restoreGen()
+
+	var stdout, stderr bytes.Buffer
+	if err := Run([]string{"--name", "AcmeCoder", "--template", "coding-agent"},
+		strings.NewReader(""), &stdout, &stderr); err != nil {
+		t.Fatalf("init must not abort when brand regeneration fails: %v", err)
+	}
+
+	// The scaffold still happened despite the generator failure.
+	if !exists(root + "/apps/backend/agents/coding-agent/main.py") {
+		t.Fatal("coding agent must be scaffolded even when brand regeneration fails")
+	}
+	// The user is told branding was not regenerated, and how to fix it.
+	if !strings.Contains(stdout.String(), "brand CSS/modules NOT regenerated") {
+		t.Fatalf("expected 'NOT regenerated' note in stdout:\n%s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "generate:brand") {
+		t.Fatalf("expected remediation hint in stderr:\n%s", stderr.String())
 	}
 }
 

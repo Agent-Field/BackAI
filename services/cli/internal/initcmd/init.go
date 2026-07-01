@@ -166,8 +166,16 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if err := updateDefaultAgentName(root, slug); err != nil {
 		return err
 	}
+	brandRegenerated := true
 	if err := runBrandGenerator(root); err != nil {
-		return err
+		// Brand CSS/modules are also regenerated at build time, so a missing
+		// pnpm / node_modules (e.g. a fresh clone that hasn't run `pnpm
+		// install` yet) must NOT abort the scaffold: brand.yaml — the source
+		// of truth — is already written above. Warn and carry on so the
+		// hero flow (`init --template coding-agent`) still scaffolds.
+		brandRegenerated = false
+		fmt.Fprintf(stderr, "warning: skipped brand asset regeneration (%v)\n", err)
+		fmt.Fprintf(stderr, "         run `pnpm install && pnpm run generate:brand` once Node deps are present\n")
 	}
 
 	var templateSummary string
@@ -189,7 +197,11 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 
 	fmt.Fprintf(stdout, "Initialized AF Stack fork for %s (template: %s)\n", projectName, tmpl)
 	fmt.Fprintf(stdout, "- brand.yaml updated\n")
-	fmt.Fprintf(stdout, "- brand CSS/modules regenerated\n")
+	if brandRegenerated {
+		fmt.Fprintf(stdout, "- brand CSS/modules regenerated\n")
+	} else {
+		fmt.Fprintf(stdout, "- brand CSS/modules NOT regenerated (run `pnpm run generate:brand` after `pnpm install`)\n")
+	}
 	fmt.Fprintf(stdout, "- default agent node_id set to %s\n", slug)
 	if templateSummary != "" {
 		fmt.Fprint(stdout, templateSummary)
