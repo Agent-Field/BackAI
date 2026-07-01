@@ -11,9 +11,29 @@ platform for AI products. Architecture is Supabase-shape (Postgres + auth
 forkable — the repo IS the product. AgentField is the AI runtime that
 ships at one of the layers, peer to LiteLLM and Postgres.
 
-**The user clones the repo, brands it, writes their code in-tree, deploys
-as one unit.** Your job is to help them with their fork — never to rebuild
-what the platform already gives them.
+**The primary path is the CLI.** `af-stack init --template <t>` scaffolds a
+branded, batteries-included app; `af-stack dev` runs the whole stack locally;
+the `deploy/` targets ship it. Your job is to help the user build on top of
+that scaffold — never to rebuild what the platform already gives them.
+
+Working directly in a raw fork of the repo (clone → brand → edit in-tree) is
+the **fallback** for deep platform customization; reach for it only when the
+CLI scaffold + the four edit surfaces below don't cover the need.
+
+## Start here — the CLI (primary path)
+
+```bash
+af-stack init acme-coder --template coding-agent  # scaffold a branded app
+cd acme-coder
+af-stack dev                                       # whole backend + apps up
+af-stack mcp add github --transport stdio \        # register tool servers
+  --command "uvx mcp-server-github" --env GITHUB_TOKEN=secret:github_token
+# edit the four surfaces below, then ship via deploy/ (Helm/Fly/Railway/Render/compose)
+```
+
+`af-stack init` writes the app under your cwd (a coding agent, customer-app,
+multi-tenancy ON, a GH_TOKEN secret slot). Everything after is editing the four
+surfaces. Prefer these commands over hand-copying files.
 
 ## Read these first
 
@@ -195,7 +215,9 @@ Follow this sequence. Don't skip steps.
 3. **Map primitives.** Walk the primitives table; mark which rows X
    uses. If any are 🚧 (roadmap), warn the user and propose a workaround
    or wait.
-4. **Scaffold.** Copy the matching template from `snippets/`:
+4. **Scaffold.** For a NEW project, start from the CLI:
+   `af-stack init <name> --template <coding-agent|node>`. To add a surface to
+   an EXISTING project, copy the matching template from `snippets/`:
    - New agent → `snippets/agent.py`
    - New workload module (Python sidecar) → `snippets/workload-module/`
    - New dashboard plugin → `snippets/dashboard-plugin/`
@@ -204,10 +226,11 @@ Follow this sequence. Don't skip steps.
 5. **Wire with SDK only.** Connect surfaces using `suite.*` (runtime
    handlers, dashboard, customer-app) or `app.*` (inside agents). Never
    reach the DB / LiteLLM / AgentField directly from outside its layer.
-6. **Test locally.** `docker compose up`. Use the runtime's
+6. **Run locally.** `af-stack dev` brings up the whole stack (falls back to
+   `docker compose up` in a raw fork). Use the runtime's
    `/api/v1/openapi.json` to verify your routes are registered.
-7. **Deploy.** `deploy/` has Helm / Fly / Railway / Render / compose.
-   `af-stack deploy <target>` once CLI v2 lands (planned).
+7. **Deploy.** `deploy/` has Helm / Fly / Railway / Render / compose — pick a
+   target and ship the whole unit.
 
 **If a request would violate a Critical Rule, STOP.** Propose the
 correct primitive instead. Example: user says "let me add a
@@ -263,8 +286,10 @@ Session-scope memory; see `rules/boundaries.md`."
 
 ## Final reminder
 
-You are working in a **fork** of AF Stack. The user owns their fork.
-Your edits live in their repo. You're not modifying a SaaS — you're
-helping them assemble a Supabase-shaped backend tailored to their
-product. When in doubt, ask "is this user code or platform code?" and
-keep your edits firmly in user code.
+**Lead with the CLI** (`af-stack init/dev`, the `deploy/` targets) — that is
+how the user scaffolds and runs their app. The scaffold + the four edit
+surfaces are where their code lives; everything else is platform code you
+don't touch. (Under the hood the app IS a fork of AF Stack the user owns —
+but only fall back to raw fork-and-edit when the CLI + surfaces don't cover
+the need.) When in doubt, ask "is this user code or platform code?" and keep
+your edits firmly in user code.
