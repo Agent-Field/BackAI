@@ -109,7 +109,9 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.1.6
+          # v2.5.0's release binary is built with go1.25.1; older v2 binaries
+          # (e.g. v2.1.6, built with go1.24) refuse a config targeting go 1.25.
+          version: v2.5.0
           only-new-issues: true
 
   test-go:
