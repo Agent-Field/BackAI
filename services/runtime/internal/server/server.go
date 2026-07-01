@@ -513,6 +513,12 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 
 // registerRoutes wires the default endpoints. Modules will add more in Phase 1.5+.
 func (s *Server) registerRoutes() {
+	// Catch-all so an unmatched route returns the canonical JSON error
+	// envelope instead of Go's default plain-text "404 page not found".
+	// The "/" pattern is the least specific in the mux, so every
+	// registered route still wins; only genuinely-unknown paths land here.
+	s.mux.HandleFunc("/", s.handleNotFound)
+
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.openapi.Register("GET", "/health", openapi.RouteMeta{
 		Summary: "Liveness probe", Tags: []string{"system"},
@@ -1121,6 +1127,16 @@ func (s *Server) forwardAgentCall(w http.ResponseWriter, r *http.Request, afPref
 		return
 	}
 
+	// Upstream agent errors (non-2xx) are mapped into the canonical error
+	// envelope so SDK/dashboard consumers branch on error.code instead of
+	// the agent's raw, per-framework error shape. Success + redirects pass
+	// through untouched.
+	if afResp.StatusCode >= 400 {
+		s.writeAgentUpstreamError(w, afResp)
+		s.logGatewayRequest(r, endpoint, afResp.StatusCode, len(body), len(afResp.Body), afResp.ExecutionID, start)
+		return
+	}
+
 	if afResp.ContentType != "" {
 		w.Header().Set("Content-Type", afResp.ContentType)
 	}
@@ -1132,6 +1148,82 @@ func (s *Server) forwardAgentCall(w http.ResponseWriter, r *http.Request, afPref
 
 	s.logGatewayRequest(r, endpoint, afResp.StatusCode, len(body), len(afResp.Body),
 		afResp.ExecutionID, start)
+}
+
+// handleNotFound is the mux catch-all: any path with no registered route
+// gets the canonical JSON error envelope rather than Go's default
+// plain-text 404.
+func (s *Server) handleNotFound(w http.ResponseWriter, r *http.Request) {
+	writeError(w, http.StatusNotFound, "NOT_FOUND",
+		"no route for "+r.Method+" "+r.URL.Path, nil)
+}
+
+// writeAgentUpstreamError renders a non-2xx agent response as the
+// canonical error envelope. If the agent already returned a canonical
+// envelope ({error:{code,...}}), it is forwarded unchanged so we never
+// double-wrap; otherwise the upstream payload is preserved under
+// details.upstream and the status is mapped to a stable code.
+func (s *Server) writeAgentUpstreamError(w http.ResponseWriter, afResp agentfield.ExecuteResponse) {
+	if hasCanonicalErrorEnvelope(afResp.Body) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(afResp.StatusCode)
+		_, _ = w.Write(afResp.Body)
+		return
+	}
+	code, message := agentUpstreamErrorCode(afResp.StatusCode)
+	writeError(w, afResp.StatusCode, code, message, upstreamErrorDetails(afResp.Body))
+}
+
+// agentUpstreamErrorCode maps an upstream HTTP status to a stable,
+// machine-readable code for the error envelope.
+func agentUpstreamErrorCode(status int) (code, message string) {
+	switch {
+	case status == http.StatusNotFound:
+		return "AGENT_NOT_FOUND", "agent or reasoner not found"
+	case status == http.StatusTooManyRequests:
+		return "AGENT_RATE_LIMITED", "agent rate limited the call"
+	case status >= 500:
+		return "AGENT_ERROR", "agent execution failed"
+	default:
+		return "AGENT_CALL_REJECTED", "agent rejected the call"
+	}
+}
+
+// hasCanonicalErrorEnvelope reports whether body is already an AF Stack
+// error envelope ({"error":{"code":"...", ...}}), so we can forward it
+// unchanged rather than nesting it.
+func hasCanonicalErrorEnvelope(body []byte) bool {
+	if len(body) == 0 {
+		return false
+	}
+	var probe struct {
+		Error *struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &probe); err != nil {
+		return false
+	}
+	return probe.Error != nil && probe.Error.Code != ""
+}
+
+// upstreamErrorDetails preserves the agent's original error payload under
+// a details object: parsed JSON when the body is JSON, otherwise a
+// bounded raw string. Returns nil for an empty body (details omitted).
+func upstreamErrorDetails(body []byte) any {
+	if len(body) == 0 {
+		return nil
+	}
+	var parsed any
+	if err := json.Unmarshal(body, &parsed); err == nil {
+		return map[string]any{"upstream": parsed}
+	}
+	const maxRaw = 2048
+	s := string(body)
+	if len(s) > maxRaw {
+		s = s[:maxRaw]
+	}
+	return map[string]any{"upstream_body": s}
 }
 
 // logGatewayRequest writes a row into suite_gateway_requests so the
