@@ -176,7 +176,11 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
-		templateSummary = summariseTemplateScaffold(tmpl, created, skipped)
+		wired, err := wireCodingAgentCompose(root)
+		if err != nil {
+			return err
+		}
+		templateSummary = summariseCodingAgentScaffold(created, skipped, wired)
 	}
 
 	fmt.Fprintf(stdout, "Initialized AF Stack fork for %s (template: %s)\n", projectName, tmpl)

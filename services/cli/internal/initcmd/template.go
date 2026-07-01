@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -221,20 +222,86 @@ func codingAgentReadme(nodeID string) string {
 		nodeID)
 }
 
-// summariseTemplateScaffold renders the post-scaffold CLI lines for a
-// template run. Returns "" for templates that scaffold nothing.
-func summariseTemplateScaffold(template string, created []string, skippedExisting bool) string {
-	if template != TemplateCodingAgent {
-		return ""
+// codingAgentComposeService is the compose service block for the coding
+// agent, mirroring the shape of the other default-stack agents
+// (supportdesk-agent). It carries NO `profiles:` key, so `af-stack dev`
+// (plain `docker compose up`) brings it up — the "agent reachable, no
+// hand-wiring" half of the H1 contract. Indented two spaces to sit as a
+// sibling under the top-level `services:` map.
+const codingAgentComposeService = `  coding-agent:
+    build:
+      context: apps/backend/agents/coding-agent
+      dockerfile: Dockerfile
+    environment:
+      AGENTFIELD_SERVER: http://agentfield:8080
+      NODE_ID: coding-agent
+      AGENT_CALLBACK_URL: http://coding-agent:8090
+      GH_TOKEN: ${GH_TOKEN:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+    depends_on:
+      agentfield:
+        condition: service_started
+    restart: unless-stopped
+`
+
+var (
+	// codingAgentServiceRE detects an already-present coding-agent
+	// service (idempotency guard). Two-space indent = a service key.
+	codingAgentServiceRE = regexp.MustCompile(`(?m)^  coding-agent:[ \t]*$`)
+	// servicesKeyRE matches the top-level services: line including its
+	// trailing newline, so the insertion point is the first service line.
+	servicesKeyRE = regexp.MustCompile(`(?m)^services:[ \t]*\r?\n`)
+)
+
+// wireCodingAgentCompose injects the coding-agent service into
+// docker-compose.yml at root, immediately after the top-level services:
+// key. Idempotent: returns (false, nil) when a coding-agent service is
+// already present or there is no compose file. Returns (true, nil) when
+// it writes the service. Textual insertion (not a yaml round-trip) keeps
+// the operator's comments, anchors, and formatting intact.
+func wireCodingAgentCompose(root string) (wired bool, err error) {
+	path := filepath.Join(root, "docker-compose.yml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("init: read docker-compose.yml: %w", err)
 	}
+	content := string(raw)
+	if codingAgentServiceRE.MatchString(content) {
+		return false, nil // already wired
+	}
+	loc := servicesKeyRE.FindStringIndex(content)
+	if loc == nil {
+		return false, fmt.Errorf("init: docker-compose.yml has no top-level services: key to wire coding-agent into")
+	}
+	insertAt := loc[1]
+	updated := content[:insertAt] + codingAgentComposeService + content[insertAt:]
+	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+		return false, fmt.Errorf("init: update docker-compose.yml: %w", err)
+	}
+	return true, nil
+}
+
+// summariseCodingAgentScaffold renders the post-scaffold CLI lines for
+// the coding-agent template run.
+func summariseCodingAgentScaffold(created []string, skippedExisting, wired bool) string {
 	var b strings.Builder
 	if len(created) == 0 && skippedExisting {
 		b.WriteString(fmt.Sprintf("- coding-agent already present at %s (left unchanged)\n", filepath.ToSlash(codingAgentDir)))
-		return b.String()
+	} else {
+		b.WriteString(fmt.Sprintf("- scaffolded coding agent at %s (node_id %q)\n", filepath.ToSlash(codingAgentDir), codingAgentNodeID))
+		if skippedExisting {
+			b.WriteString("  (some files already existed and were left unchanged)\n")
+		}
 	}
-	b.WriteString(fmt.Sprintf("- scaffolded coding agent at %s (node_id %q)\n", filepath.ToSlash(codingAgentDir), codingAgentNodeID))
-	if skippedExisting {
-		b.WriteString("  (some files already existed and were left unchanged)\n")
+	if wired {
+		b.WriteString("- wired coding-agent into docker-compose.yml (default stack)\n")
+	} else {
+		b.WriteString("- coding-agent already present in docker-compose.yml (left unchanged)\n")
 	}
 	b.WriteString("- next: store a GitHub token in the GH_TOKEN secret slot, then `af-stack dev`\n")
 	return b.String()

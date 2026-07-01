@@ -88,6 +88,57 @@ func TestInitCodingAgentTemplateScaffolds(t *testing.T) {
 	}
 }
 
+// T6 (H1.3): the coding-agent template injects a default-stack
+// coding-agent service into docker-compose.yml, preserving existing
+// services and carrying no `profiles:` key (so `af-stack dev` runs it).
+func TestInitCodingAgentWiresCompose(t *testing.T) {
+	root := minimalRepo(t)
+	out := runInit(t, root, "--name", "AcmeCoder", "--template", "coding-agent")
+
+	compose := read(t, root, "docker-compose.yml")
+	if !strings.Contains(compose, "coding-agent:") {
+		t.Fatalf("compose not wired:\n%s", compose)
+	}
+	if !strings.Contains(compose, "context: apps/backend/agents/coding-agent") {
+		t.Fatalf("compose missing build context:\n%s", compose)
+	}
+	if !strings.Contains(compose, "NODE_ID: coding-agent") {
+		t.Fatalf("compose missing NODE_ID:\n%s", compose)
+	}
+	if !strings.Contains(compose, "GH_TOKEN: ${GH_TOKEN:-}") {
+		t.Fatalf("compose missing GH_TOKEN passthrough:\n%s", compose)
+	}
+	// The coding-agent block must NOT sit behind a profile, or `af-stack
+	// dev` would skip it (the "no hand-wiring" contract).
+	if strings.Contains(compose, "profiles:") {
+		t.Fatalf("coding-agent must be in the default stack (no profiles):\n%s", compose)
+	}
+	// Pre-existing services survive the injection.
+	if !strings.Contains(compose, "sample-agent:") {
+		t.Fatalf("injection dropped an existing service:\n%s", compose)
+	}
+	if !strings.Contains(out, "wired coding-agent into docker-compose.yml") {
+		t.Fatalf("expected compose-wire note in output:\n%s", out)
+	}
+}
+
+// T7 (H1.3): wiring is idempotent — a second run does not add a second
+// coding-agent service block.
+func TestInitCodingAgentComposeIdempotent(t *testing.T) {
+	root := minimalRepo(t)
+	_ = runInit(t, root, "--name", "AcmeCoder", "--template", "coding-agent")
+	out := runInit(t, root, "--name", "AcmeCoder", "--template", "coding-agent")
+	compose := read(t, root, "docker-compose.yml")
+	// Count a block-unique marker, not "coding-agent:" (which also appears
+	// in the AGENT_CALLBACK_URL value).
+	if n := strings.Count(compose, "context: apps/backend/agents/coding-agent"); n != 1 {
+		t.Fatalf("expected exactly one coding-agent service, got %d:\n%s", n, compose)
+	}
+	if !strings.Contains(out, "already present in docker-compose.yml") {
+		t.Fatalf("expected idempotency note on re-run:\n%s", out)
+	}
+}
+
 // T4: an unknown template fails fast with a clear, enumerated error.
 func TestInitRejectsUnknownTemplate(t *testing.T) {
 	root := minimalRepo(t)
