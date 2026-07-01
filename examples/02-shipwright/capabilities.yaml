@@ -22,4 +22,4 @@ deploy:
   railway: not_packaged
 notes:
   - This is intentionally not the default product path.
-  - The included agent can run as a stub; real coding-agent runs need provider, harness, and repo credentials.
+  - The included agent opens a real PR via GH_TOKEN. With a coding-harness binary + provider key it runs the harness; otherwise it falls back to an honest file edit (never a fabricated diff).
