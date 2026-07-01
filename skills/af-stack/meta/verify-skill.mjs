@@ -263,6 +263,138 @@ if (failures === 0) {
   ok(`Python snippets parse cleanly`)
 }
 
+// ─── 5. Truth gates (G3) ────────────────────────────────────────────────
+//
+// Three release-truth checks. They are STUBBED (warn-only) by default so the
+// harness lands without blocking on known, tracked drift; set
+// ENFORCE_TRUTH_GATES=1 to flip them to hard failures (the later phases do).
+//
+//   a. OpenAPI ↔ runtime route parity  (published spec matches served routes)
+//   b. TS ≡ Py SDK namespace parity     (the two SDKs expose the same surface)
+//   c. No stub markers in shipped agents (examples/*/agents are real, not fakes)
+
+const ENFORCE_TRUTH_GATES = process.env.ENFORCE_TRUTH_GATES === "1"
+
+function truthGate(name, problems) {
+  if (problems.length === 0) {
+    ok(`truth-gate ${name}: clean`)
+    return
+  }
+  if (ENFORCE_TRUTH_GATES) {
+    fail(`truth-gate ${name}: ${problems.length} issue(s)`)
+  } else {
+    warn(`truth-gate ${name} [stubbed]: ${problems.length} issue(s) — set ENFORCE_TRUTH_GATES=1 to enforce`)
+  }
+  for (const p of problems.slice(0, 8)) console.log(`      - ${p}`)
+  if (problems.length > 8) console.log(`      … and ${problems.length - 8} more`)
+}
+
+console.log(`\n${YELLOW}Truth gates (G3)${ENFORCE_TRUTH_GATES ? " [ENFORCED]" : " [stubbed]"}...${RESET}`)
+
+// ── a. OpenAPI ↔ runtime route parity ──
+const normRoute = (s) => s.replace(/{[^}]+}/g, "{}").replace(/\/$/, "")
+const SERVER_DIR = join(REPO_ROOT, "services/runtime/internal/server")
+const servedRoutes = new Set()
+if (existsSync(SERVER_DIR)) {
+  for (const f of readdirSync(SERVER_DIR)) {
+    if (!f.endsWith(".go") || f.endsWith("_test.go")) continue
+    const c = readFileSync(join(SERVER_DIR, f), "utf8")
+    for (const m of c.matchAll(/HandleFunc\("(GET|POST|PUT|DELETE|PATCH)\s+(\/api\/v1\/[^"]+)"/g)) {
+      servedRoutes.add(`${m[1]} ${normRoute(m[2])}`)
+    }
+  }
+}
+const OPENAPI_JSON = join(REPO_ROOT, "docs-site/public/openapi.json")
+const documentedRoutes = new Set()
+if (existsSync(OPENAPI_JSON)) {
+  try {
+    const spec = JSON.parse(readFileSync(OPENAPI_JSON, "utf8"))
+    for (const [p, ops] of Object.entries(spec.paths || {})) {
+      if (!p.startsWith("/api/v1")) continue
+      for (const method of Object.keys(ops)) {
+        documentedRoutes.add(`${method.toUpperCase()} ${normRoute(p)}`)
+      }
+    }
+  } catch (e) {
+    warn(`could not parse ${OPENAPI_JSON}: ${e.message}`)
+  }
+}
+const routeProblems = []
+if (servedRoutes.size && documentedRoutes.size) {
+  for (const r of servedRoutes) {
+    if (!documentedRoutes.has(r)) routeProblems.push(`served but undocumented: ${r}`)
+  }
+  for (const r of documentedRoutes) {
+    if (!servedRoutes.has(r)) routeProblems.push(`documented but not served: ${r}`)
+  }
+  truthGate("openapi-parity", routeProblems)
+} else {
+  warn(`truth-gate openapi-parity: could not load routes (served=${servedRoutes.size}, documented=${documentedRoutes.size})`)
+}
+
+// ── b. TS ≡ Py SDK namespace parity ──
+function sdkNamespaces(dir, ext) {
+  const out = new Set()
+  if (!existsSync(dir)) return out
+  for (const f of readdirSync(dir)) {
+    const full = join(dir, f)
+    if (statSync(full).isDirectory()) {
+      if (!f.startsWith("_") && f !== "__pycache__") out.add(f)
+      continue
+    }
+    if (!f.endsWith(ext)) continue
+    const base = f.slice(0, -ext.length)
+    if (base.startsWith("_") || base === "index" || base === "__init__") continue
+    out.add(base)
+  }
+  return out
+}
+const pyNs = sdkNamespaces(SDK_PY_PATH, ".py")
+const tsNs = sdkNamespaces(SDK_TS_PATH, ".ts")
+const sdkProblems = []
+for (const n of pyNs) if (!tsNs.has(n)) sdkProblems.push(`py-only namespace: ${n}`)
+for (const n of tsNs) if (!pyNs.has(n)) sdkProblems.push(`ts-only namespace: ${n}`)
+truthGate("sdk-parity", sdkProblems)
+
+// ── c. No stub markers in shipped example agents ──
+// Unambiguous "this agent is not doing real work" signals. Deliberately does
+// NOT match the words "fabricate"/"hardcoded diff", which show up in honest
+// disclaimers ("never fabricates a diff") far more than in actual stubs.
+const STUB_MARKERS = [
+  /raise\s+NotImplementedError/,
+  /TODO:?\s*implement/i,
+  /\bFIXME\b/,
+  /#\s*stub\b/i,
+  /simulate[ds]?\s+(a\s+)?(run|step|diff|build)/i,
+]
+function walkAgentPy(dir) {
+  const out = []
+  if (!existsSync(dir)) return out
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry)
+    if (statSync(full).isDirectory()) {
+      if (["mocks", "tests", "__pycache__", "node_modules"].includes(entry)) continue
+      out.push(...walkAgentPy(full))
+    } else if (entry.endsWith(".py") && !entry.endsWith("_test.py") && !entry.startsWith("test_")) {
+      // Only files that live under an agents/ directory count as "shipped agents".
+      if (full.includes(`${"agents"}/`) || full.includes("/agents/")) out.push(full)
+    }
+  }
+  return out
+}
+const EXAMPLES_DIR = join(REPO_ROOT, "examples")
+const agentProblems = []
+for (const f of walkAgentPy(EXAMPLES_DIR)) {
+  const content = readFileSync(f, "utf8")
+  for (const re of STUB_MARKERS) {
+    if (re.test(content)) {
+      agentProblems.push(`${f.replace(REPO_ROOT + "/", "")} matches ${re}`)
+      break
+    }
+  }
+}
+truthGate("no-stub-agents", agentProblems)
+
 // ─── Summary ────────────────────────────────────────────────────────────
 
 console.log(`\n${"=".repeat(60)}`)
