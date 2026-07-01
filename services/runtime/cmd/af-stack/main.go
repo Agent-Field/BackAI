@@ -74,6 +74,7 @@ import (
 	e2bsandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/e2b"
 	firecrackersandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/firecracker"
 	gvisorsandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/gvisor"
+	remotesandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/remote"
 	"github.com/Agent-Field/backai/services/runtime/internal/search"
 	"github.com/Agent-Field/backai/services/runtime/internal/secrets"
 	"github.com/Agent-Field/backai/services/runtime/internal/server"
@@ -242,7 +243,7 @@ func buildAdapterRegistry(
 		Kind:             sandboxKind,
 		Name:             sandboxName,
 		Capabilities:     caps(sandboxCaps),
-		AvailableBuiltin: []string{"docker", "gvisor", "firecracker", "e2b"},
+		AvailableBuiltin: []string{"docker", "gvisor", "firecracker", "e2b", "remote"},
 		SwapMethod:       "env_var",
 		SwapEnv:          "AF_STACK_SANDBOX_ADAPTER",
 		Probe:            staticStatus(sandboxStatus),
@@ -1576,6 +1577,19 @@ func main() {
 		metricsStore,
 		errorsStore,
 	)
+
+	// A3: fail fast if any AF_STACK_*_ADAPTER names an adapter we don't
+	// implement — otherwise the operator's intended swap is silently ignored.
+	if selErrs := adapterRegistry.ValidateSelections(os.Getenv); len(selErrs) > 0 {
+		for _, e := range selErrs {
+			log.Error("invalid adapter selection", "slot", e.SlotID, "env", e.Env,
+				"value", e.Value, "valid", strings.Join(e.Available, ", "))
+		}
+		log.Error("refusing to start: one or more AF_STACK_*_ADAPTER values name unimplemented adapters",
+			"fix", "set each to a listed value or unset it to use the default")
+		os.Exit(1)
+	}
+
 	probeReg.WithAdapterRegistry(adapterRegistry)
 
 	srv := server.New(cfg, log, server.Deps{
@@ -1801,8 +1815,20 @@ func newSandbox(cfg config.SandboxConfig, store storage.Storage, log *slog.Logge
 			APIKey:  cfg.E2BAPIKey,
 			BaseURL: cfg.E2BBaseURL,
 		})
+	case "remote":
+		// Out-of-process sidecar over the remote adapter protocol. remote.New
+		// synchronously probes GET /v1/capabilities so a misconfigured URL
+		// fails here (the caller logs it and degrades to no sandbox) rather
+		// than on the first user request.
+		if strings.TrimSpace(cfg.RemoteURL) == "" {
+			return nil, fmt.Errorf("sandbox: adapter=remote needs AF_STACK_SANDBOX_ADAPTER_URL")
+		}
+		return remotesandbox.New(context.Background(), remotesandbox.Config{
+			BaseURL: cfg.RemoteURL,
+			Token:   cfg.RemoteToken,
+		})
 	default:
-		return nil, fmt.Errorf("sandbox: unknown adapter %q (want docker|gvisor|firecracker|e2b)", cfg.Adapter)
+		return nil, fmt.Errorf("sandbox: unknown adapter %q (want docker|gvisor|firecracker|e2b|remote)", cfg.Adapter)
 	}
 }
 

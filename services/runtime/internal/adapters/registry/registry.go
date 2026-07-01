@@ -23,7 +23,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -313,4 +315,51 @@ func (r *Registry) InvalidateStatus(id string) {
 	r.mu.Lock()
 	delete(r.status, id)
 	r.mu.Unlock()
+}
+
+// SelectionError reports an AF_STACK_*_ADAPTER env value that names an adapter
+// the slot does not implement — so the operator's intended swap would be
+// silently ignored (falling back to a default) rather than honoured.
+type SelectionError struct {
+	SlotID    string
+	Env       string
+	Value     string
+	Available []string
+}
+
+func (e SelectionError) Error() string {
+	return fmt.Sprintf("adapter slot %q: %s=%q is not an implemented adapter (valid: %s)",
+		e.SlotID, e.Env, e.Value, strings.Join(e.Available, ", "))
+}
+
+// ValidateSelections checks every env-var-swappable slot: if its SwapEnv is set
+// to a non-empty value that is not one of the slot's AvailableBuiltin adapters,
+// that is a misconfiguration the runtime should fail fast on rather than
+// silently defaulting. `getenv` is injected so this is testable without real
+// process env. An empty/unset SwapEnv means "use the default" and is fine.
+//
+// Slots with no AvailableBuiltin (remote-only / non-env-swap) are skipped —
+// their value space isn't a closed set we can validate here.
+func (r *Registry) ValidateSelections(getenv func(string) string) []SelectionError {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var errs []SelectionError
+	for _, s := range r.slots {
+		if s.SwapMethod != "env_var" || s.SwapEnv == "" || len(s.AvailableBuiltin) == 0 {
+			continue
+		}
+		v := strings.TrimSpace(getenv(s.SwapEnv))
+		if v == "" {
+			continue
+		}
+		if !slices.Contains(s.AvailableBuiltin, v) {
+			errs = append(errs, SelectionError{
+				SlotID:    s.ID,
+				Env:       s.SwapEnv,
+				Value:     v,
+				Available: s.AvailableBuiltin,
+			})
+		}
+	}
+	return errs
 }
