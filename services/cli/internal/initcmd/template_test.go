@@ -69,7 +69,7 @@ func TestInitCodingAgentTemplateScaffolds(t *testing.T) {
 	main := read(t, root, "apps/backend/agents/coding-agent/main.py")
 	for _, want := range []string{
 		`node_id=os.getenv("NODE_ID", "coding-agent")`, // canonical node_id
-		`os.getenv("GH_TOKEN"`,                          // credential from the secret slot
+		`os.getenv("GH_TOKEN"`,                         // credential from the secret slot
 		"async def run(",                               // the reachable reasoner
 		"NotImplementedError",                          // honest seam, not a fake artifact
 	} {

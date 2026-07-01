@@ -70,6 +70,8 @@ func scaffoldCodingAgent(root string) (created []string, skippedExisting bool, e
 			skippedExisting = true
 			continue
 		}
+		// #nosec G306 -- scaffolded project source files (main.py, Dockerfile,
+		// README) are meant to be world-readable like any checked-in source.
 		if err := os.WriteFile(dest, []byte(files[name]), 0o644); err != nil {
 			return nil, skippedExisting, fmt.Errorf("init: write %s: %w", rel, err)
 		}
@@ -280,6 +282,7 @@ func wireCodingAgentCompose(root string) (wired bool, err error) {
 	}
 	insertAt := loc[1]
 	updated := content[:insertAt] + codingAgentComposeService + content[insertAt:]
+	// #nosec G306 -- docker-compose.yml is world-readable project source.
 	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
 		return false, fmt.Errorf("init: update docker-compose.yml: %w", err)
 	}
@@ -338,6 +341,8 @@ func ensureHeroEnv(root string) (string, error) {
 	if !mtEnvKeyRE.MatchString(content) {
 		content += heroEnvBlock
 	}
+	// #nosec G306 -- .env is world-readable project scaffolding (no real
+	// secrets; the hero placeholders are filled in by the user afterwards).
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return "", fmt.Errorf("init: write .env: %w", err)
 	}

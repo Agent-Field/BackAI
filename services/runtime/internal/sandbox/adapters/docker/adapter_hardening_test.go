@@ -31,8 +31,8 @@ func TestBuildHostConfigHardening(t *testing.T) {
 	if !found {
 		t.Fatalf("SecurityOpt = %v, want it to contain no-new-privileges", hc.SecurityOpt)
 	}
-	if hc.Resources.PidsLimit == nil || *hc.Resources.PidsLimit != defaultSandboxPidsLimit {
-		t.Fatalf("PidsLimit = %v, want %d", hc.Resources.PidsLimit, defaultSandboxPidsLimit)
+	if hc.PidsLimit == nil || *hc.PidsLimit != defaultSandboxPidsLimit {
+		t.Fatalf("PidsLimit = %v, want %d", hc.PidsLimit, defaultSandboxPidsLimit)
 	}
 }
 

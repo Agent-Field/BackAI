@@ -58,7 +58,7 @@ func (s Status) IsTerminal() bool {
 //
 //   - "open"       — full egress (the default)
 //   - "restricted" — per-host egress allowlist. NOT YET IMPLEMENTED: Validate
-//                    rejects it rather than silently granting full egress.
+//     rejects it rather than silently granting full egress.
 //   - "isolated"   — no network at all
 type NetworkMode string
 
@@ -91,10 +91,10 @@ type RunSpec struct {
 	TenantID    string
 	WorkspaceID string
 
-	Image       string            // e.g. "python:3.12-slim"
-	Command     []string          // argv
-	Files       map[string]string // path -> contents, written before exec
-	Env         map[string]string
+	Image   string            // e.g. "python:3.12-slim"
+	Command []string          // argv
+	Files   map[string]string // path -> contents, written before exec
+	Env     map[string]string
 
 	TimeoutS    int
 	CPU         int

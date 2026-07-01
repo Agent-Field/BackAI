@@ -174,7 +174,7 @@ func TestStoragePrefixHelpers(t *testing.T) {
 	// sanitizeTenantSegment strips anything that could break out of the
 	// namespace.
 	for in, want := range map[string]string{
-		"7c9e-uuid-1234":  "7c9e-uuid-1234",
+		"7c9e-uuid-1234":   "7c9e-uuid-1234",
 		"../../etc/passwd": "etcpasswd",
 		"a/b/c":            "abc",
 		"t.\x00e/n":        "ten",

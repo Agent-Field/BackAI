@@ -2199,18 +2199,18 @@ func assertTenantSafeRole(ctx context.Context, cfg config.Config, database *db.D
 	switch rlsBootDecision(rs.CanBypassRLS(), mtOn, override) {
 	case rlsOK:
 		log.Info("tenant isolation: serving DB role is RLS-safe", "role", rs.Name)
-		return
 	case rlsFatal:
 		log.Error("refusing to start: the serving DB role can bypass row-level security, so multi-tenant isolation is unenforceable",
 			"role", rs.Name, "superuser", rs.IsSuperuser, "bypassrls", rs.BypassRLS,
 			"fix", "point AF_STACK_DATABASE_URL at a NOSUPERUSER NOBYPASSRLS role and run migrations via AF_STACK_MIGRATE_DATABASE_URL, or set AF_STACK_ALLOW_INSECURE_DB=true to override")
 		database.Close()
 		os.Exit(1)
+	case rlsWarn:
+		log.Warn("serving DB role can bypass row-level security; per-tenant isolation is NOT enforced",
+			"role", rs.Name, "superuser", rs.IsSuperuser, "bypassrls", rs.BypassRLS,
+			"multi_tenancy_enabled", mtOn, "override", override,
+			"recommendation", "use a NOSUPERUSER NOBYPASSRLS serving role before enabling multi-tenancy")
 	}
-	log.Warn("serving DB role can bypass row-level security; per-tenant isolation is NOT enforced",
-		"role", rs.Name, "superuser", rs.IsSuperuser, "bypassrls", rs.BypassRLS,
-		"multi_tenancy_enabled", mtOn, "override", override,
-		"recommendation", "use a NOSUPERUSER NOBYPASSRLS serving role before enabling multi-tenancy")
 }
 
 // tenancySecretSink adapts *secrets.Vault to the tenancy.SecretSink
