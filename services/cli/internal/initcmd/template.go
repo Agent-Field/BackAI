@@ -286,9 +286,67 @@ func wireCodingAgentCompose(root string) (wired bool, err error) {
 	return true, nil
 }
 
+// mtEnvKeyRE matches an existing (active or commented-out is ignored —
+// this requires a real assignment) multi-tenancy flag in a .env file.
+var mtEnvKeyRE = regexp.MustCompile(`(?m)^\s*AF_STACK_MODULE_MULTI_TENANCY\s*=`)
+
+// heroEnvBlock turns multi-tenancy on for the scaffolded app so
+// per-tenant API-key minting and isolation work on the first
+// `af-stack dev` (H1's "multi-tenancy ON"). The GH_TOKEN secret slot is
+// already carried through docker-compose.yml + documented in
+// .env.example, so it isn't duplicated here.
+const heroEnvBlock = "\n# Hero flow (coding-agent template): multi-tenancy on so per-tenant\n" +
+	"# API-key minting + isolation work out of the box. Set false for single-tenant.\n" +
+	"AF_STACK_MODULE_MULTI_TENANCY=true\n"
+
+// ensureHeroEnv makes the scaffolded fork's .env enable multi-tenancy,
+// without ever overriding an explicit operator setting. Returns the
+// action taken: "created" (no .env existed — seeded from .env.example
+// when present), "appended" (an .env existed but had no MT flag),
+// or "present" (an MT flag already existed and was left untouched).
+func ensureHeroEnv(root string) (string, error) {
+	path := filepath.Join(root, ".env")
+	if exists(path) {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return "", fmt.Errorf("init: read .env: %w", err)
+		}
+		if mtEnvKeyRE.Match(raw) {
+			return "present", nil // respect the operator's explicit choice
+		}
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			return "", fmt.Errorf("init: open .env: %w", err)
+		}
+		defer f.Close()
+		if _, err := f.WriteString(heroEnvBlock); err != nil {
+			return "", fmt.Errorf("init: append .env: %w", err)
+		}
+		return "appended", nil
+	}
+	// No .env yet — seed from .env.example (which carries the full var set
+	// with sane defaults) when present, then ensure the MT flag.
+	var content string
+	examplePath := filepath.Join(root, ".env.example")
+	if exists(examplePath) {
+		b, err := os.ReadFile(examplePath)
+		if err != nil {
+			return "", fmt.Errorf("init: read .env.example: %w", err)
+		}
+		content = string(b)
+	}
+	if !mtEnvKeyRE.MatchString(content) {
+		content += heroEnvBlock
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return "", fmt.Errorf("init: write .env: %w", err)
+	}
+	return "created", nil
+}
+
 // summariseCodingAgentScaffold renders the post-scaffold CLI lines for
 // the coding-agent template run.
-func summariseCodingAgentScaffold(created []string, skippedExisting, wired bool) string {
+func summariseCodingAgentScaffold(created []string, skippedExisting, wired bool, envAction string) string {
 	var b strings.Builder
 	if len(created) == 0 && skippedExisting {
 		b.WriteString(fmt.Sprintf("- coding-agent already present at %s (left unchanged)\n", filepath.ToSlash(codingAgentDir)))
@@ -302,6 +360,14 @@ func summariseCodingAgentScaffold(created []string, skippedExisting, wired bool)
 		b.WriteString("- wired coding-agent into docker-compose.yml (default stack)\n")
 	} else {
 		b.WriteString("- coding-agent already present in docker-compose.yml (left unchanged)\n")
+	}
+	switch envAction {
+	case "created":
+		b.WriteString("- created .env with multi-tenancy on (per-tenant key minting works)\n")
+	case "appended":
+		b.WriteString("- enabled multi-tenancy in .env (per-tenant key minting works)\n")
+	case "present":
+		b.WriteString("- .env already sets AF_STACK_MODULE_MULTI_TENANCY (left unchanged)\n")
 	}
 	b.WriteString("- next: store a GitHub token in the GH_TOKEN secret slot, then `af-stack dev`\n")
 	return b.String()

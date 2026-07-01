@@ -180,7 +180,11 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
-		templateSummary = summariseCodingAgentScaffold(created, skipped, wired)
+		envAction, err := ensureHeroEnv(root)
+		if err != nil {
+			return err
+		}
+		templateSummary = summariseCodingAgentScaffold(created, skipped, wired, envAction)
 	}
 
 	fmt.Fprintf(stdout, "Initialized AF Stack fork for %s (template: %s)\n", projectName, tmpl)

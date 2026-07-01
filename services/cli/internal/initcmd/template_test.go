@@ -139,6 +139,57 @@ func TestInitCodingAgentComposeIdempotent(t *testing.T) {
 	}
 }
 
+// T8 (H1.4): with no .env, the coding-agent template creates one seeded
+// from .env.example with multi-tenancy on.
+func TestInitCodingAgentCreatesEnvWithMT(t *testing.T) {
+	root := minimalRepo(t)
+	write(t, root, ".env.example", "AF_STACK_DATABASE_URL=postgres://x\n# GH_TOKEN=\n")
+	out := runInit(t, root, "--name", "AcmeCoder", "--template", "coding-agent")
+	env := read(t, root, ".env")
+	if !strings.Contains(env, "AF_STACK_MODULE_MULTI_TENANCY=true") {
+		t.Fatalf(".env missing MT flag:\n%s", env)
+	}
+	// Seeded from .env.example (carries the rest of the vars).
+	if !strings.Contains(env, "AF_STACK_DATABASE_URL=postgres://x") {
+		t.Fatalf(".env not seeded from .env.example:\n%s", env)
+	}
+	if !strings.Contains(out, "created .env with multi-tenancy on") {
+		t.Fatalf("expected env-created note:\n%s", out)
+	}
+}
+
+// T9 (H1.4): an existing .env with no MT flag gets it appended.
+func TestInitCodingAgentAppendsMTToEnv(t *testing.T) {
+	root := minimalRepo(t)
+	write(t, root, ".env", "AF_STACK_DATABASE_URL=postgres://x\n")
+	_ = runInit(t, root, "--name", "AcmeCoder", "--template", "coding-agent")
+	env := read(t, root, ".env")
+	if !strings.Contains(env, "AF_STACK_DATABASE_URL=postgres://x") {
+		t.Fatalf("append clobbered existing .env:\n%s", env)
+	}
+	if !strings.Contains(env, "AF_STACK_MODULE_MULTI_TENANCY=true") {
+		t.Fatalf(".env MT flag not appended:\n%s", env)
+	}
+}
+
+// T10 (H1.4): an explicit operator MT setting is never overridden, and
+// re-running is a no-op on .env (idempotent / respectful).
+func TestInitCodingAgentRespectsExplicitMT(t *testing.T) {
+	root := minimalRepo(t)
+	write(t, root, ".env", "AF_STACK_MODULE_MULTI_TENANCY=false\n")
+	out := runInit(t, root, "--name", "AcmeCoder", "--template", "coding-agent")
+	env := read(t, root, ".env")
+	if strings.Contains(env, "MULTI_TENANCY=true") {
+		t.Fatalf("scaffold overrode explicit operator MT setting:\n%s", env)
+	}
+	if strings.Count(env, "AF_STACK_MODULE_MULTI_TENANCY") != 1 {
+		t.Fatalf("expected the single existing MT line untouched:\n%s", env)
+	}
+	if !strings.Contains(out, "left unchanged") {
+		t.Fatalf("expected 'left unchanged' note:\n%s", out)
+	}
+}
+
 // T4: an unknown template fails fast with a clear, enumerated error.
 func TestInitRejectsUnknownTemplate(t *testing.T) {
 	root := minimalRepo(t)
