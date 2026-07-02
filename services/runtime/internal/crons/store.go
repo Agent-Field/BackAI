@@ -23,6 +23,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 )
 
 // Store is the suite_crons accessor.
@@ -131,6 +133,10 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (*Cron, error) {
 	if !s.HasPool() {
 		return nil, ErrNotConfigured
 	}
+	// Bind the row's tenant so PrepareConn sets app.tenant_id to match the
+	// tenant_id we insert; the force-RLS WITH CHECK then passes. Empty
+	// in.TenantID (shared cron) is a no-op — the NULL row passes regardless.
+	ctx = tenantctx.WithTenant(ctx, strings.TrimSpace(in.TenantID), "")
 	in.Name = strings.TrimSpace(in.Name)
 	in.JobName = strings.TrimSpace(in.JobName)
 	in.Schedule = strings.TrimSpace(in.Schedule)

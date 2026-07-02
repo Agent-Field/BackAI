@@ -22,6 +22,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 	"github.com/Agent-Field/backai/services/runtime/internal/toolstats"
 )
 
@@ -117,6 +118,7 @@ func (r *Registry) ListStatus(ctx context.Context, tenantID string) ([]TenantToo
 	if r == nil {
 		return nil, ErrNotConfigured
 	}
+	ctx = tenantctx.WithTenant(ctx, tenantID, "")
 	all := r.All()
 	enables, configs, updates := map[ToolName]bool{}, map[ToolName]map[string]any{}, map[ToolName]string{}
 	if r.pool != nil && tenantID != "" {
@@ -185,6 +187,7 @@ func (r *Registry) SetEnabled(ctx context.Context, tenantID string, name ToolNam
 	if tenantID == "" {
 		return TenantToolStatus{}, ErrTenantRequired
 	}
+	ctx = tenantctx.WithTenant(ctx, tenantID, "")
 	if !IsValidToolName(string(name)) {
 		return TenantToolStatus{}, ErrToolNotFound
 	}
@@ -236,6 +239,7 @@ func (r *Registry) IsEnabled(ctx context.Context, tenantID string, name ToolName
 	if r == nil || r.pool == nil || tenantID == "" {
 		return false, nil
 	}
+	ctx = tenantctx.WithTenant(ctx, tenantID, "")
 	var enabled bool
 	err := r.pool.QueryRow(ctx, `
 		select enabled from suite_tenant_tools

@@ -222,6 +222,11 @@ func (s *Server) recordSecretReveal(r *http.Request, tenantID, key string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
+		// Bind the write connection to the row's tenant so the audit-log RLS
+		// WITH CHECK passes (the pool's PrepareConn hook reads ctx). Secrets
+		// are single-tenant today (default tenant), but bind explicitly so
+		// this keeps working once per-tenant secrets land.
+		ctx = tenantctx.WithTenant(ctx, tenantID, apiKeyID)
 		metadata := map[string]any{
 			"path":   r.URL.Path,
 			"method": r.Method,

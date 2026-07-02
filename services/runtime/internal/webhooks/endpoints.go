@@ -18,6 +18,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 )
 
 // EndpointStore reads + writes suite_webhook_endpoints rows.
@@ -60,6 +62,9 @@ func (s *EndpointStore) Create(ctx context.Context, in CreateEndpointInput) (*En
 	if err := validateCreateInput(&in); err != nil {
 		return nil, err
 	}
+	// Bind the explicit tenant so the force-RLS insert's WITH CHECK passes
+	// (app.tenant_id must equal the row's tenant_id; "" allows NULL-tenant).
+	ctx = tenantctx.WithTenant(ctx, in.TenantID, "")
 
 	var tenantPtr *string
 	if in.TenantID != "" {
@@ -185,18 +190,39 @@ func (s *EndpointStore) GetBySlug(ctx context.Context, slug string) (*Endpoint, 
 	if !s.HasPool() {
 		return nil, ErrNotConfigured
 	}
-	rows, err := s.pool.Query(ctx, endpointSelectColumns+` from suite_webhook_endpoints where slug = $1`, slug)
+	// The inbound router calls this BEFORE any tenant context exists (the
+	// slug is the global routing key we use to discover the tenant). No
+	// single tenant is available, so bypass RLS to read the row regardless
+	// of its tenant_id, inside a tx.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("webhooks: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return nil, fmt.Errorf("webhooks: set bypass: %w", err)
+	}
+	rows, err := tx.Query(ctx, endpointSelectColumns+` from suite_webhook_endpoints where slug = $1`, slug)
 	if err != nil {
 		return nil, fmt.Errorf("webhooks: select endpoint by slug: %w", err)
 	}
-	defer rows.Close()
 	if !rows.Next() {
-		if err := rows.Err(); err != nil {
+		err := rows.Err()
+		rows.Close()
+		if err != nil {
 			return nil, err
 		}
 		return nil, ErrEndpointNotFound
 	}
-	return scanEndpoint(rows)
+	ep, err := scanEndpoint(rows)
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("webhooks: commit: %w", err)
+	}
+	return ep, nil
 }
 
 // Delete removes a single row by id. Returns ErrEndpointNotFound when

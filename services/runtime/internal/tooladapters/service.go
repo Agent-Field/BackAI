@@ -126,6 +126,9 @@ func (s *Service) SetEnabled(ctx context.Context, id AdapterID, in SetEnabledInp
 	if tenantID == "" {
 		return Adapter{}, ErrTenantRequired
 	}
+	// Bind tenant so the RLS force policy (app.tenant_id GUC) permits the
+	// upsert on suite_tool_adapters. "" apiKeyID is safe.
+	ctx = tenantctx.WithTenant(ctx, tenantID, "")
 	def, ok := definitionByID(id, s.cfg)
 	if !ok {
 		return Adapter{}, ErrNotFound
@@ -459,6 +462,9 @@ func (s *Service) recordCall(ctx context.Context, rec CallRecord) {
 	if s.pool == nil || rec.TenantID == "" {
 		return
 	}
+	// Bind tenant so the RLS force policy permits the audit insert on
+	// suite_tool_adapter_calls. "" apiKeyID is safe.
+	ctx = tenantctx.WithTenant(ctx, rec.TenantID, "")
 	if len(rec.Error) > 500 {
 		rec.Error = rec.Error[:500]
 	}

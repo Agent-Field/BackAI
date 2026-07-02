@@ -24,6 +24,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 )
 
 // DeliveryStore wraps a pgxpool for the suite_webhook_deliveries table.
@@ -85,6 +87,14 @@ func (s *DeliveryStore) Insert(ctx context.Context, p InsertParams) (*Delivery, 
 	if !s.HasPool() {
 		return nil, ErrNotConfigured
 	}
+	// Bind the explicit tenant (called from the public inbound path, where
+	// no ambient tenant exists) so the force-RLS insert's WITH CHECK passes.
+	// Deref the optional pointer; "" allows a NULL-tenant row.
+	tid := ""
+	if p.TenantID != nil {
+		tid = *p.TenantID
+	}
+	ctx = tenantctx.WithTenant(ctx, tid, "")
 	if p.Direction == "" {
 		p.Direction = DirectionOutbound
 	}
@@ -327,7 +337,18 @@ func (s *DeliveryStore) UpdateStatus(ctx context.Context, id string, p UpdatePar
             delivered_at    = coalesce($8, delivered_at)
         where id = $1
     `
-	tag, err := s.pool.Exec(ctx, q,
+	// Called from the public inbound path (POST /webhooks/in/{slug}) by row
+	// id, where no ambient tenant is available and the tenant isn't a
+	// parameter. Bypass RLS inside a tx so the terminal status persists.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("webhooks: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return fmt.Errorf("webhooks: set bypass: %w", err)
+	}
+	tag, err := tx.Exec(ctx, q,
 		id,
 		string(p.Status),
 		p.Attempts,
@@ -342,6 +363,9 @@ func (s *DeliveryStore) UpdateStatus(ctx context.Context, id string, p UpdatePar
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("webhooks: commit update status: %w", err)
 	}
 	return nil
 }

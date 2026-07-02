@@ -33,6 +33,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 )
 
 // Recorder writes + reads suite_notifications rows.
@@ -70,6 +72,9 @@ func (r *Recorder) insert(ctx context.Context, in SendInput, status Status, last
 	if !r.HasPool() {
 		return nil, ErrNotConfigured
 	}
+	// Bind the row's tenant so the RLS policy on suite_notifications
+	// passes on the bare pool. Empty is fine (NULL-tenant rows pass).
+	ctx = tenantctx.WithTenant(ctx, in.TenantID, "")
 	dataJSON, err := json.Marshal(in.Data)
 	if err != nil {
 		return nil, fmt.Errorf("notifications: encode data: %w", err)
@@ -145,6 +150,8 @@ func (r *Recorder) ListMutes(ctx context.Context, tenantID string) (*MuteListRes
 	if !r.HasPool() {
 		return &MuteListResult{Mutes: []Mute{}}, nil
 	}
+	// Bind the requested tenant so RLS on suite_notification_mutes passes.
+	ctx = tenantctx.WithTenant(ctx, tenantID, "")
 	args := []any{}
 	where := ""
 	if tenantID != "" {
@@ -179,6 +186,9 @@ func (r *Recorder) CreateMute(ctx context.Context, in CreateMuteInput) (*Mute, e
 	if !r.HasPool() {
 		return nil, ErrNotConfigured
 	}
+	// Bind the mute's tenant (trimmed, to match the value we store) so
+	// the RLS insert policy on suite_notification_mutes passes.
+	ctx = tenantctx.WithTenant(ctx, strings.TrimSpace(in.TenantID), "")
 	if err := in.Pattern.Validate(); err != nil {
 		return nil, err
 	}
@@ -220,12 +230,26 @@ func (r *Recorder) DeleteMute(ctx context.Context, id string) error {
 	if !r.HasPool() {
 		return ErrNotConfigured
 	}
-	tag, err := r.pool.Exec(ctx, `delete from suite_notification_mutes where id = $1`, id)
+	// Delete-by-id has no tenant in scope (operator path). Run under a
+	// bypass-RLS tx so the FORCE-RLS policy on suite_notification_mutes
+	// does not silently drop the row.
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("notifications: delete mute begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return fmt.Errorf("notifications: delete mute bypass: %w", err)
+	}
+	tag, err := tx.Exec(ctx, `delete from suite_notification_mutes where id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("notifications: delete mute: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("notifications: delete mute commit: %w", err)
 	}
 	return nil
 }
@@ -314,6 +338,10 @@ func (r *Recorder) MatchingMute(ctx context.Context, in SendInput) (*Mute, error
 	if !r.HasPool() {
 		return nil, nil
 	}
+	// Bind the send's tenant so RLS on suite_notification_mutes passes.
+	// Empty means an untenanted send, which only matches global (NULL)
+	// mutes — exactly what the query predicate intends.
+	ctx = tenantctx.WithTenant(ctx, in.TenantID, "")
 	category := ""
 	if v, ok := in.Data["category"].(string); ok {
 		category = strings.TrimSpace(v)
@@ -444,7 +472,18 @@ func (r *Recorder) UpdateStatus(
 	case StatusSending:
 		bumpAttempts = true
 	}
-	_, err := r.pool.Exec(ctx, `
+	// Lifecycle updates are keyed by id from the worker, which does not
+	// know the row's tenant. Run under a bypass-RLS tx so the FORCE-RLS
+	// policy on suite_notifications does not silently no-op the update.
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("notifications: update status begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return fmt.Errorf("notifications: update status bypass: %w", err)
+	}
+	_, err = tx.Exec(ctx, `
 		update suite_notifications
 		   set status              = $2,
 		       adapter             = coalesce($3, adapter),
@@ -456,6 +495,9 @@ func (r *Recorder) UpdateStatus(
 	`, id, string(status), adapterPtr, providerPtr, errMsgPtr, bumpAttempts, setSentAt)
 	if err != nil {
 		return fmt.Errorf("notifications: update status: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("notifications: update status commit: %w", err)
 	}
 	return nil
 }
@@ -479,6 +521,12 @@ func (r *Recorder) ClaimQueued(ctx context.Context, adapter string, limit int) (
 		return nil, fmt.Errorf("notifications: claim begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	// The worker drains queued rows across ALL tenants, so there is no
+	// single tenant to bind. Bypass RLS for this cross-tenant sweep.
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return nil, fmt.Errorf("notifications: claim bypass: %w", err)
+	}
 
 	// The CTE locks rows with FOR UPDATE SKIP LOCKED so concurrent
 	// workers race safely. The UPDATE then flips status to 'sending',
@@ -539,7 +587,17 @@ func (r *Recorder) Get(ctx context.Context, id string) (*Notification, error) {
 	if !r.HasPool() {
 		return nil, ErrNotConfigured
 	}
-	rows, err := r.pool.Query(ctx, selectColumns+` from suite_notifications where id = $1`, id)
+	// Get-by-id (operator path) has no tenant in scope. Run under a
+	// bypass-RLS tx so the FORCE-RLS policy does not hide the row.
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("notifications: get begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return nil, fmt.Errorf("notifications: get bypass: %w", err)
+	}
+	rows, err := tx.Query(ctx, selectColumns+` from suite_notifications where id = $1`, id)
 	if err != nil {
 		return nil, fmt.Errorf("notifications: select: %w", err)
 	}
@@ -589,8 +647,30 @@ func (r *Recorder) List(ctx context.Context, f ListFilters) (*ListResult, error)
 		where = " where " + strings.Join(conds, " and ")
 	}
 
+	// When a tenant filter is present, bind it so RLS scopes the read to
+	// that tenant. When it is absent this is a cross-tenant operator
+	// listing with no single tenant to bind, so run under a bypass-RLS tx
+	// (read-only; the defer'd rollback closes it).
+	var q interface {
+		Query(context.Context, string, ...any) (pgx.Rows, error)
+		QueryRow(context.Context, string, ...any) pgx.Row
+	} = r.pool
+	if f.TenantID != "" {
+		ctx = tenantctx.WithTenant(ctx, f.TenantID, "")
+	} else {
+		tx, err := r.pool.Begin(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("notifications: list begin: %w", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+			return nil, fmt.Errorf("notifications: list bypass: %w", err)
+		}
+		q = tx
+	}
+
 	var total int
-	if err := r.pool.QueryRow(ctx,
+	if err := q.QueryRow(ctx,
 		"select count(*) from suite_notifications"+where,
 		args...,
 	).Scan(&total); err != nil {
@@ -598,10 +678,10 @@ func (r *Recorder) List(ctx context.Context, f ListFilters) (*ListResult, error)
 	}
 
 	args = append(args, f.Limit, f.Offset)
-	q := selectColumns + " from suite_notifications" + where +
+	query := selectColumns + " from suite_notifications" + where +
 		fmt.Sprintf(" order by created_at desc limit $%d offset $%d", len(args)-1, len(args))
 
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := q.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("notifications: list: %w", err)
 	}
@@ -635,6 +715,8 @@ func (r *Recorder) Stats(ctx context.Context, tenantID string) (*Stats, error) {
 	if !r.HasPool() {
 		return stats, nil
 	}
+	// Bind the requested tenant so RLS on suite_notifications passes.
+	ctx = tenantctx.WithTenant(ctx, tenantID, "")
 	// Build a parameterised tenant predicate that composes cleanly with
 	// the time-window predicate below. tenantClause is "" or " and
 	// tenant_id = $1", whichever the caller asked for.
