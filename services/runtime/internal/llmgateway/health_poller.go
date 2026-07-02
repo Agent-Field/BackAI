@@ -128,7 +128,10 @@ func (p *ProviderHealthPoller) poll(ctx context.Context) {
 					"status_code":              resp.StatusCode,
 					"models":                   group.models,
 				}
-				p.insertRow(ctx, prov, status, latency, details)
+				// latency is the whole /health sweep, not this provider —
+				// store 0 so the dashboard shows "no latency signal"
+				// instead of the same fabricated P95 on every card.
+				p.insertRow(ctx, prov, status, 0, details)
 			}
 			return
 		}
@@ -256,7 +259,11 @@ func ReadProviderHealth(ctx context.Context, pool *pgxpool.Pool, window time.Dur
 		), ranked as (
 		  select provider,
 		         count(*)::int as observations,
-		         avg(case when status = 'healthy' then 1.0 else 0.0 end) * 100.0 as availability_pct,
+		         -- degraded means "serving, but some model endpoints are bad"
+		         -- (e.g. one stale slug in litellm-config) — it must count as
+		         -- available or a single dead model renders the whole provider
+		         -- as down/0% while it is actively serving traffic.
+		         avg(case when status in ('healthy', 'degraded') then 1.0 else 0.0 end) * 100.0 as availability_pct,
 		         percentile_cont(0.5) within group (order by latency_ms)::int as median_latency_ms,
 		         percentile_cont(0.95) within group (order by latency_ms)::int as p95_latency_ms,
 		         max(observed_at) as last_observed_at

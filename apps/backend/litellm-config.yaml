@@ -41,14 +41,19 @@ model_list:
       model: openrouter/meta-llama/llama-3.3-70b-instruct
       api_key: os.environ/OPENROUTER_API_KEY
 
-  - model_name: google/gemini-flash-1.5
+  # NOTE: slugs verified live on openrouter.ai/api/v1/models — the
+  # previous entries (google/gemini-flash-1.5, anthropic/claude-3.5-sonnet)
+  # were retired upstream and returned "No endpoints found", which
+  # permanently marked the whole openrouter provider degraded on the
+  # Health page.
+  - model_name: google/gemini-2.5-flash
     litellm_params:
-      model: openrouter/google/gemini-flash-1.5
+      model: openrouter/google/gemini-2.5-flash
       api_key: os.environ/OPENROUTER_API_KEY
 
-  - model_name: anthropic/claude-3.5-sonnet
+  - model_name: anthropic/claude-sonnet-4.5
     litellm_params:
-      model: openrouter/anthropic/claude-3.5-sonnet
+      model: openrouter/anthropic/claude-sonnet-4.5
       api_key: os.environ/OPENROUTER_API_KEY
 
   # ───── OpenAI (direct) ─────

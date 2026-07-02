@@ -184,9 +184,22 @@ export function providerSparkline(p: ProviderHealth): number[] {
 export function deriveProviderStatus(p: ProviderHealth): "healthy" | "degraded" | "down" | "unknown" {
   if (p.observations === 0) return "unknown"
   const uptime = p.availability_pct / 100
+  // p95 of 0 means "no latency signal" (provider rows from the LiteLLM
+  // health sweep carry no per-provider latency) — judge on uptime alone.
   const p95 = p.p95_latency_ms
-  if (uptime >= 0.99 && p95 > 0 && p95 <= 1000) return "healthy"
-  if (uptime >= 0.9 || (p95 > 0 && p95 <= 5000)) return "degraded"
+  if (uptime >= 0.99 && (p95 <= 0 || p95 <= 1000)) return "healthy"
+  // The window average lags recovery: after a provider comes back (key
+  // added, bad slug fixed), hours of old failures keep uptime low while
+  // the LATEST probe is green. Currently-serving must never render as
+  // "down" — show it as degraded/recovering until the window catches up.
+  if (
+    uptime >= 0.9 ||
+    (p95 > 0 && p95 <= 5000) ||
+    p.status === "healthy" ||
+    p.status === "degraded"
+  ) {
+    return "degraded"
+  }
   return "down"
 }
 
