@@ -14,11 +14,15 @@ RUN go mod download
 
 COPY . .
 
+# Release version stamped by CI (docker build --build-arg VERSION=...); falls
+# back to a .version file, then "dev" for local builds.
+ARG VERSION=""
+
 # Static build, stripped, no CGO
 ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64
 RUN go build \
     -trimpath \
-    -ldflags="-s -w -X main.version=$(cat .version 2>/dev/null || echo dev)" \
+    -ldflags="-s -w -X main.version=${VERSION:-$(cat .version 2>/dev/null || echo dev)}" \
     -o /out/af-stack \
     ./services/runtime/cmd/af-stack
 

@@ -41,7 +41,10 @@ import (
 	"github.com/Agent-Field/backai/services/cli/internal/project"
 )
 
-const version = "0.0.1"
+// version is overridden at build time via -ldflags "-X main.version=..."
+// (goreleaser stamps the release tag). Keep it a var, not a const, so the
+// linker can inject the real version.
+var version = "0.0.1"
 
 func main() {
 	if err := run(); err != nil {
