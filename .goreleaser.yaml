@@ -1,0 +1,66 @@
+# GoReleaser config for the `af-stack` CLI.
+# Docs: https://goreleaser.com — run locally with:
+#   goreleaser check                     # validate this file
+#   goreleaser release --snapshot --clean  # dry-run, no publish
+# In CI it runs on a version tag and publishes cross-compiled binaries +
+# checksums to the GitHub Release. Homebrew/Scoop taps are intentionally
+# deferred until the agent-field/homebrew-tap repo exists (see
+# docs/cli-distribution.md).
+version: 2
+
+project_name: af-stack
+
+builds:
+  - id: af-stack
+    main: ./services/cli/cmd/af-stack
+    binary: af-stack
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    # Stamp the release version into `main.version` (now a var, not a const).
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: af-stack
+    ids:
+      - af-stack
+    name_template: >-
+      af-stack_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    # tar.gz everywhere except Windows, which gets a zip.
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - "^style:"
+      - "merge conflict"
+
+release:
+  github:
+    owner: Agent-Field
+    name: backai
+  # rc / beta / alpha tags are published as GitHub pre-releases.
+  prerelease: auto
+  draft: false
+  name_template: "{{ .Tag }}"
