@@ -112,6 +112,16 @@ func (p *LiteLLMProvider) Chat(ctx context.Context, req ChatRequest) (ChatRespon
 			out.Usage = &Usage{}
 		}
 		out.Usage.ResponseCostUSD = &cost
+	} else if cost, ok := extractCostHeader(hdrs); ok {
+		// The LiteLLM proxy reports cost in the x-litellm-response-cost
+		// response header, not the JSON body — body injection never
+		// happens on the proxy, so without this fallback every
+		// LiteLLM-routed model not in the static pricing table metered
+		// as $0.
+		if out.Usage == nil {
+			out.Usage = &Usage{}
+		}
+		out.Usage.ResponseCostUSD = &cost
 	}
 	return out, nil
 }
@@ -148,6 +158,10 @@ func (p *LiteLLMProvider) ChatStream(ctx context.Context, req ChatRequest) (<-ch
 			return
 		}
 		defer resp.Body.Close()
+
+		// Headers arrive before the body — capture the proxy's cost
+		// header now and attach it to the final usage chunk below.
+		headerCost, headerCostOK := extractCostHeader(resp.Header)
 
 		if resp.StatusCode >= 400 {
 			b, _ := readBodyLimited(resp.Body, 1<<20)
@@ -190,6 +204,8 @@ func (p *LiteLLMProvider) ChatStream(ctx context.Context, req ChatRequest) (<-ch
 			if chunk.Usage != nil {
 				if cost, ok := extractResponseCost([]byte(payload)); ok {
 					chunk.Usage.ResponseCostUSD = &cost
+				} else if headerCostOK && chunk.Usage.ResponseCostUSD == nil {
+					chunk.Usage.ResponseCostUSD = &headerCost
 				}
 			}
 			select {
@@ -636,6 +652,25 @@ func extractResponseCost(body []byte) (float64, bool) {
 		return 0, false
 	}
 	return *aux.ResponseCost, true
+}
+
+// extractCostHeader reads the LiteLLM proxy's x-litellm-response-cost
+// response header (USD, e.g. "2.8e-06"). This is where the proxy
+// actually reports cost; the JSON-body `response_cost` field only
+// exists in the LiteLLM python SDK path.
+func extractCostHeader(hdrs http.Header) (float64, bool) {
+	if hdrs == nil {
+		return 0, false
+	}
+	raw := strings.TrimSpace(hdrs.Get("x-litellm-response-cost"))
+	if raw == "" {
+		return 0, false
+	}
+	cost, err := strconv.ParseFloat(raw, 64)
+	if err != nil || cost < 0 {
+		return 0, false
+	}
+	return cost, true
 }
 
 // previewBody returns a UTF-8-safe trimmed preview of the upstream's
