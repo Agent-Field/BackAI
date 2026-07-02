@@ -946,7 +946,15 @@ func main() {
 	// return tolerant empty responses.
 	var jobsManager *jobs.Manager
 	if database != nil && database.Pool != nil {
-		jobsManager = startJobsManager(ctx, log, database.Pool)
+		// Run River's DDL migrations via the privileged migrate connection when
+		// one is configured; the serving role can't create tables. Pass "" when
+		// the migrate URL is unset or identical to the serving URL so a single-
+		// role local-dev setup keeps migrating on the serving pool.
+		jobsMigrateURL := cfg.Database.MigrateURL
+		if jobsMigrateURL == cfg.Database.URL {
+			jobsMigrateURL = ""
+		}
+		jobsManager = startJobsManager(ctx, log, database.Pool, jobsMigrateURL)
 		if jobsManager != nil {
 			defer func() {
 				stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -1669,6 +1677,20 @@ func main() {
 		drainTimeout = 30 * time.Second
 	}
 
+	// Start the dedicated metrics listener (Prometheus scrape) when configured
+	// on its own port. Keeping /metrics off the public API port avoids exposing
+	// per-tenant cost/usage labels to unauthenticated callers; the Helm chart
+	// restricts this port to in-cluster Prometheus via a NetworkPolicy. A
+	// failure here must not take down the API — log and continue.
+	if metricsSrv := srv.MetricsServer(); metricsSrv != nil {
+		go func() {
+			log.Info("metrics server listening", "addr", metricsSrv.Addr)
+			if err := metricsSrv.ListenAndServe(); err != nil && err.Error() != "http: Server closed" {
+				log.Error("metrics server failed", "addr", metricsSrv.Addr, "error", err)
+			}
+		}()
+	}
+
 	// Start listener.
 	listenerErr := make(chan error, 1)
 	go func() {
@@ -1715,6 +1737,11 @@ func main() {
 		// connections, closes idle ones, gives active conns up to
 		// the ctx budget to finish writing their response.
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), drainTimeout)
+		if metricsSrv := srv.MetricsServer(); metricsSrv != nil {
+			if err := metricsSrv.Shutdown(shutdownCtx); err != nil {
+				log.Warn("metrics server shutdown returned error", "error", err)
+			}
+		}
 		if err := srv.HTTPServer().Shutdown(shutdownCtx); err != nil {
 			log.Warn("http shutdown returned error", "error", err)
 		}
@@ -2280,10 +2307,29 @@ func (s tenancySecretSink) Get(ctx context.Context, tenantID, key string) ([]byt
 // startJobsManager runs the River migrations idempotently, registers built-in
 // handlers, and starts the manager. Returns nil if any step fails — callers
 // should fall back to "jobs disabled" rather than crash the runtime.
-func startJobsManager(ctx context.Context, log *slog.Logger, pool *pgxpool.Pool) *jobs.Manager {
+//
+// River's migrations create tables (DDL), which the serving role is not
+// allowed to do when it's a restricted NOSUPERUSER/NOBYPASSRLS role. So when a
+// dedicated privileged migrate URL is configured we run MigrateUp over a
+// short-lived pool against THAT url — mirroring runMigrations for the goose
+// schema. The manager itself still runs on the serving pool (DML only).
+// Without this split, jobs are silently disabled under the multi-tenant prod
+// posture (restricted serving role), taking crons and notification delivery
+// down with them.
+func startJobsManager(ctx context.Context, log *slog.Logger, pool *pgxpool.Pool, migrateURL string) *jobs.Manager {
 	migCtx, migCancel := context.WithTimeout(ctx, 60*time.Second)
 	defer migCancel()
-	if err := jobs.MigrateUp(migCtx, pool); err != nil {
+	migratePool := pool
+	if migrateURL != "" {
+		privDB, err := db.Open(migCtx, db.Config{URL: migrateURL})
+		if err != nil {
+			log.Error("river migrations: open privileged connection failed; jobs disabled", "error", err)
+			return nil
+		}
+		defer privDB.Close()
+		migratePool = privDB.Pool
+	}
+	if err := jobs.MigrateUp(migCtx, migratePool); err != nil {
 		log.Error("river migrations failed; jobs disabled", "error", err)
 		return nil
 	}
