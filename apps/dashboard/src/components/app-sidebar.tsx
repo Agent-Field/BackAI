@@ -83,6 +83,10 @@ interface NavItem {
   href: string
   icon: LucideIcon
   comingSoon?: boolean
+  /** Overrides the generic coming-soon tooltip when the backend is NOT
+   *  actually ready (e.g. needs an adapter deployed). Keeps the sidebar
+   *  honest — "backend ready" must be literally true. */
+  comingSoonNote?: string
 }
 
 interface NavGroup {
@@ -106,11 +110,11 @@ const GROUPS: NavGroup[] = [
       { id: "runs", label: "Runs", href: "/activity/runs", icon: Activity },
       { id: "errors", label: "Errors", href: "/activity/errors", icon: AlertTriangle, comingSoon: true },
       { id: "logs", label: "Logs", href: "/activity/logs", icon: BarChart3, comingSoon: true },
-      { id: "traces", label: "Traces", href: "/activity/traces", icon: Network, comingSoon: true },
+      { id: "traces", label: "Traces", href: "/activity/traces", icon: Network, comingSoon: true, comingSoonNote: "page coming soon; backend needs a traces adapter (e.g. Tempo)" },
       { id: "queue", label: "Queue", href: "/activity/queue", icon: Clock, comingSoon: true },
       { id: "webhooks", label: "Webhook flow", href: "/activity/webhooks", icon: Webhook, comingSoon: true },
       { id: "cache", label: "Cache", href: "/activity/cache", icon: Zap, comingSoon: true },
-      { id: "notifications", label: "Notifications", href: "/activity/notifications", icon: Send, comingSoon: true },
+      { id: "notifications", label: "Notifications", href: "/activity/notifications", icon: Send, comingSoon: true, comingSoonNote: "page coming soon; backend needs a notification adapter" },
     ],
   },
   {
@@ -217,9 +221,19 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         ))}
       </SidebarContent>
       <SidebarFooter>
-        <span className="px-row-x py-row-y text-meta text-muted-foreground">
-          v0.1 · feat/ui-redesign
-        </span>
+        <div className="px-row-x py-row-y flex items-center justify-between">
+          <span className="text-meta text-muted-foreground">
+            v0.1 · feat/ui-redesign
+          </span>
+          {/* Plain anchor: /sign-out is a route handler that kills the
+              better-auth session server-side and redirects to /login. */}
+          <a
+            href="/sign-out"
+            className="text-meta text-muted-foreground hover:text-foreground"
+          >
+            Sign out
+          </a>
+        </div>
       </SidebarFooter>
     </Sidebar>
   )
@@ -243,7 +257,7 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
         className={`gap-inline ${item.comingSoon ? "opacity-60" : ""}`}
         title={
           item.comingSoon
-            ? `${item.label} — page coming soon; backend ready`
+            ? `${item.label} — ${item.comingSoonNote ?? "page coming soon; backend ready"}`
             : item.label
         }
       >

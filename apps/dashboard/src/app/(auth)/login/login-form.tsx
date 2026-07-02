@@ -3,7 +3,7 @@
 "use client"
 
 import { Suspense, useState } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useSearchParams } from "next/navigation"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -33,7 +33,6 @@ type LoginFormProps = {
 }
 
 function LoginFormInner({ sso }: LoginFormProps) {
-  const router = useRouter()
   const searchParams = useSearchParams()
   const next = searchParams.get("next") ?? "/"
   const error = searchParams.get("error")
@@ -56,8 +55,13 @@ function LoginFormInner({ sso }: LoginFormProps) {
         toast.error(result.error.message ?? "Could not sign in.")
         return
       }
-      router.push(next)
-      router.refresh()
+      // Full navigation instead of router.push: the client router may have
+      // a prefetched RSC payload of the target from BEFORE sign-in (a
+      // middleware redirect back to this login page), which replays as a
+      // redirect loop. A document navigation re-runs middleware with the
+      // fresh session cookie. `next` is constrained to a same-app path.
+      const safeNext = next.startsWith("/") && !next.startsWith("//") ? next : "/"
+      window.location.assign(safeNext)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not sign in.")
     } finally {

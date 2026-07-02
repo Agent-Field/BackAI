@@ -119,6 +119,9 @@ func TestAgentFromEndpoint(t *testing.T) {
 		{"/api/v1/execute/sample.echo", "sample.echo"},
 		{"/api/v1/execute/async/sample.echo", "sample.echo"},
 		{"/api/v1/execute/ns.fn_v2", "ns.fn_v2"},
+		{"/api/v1/llm/chat/completions", "llm.chat"},
+		{"/api/v1/llm/embeddings", "llm.embeddings"},
+		{"/api/v1/llm/", "llm"},
 		{"/other/path", "/other/path"},
 		{"", ""},
 	}

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// GET/POST /sign-out — kills the better-auth session and bounces to sign-in.
+// GET/POST /sign-out — kills the operator's better-auth session and
+// bounces to /login. Mirrors the customer app's sign-out route.
 
 import { NextResponse } from "next/server"
 import { headers } from "next/headers"
@@ -11,11 +12,11 @@ async function handle() {
   try {
     await auth.api.signOut({ headers: await headers() })
   } catch (err) {
-    console.error("[customer-app] sign-out failed:", err)
+    console.error("[dashboard] sign-out failed:", err)
   }
   const url = new URL(
-    "/sign-in",
-    process.env.BETTER_AUTH_URL ?? "http://localhost:34000",
+    "/login",
+    process.env.BETTER_AUTH_URL ?? "http://localhost:33000",
   )
   const res = NextResponse.redirect(url)
   // auth.api.signOut revokes the DB session, but without better-auth's
@@ -24,10 +25,10 @@ async function handle() {
   // signed session_data cache, which reads as "logged in" for up to
   // 5 minutes. Clear both explicitly.
   for (const name of [
-    "better-auth.session_token",
-    "better-auth.session_data",
-    "__Secure-better-auth.session_token",
-    "__Secure-better-auth.session_data",
+    "backai-operator.session_token",
+    "backai-operator.session_data",
+    "__Secure-backai-operator.session_token",
+    "__Secure-backai-operator.session_data",
   ]) {
     res.cookies.set(name, "", { maxAge: 0, path: "/" })
   }

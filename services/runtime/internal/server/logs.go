@@ -41,11 +41,13 @@ type logsResponse struct {
 func (s *Server) registerLogsRoutes() {
 	// S1b: /api/v1/logs bypasses the tenant resolver (publicPrefixes) and reads
 	// an attacker-controlled ?tenant= filter — gate it to operators. The
-	// /admin/logs/* variants are already operator surfaces.
+	// /admin/logs/* variants bypass the resolver the same way, so they get
+	// the same operator gate; without it anyone who can reach the runtime
+	// port can read raw runtime logs.
 	s.mux.HandleFunc("GET /api/v1/logs", s.operatorGuard(rbac.ResourceAdminLogs, s.handleListLogsCompat))
-	s.mux.HandleFunc("GET /api/v1/admin/logs", s.handleAdminListLogs)
-	s.mux.HandleFunc("GET /api/v1/admin/logs/tail", s.handleAdminTailLogs)
-	s.mux.HandleFunc("GET /api/v1/admin/logs/capabilities", s.handleAdminLogCapabilities)
+	s.mux.HandleFunc("GET /api/v1/admin/logs", s.operatorGuard(rbac.ResourceAdminLogs, s.handleAdminListLogs))
+	s.mux.HandleFunc("GET /api/v1/admin/logs/tail", s.operatorGuard(rbac.ResourceAdminLogs, s.handleAdminTailLogs))
+	s.mux.HandleFunc("GET /api/v1/admin/logs/capabilities", s.operatorGuard(rbac.ResourceAdminLogs, s.handleAdminLogCapabilities))
 }
 
 func (s *Server) handleListLogsCompat(w http.ResponseWriter, r *http.Request) {

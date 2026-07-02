@@ -378,7 +378,15 @@ func (s *Server) resolveSession(ctx context.Context, r *http.Request) (tenantID,
 
 func betterAuthSessionToken(r *http.Request) string {
 	var token string
+	// The operator dashboard uses a distinct cookie prefix
+	// ("backai-operator") so its session can't collide with the customer
+	// app's on a shared host — browsers scope cookies by host, not port.
+	// Check the operator cookie first: it is the only one that can pass
+	// the suite_operators gate, and each app's /api/v1 proxy forwards
+	// only its own session cookie, so requests stay single-session.
 	for _, name := range []string{
+		"backai-operator.session_token",
+		"__Secure-backai-operator.session_token",
 		"better-auth.session_token",
 		"__Secure-better-auth.session_token",
 	} {

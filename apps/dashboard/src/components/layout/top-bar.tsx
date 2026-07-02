@@ -8,6 +8,7 @@ import Link from "next/link"
 import { useEffect, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
+import { CommandPalette, useCommandPalette } from "@/components/layout/command-palette"
 import { Button } from "@/components/ui/button"
 import { DeltaIndicator } from "@/components/ui/delta-indicator"
 import {
@@ -285,8 +286,10 @@ function AnchorPill({
 }
 
 function CmdKTrigger() {
+  const { open, setOpen } = useCommandPalette()
   return (
     <Tooltip>
+      <CommandPalette open={open} onOpenChange={setOpen} />
       <TooltipTrigger
         render={
           <Button
@@ -294,6 +297,7 @@ function CmdKTrigger() {
             size="sm"
             className="h-8 gap-inline rounded-md text-meta text-muted-foreground"
             aria-label="Open command palette"
+            onClick={() => setOpen(true)}
           />
         }
       >

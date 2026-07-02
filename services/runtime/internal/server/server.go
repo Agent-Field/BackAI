@@ -1289,6 +1289,25 @@ func (s *Server) logGatewayRequest(
 	executionID string,
 	startedAt time.Time,
 ) {
+	s.logGatewayRequestLabeled(r, endpoint, "", status, requestBytes, responseBytes, executionID, startedAt)
+}
+
+// logGatewayRequestLabeled is logGatewayRequest with an explicit caller
+// label for endpoints whose path doesn't identify the caller (the LLM
+// gateway: every call shares "/api/v1/llm/chat/completions", so the
+// X-AF-Reasoner-derived label is what the Runs view displays). Empty
+// label → NULL column; execute-endpoint rows keep deriving their agent
+// from the endpoint path.
+func (s *Server) logGatewayRequestLabeled(
+	r *http.Request,
+	endpoint string,
+	agentLabel string,
+	status int,
+	requestBytes int,
+	responseBytes int,
+	executionID string,
+	startedAt time.Time,
+) {
 	// backai_runs_total intentionally uses this hook because /api/v1/runs
 	// is also sourced from suite_gateway_requests filtered to agent execute
 	// endpoints. This keeps the metric and dashboard on one terminal source.
@@ -1335,11 +1354,15 @@ func (s *Server) logGatewayRequest(
 	// suite_gateway_requests passes — the background context above carries no
 	// tenant of its own.
 	ctx = tenantctx.WithTenant(ctx, tenantID, apiKeyID)
+	var labelPtr *string
+	if agentLabel != "" {
+		labelPtr = &agentLabel
+	}
 	_, err := s.db.Pool.Exec(ctx, `
         insert into suite_gateway_requests
             (tenant_id, api_key_id, endpoint, method, status_code, duration_ms,
-             request_bytes, response_bytes, af_execution_id, user_agent)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             request_bytes, response_bytes, af_execution_id, user_agent, agent_label)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
     `,
 		tenantID,
 		keyPtr,
@@ -1351,6 +1374,7 @@ func (s *Server) logGatewayRequest(
 		responseBytes,
 		execIDPtr,
 		r.Header.Get("User-Agent"),
+		labelPtr,
 	)
 	if err != nil {
 		s.log.Warn("failed to log gateway request", "endpoint", endpoint, "error", err)

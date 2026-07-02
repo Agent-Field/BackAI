@@ -504,13 +504,47 @@ func (s *Server) handleLLMChatCompletions(w http.ResponseWriter, r *http.Request
 		EstimatedCostUSD: estCost,
 		PromptCharsHint:  promptChars,
 	}
+	// LLM response cache (Phase 7.3): exact-match dedup of identical
+	// non-streaming requests, keyed on (tenant, model, canonical body
+	// hash). Checked before the budget pre-call hook on purpose — a hit
+	// makes no upstream call and costs $0, so an over-budget tenant can
+	// still be served from cache.
+	runLabel := llmRunLabel(agent, reasoner)
+	cacheHash := ""
+	if s.llmCache != nil && !req.Stream {
+		cacheHash = llmcache.RequestHash(req.Model, body)
+		entry, hit, err := s.llmCache.Get(r.Context(), tenantID, req.Model, cacheHash)
+		switch {
+		case err != nil:
+			s.log.Warn("llmcache: get failed; treating as miss", "error", err)
+		case hit:
+			usage := &llmgateway.Usage{
+				PromptTokens:     entry.PromptTokens,
+				CompletionTokens: entry.CompletionTokens,
+				TotalTokens:      entry.PromptTokens + entry.CompletionTokens,
+			}
+			post := s.buildPostPayload(pre, nil, usage, start, http.StatusOK)
+			post.Cached = true
+			post.CostUSD = 0
+			post.CostKnown = true
+			s.fireLLMPostCallBest(r.Context(), post)
+			w.Header().Set("X-AF-Cache", "hit")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(entry.ResponseJSON)
+			s.logGatewayRequestLabeled(r, llmChatEndpoint, runLabel,
+				http.StatusOK, len(body), len(entry.ResponseJSON), "", start)
+			return
+		}
+	}
+
 	if err := s.fireLLMPreCall(r.Context(), pre); err != nil {
 		s.writeHookRejection(w, err, pre, start)
 		return
 	}
 
 	if req.Stream {
-		s.streamChatCompletion(w, r, req, requestID, start, pre)
+		s.streamChatCompletion(w, r, req, requestID, start, pre, len(body), runLabel)
 		return
 	}
 
@@ -520,6 +554,8 @@ func (s *Server) handleLLMChatCompletions(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		s.fireLLMPostCallBest(r.Context(), s.errorPost(pre, err, start))
 		llmAPIErrorResponse(w, err)
+		s.logGatewayRequestLabeled(r, llmChatEndpoint, runLabel,
+			llmErrorHTTPStatus(err), len(body), 0, "", start)
 		return
 	}
 	if s.guardrails != nil {
@@ -527,12 +563,73 @@ func (s *Server) handleLLMChatCompletions(w http.ResponseWriter, r *http.Request
 		if err != nil {
 			s.fireLLMPostCallBest(r.Context(), s.guardrailPost(pre, err, start))
 			writeGuardrailError(w, err)
+			_, _, gStatus := classifyGuardrailError(err)
+			if gStatus == 0 {
+				gStatus = http.StatusForbidden
+			}
+			s.logGatewayRequestLabeled(r, llmChatEndpoint, runLabel,
+				gStatus, len(body), 0, "", start)
 			return
 		}
 		resp = next
 	}
 	s.fireLLMPostCallBest(r.Context(), post)
+
+	respJSON, marshalErr := json.Marshal(resp)
+	if marshalErr == nil && s.llmCache != nil && cacheHash != "" {
+		promptTokens, completionTokens := 0, 0
+		if resp.Usage != nil {
+			promptTokens = resp.Usage.PromptTokens
+			completionTokens = resp.Usage.CompletionTokens
+		}
+		w.Header().Set("X-AF-Cache", "miss")
+		// Best-effort store on a detached context so a slow write (or a
+		// client disconnect) never delays or cancels the response.
+		go func(payload []byte, pt, ct int) {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if err := s.llmCache.Put(ctx, tenantID, req.Model, cacheHash,
+				payload, pt, ct, llmCacheTTL); err != nil {
+				s.log.Warn("llmcache: put failed", "error", err)
+			}
+		}(respJSON, promptTokens, completionTokens)
+	}
 	writeJSON(w, http.StatusOK, resp)
+	s.logGatewayRequestLabeled(r, llmChatEndpoint, runLabel,
+		http.StatusOK, len(body), len(respJSON), "", start)
+}
+
+// llmChatEndpoint is the gateway-request log identity for chat calls.
+// Kept truthful to the public path; the caller identity goes in the
+// agent_label column instead.
+const llmChatEndpoint = "/api/v1/llm/chat/completions"
+
+// llmCacheTTL bounds how long an exact-match chat response is replayed.
+// Short by design: the cache exists to suppress duplicate upstream calls
+// (retries, fan-outs, page reloads), not to serve stale generations.
+const llmCacheTTL = 5 * time.Minute
+
+// llmRunLabel folds the X-AF-Reasoner-derived caller labels into the
+// single display label recorded in suite_gateway_requests.agent_label
+// (e.g. agent "courtsim" + reasoner "stage_briefs" → "courtsim.stage_briefs").
+func llmRunLabel(agent, reasoner string) string {
+	switch {
+	case agent != "" && reasoner != "":
+		return agent + "." + reasoner
+	case reasoner != "":
+		return reasoner
+	default:
+		return agent
+	}
+}
+
+// llmErrorHTTPStatus maps a gateway error to the status code the client
+// saw, for the gateway-request log.
+func llmErrorHTTPStatus(err error) int {
+	if apiErr, ok := llmgateway.AsAPIError(err); ok {
+		return apiErr.HTTPStatus()
+	}
+	return http.StatusBadGateway
 }
 
 // streamChatCompletion runs a streaming chat completion. The upstream
@@ -545,6 +642,8 @@ func (s *Server) streamChatCompletion(
 	requestID string,
 	start time.Time,
 	pre LLMPreCallPayload,
+	requestBytes int,
+	runLabel string,
 ) {
 	sse, err := llmgateway.NewSSEWriter(w)
 	if err != nil {
@@ -628,6 +727,10 @@ streamLoop:
 		} else {
 			s.fireLLMPostCallBest(r.Context(), s.errorPost(pre, streamErr, start))
 		}
+		// The SSE transport already committed a 200; log the underlying
+		// failure status so the Runs view classifies this as failed.
+		s.logGatewayRequestLabeled(r, llmChatEndpoint, runLabel,
+			llmErrorHTTPStatus(streamErr), requestBytes, completionChars, "", start)
 		return
 	}
 
@@ -648,6 +751,8 @@ streamLoop:
 		post.TTFTSeconds = firstChunkAt.Sub(start).Seconds()
 	}
 	s.fireLLMPostCallBest(r.Context(), post)
+	s.logGatewayRequestLabeled(r, llmChatEndpoint, runLabel,
+		http.StatusOK, requestBytes, completionChars, "", start)
 }
 
 // ─── embeddings ───────────────────────────────────────────────────────────

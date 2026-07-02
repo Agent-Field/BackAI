@@ -32,7 +32,7 @@ export function middleware(request: NextRequest) {
 
   if (process.env.NODE_ENV === "development" && searchParams.get("preview") === "1") {
     const response = NextResponse.next()
-    response.cookies.set("better-auth.session_token", "dev-preview-session", {
+    response.cookies.set("backai-operator.session_token", "dev-preview-session", {
       httpOnly: true,
       sameSite: "lax",
       path: "/",
@@ -40,7 +40,9 @@ export function middleware(request: NextRequest) {
     return response
   }
 
-  const sessionCookie = getSessionCookie(request)
+  // Must match the cookiePrefix in lib/auth.ts — the default would look
+  // for better-auth.session_token and bounce valid operator sessions.
+  const sessionCookie = getSessionCookie(request, { cookiePrefix: "backai-operator" })
   if (!sessionCookie) {
     const url = request.nextUrl.clone()
     url.pathname = "/login"

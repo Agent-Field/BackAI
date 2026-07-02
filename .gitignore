@@ -91,3 +91,6 @@ tmp/
 .tmp/
 *.tmp
 .cache/
+
+# Local planning scratch — never ship
+claude-plans/
