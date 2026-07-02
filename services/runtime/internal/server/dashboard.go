@@ -136,14 +136,15 @@ func (s *Server) queryRuns(ctx context.Context, q runQuery) (runListResponse, er
 		return out, nil
 	}
 
-	// Build the WHERE clause. We always filter to gateway-request rows
-	// that targeted an agent execute endpoint, so this view is "agent
-	// runs" rather than every HTTP hit the gateway recorded.
+	// Build the WHERE clause. We filter to gateway-request rows that
+	// represent billable work — agent execute forwards and LLM gateway
+	// calls — so this view is "runs" rather than every HTTP hit the
+	// gateway recorded (health checks, admin traffic, ...).
 	//
 	// Column references use the `r` alias so the same clause can be
 	// reused by both the count-only query (FROM suite_gateway_requests r)
 	// and the rows query that joins to suite_cost_events.
-	conds := []string{"r.endpoint like '/api/v1/execute/%'"}
+	conds := []string{runEndpointCond}
 	args := []any{}
 	bind := func(v any) string {
 		args = append(args, v)
@@ -152,10 +153,12 @@ func (s *Server) queryRuns(ctx context.Context, q runQuery) (runListResponse, er
 	if q.Agent != "" {
 		// Match both sync and async endpoint variants for the requested
 		// agent call (e.g. "/api/v1/execute/sample.echo" and
-		// "/api/v1/execute/async/sample.echo").
+		// "/api/v1/execute/async/sample.echo"), plus LLM rows whose
+		// caller label (from X-AF-Reasoner) matches.
 		syncBind := bind("/api/v1/execute/" + q.Agent)
 		asyncBind := bind("/api/v1/execute/async/" + q.Agent)
-		conds = append(conds, "(r.endpoint = "+syncBind+" or r.endpoint = "+asyncBind+")")
+		labelBind := bind(q.Agent)
+		conds = append(conds, "(r.endpoint = "+syncBind+" or r.endpoint = "+asyncBind+" or r.agent_label = "+labelBind+")")
 	}
 	if q.Tenant != "" {
 		conds = append(conds, "r.tenant_id::text = "+bind(q.Tenant))
@@ -208,6 +211,7 @@ func (s *Server) queryRuns(ctx context.Context, q runQuery) (runListResponse, er
             coalesce(r.tenant_id::text, '') as tenant_id_text,
             coalesce(t.name, '')            as tenant_name,
             r.endpoint,
+            coalesce(r.agent_label, '')     as agent_label,
             r.status_code,
             r.duration_ms,
             r.created_at,
@@ -235,17 +239,22 @@ func (s *Server) queryRuns(ctx context.Context, q runQuery) (runListResponse, er
 			tenantID   string
 			tenantName string
 			endpoint   string
+			agentLabel string
 			statusCode pgtype.Int4
 			durationMS pgtype.Int4
 			createdAt  time.Time
 			costUSD    float64
 		)
-		if err := rows.Scan(&id, &tenantID, &tenantName, &endpoint, &statusCode, &durationMS, &createdAt, &costUSD); err != nil {
+		if err := rows.Scan(&id, &tenantID, &tenantName, &endpoint, &agentLabel, &statusCode, &durationMS, &createdAt, &costUSD); err != nil {
 			return out, err
+		}
+		agentName := agentLabel
+		if agentName == "" {
+			agentName = agentFromEndpoint(endpoint)
 		}
 		rec := runRecord{
 			ID:        uuidString(id),
-			Agent:     agentFromEndpoint(endpoint),
+			Agent:     agentName,
 			Status:    classifyStatus(statusCode),
 			StartedAt: createdAt.UTC().Format(time.RFC3339Nano),
 			CostUSD:   costUSD,
@@ -270,17 +279,35 @@ func (s *Server) queryRuns(ctx context.Context, q runQuery) (runListResponse, er
 	return out, nil
 }
 
+// runEndpointCond selects the gateway-request rows that count as "runs":
+// agent execute forwards plus LLM gateway calls. Shared by queryRuns and
+// the home-overview failure counter so the two views agree on what a run is.
+const runEndpointCond = "(r.endpoint like '/api/v1/execute/%' or r.endpoint like '/api/v1/llm/%')"
+
 // agentFromEndpoint strips the /api/v1/execute/ (or async) prefix to
-// recover the agent call name (e.g. "sample.echo"). Returns the raw
-// endpoint if the prefix is missing.
+// recover the agent call name (e.g. "sample.echo"). LLM gateway rows
+// without an agent_label fall back to a stable "llm.<operation>" name.
+// Returns the raw endpoint if no prefix matches.
 func agentFromEndpoint(endpoint string) string {
 	const sync = "/api/v1/execute/"
 	const async = "/api/v1/execute/async/"
+	const llm = "/api/v1/llm/"
 	if strings.HasPrefix(endpoint, async) {
 		return strings.TrimPrefix(endpoint, async)
 	}
 	if strings.HasPrefix(endpoint, sync) {
 		return strings.TrimPrefix(endpoint, sync)
+	}
+	if strings.HasPrefix(endpoint, llm) {
+		// "/api/v1/llm/chat/completions" → "llm.chat"
+		rest := strings.TrimPrefix(endpoint, llm)
+		if op, _, ok := strings.Cut(rest, "/"); ok && op != "" {
+			return "llm." + op
+		}
+		if rest != "" {
+			return "llm." + rest
+		}
+		return "llm"
 	}
 	return endpoint
 }
@@ -490,12 +517,13 @@ func (s *Server) handleHomeOverview(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Failed runs in the last 24 hours (Gap 3). Counts gateway requests
-		// whose status_code is null or non-2xx, scoped to agent-execute
-		// endpoints so we don't conflate admin traffic with run failures.
+		// whose status_code is null or non-2xx, scoped to run endpoints
+		// (execute + LLM gateway) so we don't conflate admin traffic with
+		// run failures.
 		var failed24 int64
 		err = s.db.Pool.QueryRow(ctx,
-			"select count(*) from suite_gateway_requests "+
-				"where endpoint like '/api/v1/execute/%' "+
+			"select count(*) from suite_gateway_requests r "+
+				"where "+runEndpointCond+" "+
 				"and (status_code is null or status_code < 200 or status_code >= 300) "+
 				"and created_at >= $1",
 			now.Add(-24*time.Hour)).Scan(&failed24)
