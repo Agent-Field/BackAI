@@ -4,7 +4,6 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -33,7 +32,6 @@ type OnboardingKey = {
 const ONBOARDING_KEY_STORAGE = "backai:onboarding-api-key"
 
 export default function SignUpPage() {
-  const router = useRouter()
   const [submitting, setSubmitting] = useState(false)
 
   const form = useForm<SignUpValues>({
@@ -69,8 +67,9 @@ export default function SignUpPage() {
           // Chat can mint a fresh internal token later if storage is unavailable.
         }
       }
-      router.push("/dashboard")
-      router.refresh()
+      // Full navigation — see sign-in-form.tsx: avoids replaying a stale
+      // prefetched middleware redirect from the signed-out state.
+      window.location.assign("/dashboard")
     } finally {
       setSubmitting(false)
     }

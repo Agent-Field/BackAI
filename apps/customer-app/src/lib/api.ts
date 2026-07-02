@@ -133,8 +133,11 @@ async function serverCookieHeader(): Promise<string | undefined> {
   try {
     const { cookies } = await import("next/headers")
     const store = await cookies()
+    // Drop the operator dashboard's cookies (shared host) — customer
+    // calls must resolve the customer session only.
     return store
       .getAll()
+      .filter((c) => !c.name.includes("backai-operator"))
       .map((c) => `${c.name}=${c.value}`)
       .join("; ")
   } catch {

@@ -63,6 +63,15 @@ function makeAuth() {
     secret: process.env.AF_STACK_AUTH_SECRET ?? "dev-secret-change-me",
     baseURL: process.env.BETTER_AUTH_URL,
     trustedOrigins,
+    // The customer app and this dashboard both run better-auth on the same
+    // host (localhost, different ports) and browsers scope cookies by host
+    // only — with the default "better-auth" prefix a customer session from
+    // the app overwrites/shadows the operator session here and the operator
+    // gate bounces to /login?error=operator_required. A distinct prefix
+    // keeps the two sessions independent.
+    advanced: {
+      cookiePrefix: "backai-operator",
+    },
     // Mirror every better-auth user into suite_users on create so the
     // runtime's tenant_resolver can join on email and find the canonical
     // suite user id. Without this hook a freshly-created user (via SSO /

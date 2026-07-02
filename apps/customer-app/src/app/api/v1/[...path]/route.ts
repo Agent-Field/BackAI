@@ -26,8 +26,11 @@ async function proxy(req: NextRequest, { params }: { params: Promise<{ path: str
     if (key.toLowerCase() === "host") return
     upstreamHeaders.set(key, value)
   })
+  // Drop the operator dashboard's backai-operator.* cookies (shared
+  // host): customer calls must resolve the customer session only.
   const cookieHeader = (await cookies())
     .getAll()
+    .filter((cookie) => !cookie.name.includes("backai-operator"))
     .map((cookie) => `${cookie.name}=${cookie.value}`)
     .join("; ")
   if (cookieHeader) {

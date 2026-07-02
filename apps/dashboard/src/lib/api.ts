@@ -45,8 +45,12 @@ async function serverCookieHeader(): Promise<string | undefined> {
   try {
     const { cookies } = await import("next/headers")
     const store = await cookies()
+    // Only the operator session (backai-operator.*): on a shared host
+    // the browser also holds the customer app's better-auth.* cookies,
+    // and forwarding those makes the runtime resolve the wrong session.
     return store
       .getAll()
+      .filter((c) => c.name.includes("backai-operator"))
       .map((c) => `${c.name}=${c.value}`)
       .join("; ")
   } catch {

@@ -217,9 +217,19 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         ))}
       </SidebarContent>
       <SidebarFooter>
-        <span className="px-row-x py-row-y text-meta text-muted-foreground">
-          v0.1 · feat/ui-redesign
-        </span>
+        <div className="px-row-x py-row-y flex items-center justify-between">
+          <span className="text-meta text-muted-foreground">
+            v0.1 · feat/ui-redesign
+          </span>
+          {/* Plain anchor: /sign-out is a route handler that kills the
+              better-auth session server-side and redirects to /login. */}
+          <a
+            href="/sign-out"
+            className="text-meta text-muted-foreground hover:text-foreground"
+          >
+            Sign out
+          </a>
+        </div>
       </SidebarFooter>
     </Sidebar>
   )

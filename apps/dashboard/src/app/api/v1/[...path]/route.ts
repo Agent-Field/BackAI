@@ -26,8 +26,21 @@ async function proxy(req: NextRequest, { params }: { params: Promise<{ path: str
   const upstreamHeaders = new Headers()
   req.headers.forEach((value, key) => {
     if (key.toLowerCase() === "host") return
+    if (key.toLowerCase() === "cookie") return
     upstreamHeaders.set(key, value)
   })
+  // Forward ONLY the operator session cookies. On a shared host the
+  // browser also sends the customer app's better-auth.* cookies here;
+  // if those reach the runtime it resolves the wrong session and admin
+  // calls fail with OPERATOR_FORBIDDEN.
+  const operatorCookies = req.cookies
+    .getAll()
+    .filter((c) => c.name.includes("backai-operator"))
+    .map((c) => `${c.name}=${c.value}`)
+    .join("; ")
+  if (operatorCookies) {
+    upstreamHeaders.set("cookie", operatorCookies)
+  }
 
   let upstream: Response
   try {
