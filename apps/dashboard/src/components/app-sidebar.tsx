@@ -83,6 +83,10 @@ interface NavItem {
   href: string
   icon: LucideIcon
   comingSoon?: boolean
+  /** Overrides the generic coming-soon tooltip when the backend is NOT
+   *  actually ready (e.g. needs an adapter deployed). Keeps the sidebar
+   *  honest — "backend ready" must be literally true. */
+  comingSoonNote?: string
 }
 
 interface NavGroup {
@@ -106,11 +110,11 @@ const GROUPS: NavGroup[] = [
       { id: "runs", label: "Runs", href: "/activity/runs", icon: Activity },
       { id: "errors", label: "Errors", href: "/activity/errors", icon: AlertTriangle, comingSoon: true },
       { id: "logs", label: "Logs", href: "/activity/logs", icon: BarChart3, comingSoon: true },
-      { id: "traces", label: "Traces", href: "/activity/traces", icon: Network, comingSoon: true },
+      { id: "traces", label: "Traces", href: "/activity/traces", icon: Network, comingSoon: true, comingSoonNote: "page coming soon; backend needs a traces adapter (e.g. Tempo)" },
       { id: "queue", label: "Queue", href: "/activity/queue", icon: Clock, comingSoon: true },
       { id: "webhooks", label: "Webhook flow", href: "/activity/webhooks", icon: Webhook, comingSoon: true },
       { id: "cache", label: "Cache", href: "/activity/cache", icon: Zap, comingSoon: true },
-      { id: "notifications", label: "Notifications", href: "/activity/notifications", icon: Send, comingSoon: true },
+      { id: "notifications", label: "Notifications", href: "/activity/notifications", icon: Send, comingSoon: true, comingSoonNote: "page coming soon; backend needs a notification adapter" },
     ],
   },
   {
@@ -253,7 +257,7 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
         className={`gap-inline ${item.comingSoon ? "opacity-60" : ""}`}
         title={
           item.comingSoon
-            ? `${item.label} — page coming soon; backend ready`
+            ? `${item.label} — ${item.comingSoonNote ?? "page coming soon; backend ready"}`
             : item.label
         }
       >
