@@ -52,6 +52,27 @@ func TestAdapterListUsesEnvOverride(t *testing.T) {
 			t.Fatalf("adapter list missing %q:\n%s", want, out)
 		}
 	}
+	// Truth contract: the table must distinguish adapters the runtime actually
+	// constructs from ones the docs mark as planned. "remote" is a real sandbox
+	// adapter (main.go newSandbox) and must be listed; planned entries must
+	// appear under a PLANNED column, never presented as ready-to-use choices.
+	if !strings.Contains(out, "PLANNED") {
+		t.Fatalf("adapter list missing PLANNED column:\n%s", out)
+	}
+	if !strings.Contains(out, "remote") {
+		t.Fatalf("adapter list omits the real 'remote' sandbox adapter:\n%s", out)
+	}
+	readyLine := ""
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "Storage") {
+			readyLine = line
+		}
+	}
+	// r2/gcs/azure-blob are planned; they must sit in the PLANNED column, to the
+	// right of the READY column — never adjacent to the ready "minio, s3" set.
+	if strings.Contains(readyLine, "minio, s3, r2") {
+		t.Fatalf("planned storage adapters leaked into the READY column:\n%s", readyLine)
+	}
 }
 
 func TestDeployCommandSelection(t *testing.T) {

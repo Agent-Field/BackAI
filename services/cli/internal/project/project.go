@@ -287,26 +287,37 @@ func runOperatorCreate(ctx context.Context, args []string, stdout, stderr io.Wri
 }
 
 func runAdapterList(_ []string, stdout, _ io.Writer) error {
+	// READY lists only the adapters the runtime actually constructs today (see
+	// services/runtime/cmd/af-stack/main.go: newStorage/newSandbox/
+	// buildNotificationsAdapter and internal/billing NewClientFromEnv). PLANNED
+	// mirrors the "Planned" tables in the docs/adapters/*.md pages — selecting
+	// one of those falls back to the default with a warning, so the CLI must
+	// not present them as working choices.
 	rows := []struct {
 		Area    string
 		Env     string
 		Default string
-		Choices string
+		Ready   string
+		Planned string
 		Docs    string
 	}{
-		{"Storage", "AF_STACK_S3_ADAPTER", "minio", "minio, s3, r2, gcs, azure-blob", "docs/adapters/storage.md"},
-		{"Sandbox", "AF_STACK_SANDBOX_ADAPTER", "docker", "docker, gvisor, firecracker, e2b", "docs/adapters/sandbox.md"},
-		{"Notifications", "AF_STACK_NOTIFICATIONS_ADAPTER", "log", "log, resend, postmark, sendgrid, ses, mailgun", "docs/adapters/notifications.md"},
-		{"Billing", "AF_STACK_BILLING_ADAPTER", "stripe", "stripe, lago, none", "docs/adapters/billing.md"},
+		{"Storage", "AF_STACK_S3_ADAPTER", "minio", "minio, s3", "r2, gcs, azure-blob", "docs/adapters/storage.md"},
+		{"Sandbox", "AF_STACK_SANDBOX_ADAPTER", "docker", "docker, gvisor, firecracker, e2b, remote", "", "docs/adapters/sandbox.md"},
+		{"Notifications", "AF_STACK_NOTIFICATIONS_ADAPTER", "log", "log, resend", "postmark, sendgrid, ses, mailgun", "docs/adapters/notifications.md"},
+		{"Billing", "AF_STACK_BILLING_ADAPTER", "stripe", "stripe, lago, none", "", "docs/adapters/billing.md"},
 	}
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "AREA\tACTIVE\tENV\tCHOICES\tDOCS")
+	fmt.Fprintln(tw, "AREA\tACTIVE\tENV\tREADY\tPLANNED\tDOCS")
 	for _, row := range rows {
 		active := strings.TrimSpace(os.Getenv(row.Env))
 		if active == "" {
 			active = row.Default
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", row.Area, active, row.Env, row.Choices, row.Docs)
+		planned := row.Planned
+		if planned == "" {
+			planned = "-"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", row.Area, active, row.Env, row.Ready, planned, row.Docs)
 	}
 	return tw.Flush()
 }
