@@ -1605,8 +1605,20 @@ func (m *Manager) ListAudit(ctx context.Context, f AuditFilter) (AuditPage, erro
 		offset = 0
 	}
 
+	// suite_audit_log is RLS-guarded and this is the operator's
+	// cross-tenant audit view (handler is operator-gated) — read through
+	// a bypass transaction or the policy hides every row.
+	tx, err := m.pool.Begin(ctx)
+	if err != nil {
+		return AuditPage{}, fmt.Errorf("tenancy: audit tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // read-only tx
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return AuditPage{}, fmt.Errorf("tenancy: audit bypass: %w", err)
+	}
+
 	var total int
-	if err := m.pool.QueryRow(ctx,
+	if err := tx.QueryRow(ctx,
 		"select count(*) from suite_audit_log"+where, args...).Scan(&total); err != nil {
 		span.RecordError(err)
 		return AuditPage{}, fmt.Errorf("tenancy: audit count: %w", err)
@@ -1622,7 +1634,7 @@ func (m *Manager) ListAudit(ctx context.Context, f AuditFilter) (AuditPage, erro
 		" order by occurred_at desc limit $" + fmt.Sprint(limitIdx) +
 		" offset $" + fmt.Sprint(offsetIdx)
 
-	rows, err := m.pool.Query(ctx, rowsSQL, pageArgs...)
+	rows, err := tx.Query(ctx, rowsSQL, pageArgs...)
 	if err != nil {
 		span.RecordError(err)
 		return AuditPage{}, fmt.Errorf("tenancy: audit list: %w", err)

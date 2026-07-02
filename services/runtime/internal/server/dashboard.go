@@ -168,10 +168,25 @@ func (s *Server) queryRuns(ctx context.Context, q runQuery) (runListResponse, er
 	}
 	where := "where " + strings.Join(conds, " and ")
 
+	// suite_gateway_requests is RLS-guarded (tenant_isolation policy).
+	// This is an operator-facing, cross-tenant view served without a
+	// tenant binding, so read through a short transaction with
+	// app.bypass_rls=on — the same pattern as aggregation_endpoints.go
+	// and admin_anchors.go. Without it the policy filters every row and
+	// the Runs page renders empty.
+	tx, err := s.db.Pool.Begin(ctx)
+	if err != nil {
+		return out, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // read-only tx; rollback is the cleanup path
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return out, err
+	}
+
 	// Total count for pagination.
 	var total int64
 	countSQL := "select count(*) from suite_gateway_requests r " + where
-	if err := s.db.Pool.QueryRow(ctx, countSQL, args...).Scan(&total); err != nil {
+	if err := tx.QueryRow(ctx, countSQL, args...).Scan(&total); err != nil {
 		return out, err
 	}
 	out.Total = total
@@ -208,7 +223,7 @@ func (s *Server) queryRuns(ctx context.Context, q runQuery) (runListResponse, er
 		" order by r.created_at desc limit $" + strconv.Itoa(limitIdx) +
 		" offset $" + strconv.Itoa(offsetIdx)
 
-	rows, err := s.db.Pool.Query(ctx, rowsSQL, pageArgs...)
+	rows, err := tx.Query(ctx, rowsSQL, pageArgs...)
 	if err != nil {
 		return out, err
 	}

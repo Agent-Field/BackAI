@@ -79,7 +79,19 @@ func (s *Store) List(ctx context.Context, f ListFilters) ([]Cron, error) {
 		  from suite_crons` + where + `
 		 order by created_at desc, id asc`
 
-	rows, err := s.pool.Query(ctx, q, args...)
+	// Operator-only listing (the sole caller sits behind operatorGuard)
+	// over the RLS-guarded suite_crons — without a bypass transaction the
+	// tenant_isolation policy hides every tenant-scoped cron.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("crons: list tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // read-only tx
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return nil, fmt.Errorf("crons: list bypass: %w", err)
+	}
+
+	rows, err := tx.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("crons: list query: %w", err)
 	}
