@@ -93,8 +93,8 @@ as worked examples of the value structure.
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `image.runtime.repository` | `ghcr.io/agentfield/af-stack-runtime` | Runtime image. |
-| `image.dashboard.repository` | `ghcr.io/agentfield/af-stack-dashboard` | Dashboard image. |
+| `image.runtime.repository` | `ghcr.io/agent-field/af-stack-runtime` | Runtime image. |
+| `image.dashboard.repository` | `ghcr.io/agent-field/af-stack-dashboard` | Dashboard image. |
 | `image.*.tag` | `""` | Defaults to `.Chart.AppVersion`. |
 | `replicaCount.runtime` | `2` | Ignored when `autoscaling.runtime.enabled=true`. |
 | `replicaCount.dashboard` | `2` | Ignored when `autoscaling.dashboard.enabled=true`. |
