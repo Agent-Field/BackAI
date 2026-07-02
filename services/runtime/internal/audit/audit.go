@@ -129,6 +129,11 @@ func (w *Writer) Write(ctx context.Context, r *http.Request, ev Event) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
+		// Bind the write connection to the row's tenant so the audit-log RLS
+		// WITH CHECK passes (the pool's PrepareConn hook reads this from ctx).
+		// Without it the goroutine's background context carries no tenant and
+		// the insert is rejected.
+		ctx = tenantctx.WithTenant(ctx, tenantID, apiKeyID)
 		_, err := w.pool.Exec(ctx, `
 			insert into suite_audit_log
 				(tenant_id, user_id, api_key_id, action,

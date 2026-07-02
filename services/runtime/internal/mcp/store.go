@@ -30,6 +30,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 )
 
 // Store is the pgxpool-backed suite_mcp_servers accessor.
@@ -143,6 +145,11 @@ func (s *Store) Upsert(ctx context.Context, in UpsertInput) (*Server, error) {
 	if !s.HasPool() {
 		return nil, ErrNotConfigured
 	}
+	// Bind the row's tenant so PrepareConn sets app.tenant_id to match
+	// the tenant_id we insert; the force-RLS WITH CHECK then passes.
+	// Empty in.TenantID (shared server) is a no-op — the NULL row passes
+	// regardless of the GUC.
+	ctx = tenantctx.WithTenant(ctx, in.TenantID, "")
 	if err := validateName(in.Name); err != nil {
 		return nil, err
 	}
@@ -309,7 +316,18 @@ func (s *Store) RecordStatus(ctx context.Context, name string, status Status, er
 		errMsgPtr = &errMsg
 	}
 	stampConnect := status == StatusReady
-	_, err := s.pool.Exec(ctx, `
+	// Pool lifecycle write from the reconciler goroutine: ctx carries no
+	// request tenant, so bypass RLS transactionally to update the
+	// name-keyed row across whichever tenant owns it. Scope is the tx.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("mcp: record status begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return fmt.Errorf("mcp: record status bypass: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
 		update suite_mcp_servers
 		   set status            = $2,
 		       last_error        = case
@@ -319,9 +337,11 @@ func (s *Store) RecordStatus(ctx context.Context, name string, status Status, er
 		       end,
 		       last_connected_at = case when $5 then now() else last_connected_at end
 		 where name = $1
-	`, name, string(status), errMsgPtr, errMsg != "", stampConnect)
-	if err != nil {
+	`, name, string(status), errMsgPtr, errMsg != "", stampConnect); err != nil {
 		return fmt.Errorf("mcp: record status: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("mcp: record status commit: %w", err)
 	}
 	return nil
 }
@@ -335,14 +355,26 @@ func (s *Store) RecordToolsCount(ctx context.Context, name string, count int) er
 	if err := validateName(name); err != nil {
 		return err
 	}
-	_, err := s.pool.Exec(ctx, `
+	// Pool refresh write from the reconciler goroutine: no request tenant
+	// on ctx, so bypass RLS transactionally to stamp the name-keyed row.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("mcp: record tools count begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return fmt.Errorf("mcp: record tools count bypass: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
 		update suite_mcp_servers
 		   set tools_count       = $2,
 		       last_connected_at = now()
 		 where name = $1
-	`, name, count)
-	if err != nil {
+	`, name, count); err != nil {
 		return fmt.Errorf("mcp: record tools count: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("mcp: record tools count commit: %w", err)
 	}
 	return nil
 }

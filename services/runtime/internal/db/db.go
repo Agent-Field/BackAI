@@ -12,7 +12,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 )
 
 // DB is the runtime's PG handle. Wraps pgxpool with helpers.
@@ -47,6 +50,36 @@ func Open(ctx context.Context, cfg Config) (*DB, error) {
 	}
 	if cfg.ConnMaxLifetime > 0 {
 		pcfg.MaxConnLifetime = cfg.ConnMaxLifetime
+	}
+
+	// Bind every connection checkout to the caller's tenant for row-level
+	// security. The runtime serves as a NOBYPASSRLS role, and per-tenant RLS
+	// policies gate on the `app.tenant_id` GUC — but that GUC lives on the PG
+	// session, while the tenant lives only in the Go context. Without this
+	// hook nothing carries the tenant across, so every tenant-scoped write on
+	// the bare pool fails the RLS WITH CHECK and every tenant-scoped read
+	// returns zero rows.
+	//
+	// PrepareConn runs on each acquire with the acquiring query's context, so
+	// we set the GUC deterministically from tenantctx: to the caller's tenant
+	// when present, or to '' otherwise. Setting it on every acquire (rather
+	// than only when a tenant is present) is what prevents a pooled connection
+	// from leaking a previous borrower's tenant binding to the next caller.
+	//
+	// Admin/system paths that need cross-tenant visibility still open their
+	// own transaction and `set local app.bypass_rls = 'on'`, which overrides
+	// this per-transaction and auto-clears on commit. System writers that must
+	// write a specific tenant's row from a background context bind it
+	// explicitly via tenantctx.WithTenant before issuing the write.
+	pcfg.PrepareConn = func(ctx context.Context, conn *pgx.Conn) (bool, error) {
+		if _, err := conn.Exec(ctx,
+			`select set_config('app.tenant_id', $1, false)`,
+			tenantctx.TenantID(ctx)); err != nil {
+			// Destroy the connection and let the query retry on a fresh one;
+			// a connection we can't bind is unsafe to hand out.
+			return false, fmt.Errorf("db: bind tenant context: %w", err)
+		}
+		return true, nil
 	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, pcfg)

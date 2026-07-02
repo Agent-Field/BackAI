@@ -233,6 +233,18 @@ func (s *Server) eraseSuiteUser(ctx context.Context, userID, email string) (map[
 	}
 	defer tx.Rollback(ctx)
 
+	// The erase is a by-user-id sweep across every tenant the user belongs
+	// to (memberships, oauth tokens, and updated_by/actor references span
+	// tenants; the oauth-secrets CTE resolves tenant_id per row). The
+	// /api/v1/admin surface bypasses the tenant resolver, so no single
+	// app.tenant_id can scope these deletes — bind-to-tenant would make the
+	// erase a silent no-op. Bypass force-RLS transactionally (same committed
+	// pattern as server/sql_history.go) so the operator-gated erase can reach
+	// the user's rows in all tenants.
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return nil, err
+	}
+
 	counts := map[string]int64{}
 	exec := func(name, sql string, args ...any) error {
 		tag, err := tx.Exec(ctx, sql, args...)

@@ -22,6 +22,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 )
 
 // Store wraps the SQL surface for billing tables.
@@ -124,6 +126,9 @@ func (s *Store) UpsertCustomer(ctx context.Context, c Customer) (Customer, error
 	if strings.TrimSpace(c.TenantID) == "" {
 		return Customer{}, fmt.Errorf("%w: tenant_id is required", ErrInvalidInput)
 	}
+	// Bind tenant so the RLS force policy permits the upsert on
+	// suite_billing_customers. "" apiKeyID is safe.
+	ctx = tenantctx.WithTenant(ctx, c.TenantID, "")
 	plan := strings.TrimSpace(c.Plan)
 	if plan == "" {
 		plan = "free"
@@ -256,6 +261,9 @@ func (s *Store) IncrementMeter(
 	if strings.TrimSpace(meter) == "" || strings.TrimSpace(tenantID) == "" {
 		return fmt.Errorf("%w: meter and tenant_id are required", ErrInvalidInput)
 	}
+	// Bind tenant so the RLS force policy permits the upsert on
+	// suite_usage_meters. "" apiKeyID is safe.
+	ctx = tenantctx.WithTenant(ctx, tenantID, "")
 	const q = `
 		insert into suite_usage_meters
 			(meter, tenant_id, period_start, period_end, quantity, cost_usd)

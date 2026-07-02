@@ -24,6 +24,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 )
 
 // Store is the suite_skills + suite_skill_attachments accessor.
@@ -45,6 +47,26 @@ func NewStore(pool *pgxpool.Pool, log *slog.Logger) *Store {
 // the REST layer for the 503 SKILLS_NOT_CONFIGURED branch.
 func (s *Store) HasPool() bool {
 	return s != nil && s.pool != nil
+}
+
+// beginBypass opens a transaction and enables the admin RLS escape hatch
+// (app.bypass_rls=on) for its lifetime. The /api/v1/skills surface bypasses
+// the tenant resolver (publicPrefixes) and is gated to operators via
+// operatorGuard, so there is no per-request app.tenant_id GUC to scope by.
+// Cross-tenant reads/by-id ops therefore transact under bypass — mirroring
+// server/sql_history.go — while the tenant-targeted write (Install) binds the
+// row's tenant instead of bypassing. Callers must defer tx.Rollback and Commit
+// on success.
+func (s *Store) beginBypass(ctx context.Context) (pgx.Tx, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		_ = tx.Rollback(ctx)
+		return nil, err
+	}
+	return tx, nil
 }
 
 // List returns the skills visible to the caller, optionally filtered by
@@ -99,7 +121,13 @@ func (s *Store) List(ctx context.Context, f ListFilters) ([]Skill, error) {
 		  from suite_skills` + where + `
 		 order by installed_at desc, id asc`
 
-	rows, err := s.pool.Query(ctx, q, args...)
+	tx, err := s.beginBypass(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("skills: list begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	rows, err := tx.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("skills: list query: %w", err)
 	}
@@ -116,6 +144,10 @@ func (s *Store) List(ctx context.Context, f ListFilters) ([]Skill, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	rows.Close()
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("skills: list commit: %w", err)
+	}
 	return out, nil
 }
 
@@ -128,7 +160,12 @@ func (s *Store) Get(ctx context.Context, id string) (*Skill, error) {
 	if id == "" {
 		return nil, fmt.Errorf("%w: id is required", ErrInvalidInput)
 	}
-	rows, err := s.pool.Query(ctx, `
+	tx, err := s.beginBypass(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("skills: get begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	rows, err := tx.Query(ctx, `
 		select id, name, version, source, description,
 		       harnesses, tags, tenant_id, installed_at
 		  from suite_skills
@@ -143,7 +180,15 @@ func (s *Store) Get(ctx context.Context, id string) (*Skill, error) {
 		}
 		return nil, ErrNotFound
 	}
-	return scanSkill(rows)
+	sk, err := scanSkill(rows)
+	if err != nil {
+		return nil, err
+	}
+	rows.Close()
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("skills: get commit: %w", err)
+	}
+	return sk, nil
 }
 
 // Install persists a Skill row. Idempotent: re-installing the same id
@@ -191,6 +236,17 @@ func (s *Store) Install(ctx context.Context, sk Skill) (*Skill, error) {
 		tenantPtr = &t
 	}
 
+	// BIND: skills bypass the tenant resolver, so bind the row's target
+	// tenant onto app.tenant_id so the RLS WITH CHECK passes for a
+	// tenant-scoped install. "" (shared bundle → tenant_id NULL) is safe to
+	// bind; the policy allows the NULL-tenant row. We never bypass this write:
+	// binding scopes it to the intended tenant rather than the ambient GUC.
+	bindTenant := ""
+	if tenantPtr != nil {
+		bindTenant = *tenantPtr
+	}
+	ctx = tenantctx.WithTenant(ctx, bindTenant, "")
+
 	const q = `
 		insert into suite_skills
 		    (id, name, version, source, description, harnesses, tags, tenant_id)
@@ -231,12 +287,23 @@ func (s *Store) Uninstall(ctx context.Context, id string) error {
 	if id == "" {
 		return fmt.Errorf("%w: id is required", ErrInvalidInput)
 	}
-	tag, err := s.pool.Exec(ctx, `delete from suite_skills where id = $1`, id)
+	// BYPASS: by-id delete with no tenant param, on the operator-gated
+	// cross-tenant skills surface (no app.tenant_id GUC). Bypass so an
+	// operator can uninstall any tenant's (or a shared) skill by id.
+	tx, err := s.beginBypass(ctx)
+	if err != nil {
+		return fmt.Errorf("skills: uninstall begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	tag, err := tx.Exec(ctx, `delete from suite_skills where id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("skills: uninstall: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("skills: uninstall commit: %w", err)
 	}
 	return nil
 }
@@ -254,7 +321,17 @@ func (s *Store) Attach(ctx context.Context, skillID, agent string) error {
 	if agent == "" {
 		return fmt.Errorf("%w: agent is required", ErrInvalidInput)
 	}
-	tag, err := s.pool.Exec(ctx, `
+	// BYPASS: no tenant param; attachments are scoped by the skill row via
+	// the attachment_passthrough policy join, but the skills surface bypasses
+	// the tenant resolver (no app.tenant_id GUC) so the join would only match
+	// shared skills. Bypass so operators can attach onto any skill by id; the
+	// skill_id FK still enforces existence (→ ErrNotFound below).
+	tx, err := s.beginBypass(ctx)
+	if err != nil {
+		return fmt.Errorf("skills: attach begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	tag, err := tx.Exec(ctx, `
 		insert into suite_skill_attachments (skill_id, agent)
 		values ($1, $2)
 		on conflict (skill_id, agent) do nothing
@@ -270,6 +347,9 @@ func (s *Store) Attach(ctx context.Context, skillID, agent string) error {
 		return fmt.Errorf("skills: attach: %w", err)
 	}
 	_ = tag
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("skills: attach commit: %w", err)
+	}
 	return nil
 }
 
@@ -286,7 +366,14 @@ func (s *Store) Detach(ctx context.Context, skillID, agent string) error {
 	if agent == "" {
 		return fmt.Errorf("%w: agent is required", ErrInvalidInput)
 	}
-	tag, err := s.pool.Exec(ctx, `
+	// BYPASS: same rationale as Attach — no tenant param, cross-tenant
+	// operator surface with no app.tenant_id GUC, scoped by skill_id.
+	tx, err := s.beginBypass(ctx)
+	if err != nil {
+		return fmt.Errorf("skills: detach begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	tag, err := tx.Exec(ctx, `
 		delete from suite_skill_attachments
 		 where skill_id = $1 and agent = $2
 	`, skillID, agent)
@@ -295,6 +382,9 @@ func (s *Store) Detach(ctx context.Context, skillID, agent string) error {
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("skills: detach commit: %w", err)
 	}
 	return nil
 }
@@ -308,7 +398,15 @@ func (s *Store) ListAttachments(ctx context.Context, skillID string) ([]Attachme
 	if skillID == "" {
 		return nil, fmt.Errorf("%w: skill_id is required", ErrInvalidInput)
 	}
-	rows, err := s.pool.Query(ctx, `
+	// BYPASS: by-skill_id read on the cross-tenant operator surface (no
+	// app.tenant_id GUC); the passthrough join would otherwise only match
+	// shared skills. Bypass so operators can list a skill's attachments by id.
+	tx, err := s.beginBypass(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("skills: list attachments begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	rows, err := tx.Query(ctx, `
 		select skill_id, agent, attached_at
 		  from suite_skill_attachments
 		 where skill_id = $1
@@ -335,6 +433,10 @@ func (s *Store) ListAttachments(ctx context.Context, skillID string) ([]Attachme
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	rows.Close()
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("skills: list attachments commit: %w", err)
 	}
 	return out, nil
 }

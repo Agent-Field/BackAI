@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/secrets"
+	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 )
 
 // refreshSkew is the window before expires_at at which Manager.Token
@@ -98,6 +99,10 @@ func (m *Manager) StoreTokens(
 	if ts.AccessToken == "" {
 		return fmt.Errorf("oauth: cannot store empty access token")
 	}
+
+	// Bind tenant so the RLS force policy permits the upsert on
+	// suite_oauth_tokens. "" apiKeyID is safe.
+	ctx = tenantctx.WithTenant(ctx, tenantID, "")
 
 	accessRef := vaultKey(provider, userID, false)
 	if _, err := m.vault.Put(ctx, tenantID, accessRef, secrets.PutInput{
@@ -403,6 +408,9 @@ func (m *Manager) Disconnect(
 	if userID == "" {
 		return ErrUserRequired
 	}
+	// Bind tenant so the RLS force policy permits the load + soft-delete
+	// update on suite_oauth_tokens. "" apiKeyID is safe.
+	ctx = tenantctx.WithTenant(ctx, tenantID, "")
 	row, err := m.loadRow(ctx, tenantID, userID, provider)
 	if err != nil {
 		return err

@@ -16,6 +16,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 )
 
 // RedactedMarker is the canonical placeholder string used wherever a
@@ -98,6 +100,7 @@ func validateKey(key string) error {
 // byte slice is the only place the plaintext exists outside the GCM
 // open call; callers must NOT log it.
 func (v *Vault) Get(ctx context.Context, tenantID, key string) ([]byte, error) {
+	ctx = tenantctx.WithTenant(ctx, tenantID, "")
 	ctx, span := v.tracer.Start(ctx, "secrets.get",
 		trace.WithAttributes(
 			attribute.String("secret.key", key),
@@ -151,6 +154,7 @@ func (v *Vault) Get(ctx context.Context, tenantID, key string) ([]byte, error) {
 // Put inserts or updates a secret. The ON CONFLICT path overwrites the
 // ciphertext and bumps updated_at; created_at is preserved.
 func (v *Vault) Put(ctx context.Context, tenantID, key string, in PutInput) (SecretMetadata, error) {
+	ctx = tenantctx.WithTenant(ctx, tenantID, "")
 	ctx, span := v.tracer.Start(ctx, "secrets.put",
 		trace.WithAttributes(
 			attribute.String("secret.key", key),
@@ -226,6 +230,7 @@ func (v *Vault) Put(ctx context.Context, tenantID, key string, in PutInput) (Sec
 
 // Delete removes a secret. Returns ErrSecretNotFound if no row matched.
 func (v *Vault) Delete(ctx context.Context, tenantID, key string) error {
+	ctx = tenantctx.WithTenant(ctx, tenantID, "")
 	ctx, span := v.tracer.Start(ctx, "secrets.delete",
 		trace.WithAttributes(
 			attribute.String("secret.key", key),
@@ -265,6 +270,7 @@ func (v *Vault) Delete(ctx context.Context, tenantID, key string) error {
 // List returns metadata for every secret stored under tenantID. Values
 // are NEVER materialised by this call.
 func (v *Vault) List(ctx context.Context, tenantID string) ([]SecretMetadata, error) {
+	ctx = tenantctx.WithTenant(ctx, tenantID, "")
 	ctx, span := v.tracer.Start(ctx, "secrets.list",
 		trace.WithAttributes(attribute.String("secret.tenant_id", tenantID)),
 	)
@@ -311,6 +317,7 @@ func (v *Vault) List(ctx context.Context, tenantID string) ([]SecretMetadata, er
 // GetMetadata returns metadata for a single secret without decrypting
 // the value. Returns ErrSecretNotFound if the row is missing.
 func (v *Vault) GetMetadata(ctx context.Context, tenantID, key string) (SecretMetadata, error) {
+	ctx = tenantctx.WithTenant(ctx, tenantID, "")
 	ctx, span := v.tracer.Start(ctx, "secrets.get_metadata",
 		trace.WithAttributes(
 			attribute.String("secret.key", key),
@@ -355,6 +362,7 @@ func (v *Vault) GetMetadata(ctx context.Context, tenantID, key string) (SecretMe
 // secret must already exist (returns ErrSecretNotFound otherwise) so
 // rotation can't accidentally create new entries.
 func (v *Vault) Rotate(ctx context.Context, tenantID, key, newValue string) (SecretMetadata, error) {
+	ctx = tenantctx.WithTenant(ctx, tenantID, "")
 	ctx, span := v.tracer.Start(ctx, "secrets.rotate",
 		trace.WithAttributes(
 			attribute.String("secret.key", key),
