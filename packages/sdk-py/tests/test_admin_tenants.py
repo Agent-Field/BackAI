@@ -84,9 +84,7 @@ async def test_get_returns_tenant_detail() -> None:
         },
     }
     with respx.mock(assert_all_called=True) as router:
-        router.get(f"{BASE}/admin/tenants/t-1").mock(
-            return_value=httpx.Response(200, json=detail)
-        )
+        router.get(f"{BASE}/admin/tenants/t-1").mock(return_value=httpx.Response(200, json=detail))
         result = await tenants.get("t-1")
     assert result.tenant.id == "t-1"
     assert result.members[0].user.email == "owner@acme.co"
@@ -115,9 +113,7 @@ async def test_create_accepts_pydantic_input() -> None:
         route = router.post(f"{BASE}/admin/tenants").mock(
             return_value=httpx.Response(201, json=_tenant_row(plan="pro"))
         )
-        result = await tenants.create(
-            CreateTenantInput(slug="acme", name="Acme", plan="pro")
-        )
+        result = await tenants.create(CreateTenantInput(slug="acme", name="Acme", plan="pro"))
     assert result.plan == "pro"
     body = route.calls.last.request.read().decode()
     assert "pro" in body
@@ -128,9 +124,7 @@ async def test_update_patches_tenant() -> None:
         route = router.patch(f"{BASE}/admin/tenants/t-1").mock(
             return_value=httpx.Response(200, json=_tenant_row(name="Acme Renamed"))
         )
-        result = await tenants.update(
-            "t-1", UpdateTenantInput(name="Acme Renamed")
-        )
+        result = await tenants.update("t-1", UpdateTenantInput(name="Acme Renamed"))
     assert result.name == "Acme Renamed"
     body = route.calls.last.request.read().decode()
     # exclude_none should drop unset fields.
@@ -156,9 +150,7 @@ async def test_mt_disabled_surfaces_as_af_stack_error() -> None:
     """
     body = {"error": {"code": "MT_DISABLED", "message": "multi-tenancy module not enabled"}}
     with respx.mock(assert_all_called=True) as router:
-        router.get(f"{BASE}/admin/tenants").mock(
-            return_value=httpx.Response(503, json=body)
-        )
+        router.get(f"{BASE}/admin/tenants").mock(return_value=httpx.Response(503, json=body))
         with pytest.raises(AFStackError) as exc:
             await tenants.list()
     assert exc.value.code == "MT_DISABLED"

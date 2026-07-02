@@ -84,9 +84,7 @@ def _as_dict(value: Any) -> dict[str, Any]:
         return value.model_dump(exclude_none=True)
     if isinstance(value, dict):
         return {k: v for k, v in value.items() if v is not None}
-    raise TypeError(
-        f"input must be IssueAPIKeyInput or dict, got {type(value).__name__}"
-    )
+    raise TypeError(f"input must be IssueAPIKeyInput or dict, got {type(value).__name__}")
 
 
 __all__ = ["issue", "list", "revoke"]

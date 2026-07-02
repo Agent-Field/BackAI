@@ -79,9 +79,7 @@ async def install(
     """
     if not isinstance(source, str) or not source:
         raise ValueError("`source` must be a non-empty string")
-    payload = InstallSkillInput(source=source, tenant_id=tenant_id).model_dump(
-        exclude_none=True
-    )
+    payload = InstallSkillInput(source=source, tenant_id=tenant_id).model_dump(exclude_none=True)
     body = await _http.request_json("POST", "/skills", json=payload)
     return Skill.model_validate(body or {})
 
@@ -90,9 +88,7 @@ async def uninstall(skill_id: str) -> None:
     """Uninstall a skill by id. Attachments cascade-delete server-side."""
     if not isinstance(skill_id, str) or not skill_id:
         raise ValueError("`skill_id` must be a non-empty string")
-    await _http.request_json(
-        "DELETE", f"/skills/{quote(skill_id, safe='')}"
-    )
+    await _http.request_json("DELETE", f"/skills/{quote(skill_id, safe='')}")
 
 
 async def attach(skill_id: str, agent: str) -> None:
@@ -105,9 +101,7 @@ async def attach(skill_id: str, agent: str) -> None:
         raise ValueError("`skill_id` must be a non-empty string")
     if not isinstance(agent, str) or not agent:
         raise ValueError("`agent` must be a non-empty string")
-    payload = AttachSkillInput(skill_id=skill_id, agent=agent).model_dump(
-        exclude_none=True
-    )
+    payload = AttachSkillInput(skill_id=skill_id, agent=agent).model_dump(exclude_none=True)
     await _http.request_json("POST", "/skills/attach", json=payload)
 
 

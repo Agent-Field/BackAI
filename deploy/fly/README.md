@@ -93,9 +93,10 @@ The staging script requires `FLY_API_TOKEN`,
 
 ## Common pitfalls
 
-- `release_command` runs `af-stack migrate up` before each deploy. If your
-  Postgres is unreachable from the Fly region, this hangs the deploy. Fix
-  by deploying with `--strategy=immediate` once, then re-enabling.
+- Migrations run automatically at runtime boot (there is no `af-stack migrate`
+  subcommand and no `release_command`). If Postgres is unreachable from the Fly
+  region, the runtime fails its health check on boot rather than in a release
+  phase — check the runtime logs and confirm the DB is reachable from the region.
 - The dashboard CANNOT reach the runtime over the public Fly URL from
   inside `RUNTIME_URL` — use `<runtime-app-name>.flycast` (the 6PN private
   hostname). Save egress bandwidth and lower latency.

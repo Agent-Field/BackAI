@@ -51,9 +51,7 @@ async def test_get_url_encodes_key() -> None:
     # (e.g. slashes for namespaced names).
     with respx.mock(assert_all_called=True) as router:
         route = router.post(f"{BASE}/secrets/team%2Fdeploy-token/reveal").mock(
-            return_value=httpx.Response(
-                200, json={"key": "team/deploy-token", "value": "v"}
-            )
+            return_value=httpx.Response(200, json={"key": "team/deploy-token", "value": "v"})
         )
         value = await secrets.get("team/deploy-token")
     assert value == "v"
@@ -134,9 +132,7 @@ async def test_list_returns_metadata_rows() -> None:
         ]
     }
     with respx.mock(assert_all_called=True) as router:
-        router.get(f"{BASE}/secrets").mock(
-            return_value=httpx.Response(200, json=payload)
-        )
+        router.get(f"{BASE}/secrets").mock(return_value=httpx.Response(200, json=payload))
         result = await secrets.list()
     assert isinstance(result, SecretList)
     assert [row.key for row in result.secrets] == ["OPENAI_API_KEY", "STRIPE_API_KEY"]
@@ -161,9 +157,7 @@ async def test_put_sends_value_and_returns_metadata() -> None:
         route = router.put(f"{BASE}/secrets/NEW_KEY").mock(
             return_value=httpx.Response(200, json=response)
         )
-        meta = await secrets.put(
-            "NEW_KEY", "plaintext-value", description="test"
-        )
+        meta = await secrets.put("NEW_KEY", "plaintext-value", description="test")
     assert isinstance(meta, SecretMetadata)
     body = json.loads(route.calls.last.request.read().decode())
     assert body["value"] == "plaintext-value"

@@ -7,8 +7,7 @@ and empty envelopes for other PromQL.
 
 import os
 import time
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -20,7 +19,7 @@ START_TIME = time.time()
 
 class QueryRequest(BaseModel):
     query: str
-    time: Optional[str] = None
+    time: str | None = None
 
 
 class RangeRequest(BaseModel):
@@ -31,10 +30,10 @@ class RangeRequest(BaseModel):
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-async def verify_token(authorization: Optional[str] = Header(None)):
+async def verify_token(authorization: str | None = Header(None)):
     if not REQUIRE_AUTH:
         return
     if not authorization or not authorization.startswith("Bearer "):
@@ -48,18 +47,20 @@ app = FastAPI(title="BackAI Metrics v1 Echo Adapter")
 
 @app.get("/health")
 @app.get("/healthz")
-async def healthz(authorization: Optional[str] = Header(None)):
+async def healthz(authorization: str | None = Header(None)):
     await verify_token(authorization)
     return {
         "status": "healthy",
-        "started_at": datetime.fromtimestamp(START_TIME, tz=timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        "started_at": datetime.fromtimestamp(START_TIME, tz=UTC)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z"),
         "uptime_seconds": int(time.time() - START_TIME),
         "dependencies": [],
     }
 
 
 @app.get("/v1/capabilities")
-async def capabilities(authorization: Optional[str] = Header(None)):
+async def capabilities(authorization: str | None = Header(None)):
     await verify_token(authorization)
     return {
         "name": "metrics-echo",
@@ -80,24 +81,26 @@ async def capabilities(authorization: Optional[str] = Header(None)):
 
 
 @app.get("/v1/info")
-async def info(authorization: Optional[str] = Header(None)):
+async def info(authorization: str | None = Header(None)):
     await verify_token(authorization)
-    return {"docs": "https://github.com/Agent-Field/backai/blob/main/docs/adapters/protocols/metrics-v1.md"}
+    return {
+        "docs": "https://github.com/Agent-Field/backai/blob/main/docs/adapters/protocols/metrics-v1.md"
+    }
 
 
 @app.post("/v1/metrics/query")
-async def post_query_metrics(body: QueryRequest, authorization: Optional[str] = Header(None)):
+async def post_query_metrics(body: QueryRequest, authorization: str | None = Header(None)):
     await verify_token(authorization)
     return instant_envelope(body.query, body.time)
 
 
 @app.post("/v1/metrics/query_range")
-async def post_range_metrics(body: RangeRequest, authorization: Optional[str] = Header(None)):
+async def post_range_metrics(body: RangeRequest, authorization: str | None = Header(None)):
     await verify_token(authorization)
     return range_envelope(body.query, body.from_, body.to)
 
 
-def instant_envelope(query: str, at: Optional[str]):
+def instant_envelope(query: str, at: str | None):
     if query.strip() != "up{}":
         return {"samples": []}
     return {

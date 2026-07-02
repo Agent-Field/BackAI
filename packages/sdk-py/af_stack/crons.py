@@ -83,9 +83,7 @@ async def list(  # noqa: A001 — mirrors the JS `crons.list()` ergonomics
     params: dict[str, Any] = {}
     if tenant is not None:
         params["tenant"] = tenant
-    body = await _http.request_json(
-        "GET", "/crons", params=params or None
-    )
+    body = await _http.request_json("GET", "/crons", params=params or None)
     return CronList.model_validate(body or {"crons": []})
 
 
@@ -151,9 +149,7 @@ async def delete(id: str) -> bool:  # noqa: A002
     """Delete a cron schedule by id. Returns ``True`` on success."""
     if not id:
         raise ValueError("cron id must be a non-empty string")
-    body = await _http.request_json(
-        "DELETE", f"/crons/{quote(id, safe='')}"
-    )
+    body = await _http.request_json("DELETE", f"/crons/{quote(id, safe='')}")
     if not isinstance(body, dict):
         return True
     return bool(body.get("deleted", True))

@@ -7,8 +7,7 @@ search and a stable trace detail for /v1/traces/trace_echo.
 
 import os
 import time
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
@@ -20,10 +19,10 @@ START_TIME = time.time()
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-async def verify_token(authorization: Optional[str] = Header(None)):
+async def verify_token(authorization: str | None = Header(None)):
     if not REQUIRE_AUTH:
         return
     if not authorization or not authorization.startswith("Bearer "):
@@ -33,14 +32,14 @@ async def verify_token(authorization: Optional[str] = Header(None)):
 
 
 class SearchFilter(BaseModel):
-    service: Optional[str] = None
-    operation: Optional[str] = None
+    service: str | None = None
+    operation: str | None = None
     tag: dict[str, str] = Field(default_factory=dict)
-    min_duration: Optional[str] = None
-    max_duration: Optional[str] = None
-    status: Optional[str] = None
-    from_: Optional[str] = Field(default=None, alias="from")
-    to: Optional[str] = None
+    min_duration: str | None = None
+    max_duration: str | None = None
+    status: str | None = None
+    from_: str | None = Field(default=None, alias="from")
+    to: str | None = None
     limit: int = 20
 
 
@@ -77,18 +76,20 @@ app = FastAPI(title="BackAI Traces v1 Echo Adapter")
 
 @app.get("/health")
 @app.get("/healthz")
-async def healthz(authorization: Optional[str] = Header(None)):
+async def healthz(authorization: str | None = Header(None)):
     await verify_token(authorization)
     return {
         "status": "healthy",
-        "started_at": datetime.fromtimestamp(START_TIME, tz=timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        "started_at": datetime.fromtimestamp(START_TIME, tz=UTC)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z"),
         "uptime_seconds": int(time.time() - START_TIME),
         "dependencies": [],
     }
 
 
 @app.get("/v1/capabilities")
-async def capabilities(authorization: Optional[str] = Header(None)):
+async def capabilities(authorization: str | None = Header(None)):
     await verify_token(authorization)
     return {
         "name": "traces-echo",
@@ -108,13 +109,15 @@ async def capabilities(authorization: Optional[str] = Header(None)):
 
 
 @app.get("/v1/info")
-async def info(authorization: Optional[str] = Header(None)):
+async def info(authorization: str | None = Header(None)):
     await verify_token(authorization)
-    return {"docs": "https://github.com/Agent-Field/backai/blob/main/docs/adapters/protocols/traces-v1.md"}
+    return {
+        "docs": "https://github.com/Agent-Field/backai/blob/main/docs/adapters/protocols/traces-v1.md"
+    }
 
 
 @app.post("/v1/traces/search")
-async def search_traces(filter: SearchFilter, authorization: Optional[str] = Header(None)):
+async def search_traces(filter: SearchFilter, authorization: str | None = Header(None)):
     await verify_token(authorization)
     service = filter.service or "traces-echo"
     operation = filter.operation or "synthetic trace"
@@ -128,7 +131,7 @@ async def search_traces(filter: SearchFilter, authorization: Optional[str] = Hea
 
 
 @app.get("/v1/traces/{trace_id}")
-async def get_trace(trace_id: str, authorization: Optional[str] = Header(None)):
+async def get_trace(trace_id: str, authorization: str | None = Header(None)):
     await verify_token(authorization)
     if trace_id != "trace_echo":
         return JSONResponse(

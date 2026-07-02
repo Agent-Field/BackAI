@@ -8,7 +8,7 @@ Mirrors the canonical contract in
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -56,9 +56,7 @@ async def test_events_returns_parsed_list() -> None:
         "has_more": True,
     }
     with respx.mock(assert_all_called=True) as router:
-        router.get(f"{BASE}/cost/events").mock(
-            return_value=httpx.Response(200, json=body)
-        )
+        router.get(f"{BASE}/cost/events").mock(return_value=httpx.Response(200, json=body))
         result = await cost.events()
     assert result.total == 42
     assert result.has_more is True
@@ -69,9 +67,7 @@ async def test_events_returns_parsed_list() -> None:
 async def test_events_sends_filters_as_query_params() -> None:
     with respx.mock(assert_all_called=True) as router:
         route = router.get(f"{BASE}/cost/events").mock(
-            return_value=httpx.Response(
-                200, json={"events": [], "total": 0, "has_more": False}
-            )
+            return_value=httpx.Response(200, json={"events": [], "total": 0, "has_more": False})
         )
         await cost.events(
             tenant="t-acme",
@@ -87,13 +83,11 @@ async def test_events_sends_filters_as_query_params() -> None:
 
 
 async def test_events_serialises_datetime_filters() -> None:
-    from_dt = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    from_dt = datetime(2026, 6, 1, tzinfo=UTC)
     to_dt = datetime(2026, 6, 30)  # naive — should be treated as UTC
     with respx.mock(assert_all_called=True) as router:
         route = router.get(f"{BASE}/cost/events").mock(
-            return_value=httpx.Response(
-                200, json={"events": [], "total": 0, "has_more": False}
-            )
+            return_value=httpx.Response(200, json={"events": [], "total": 0, "has_more": False})
         )
         await cost.events(from_=from_dt, to=to_dt)
     params = route.calls.last.request.url.params

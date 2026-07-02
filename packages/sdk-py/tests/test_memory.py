@@ -77,9 +77,7 @@ async def test_get_omits_scope_id_when_not_supplied() -> None:
 async def test_put_forwards_embed_metadata_and_scope_id() -> None:
     with respx.mock(assert_all_called=True) as router:
         route = router.put(f"{BASE}/memory").mock(
-            return_value=httpx.Response(
-                200, json=_entry_row(has_embedding=True)
-            )
+            return_value=httpx.Response(200, json=_entry_row(has_embedding=True))
         )
         entry = await memory.put(
             "tenant",
@@ -137,9 +135,7 @@ async def test_list_forwards_filters_and_parses_paginated_response() -> None:
         "has_more": True,
     }
     with respx.mock(assert_all_called=True) as router:
-        route = router.get(f"{BASE}/memory").mock(
-            return_value=httpx.Response(200, json=body)
-        )
+        route = router.get(f"{BASE}/memory").mock(return_value=httpx.Response(200, json=body))
         result = await memory.list(
             scope="tenant",
             scope_id="t-acme",
@@ -231,9 +227,7 @@ async def test_get_raises_on_structured_error() -> None:
         }
     }
     with respx.mock(assert_all_called=True) as router:
-        router.get(f"{BASE}/memory/get").mock(
-            return_value=httpx.Response(404, json=error_body)
-        )
+        router.get(f"{BASE}/memory/get").mock(return_value=httpx.Response(404, json=error_body))
         with pytest.raises(AFStackError) as exc:
             await memory.get("tenant", "missing", "t-acme")
     assert exc.value.code == "MEMORY_NOT_FOUND"

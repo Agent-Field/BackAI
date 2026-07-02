@@ -111,7 +111,7 @@ def _probe_version(binary: str) -> str | None:
     gate on ``ready`` status.
     """
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603 - fixed argv, no shell, sample agent
             [binary, "--version"],
             capture_output=True,
             text=True,
@@ -151,9 +151,7 @@ def _build_capabilities() -> dict[str, Any]:
             )
             continue
         version = _probe_version(binary_path)
-        missing_env = [
-            name for name in required_env if not (os.environ.get(name) or "").strip()
-        ]
+        missing_env = [name for name in required_env if not (os.environ.get(name) or "").strip()]
         if missing_env:
             harnesses.append(
                 {
@@ -259,6 +257,7 @@ class Summary(BaseModel):
 
 
 if _MODEL is not None:
+
     @app.reasoner(tags=["text", "demo"])
     async def summarize(payload: dict[str, Any]) -> dict[str, Any]:
         """Summarize the given text. Demonstrates `app.ai()` with structured output.
@@ -271,8 +270,7 @@ if _MODEL is not None:
             return {"error": "missing 'text' in input"}
         result = await app.ai(
             system=(
-                "Summarize the user's text in 1-2 sentences for the TLDR, "
-                "then list 3-5 key points."
+                "Summarize the user's text in 1-2 sentences for the TLDR, then list 3-5 key points."
             ),
             user=text,
             schema=Summary,

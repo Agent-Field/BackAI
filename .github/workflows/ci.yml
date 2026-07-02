@@ -1,8 +1,11 @@
 name: CI
 
-# CI is currently MANUAL-ONLY to conserve resources during early build.
-# To re-enable automatic CI on push/PR, uncomment the `push` and
-# `pull_request` triggers below.
+# CI runs automatically on pushes to main and on PRs targeting main.
+# The fast gates (build, lint, unit tests, compose/deploy config validation,
+# docs) run on every PR. The heavy/real-infra deploy smokes (helm-kind,
+# fly-staging, prod-compose) are OPT-IN: they only run on manual dispatch or on
+# a PR carrying the `deploy-smoke` label, so ordinary PRs never spin up clusters,
+# deploy to Fly, or require the full prod secret set.
 on:
   workflow_dispatch:
     inputs:
@@ -10,10 +13,10 @@ on:
         description: "Run the full Helm kind deploy smoke test"
         required: false
         default: "true"
-  # push:
-  #   branches: [main]
-  # pull_request:
-  #   branches: [main]
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
@@ -83,17 +86,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # only-new-issues needs the base ref to diff against.
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          # Match the toolchain go.mod requires (go 1.25.x). Pinning an older
+          # version forced a GOTOOLCHAIN auto-download whose tool set was
+          # missing `covdata`, breaking `go test -cover` on no-test packages.
+          go-version-file: go.mod
           cache: true
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
-          args: --timeout=5m
       - name: go vet
-        run: go vet ./... || true
+        run: go vet ./...
+      - name: go build
+        run: go build ./...
+      # golangci-lint v2 (S7): the config was migrated from the v1 schema so it
+      # analyzes the go 1.25 toolchain cleanly again. It is restored as a
+      # blocking gate in only-new-issues mode — the ~106-issue pre-existing
+      # backlog is not gated, but any NEW issue a PR introduces fails the build,
+      # so the debt burns down as files are touched. Run ENFORCE via
+      # `golangci-lint run` locally to see the full backlog.
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          # v2.5.0's release binary is built with go1.25.1; older v2 binaries
+          # (e.g. v2.1.6, built with go1.24) refuse a config targeting go 1.25.
+          version: v2.5.0
+          only-new-issues: true
 
   test-go:
     name: Test (Go)
@@ -104,7 +123,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          # Match the toolchain go.mod requires (go 1.25.x). Pinning an older
+          # version forced a GOTOOLCHAIN auto-download whose tool set was
+          # missing `covdata`, breaking `go test -cover` on no-test packages.
+          go-version-file: go.mod
           cache: true
       - run: go test ./... -race -cover
 
@@ -117,7 +139,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
       - run: uv python install 3.11
-      - run: uv tool install ruff
+      # Pin ruff: its formatter output drifts across releases, so an unpinned
+      # `ruff` would fail `format --check` whenever a new version ships. The
+      # baseline is formatted with this exact version.
+      - run: uv tool install ruff==0.15.20
       - run: ruff check .
       - run: ruff format --check .
 
@@ -202,7 +227,8 @@ jobs:
   helm-kind-smoke:
     name: Helm kind smoke
     needs: changes
-    if: needs.changes.outputs.deploy == 'true' && (github.event_name != 'workflow_dispatch' || github.event.inputs.run_helm_kind_smoke == 'true')
+    # Opt-in only: manual dispatch (with the input set) or a `deploy-smoke`-labeled PR.
+    if: needs.changes.outputs.deploy == 'true' && ((github.event_name == 'workflow_dispatch' && github.event.inputs.run_helm_kind_smoke == 'true') || contains(github.event.pull_request.labels.*.name, 'deploy-smoke'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -218,7 +244,9 @@ jobs:
   fly-staging-smoke:
     name: Fly staging smoke
     needs: changes
-    if: needs.changes.outputs.deploy == 'true'
+    # Opt-in only: deploys to REAL Fly infra (needs FLY_API_TOKEN), so never on
+    # an ordinary PR. Manual dispatch or a `deploy-smoke`-labeled PR.
+    if: needs.changes.outputs.deploy == 'true' && (github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'deploy-smoke'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -236,7 +264,9 @@ jobs:
   prod-compose-smoke:
     name: Production compose smoke
     needs: changes
-    if: needs.changes.outputs.deploy == 'true'
+    # Opt-in only: needs the full prod secret set; absent secrets => guaranteed
+    # red on ordinary PRs. Manual dispatch or a `deploy-smoke`-labeled PR.
+    if: needs.changes.outputs.deploy == 'true' && (github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'deploy-smoke'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -281,7 +311,8 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # Astro 5 requires Node >=22.12.0; the docs-site build fails on 20.
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: docs-site/package-lock.json
       - name: Install

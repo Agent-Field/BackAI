@@ -22,9 +22,8 @@ import os
 from typing import Any
 
 import httpx
-from pydantic import BaseModel, Field
-
 from main import app
+from pydantic import BaseModel, Field
 
 
 class TagSuggestions(BaseModel):
@@ -126,8 +125,7 @@ async def suggest_tags(payload: dict[str, Any]) -> dict[str, Any]:
         system=(
             "Propose up to 5 short tags for the user's note. Tags must be "
             "lowercase, single token (kebab-or-snake-case allowed), and "
-            "describe the topic or domain. Never invent personal names."
-            + history_hint
+            "describe the topic or domain. Never invent personal names." + history_hint
         ),
         user=body,
         schema=TagSuggestions,

@@ -16,9 +16,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from pydantic import BaseModel, Field
-
 from main import app
+from pydantic import BaseModel, Field
 
 # Matches Markdown unchecked task lines, capturing the task text.
 #   "- [ ] write the README"
@@ -70,17 +69,13 @@ async def todo_completer(payload: dict[str, Any]) -> dict[str, Any]:
             "imperative voice). Do not add tasks. Preserve the input "
             "order and count exactly."
         ),
-        user=(
-            "Here are the unfinished tasks:\n\n"
-            f"{numbered}\n\n"
-            "Return one completion per task."
-        ),
+        user=(f"Here are the unfinished tasks:\n\n{numbered}\n\nReturn one completion per task."),
         schema=CompletionList,
     )
 
     # Defensive zip: trim model output to the input length so a bad
     # response never produces more rows than the user actually had.
     pairs: list[dict[str, str]] = []
-    for original, comp in zip(todos, result.completions):
+    for original, comp in zip(todos, result.completions, strict=False):
         pairs.append({"line": original, "suggestion": comp.suggestion})
     return {"completions": pairs}

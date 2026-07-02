@@ -7,8 +7,9 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# git is required for clone/commit/push; ca-certificates for the GitHub API.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates && \
+        ca-certificates git && \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

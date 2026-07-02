@@ -13,6 +13,7 @@ import (
 
 	"github.com/Agent-Field/backai/services/runtime/internal/observability/logs"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
+	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
 )
 
 type logLineWire struct {
@@ -38,7 +39,10 @@ type logsResponse struct {
 // registerLogsRoutes wires both the historical /api/v1/logs endpoint and the
 // Block 3 admin logs adapter endpoints.
 func (s *Server) registerLogsRoutes() {
-	s.mux.HandleFunc("GET /api/v1/logs", s.handleListLogsCompat)
+	// S1b: /api/v1/logs bypasses the tenant resolver (publicPrefixes) and reads
+	// an attacker-controlled ?tenant= filter — gate it to operators. The
+	// /admin/logs/* variants are already operator surfaces.
+	s.mux.HandleFunc("GET /api/v1/logs", s.operatorGuard(rbac.ResourceAdminLogs, s.handleListLogsCompat))
 	s.mux.HandleFunc("GET /api/v1/admin/logs", s.handleAdminListLogs)
 	s.mux.HandleFunc("GET /api/v1/admin/logs/tail", s.handleAdminTailLogs)
 	s.mux.HandleFunc("GET /api/v1/admin/logs/capabilities", s.handleAdminLogCapabilities)

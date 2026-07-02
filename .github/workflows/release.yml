@@ -1,0 +1,227 @@
+name: Release
+
+# Auto-release on merge to main: when the CI workflow succeeds on a push to
+# main, compute the next semantic version from the merged commits, build and
+# publish the container images, smoke-boot the runtime image against a real
+# Postgres so a broken build can't ship, then cut the GitHub Release with
+# cross-compiled CLI binaries and move the `latest` image tag.
+#
+# Manual runs are supported via workflow_dispatch (e.g. to re-cut after a
+# transient failure). Use dry_run to compute the version without publishing.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Compute the version but do not publish"
+        type: boolean
+        default: false
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Compute version
+    # Only release after CI passed on a push to main (or a manual dispatch).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.compute.outputs.should_release }}
+      version: ${{ steps.compute.outputs.version }}
+      tag: ${{ steps.compute.outputs.tag }}
+      prerelease: ${{ steps.compute.outputs.prerelease }}
+      sha: ${{ steps.sha.outputs.sha }}
+    steps:
+      - id: sha
+        run: echo "sha=${{ github.event.workflow_run.head_sha || github.sha }}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.sha.outputs.sha }}
+          fetch-depth: 0
+      - id: compute
+        name: Next version from conventional commits
+        run: |
+          set -euo pipefail
+          # Base the next version on the latest STABLE tag (vX.Y.Z). Pre-release
+          # tags like v0.1.0-rc.1 are deliberately ignored so the first real
+          # auto-release starts a clean stable series.
+          last_stable="$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)"
+          if [ -n "$last_stable" ]; then
+            base="${last_stable#v}"
+            range="${last_stable}..HEAD"
+          else
+            base="0.0.0"
+            range="HEAD"
+          fi
+          IFS=. read -r MA MI PA <<< "$base"
+
+          subjects="$(git log --format='%s' $range)"
+          bodies="$(git log --format='%B' $range)"
+
+          bump=none
+          # `type!:` or a `BREAKING CHANGE` footer => major.
+          if printf '%s\n' "$subjects" | grep -qE '^[a-zA-Z]+(\([^)]*\))?!:' \
+             || printf '%s\n' "$bodies" | grep -qE 'BREAKING[ -]CHANGE'; then
+            bump=major
+          elif printf '%s\n' "$subjects" | grep -qE '^feat(\([^)]*\))?:'; then
+            bump=minor
+          elif printf '%s\n' "$subjects" | grep -qE '^fix(\([^)]*\))?:'; then
+            bump=patch
+          fi
+
+          echo "base=$base range=$range bump=$bump"
+          case "$bump" in
+            major) MA=$((MA+1)); MI=0; PA=0 ;;
+            minor) MI=$((MI+1)); PA=0 ;;
+            patch) PA=$((PA+1)) ;;
+            none)
+              echo "No feat/fix/breaking commits since ${last_stable:-<start>}; nothing to release."
+              echo "should_release=false" >> "$GITHUB_OUTPUT"
+              exit 0 ;;
+          esac
+          version="${MA}.${MI}.${PA}"
+          echo "Releasing v${version}"
+          {
+            echo "should_release=true"
+            echo "version=${version}"
+            echo "tag=v${version}"
+            echo "prerelease=false"
+          } >> "$GITHUB_OUTPUT"
+
+  images:
+    name: Build & push images
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - name: runtime
+            dockerfile: services/runtime/Dockerfile
+          - name: dashboard
+            dockerfile: apps/dashboard/Dockerfile
+          - name: customer-app
+            dockerfile: apps/customer-app/Dockerfile
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push ${{ matrix.name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ghcr.io/agent-field/af-stack-${{ matrix.name }}:${{ needs.prepare.outputs.version }}
+          build-args: |
+            VERSION=${{ needs.prepare.outputs.version }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          provenance: false
+
+  smoke:
+    name: Smoke — boot runtime image
+    needs: [prepare, images]
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Boot the freshly built runtime image and assert /ready
+        env:
+          AF_STACK_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.release-smoke.yml up -d
+          echo "Waiting for runtime /ready (migrations must apply on the built image)..."
+          ok=""
+          for _ in $(seq 1 60); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/ready || true)"
+            if [ "$code" = "200" ]; then echo "runtime /ready = 200"; ok=1; break; fi
+            sleep 3
+          done
+          if [ "$ok" != "1" ]; then
+            echo "::error::runtime image did not become ready — refusing to publish the release"
+            docker compose -f docker-compose.release-smoke.yml logs runtime | tail -80
+            exit 1
+          fi
+          curl -fsS http://localhost:8080/health >/dev/null && echo "health OK"
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.release-smoke.yml down -v || true
+
+  publish:
+    name: Tag, release & move latest
+    needs: [prepare, images, smoke]
+    if: >-
+      needs.prepare.outputs.should_release == 'true' &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.dry_run != 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+      - name: Create and push the release tag
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ needs.prepare.outputs.tag }}" -m "Release ${{ needs.prepare.outputs.tag }}"
+          git push origin "${{ needs.prepare.outputs.tag }}"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: GoReleaser — GitHub Release + CLI binaries
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Move :latest to this release (stable only)
+        if: needs.prepare.outputs.prerelease != 'true'
+        run: |
+          set -euo pipefail
+          for svc in runtime dashboard customer-app; do
+            docker buildx imagetools create \
+              --tag "ghcr.io/agent-field/af-stack-$svc:latest" \
+              "ghcr.io/agent-field/af-stack-$svc:${{ needs.prepare.outputs.version }}"
+          done

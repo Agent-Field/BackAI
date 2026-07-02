@@ -1,0 +1,76 @@
+# Release regression smoke.
+#
+# Boots the freshly-BUILT runtime image (not a source rebuild) against Postgres
+# + MinIO and asserts /ready, so a release can never publish a runtime image
+# that fails to boot or apply migrations — the exact regression class that a
+# broken migration (e.g. an unannotated goose DO-block) produces.
+#
+# Multi-tenancy is ON so this also exercises the "refuse to serve as an
+# RLS-bypassing role" security posture (migrate as the privileged owner, serve
+# as the restricted afstack_app role). AgentField is intentionally absent:
+# /ready does not depend on it (the runtime only warns at startup), so this
+# stays a fast, dependency-light gate.
+#
+# Used by .github/workflows/release.yml:
+#   AF_STACK_VERSION=<tag> docker compose -f docker-compose.release-smoke.yml up -d
+#   # poll http://localhost:8080/ready until 200
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: afstack
+      POSTGRES_PASSWORD: afstack
+      POSTGRES_MULTIPLE_DATABASES: afstack,agentfield
+      AF_STACK_APP_DB_PASSWORD: afstack_app
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    volumes:
+      - ./deploy/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./scripts/postgres-init.sh:/docker-entrypoint-initdb.d/postgres-init.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U afstack"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio-secret
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  runtime:
+    image: ghcr.io/agent-field/af-stack-runtime:${AF_STACK_VERSION:-latest}
+    environment:
+      AF_STACK_HTTP_ADDR: ":8080"
+      AF_STACK_METRICS_ADDR: ":9090"
+      # Serve as the restricted role; migrate as the privileged owner.
+      AF_STACK_DATABASE_URL: postgres://afstack_app:afstack_app@postgres:5432/afstack?sslmode=disable
+      AF_STACK_MIGRATE_DATABASE_URL: postgres://afstack:afstack@postgres:5432/afstack?sslmode=disable
+      AF_STACK_MODULE_MULTI_TENANCY: "true"
+      # Throwaway secrets — smoke only, never production.
+      AF_STACK_KMS_KEY: "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+      AF_STACK_AUTH_SECRET: "release-smoke-secret-not-for-production-use-only"
+      # MinIO-backed storage.
+      AF_STACK_S3_ADAPTER: minio
+      AF_STACK_S3_ENDPOINT: minio:9000
+      AF_STACK_S3_BUCKET: af-stack
+      AF_STACK_S3_ACCESS_KEY: minio
+      AF_STACK_S3_SECRET_KEY: minio-secret
+      AF_STACK_S3_REGION: us-east-1
+      # e2b with no key => nil sandbox: boots cleanly, needs no docker.sock.
+      AF_STACK_SANDBOX_ADAPTER: e2b
+      LOG_FORMAT: json
+      LOG_LEVEL: info
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy

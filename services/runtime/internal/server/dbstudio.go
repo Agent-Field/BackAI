@@ -13,16 +13,14 @@
 // DB_STUDIO_NOT_CONFIGURED envelope so the runtime stays bootable
 // without a database (e.g. early local dev).
 //
-// Authorization: these routes are dashboard-only. The tenant resolver
-// (tenant_resolver.go) treats /api/v1/db/* as a public prefix — the
-// dashboard's own session auth gates the operator UI, the same way
-// /api/v1/admin/* works. The route is not exposed to API-key callers.
-//
-// The POST /api/v1/db/sql write path (readOnly=false) is reserved for
-// admin callers. We thread the flag through to dbstudio.RunSQL which
-// wraps the statement in a plain transaction; we DON'T yet add an
-// admin-only check here because the Phase 6 admin gate isn't wired to
-// arbitrary dashboard routes. Phase 8.x will revisit.
+// Authorization: these routes can run arbitrary SQL, so every one is
+// operator-gated via operatorGuard (better-auth session -> suite_operators
+// role -> Casbin admin:db policy). The paths still bypass the tenant resolver
+// (publicPrefixes) — operator auth is enforced per-route here instead, the
+// same pattern cost.go / gdpr.go use. The route is not exposed to API-key
+// callers: a tenant key carries no operator session, so it gets 401.
+// Reads (GET) allow owner+admin; the POST /api/v1/db/sql write path resolves
+// to owner-only through the admin:* policy.
 package server
 
 import (
@@ -35,6 +33,7 @@ import (
 
 	"github.com/Agent-Field/backai/services/runtime/internal/dbstudio"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
+	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
 )
 
 // ─── Request shapes ───────────────────────────────────────────────────────
@@ -58,12 +57,15 @@ type dbTableListResponse struct {
 // registerDBStudioRoutes wires the four /api/v1/db endpoints. Called
 // from registerRoutes() in server.go.
 func (s *Server) registerDBStudioRoutes() {
-	s.mux.HandleFunc("GET /api/v1/db/tables", s.handleListDBTables)
-	s.mux.HandleFunc("GET /api/v1/db/tables/{schema}/{name}", s.handleGetDBTable)
-	s.mux.HandleFunc("GET /api/v1/db/rows", s.handleDBRows)
-	s.mux.HandleFunc("POST /api/v1/db/sql", s.handleDBRunSQL)
-	s.mux.HandleFunc("GET /api/v1/db/sql/history", s.handleSQLHistory)
-	s.mux.HandleFunc("POST /api/v1/db/sql/history", s.handleSQLHistoryRecord)
+	db := func(h http.HandlerFunc) http.HandlerFunc {
+		return s.operatorGuard(rbac.ResourceAdminDB, h)
+	}
+	s.mux.HandleFunc("GET /api/v1/db/tables", db(s.handleListDBTables))
+	s.mux.HandleFunc("GET /api/v1/db/tables/{schema}/{name}", db(s.handleGetDBTable))
+	s.mux.HandleFunc("GET /api/v1/db/rows", db(s.handleDBRows))
+	s.mux.HandleFunc("POST /api/v1/db/sql", db(s.handleDBRunSQL))
+	s.mux.HandleFunc("GET /api/v1/db/sql/history", db(s.handleSQLHistory))
+	s.mux.HandleFunc("POST /api/v1/db/sql/history", db(s.handleSQLHistoryRecord))
 }
 
 // dbStudioUnavailable returns true (and writes a 503) if the Studio

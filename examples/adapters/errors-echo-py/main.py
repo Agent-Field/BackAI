@@ -6,12 +6,11 @@ Run:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
-
 
 app = FastAPI(title="BackAI errors echo adapter")
 
@@ -36,8 +35,8 @@ class Group(BaseModel):
     status: str = "open"
     count: int = 1
     user_count: int = 0
-    first_seen: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    last_seen: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    first_seen: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    last_seen: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     fingerprint: str = "echo-error"
     culprit: str = "examples/adapters/errors-echo-py/main.py"
     sample_event: dict[str, Any] = Field(default_factory=lambda: {"adapter": "errors-echo"})
@@ -52,7 +51,7 @@ async def healthz():
 
 
 @app.get("/v1/capabilities")
-async def capabilities(authorization: Optional[str] = Header(None)):
+async def capabilities(authorization: str | None = Header(None)):
     return {
         "name": "errors-echo",
         "version": "0.1.0",
@@ -77,18 +76,20 @@ async def capabilities(authorization: Optional[str] = Header(None)):
 
 @app.get("/v1/info")
 async def info():
-    return {"docs": "https://github.com/Agent-Field/backai/blob/main/docs/adapters/protocols/errors-v1.md"}
+    return {
+        "docs": "https://github.com/Agent-Field/backai/blob/main/docs/adapters/protocols/errors-v1.md"
+    }
 
 
 @app.post("/v1/errors/list")
-async def list_errors(filter: ListFilter, authorization: Optional[str] = Header(None)):
+async def list_errors(filter: ListFilter, authorization: str | None = Header(None)):
     if filter.status and filter.status != GROUP.status:
         return {"groups": [], "has_more": False}
     return {"groups": [GROUP.model_dump()], "has_more": False}
 
 
 @app.get("/v1/errors/{group_id}")
-async def get_error(group_id: str, authorization: Optional[str] = Header(None)):
+async def get_error(group_id: str, authorization: str | None = Header(None)):
     if group_id != GROUP.id:
         raise HTTPException(
             status_code=404,
@@ -103,11 +104,11 @@ async def get_error(group_id: str, authorization: Optional[str] = Header(None)):
 
 
 @app.patch("/v1/errors/{group_id}")
-async def update_error(group_id: str, update: Update, authorization: Optional[str] = Header(None)):
+async def update_error(group_id: str, update: Update, authorization: str | None = Header(None)):
     if group_id != GROUP.id:
         raise HTTPException(status_code=404, detail={"code": "error_group_not_found"})
     if update.status not in {"open", "muted", "resolved"}:
         raise HTTPException(status_code=400, detail={"code": "invalid_error_status"})
     GROUP.status = update.status
-    GROUP.last_seen = datetime.now(timezone.utc).isoformat()
+    GROUP.last_seen = datetime.now(UTC).isoformat()
     return GROUP.model_dump()

@@ -83,9 +83,7 @@ async def test_list_passes_filters_as_query() -> None:
 
 async def test_list_returns_empty_on_no_rows() -> None:
     with respx.mock(assert_all_called=True) as router:
-        router.get(f"{BASE}/skills").mock(
-            return_value=httpx.Response(200, json={"skills": []})
-        )
+        router.get(f"{BASE}/skills").mock(return_value=httpx.Response(200, json={"skills": []}))
         result = await skills.list()
     assert result.skills == []
 
@@ -108,9 +106,7 @@ async def test_install_posts_source_and_returns_skill() -> None:
 async def test_install_includes_tenant_id_when_provided() -> None:
     with respx.mock(assert_all_called=True) as router:
         route = router.post(f"{BASE}/skills").mock(
-            return_value=httpx.Response(
-                200, json=_skill_row(tenant_id="t-acme")
-            )
+            return_value=httpx.Response(200, json=_skill_row(tenant_id="t-acme"))
         )
         result = await skills.install("embedded:default", tenant_id="t-acme")
     body = route.calls.last.request.read().decode()
@@ -131,9 +127,7 @@ async def test_install_surface_503_as_error() -> None:
         }
     }
     with respx.mock(assert_all_called=True) as router:
-        router.post(f"{BASE}/skills").mock(
-            return_value=httpx.Response(503, json=err_body)
-        )
+        router.post(f"{BASE}/skills").mock(return_value=httpx.Response(503, json=err_body))
         with pytest.raises(AFStackError) as exc:
             await skills.install("embedded:default")
     assert exc.value.code == "SKILLS_NOT_CONFIGURED"
@@ -148,6 +142,7 @@ async def test_uninstall_issues_delete() -> None:
     with respx.mock(assert_all_called=True) as router:
         # The id is URL-encoded — verify the encoded path matches.
         from urllib.parse import quote
+
         encoded = quote(skill_id, safe="")
         router.delete(f"{BASE}/skills/{encoded}").mock(
             return_value=httpx.Response(200, json={"deleted": True})

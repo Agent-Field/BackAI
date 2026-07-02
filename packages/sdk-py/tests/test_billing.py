@@ -70,9 +70,7 @@ async def test_customers_returns_parsed_list() -> None:
         ],
     }
     with respx.mock(assert_all_called=True) as router:
-        router.get(f"{BASE}/billing/customers").mock(
-            return_value=httpx.Response(200, json=body)
-        )
+        router.get(f"{BASE}/billing/customers").mock(return_value=httpx.Response(200, json=body))
         result = await billing.customers()
     assert len(result.customers) == 2
     assert result.customers[0].plan == "pro"
@@ -82,9 +80,9 @@ async def test_customers_returns_parsed_list() -> None:
 async def test_customer_returns_single_row() -> None:
     body = _customer_row()
     with respx.mock(assert_all_called=True) as router:
-        router.get(
-            f"{BASE}/billing/customers/00000000-0000-0000-0000-000000000001"
-        ).mock(return_value=httpx.Response(200, json=body))
+        router.get(f"{BASE}/billing/customers/00000000-0000-0000-0000-000000000001").mock(
+            return_value=httpx.Response(200, json=body)
+        )
         result = await billing.customer("00000000-0000-0000-0000-000000000001")
     assert result.tenant_id == "00000000-0000-0000-0000-000000000001"
     assert result.plan == "pro"
@@ -105,9 +103,7 @@ async def test_meters_returns_parsed_list() -> None:
         "total_cost_usd": 0.0617,
     }
     with respx.mock(assert_all_called=True) as router:
-        router.get(f"{BASE}/billing/meters").mock(
-            return_value=httpx.Response(200, json=body)
-        )
+        router.get(f"{BASE}/billing/meters").mock(return_value=httpx.Response(200, json=body))
         result = await billing.meters()
     assert result.total_cost_usd == 0.0617
     assert len(result.meters) == 2
@@ -118,9 +114,7 @@ async def test_meters_returns_parsed_list() -> None:
 async def test_meters_sends_query_params() -> None:
     with respx.mock(assert_all_called=True) as router:
         route = router.get(f"{BASE}/billing/meters").mock(
-            return_value=httpx.Response(
-                200, json={"meters": [], "total_cost_usd": 0.0}
-            )
+            return_value=httpx.Response(200, json={"meters": [], "total_cost_usd": 0.0})
         )
         await billing.meters(
             tenant="00000000-0000-0000-0000-000000000001",
@@ -139,9 +133,9 @@ async def test_portal_link_returns_url() -> None:
         "expires_at": "2026-06-02T00:00:00Z",
     }
     with respx.mock(assert_all_called=True) as router:
-        router.post(
-            f"{BASE}/billing/customers/00000000-0000-0000-0000-000000000001/portal"
-        ).mock(return_value=httpx.Response(200, json=body))
+        router.post(f"{BASE}/billing/customers/00000000-0000-0000-0000-000000000001/portal").mock(
+            return_value=httpx.Response(200, json=body)
+        )
         result = await billing.portal_link(
             "00000000-0000-0000-0000-000000000001",
             return_url="https://app.example.com/back",
@@ -168,12 +162,10 @@ async def test_meter_validates_inputs() -> None:
 async def test_has_budget_is_permissive_for_unknown_plan() -> None:
     body_cust = _customer_row(plan="enterprise")
     with respx.mock(assert_all_called=True) as router:
-        router.get(
-            f"{BASE}/billing/customers/00000000-0000-0000-0000-000000000001"
-        ).mock(return_value=httpx.Response(200, json=body_cust))
-        ok = await billing.has_budget(
-            "00000000-0000-0000-0000-000000000001", 100.0
+        router.get(f"{BASE}/billing/customers/00000000-0000-0000-0000-000000000001").mock(
+            return_value=httpx.Response(200, json=body_cust)
         )
+        ok = await billing.has_budget("00000000-0000-0000-0000-000000000001", 100.0)
     assert ok is True
 
 
@@ -184,16 +176,14 @@ async def test_has_budget_blocks_over_cap() -> None:
         "total_cost_usd": 9.5,
     }
     with respx.mock(assert_all_called=True) as router:
-        router.get(
-            f"{BASE}/billing/customers/00000000-0000-0000-0000-000000000001"
-        ).mock(return_value=httpx.Response(200, json=body_cust))
+        router.get(f"{BASE}/billing/customers/00000000-0000-0000-0000-000000000001").mock(
+            return_value=httpx.Response(200, json=body_cust)
+        )
         router.get(f"{BASE}/billing/meters").mock(
             return_value=httpx.Response(200, json=body_meters)
         )
         # free cap is $10. existing $9.5 + additional $1.0 = $10.5 > cap.
-        ok = await billing.has_budget(
-            "00000000-0000-0000-0000-000000000001", 1.0
-        )
+        ok = await billing.has_budget("00000000-0000-0000-0000-000000000001", 1.0)
     assert ok is False
 
 
@@ -204,15 +194,13 @@ async def test_has_budget_passes_within_cap() -> None:
         "total_cost_usd": 5.0,
     }
     with respx.mock(assert_all_called=True) as router:
-        router.get(
-            f"{BASE}/billing/customers/00000000-0000-0000-0000-000000000001"
-        ).mock(return_value=httpx.Response(200, json=body_cust))
+        router.get(f"{BASE}/billing/customers/00000000-0000-0000-0000-000000000001").mock(
+            return_value=httpx.Response(200, json=body_cust)
+        )
         router.get(f"{BASE}/billing/meters").mock(
             return_value=httpx.Response(200, json=body_meters)
         )
-        ok = await billing.has_budget(
-            "00000000-0000-0000-0000-000000000001", 1.0
-        )
+        ok = await billing.has_budget("00000000-0000-0000-0000-000000000001", 1.0)
     assert ok is True
 
 

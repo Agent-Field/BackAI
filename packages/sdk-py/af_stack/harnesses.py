@@ -80,9 +80,7 @@ class HarnessList(BaseModel):
 def _check_provider(provider: str) -> None:
     if provider not in _ALLOWED_PROVIDERS:
         allowed = ", ".join(_ALLOWED_PROVIDERS)
-        raise ValueError(
-            f"`provider` must be one of: {allowed}; got {provider!r}"
-        )
+        raise ValueError(f"`provider` must be one of: {allowed}; got {provider!r}")
 
 
 async def list() -> HarnessList:  # noqa: A001 — mirrors the JS API
@@ -98,18 +96,14 @@ async def list() -> HarnessList:  # noqa: A001 — mirrors the JS API
 async def get(provider: HarnessProvider | str) -> Harness:
     """Fetch the cached probe result for a single provider."""
     _check_provider(provider)
-    body = await _http.request_json(
-        "GET", f"/harnesses/{quote(provider, safe='')}"
-    )
+    body = await _http.request_json("GET", f"/harnesses/{quote(provider, safe='')}")
     return Harness.model_validate(body or {})
 
 
 async def probe(provider: HarnessProvider | str) -> Harness:
     """Force a fresh probe of the named harness and return the result."""
     _check_provider(provider)
-    body = await _http.request_json(
-        "POST", f"/harnesses/{quote(provider, safe='')}/probe"
-    )
+    body = await _http.request_json("POST", f"/harnesses/{quote(provider, safe='')}/probe")
     return Harness.model_validate(body or {})
 
 

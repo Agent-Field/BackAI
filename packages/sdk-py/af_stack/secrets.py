@@ -80,9 +80,7 @@ async def reveal(key: str) -> str:
     """Reveal the plaintext value of a secret. Every call is audited."""
     if not key:
         raise ValueError("secret key must be a non-empty string")
-    body = await _http.request_json(
-        "POST", f"/secrets/{quote(key, safe='')}/reveal"
-    )
+    body = await _http.request_json("POST", f"/secrets/{quote(key, safe='')}/reveal")
     if not isinstance(body, dict) or "value" not in body:
         raise _http.AFStackError(
             code="BAD_RESPONSE",
@@ -122,9 +120,7 @@ async def put(
         payload["description"] = description
     if rotate_after is not None:
         payload["rotate_after"] = rotate_after
-    body = await _http.request_json(
-        "PUT", f"/secrets/{quote(key, safe='')}", json=payload
-    )
+    body = await _http.request_json("PUT", f"/secrets/{quote(key, safe='')}", json=payload)
     return SecretMetadata.model_validate(body or {})
 
 

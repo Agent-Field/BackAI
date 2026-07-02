@@ -107,6 +107,7 @@ func testSetup(t *testing.T) (*pgxpool.Pool, *Recorder, *Budgets, *Aggregate, fu
             model text not null,
             provider text not null,
             agent text,
+            reasoner text,
             prompt_tokens int not null default 0,
             completion_tokens int not null default 0,
             total_tokens int not null default 0,
@@ -114,7 +115,9 @@ func testSetup(t *testing.T) (*pgxpool.Pool, *Recorder, *Budgets, *Aggregate, fu
             cached boolean not null default false,
             latency_ms int not null default 0,
             occurred_at timestamptz not null default now(),
-            modality text not null default 'text'
+            modality text not null default 'text',
+            status_code int not null default 0,
+            error_code text
         )`)
 	mustExec(ctx, t, pool, `
         create table suite_budgets (
@@ -412,6 +415,104 @@ func TestHasBudgetNoBudgetAdmits(t *testing.T) {
 	}
 	if !ok {
 		t.Errorf("expected admit when no budget, got reject")
+	}
+}
+
+// ─── S5 default spend ceiling (DB-backed) ─────────────────────────────────
+
+// TestDefaultCeilingAdmitsUnderCap: a tenant with NO explicit budget
+// row is admitted while month-to-date spend stays under the configured
+// default ceiling. Maps to contract item C2.
+func TestDefaultCeilingAdmitsUnderCap(t *testing.T) {
+	pool, rec, budgets, _, cleanup := testSetup(t)
+	defer cleanup()
+	ctx := context.Background()
+	budgets = budgets.WithDefaultCeilingUSD(50)
+	tenant := seedTenant(t, pool, "acme", "Acme")
+	// $10 of spend this month, no budget row.
+	if err := rec.Record(ctx, Event{
+		TenantID: tenant, Model: "m", Provider: "p",
+		CostUSD: 10, OccurredAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	ok, err := budgets.HasBudget(ctx, tenant, 0.001)
+	if err != nil || !ok {
+		t.Errorf("expected admit (10+0.001 < 50 default ceiling), got ok=%v err=%v", ok, err)
+	}
+}
+
+// TestDefaultCeilingRejectsOverCap: the same un-budgeted tenant is
+// rejected once month-to-date spend reaches the default ceiling — the
+// runtime spend ceiling fires before any LiteLLM forward. Maps to
+// contract item C3.
+func TestDefaultCeilingRejectsOverCap(t *testing.T) {
+	pool, rec, budgets, _, cleanup := testSetup(t)
+	defer cleanup()
+	ctx := context.Background()
+	budgets = budgets.WithDefaultCeilingUSD(50)
+	tenant := seedTenant(t, pool, "acme", "Acme")
+	// $50 of spend this month, no budget row -> at the default ceiling.
+	if err := rec.Record(ctx, Event{
+		TenantID: tenant, Model: "m", Provider: "p",
+		CostUSD: 50, OccurredAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	ok, err := budgets.HasBudget(ctx, tenant, 0.001)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if ok {
+		t.Errorf("expected reject at default ceiling (50+0.001 > 50), got admit")
+	}
+}
+
+// TestExplicitBudgetOverridesDefaultCeiling: an explicit per-tenant
+// budget always wins over the default ceiling — even a generous
+// explicit cap admits spend that a low default ceiling would reject.
+// Maps to contract item C1.
+func TestExplicitBudgetOverridesDefaultCeiling(t *testing.T) {
+	pool, rec, budgets, _, cleanup := testSetup(t)
+	defer cleanup()
+	ctx := context.Background()
+	budgets = budgets.WithDefaultCeilingUSD(10) // low default
+	tenant := seedTenant(t, pool, "acme", "Acme")
+	// Explicit budget of $1000 — well above the $10 default ceiling.
+	if _, err := budgets.Set(ctx, SetBudgetInput{TenantID: tenant, MonthlyUSD: 1000, AlertThresholdPct: 80}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	// $50 of spend — over the default ceiling, but under the explicit cap.
+	if err := rec.Record(ctx, Event{
+		TenantID: tenant, Model: "m", Provider: "p",
+		CostUSD: 50, OccurredAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	ok, err := budgets.HasBudget(ctx, tenant, 0.001)
+	if err != nil || !ok {
+		t.Errorf("expected admit (explicit $1000 cap wins over $10 default), got ok=%v err=%v", ok, err)
+	}
+}
+
+// TestNoBudgetNoCeilingStillAdmits: with the default ceiling disabled
+// (0), an un-budgeted tenant remains unlimited — pre-S5 back-compat.
+// Maps to contract item C4.
+func TestNoBudgetNoCeilingStillAdmits(t *testing.T) {
+	pool, rec, budgets, _, cleanup := testSetup(t)
+	defer cleanup()
+	ctx := context.Background()
+	// No WithDefaultCeilingUSD call -> ceiling 0 -> disabled.
+	tenant := seedTenant(t, pool, "acme", "Acme")
+	if err := rec.Record(ctx, Event{
+		TenantID: tenant, Model: "m", Provider: "p",
+		CostUSD: 100000, OccurredAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	ok, err := budgets.HasBudget(ctx, tenant, 1.0)
+	if err != nil || !ok {
+		t.Errorf("expected admit when ceiling disabled, got ok=%v err=%v", ok, err)
 	}
 }
 

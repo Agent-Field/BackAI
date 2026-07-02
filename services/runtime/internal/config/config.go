@@ -38,12 +38,17 @@ type Config struct {
 //   - "gvisor"       — local Docker daemon w/ runsc runtime (Phase 9.2)
 //   - "firecracker"  — micro-VM via Flintlock (Phase 9.2 scaffold)
 //   - "e2b"          — e2b.dev hosted sandboxes (Phase 9.2)
+//   - "remote"       — an out-of-process sidecar over the remote protocol
+//     (RemoteURL/RemoteToken); see docs/adapters/AUTHORING.md
 //
 // E2BAPIKey / E2BBaseURL are only consumed when Adapter="e2b".
+// RemoteURL / RemoteToken are only consumed when Adapter="remote".
 type SandboxConfig struct {
-	Adapter    string `yaml:"adapter"`
-	E2BAPIKey  string `yaml:"e2b_api_key"`
-	E2BBaseURL string `yaml:"e2b_base_url"`
+	Adapter     string `yaml:"adapter"`
+	E2BAPIKey   string `yaml:"e2b_api_key"`
+	E2BBaseURL  string `yaml:"e2b_base_url"`
+	RemoteURL   string `yaml:"remote_url"`
+	RemoteToken string `yaml:"remote_token"`
 }
 
 // LogsConfig selects the runtime log-store adapter. The ring adapter is the
@@ -168,7 +173,13 @@ type ServerConfig struct {
 
 // DatabaseConfig holds Postgres connection settings.
 type DatabaseConfig struct {
-	URL             string        `yaml:"url"`
+	URL string `yaml:"url"`
+	// MigrateURL is an optional privileged connection used ONLY to run
+	// migrations (DDL). The serving role (URL) should be a NOSUPERUSER
+	// NOBYPASSRLS role so per-tenant RLS is actually enforced; that role
+	// cannot run DDL, so migrations connect via MigrateURL instead. When
+	// empty, migrations run over URL (fine for single-role local dev).
+	MigrateURL      string        `yaml:"migrate_url"`
 	MaxConnections  int           `yaml:"max_connections"`
 	MaxIdleConns    int           `yaml:"max_idle_connections"`
 	ConnMaxLifetime time.Duration `yaml:"conn_max_lifetime"`
@@ -283,6 +294,9 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("AF_STACK_DATABASE_URL"); v != "" {
 		cfg.Database.URL = v
 	}
+	if v := os.Getenv("AF_STACK_MIGRATE_DATABASE_URL"); v != "" {
+		cfg.Database.MigrateURL = v
+	}
 	if v := os.Getenv("AF_STACK_AGENTFIELD_URL"); v != "" {
 		cfg.AgentField.URL = v
 	}
@@ -360,6 +374,15 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("AF_STACK_E2B_BASE_URL"); v != "" {
 		cfg.Sandbox.E2BBaseURL = v
+	}
+	// Remote sandbox sidecar (Adapter="remote"): AF_STACK_SANDBOX_ADAPTER_URL
+	// + optional _TOKEN, matching the generic remote-adapter env contract in
+	// docs/adapters/AUTHORING.md.
+	if v := os.Getenv("AF_STACK_SANDBOX_ADAPTER_URL"); v != "" {
+		cfg.Sandbox.RemoteURL = v
+	}
+	if v := os.Getenv("AF_STACK_SANDBOX_ADAPTER_TOKEN"); v != "" {
+		cfg.Sandbox.RemoteToken = v
 	}
 
 	// Logs adapter slot. Keep selection on _ADAPTER to match the rest of

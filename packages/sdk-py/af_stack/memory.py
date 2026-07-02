@@ -199,9 +199,7 @@ async def list(  # noqa: A001 — mirrors the JS `memory.list()` ergonomics
     if prefix is not None:
         params["prefix"] = prefix
     body = await _http.request_json("GET", "/memory", params=params)
-    return MemoryList.model_validate(
-        body or {"entries": [], "total": 0, "has_more": False}
-    )
+    return MemoryList.model_validate(body or {"entries": [], "total": 0, "has_more": False})
 
 
 async def search(
@@ -235,9 +233,7 @@ async def search(
     if threshold is not None:
         payload["threshold"] = threshold
     body = await _http.request_json("POST", "/memory/search", json=payload)
-    return MemorySearchResult.model_validate(
-        body or {"hits": [], "duration_ms": 0}
-    )
+    return MemorySearchResult.model_validate(body or {"hits": [], "duration_ms": 0})
 
 
 def _validate_scope(scope: str) -> None:

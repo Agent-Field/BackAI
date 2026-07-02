@@ -64,7 +64,9 @@ services:
           memory: "256M"
 
   agentfield:
-    image: agentfield/control-plane:latest
+    # Pinned off :latest for reproducible prod deploys. Override AGENTFIELD_VERSION
+    # to move the AgentField control plane deliberately (published on Docker Hub).
+    image: agentfield/control-plane:${AGENTFIELD_VERSION:-v0.1.96}
     restart: unless-stopped
     environment:
       AGENTFIELD_STORAGE_MODE: postgres
@@ -85,7 +87,10 @@ services:
           memory: "512M"
 
   runtime:
-    image: ghcr.io/agentfield/af-stack-runtime:latest
+    # Pinned off :latest. AF_STACK_VERSION selects the runtime + dashboard image
+    # tag together; set it to the release CI publishes (e.g. a git SHA or vX.Y.Z)
+    # so prod pulls a reproducible build instead of a moving :latest.
+    image: ghcr.io/agent-field/af-stack-runtime:${AF_STACK_VERSION:-0.1.0}
     restart: unless-stopped
     environment:
       AF_STACK_HTTP_ADDR: ":8080"
@@ -134,7 +139,7 @@ services:
     # user (uid 65532) is used. NO docker.sock mount.
 
   dashboard:
-    image: ghcr.io/agentfield/af-stack-dashboard:latest
+    image: ghcr.io/agent-field/af-stack-dashboard:${AF_STACK_VERSION:-0.1.0}
     restart: unless-stopped
     environment:
       DATABASE_URL: ${AF_STACK_DATABASE_URL}

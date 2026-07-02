@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -73,6 +74,7 @@ import (
 	e2bsandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/e2b"
 	firecrackersandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/firecracker"
 	gvisorsandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/gvisor"
+	remotesandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/remote"
 	"github.com/Agent-Field/backai/services/runtime/internal/search"
 	"github.com/Agent-Field/backai/services/runtime/internal/secrets"
 	"github.com/Agent-Field/backai/services/runtime/internal/server"
@@ -137,6 +139,14 @@ func caps(v any) json.RawMessage {
 	}
 	return json.RawMessage(b)
 }
+
+// defaultTenantMonthlyBudgetUSD is the built-in fallback monthly spend
+// ceiling for tenants without an explicit suite_budgets row (the S5
+// runtime spend ceiling). It is a safety net against runaway spend on
+// self-serve signups, not a billing plan — operators set real caps per
+// tenant via /api/v1/admin/budgets, raise this globally with
+// AF_STACK_DEFAULT_MONTHLY_BUDGET_USD, or set that env to 0 to disable.
+const defaultTenantMonthlyBudgetUSD = 100.0
 
 func defaulted(value, fallback string) string {
 	value = strings.TrimSpace(value)
@@ -233,7 +243,7 @@ func buildAdapterRegistry(
 		Kind:             sandboxKind,
 		Name:             sandboxName,
 		Capabilities:     caps(sandboxCaps),
-		AvailableBuiltin: []string{"docker", "gvisor", "firecracker", "e2b"},
+		AvailableBuiltin: []string{"docker", "gvisor", "firecracker", "e2b", "remote"},
 		SwapMethod:       "env_var",
 		SwapEnv:          "AF_STACK_SANDBOX_ADAPTER",
 		Probe:            staticStatus(sandboxStatus),
@@ -772,7 +782,7 @@ func main() {
 		} else {
 			log.Info("database connected")
 			migCtx, migCancel := context.WithTimeout(ctx, 60*time.Second)
-			if err := database.Migrate(migCtx); err != nil {
+			if err := runMigrations(migCtx, cfg, database, log); err != nil {
 				log.Error("migrations failed", "error", err)
 				database.Close()
 				migCancel()
@@ -780,6 +790,12 @@ func main() {
 			}
 			migCancel()
 			log.Info("migrations applied")
+			// Tenant-isolation guard: per-tenant RLS is unenforceable if the
+			// serving role can bypass RLS (superuser or BYPASSRLS). Refuse to
+			// start in that state when multi-tenancy is enabled; warn otherwise.
+			assertCtx, assertCancel := context.WithTimeout(ctx, 5*time.Second)
+			assertTenantSafeRole(assertCtx, cfg, database, log)
+			assertCancel()
 			statsCtx, statsCancel := context.WithTimeout(ctx, 5*time.Second)
 			warnIfPGStatsRoleMissing(statsCtx, database.Pool, log)
 			statsCancel()
@@ -891,11 +907,26 @@ func main() {
 	var vault *secrets.Vault
 	if database != nil && database.Pool != nil {
 		cipher, kekErr := secrets.LoadCipher(ctx, log)
-		if kekErr != nil {
-			log.Error("secrets: KMS load failed; secrets vault disabled",
+		// KMS preflight: a cipher that parses but can't round-trip is as
+		// broken as one that failed to load — fold a preflight failure
+		// into kekErr so the boot decision treats both the same.
+		if kekErr == nil {
+			if pfErr := cipher.Preflight(); pfErr != nil {
+				kekErr = pfErr
+			}
+		}
+		switch kmsBootDecision(kekErr, secrets.KMSConfigured()) {
+		case kmsFatal:
+			log.Error("refusing to start: KMS is configured but the key could not be loaded — secrets, OAuth tokens, and webhook verification would be silently unavailable",
+				"error", kekErr,
+				"fix", "set AF_STACK_KMS_KEY to 32 random bytes hex-encoded (or fix AF_STACK_KMS_PROVIDER + the cloud data key), or unset them to boot with the dev key")
+			database.Close()
+			os.Exit(1)
+		case kmsDegrade:
+			log.Error("secrets: KMS load failed; secrets vault disabled (no KMS explicitly configured)",
 				"error", kekErr,
 			)
-		} else {
+		case kmsServe:
 			vault, err = secrets.New(database.Pool, cipher, log)
 			if err != nil {
 				log.Error("secrets: vault init failed", "error", err)
@@ -1091,7 +1122,21 @@ func main() {
 	)
 	if database != nil && database.Pool != nil {
 		costRecorder = cost.NewRecorder(database.Pool, log)
-		costBudgets = cost.NewBudgets(database.Pool, log)
+		// S5 runtime spend ceiling: bound un-budgeted tenants so a
+		// runaway agent loop on a fresh self-serve signup can't run an
+		// unbounded provider bill before any explicit budget is set.
+		// AF_STACK_DEFAULT_MONTHLY_BUDGET_USD overrides the built-in
+		// default; set it to 0 to opt back into unlimited.
+		defaultCeiling := envFloat("AF_STACK_DEFAULT_MONTHLY_BUDGET_USD", defaultTenantMonthlyBudgetUSD)
+		costBudgets = cost.NewBudgets(database.Pool, log).WithDefaultCeilingUSD(defaultCeiling)
+		if defaultCeiling > 0 {
+			log.Info("cost: default per-tenant monthly spend ceiling active",
+				"default_monthly_usd", defaultCeiling,
+				"note", "applies only to tenants without an explicit budget; set AF_STACK_DEFAULT_MONTHLY_BUDGET_USD=0 to disable")
+		} else {
+			log.Warn("cost: no default spend ceiling — tenants without an explicit budget can spend without bound",
+				"fix", "set AF_STACK_DEFAULT_MONTHLY_BUDGET_USD to a positive USD cap")
+		}
 		costAggregate = cost.NewAggregate(database.Pool, log)
 		// LiteLLM is the source of truth for cumulative spend (item #22).
 		// Hand the admin client to the aggregator so the dashboard reads
@@ -1532,6 +1577,19 @@ func main() {
 		metricsStore,
 		errorsStore,
 	)
+
+	// A3: fail fast if any AF_STACK_*_ADAPTER names an adapter we don't
+	// implement — otherwise the operator's intended swap is silently ignored.
+	if selErrs := adapterRegistry.ValidateSelections(os.Getenv); len(selErrs) > 0 {
+		for _, e := range selErrs {
+			log.Error("invalid adapter selection", "slot", e.SlotID, "env", e.Env,
+				"value", e.Value, "valid", strings.Join(e.Available, ", "))
+		}
+		log.Error("refusing to start: one or more AF_STACK_*_ADAPTER values name unimplemented adapters",
+			"fix", "set each to a listed value or unset it to use the default")
+		os.Exit(1)
+	}
+
 	probeReg.WithAdapterRegistry(adapterRegistry)
 
 	srv := server.New(cfg, log, server.Deps{
@@ -1757,8 +1815,20 @@ func newSandbox(cfg config.SandboxConfig, store storage.Storage, log *slog.Logge
 			APIKey:  cfg.E2BAPIKey,
 			BaseURL: cfg.E2BBaseURL,
 		})
+	case "remote":
+		// Out-of-process sidecar over the remote adapter protocol. remote.New
+		// synchronously probes GET /v1/capabilities so a misconfigured URL
+		// fails here (the caller logs it and degrades to no sandbox) rather
+		// than on the first user request.
+		if strings.TrimSpace(cfg.RemoteURL) == "" {
+			return nil, fmt.Errorf("sandbox: adapter=remote needs AF_STACK_SANDBOX_ADAPTER_URL")
+		}
+		return remotesandbox.New(context.Background(), remotesandbox.Config{
+			BaseURL: cfg.RemoteURL,
+			Token:   cfg.RemoteToken,
+		})
 	default:
-		return nil, fmt.Errorf("sandbox: unknown adapter %q (want docker|gvisor|firecracker|e2b)", cfg.Adapter)
+		return nil, fmt.Errorf("sandbox: unknown adapter %q (want docker|gvisor|firecracker|e2b|remote)", cfg.Adapter)
 	}
 }
 
@@ -1901,6 +1971,21 @@ func envBool(key string, def bool) bool {
 	default:
 		return def
 	}
+}
+
+// envFloat reads a float64 from an env var, returning def when unset or
+// unparseable. A literal "0" is honoured (returns 0), so operators can
+// disable a default-on ceiling.
+func envFloat(key string, def float64) float64 {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return def
+	}
+	return v
 }
 
 func splitEnvList(raw string) []string {
@@ -2057,6 +2142,100 @@ func warnIfPGStatsRoleMissing(ctx context.Context, pool *pgxpool.Pool, log *slog
 	}
 	if !ok {
 		log.Warn("postgres stats visibility is reduced; grant pg_read_all_stats to the runtime DB role for complete DB health and search-index stats")
+	}
+}
+
+// runMigrations applies pending migrations. The serving role may be a
+// restricted NOSUPERUSER/NOBYPASSRLS role with no DDL rights, so when a
+// dedicated privileged migrate URL is configured (AF_STACK_MIGRATE_DATABASE_URL)
+// migrations run over a short-lived pool against THAT url instead of the
+// serving pool. When unset, migrations run over the serving connection — fine
+// for single-role local dev.
+func runMigrations(ctx context.Context, cfg config.Config, serving *db.DB, log *slog.Logger) error {
+	migURL := cfg.Database.MigrateURL
+	if migURL == "" || migURL == cfg.Database.URL {
+		return serving.Migrate(ctx)
+	}
+	log.Info("running migrations via dedicated privileged connection (AF_STACK_MIGRATE_DATABASE_URL)")
+	migDB, err := db.Open(ctx, db.Config{URL: migURL})
+	if err != nil {
+		return fmt.Errorf("open migrate connection: %w", err)
+	}
+	defer migDB.Close()
+	return migDB.Migrate(ctx)
+}
+
+// assertTenantSafeRole enforces that the serving DB role cannot bypass
+// row-level security. A superuser or BYPASSRLS role silently defeats
+// per-tenant RLS, so the moment multi-tenancy is enabled it is fatal (unless
+// explicitly overridden with AF_STACK_ALLOW_INSECURE_DB). With multi-tenancy
+// off it is a warning, so single-tenant local dev still boots.
+type rlsDecision int
+
+const (
+	rlsOK    rlsDecision = iota // role cannot bypass RLS
+	rlsWarn                     // can bypass, but MT off or overridden -> warn + boot
+	rlsFatal                    // can bypass while MT on and no override -> refuse to start
+)
+
+// rlsBootDecision is the pure policy: a role that can bypass RLS is fatal only
+// when multi-tenancy is enabled and not explicitly overridden; otherwise it is
+// a warning. A non-bypassing role is always OK.
+func rlsBootDecision(canBypass, mtEnabled, override bool) rlsDecision {
+	if !canBypass {
+		return rlsOK
+	}
+	if mtEnabled && !override {
+		return rlsFatal
+	}
+	return rlsWarn
+}
+
+// kmsDecision is the boot-time outcome for the secrets KEK.
+type kmsDecision int
+
+const (
+	kmsServe   kmsDecision = iota // cipher loaded + preflighted -> serve the vault
+	kmsDegrade                    // load failed but no KMS configured -> dev/optional, vault disabled
+	kmsFatal                      // load failed AND KMS explicitly configured -> refuse to start
+)
+
+// kmsBootDecision is the pure policy for the secrets vault KEK: a load or
+// preflight failure is fatal only when the operator explicitly configured
+// KMS (so a silently-disabled vault can't masquerade as a healthy boot);
+// otherwise it degrades to a disabled vault. A clean load always serves.
+func kmsBootDecision(loadErr error, kmsConfigured bool) kmsDecision {
+	if loadErr == nil {
+		return kmsServe
+	}
+	if kmsConfigured {
+		return kmsFatal
+	}
+	return kmsDegrade
+}
+
+func assertTenantSafeRole(ctx context.Context, cfg config.Config, database *db.DB, log *slog.Logger) {
+	rs, err := database.ConnRoleSecurity(ctx)
+	if err != nil {
+		log.Warn("could not verify DB role RLS safety", "error", err)
+		return
+	}
+	mtOn := cfg.Modules.Enabled["multi-tenancy"]
+	override := envBool("AF_STACK_ALLOW_INSECURE_DB", false)
+	switch rlsBootDecision(rs.CanBypassRLS(), mtOn, override) {
+	case rlsOK:
+		log.Info("tenant isolation: serving DB role is RLS-safe", "role", rs.Name)
+	case rlsFatal:
+		log.Error("refusing to start: the serving DB role can bypass row-level security, so multi-tenant isolation is unenforceable",
+			"role", rs.Name, "superuser", rs.IsSuperuser, "bypassrls", rs.BypassRLS,
+			"fix", "point AF_STACK_DATABASE_URL at a NOSUPERUSER NOBYPASSRLS role and run migrations via AF_STACK_MIGRATE_DATABASE_URL, or set AF_STACK_ALLOW_INSECURE_DB=true to override")
+		database.Close()
+		os.Exit(1)
+	case rlsWarn:
+		log.Warn("serving DB role can bypass row-level security; per-tenant isolation is NOT enforced",
+			"role", rs.Name, "superuser", rs.IsSuperuser, "bypassrls", rs.BypassRLS,
+			"multi_tenancy_enabled", mtOn, "override", override,
+			"recommendation", "use a NOSUPERUSER NOBYPASSRLS serving role before enabling multi-tenancy")
 	}
 }
 

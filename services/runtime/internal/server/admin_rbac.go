@@ -44,7 +44,11 @@ func (s *Server) operatorAccessDenied(
 	resource string,
 	action string,
 ) bool {
-	principal, err := s.resolveOperatorPrincipal(r.Context(), r)
+	resolve := s.operatorResolver
+	if resolve == nil {
+		resolve = s.resolveOperatorPrincipal
+	}
+	principal, err := resolve(r.Context(), r)
 	switch {
 	case err == nil:
 	case errors.Is(err, errNoSession):
@@ -114,4 +118,23 @@ func (s *Server) resolveOperatorPrincipal(ctx context.Context, r *http.Request) 
 
 func adminAction(method string) string {
 	return rbac.ActionForMethod(method)
+}
+
+// operatorGuard wraps h with the operator-auth gate (better-auth session ->
+// suite_operators role -> Casbin policy), deriving the RBAC action from the
+// HTTP method. It is used to protect operator-only control surfaces that
+// bypass the tenant resolver via publicPrefixes (e.g. the DB-studio and
+// adapter-registry endpoints) and therefore must enforce their own auth.
+//
+// Unlike adminAccessDenied, this does NOT require the multi-tenancy module to
+// be enabled — operator access is orthogonal to multi-tenancy, the same way
+// cost.go and gdpr.go already gate their operator surfaces. s.rbac is always
+// wired (server.go falls back to rbac.NewDefault()).
+func (s *Server) operatorGuard(resource string, h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.operatorAccessDenied(w, r, resource, adminAction(r.Method)) {
+			return
+		}
+		h(w, r)
+	}
 }

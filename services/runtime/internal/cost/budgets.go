@@ -27,6 +27,14 @@ import (
 type Budgets struct {
 	pool *pgxpool.Pool
 	log  *slog.Logger
+
+	// defaultMonthlyUSD is the fallback monthly ceiling applied by
+	// HasBudget to any tenant that has NO explicit suite_budgets row.
+	// Zero means "no default ceiling" (unlimited for un-budgeted
+	// tenants — the pre-S5 behaviour). A positive value bounds runaway
+	// spend on self-serve tenants that never had a budget configured,
+	// independent of LiteLLM's own per-key limits.
+	defaultMonthlyUSD float64
 }
 
 // NewBudgets constructs a Budgets. Pool/log may be nil — in nil-pool
@@ -36,6 +44,29 @@ func NewBudgets(pool *pgxpool.Pool, log *slog.Logger) *Budgets {
 		log = slog.Default()
 	}
 	return &Budgets{pool: pool, log: log}
+}
+
+// WithDefaultCeilingUSD sets the fallback monthly spend ceiling applied
+// to tenants without an explicit budget row. Chainable. A non-positive
+// value disables the default ceiling (un-budgeted tenants stay
+// unlimited). See HasBudget for the enforcement semantics.
+func (b *Budgets) WithDefaultCeilingUSD(usd float64) *Budgets {
+	if b == nil {
+		return b
+	}
+	if usd < 0 {
+		usd = 0
+	}
+	b.defaultMonthlyUSD = usd
+	return b
+}
+
+// DefaultCeilingUSD reports the configured fallback ceiling (0 == off).
+func (b *Budgets) DefaultCeilingUSD() float64 {
+	if b == nil {
+		return 0
+	}
+	return b.defaultMonthlyUSD
 }
 
 // Get returns the budget for tenantID. Returns ErrBudgetNotFound when
@@ -199,13 +230,20 @@ func (b *Budgets) Spent(ctx context.Context, tenantID string, periodStart time.T
 //
 // Returns (true, nil) when:
 //   - no DB / no budgets at all (permissive boot mode),
-//   - tenantID has no budget row (no cap configured),
-//   - spent + estimated <= monthly_usd.
+//   - tenantID has no budget row AND no default ceiling is configured,
+//   - spent + estimated <= the applicable cap (explicit row, else the
+//     configured default ceiling).
 //
 // Returns (false, nil) when the call would exceed the cap. Returns
 // (false, err) only on a real database error — the gateway treats this
 // as fail-open (admit the call) so a flaky PG doesn't take down the
 // LLM surface.
+//
+// When a tenant has no explicit suite_budgets row and a default ceiling
+// is configured (WithDefaultCeilingUSD), HasBudget enforces that ceiling
+// against the current calendar month's spend. This bounds runaway spend
+// on self-serve tenants that were never given an explicit budget — the
+// S5 spend ceiling — independent of LiteLLM's per-virtual-key limits.
 //
 // estimatedUSD is the caller's best guess at the upcoming call's cost.
 // The gateway typically passes a small sentinel (~$0.001) so the gate
@@ -230,10 +268,16 @@ func (b *Budgets) HasBudget(ctx context.Context, tenantID string, estimatedUSD f
     `, tenantID).Scan(&monthlyUSD, &periodStart)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			// No cap configured for this tenant -> allow.
-			return true, nil
+			// No explicit cap. Fall back to the default ceiling if one
+			// is configured; otherwise allow (pre-S5 behaviour).
+			if b.defaultMonthlyUSD <= 0 {
+				return true, nil
+			}
+			monthlyUSD = b.defaultMonthlyUSD
+			periodStart = currentMonthStartUTC()
+		} else {
+			return false, fmt.Errorf("cost: lookup budget: %w", err)
 		}
-		return false, fmt.Errorf("cost: lookup budget: %w", err)
 	}
 
 	spent, err := b.Spent(ctx, tenantID, periodStart)
@@ -244,6 +288,16 @@ func (b *Budgets) HasBudget(ctx context.Context, tenantID string, estimatedUSD f
 		return false, nil
 	}
 	return true, nil
+}
+
+// currentMonthStartUTC returns midnight UTC on the first of the current
+// month — the window anchor for the default-ceiling spend lookup. It
+// mirrors the schema default for suite_budgets.current_period_start
+// (date_trunc('month', now())), so an un-budgeted tenant's accounting
+// lines up with what they'd see once an explicit budget is created.
+func currentMonthStartUTC() time.Time {
+	now := time.Now().UTC()
+	return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 }
 
 // buildBudget shapes the in-memory Budget from the row + spend.

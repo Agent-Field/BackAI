@@ -19,7 +19,14 @@ import respx
 from af_stack import suite, tools
 from af_stack._http import AFStackError
 from af_stack._http import close as http_close
-from af_stack.tools import MCPCallResult, MCPServer, MCPTool, ToolAdapter, ToolAdapterCallResult, Tools
+from af_stack.tools import (
+    MCPCallResult,
+    MCPServer,
+    MCPTool,
+    ToolAdapter,
+    ToolAdapterCallResult,
+    Tools,
+)
 
 BASE = "http://localhost:8080/api/v1"
 
@@ -211,13 +218,9 @@ async def test_add_mcp_server_raises_on_structured_error() -> None:
         }
     }
     with respx.mock(assert_all_called=True) as router:
-        router.post(f"{BASE}/mcp/servers").mock(
-            return_value=httpx.Response(409, json=error_body)
-        )
+        router.post(f"{BASE}/mcp/servers").mock(return_value=httpx.Response(409, json=error_body))
         with pytest.raises(AFStackError) as exc:
-            await tools.add_mcp_server(
-                "github", "stdio", command=["uvx", "mcp-server-github"]
-            )
+            await tools.add_mcp_server("github", "stdio", command=["uvx", "mcp-server-github"])
     assert exc.value.code == "MCP_DUPLICATE_NAME"
     assert exc.value.status_code == 409
 
@@ -246,9 +249,7 @@ async def test_remove_mcp_server_rejects_empty_name() -> None:
 async def test_enable_mcp_server_puts_flag() -> None:
     with respx.mock(assert_all_called=True) as router:
         route = router.put(f"{BASE}/mcp/servers/github/enabled").mock(
-            return_value=httpx.Response(
-                200, json=_server_row(is_enabled=False, status="disabled")
-            )
+            return_value=httpx.Response(200, json=_server_row(is_enabled=False, status="disabled"))
         )
         server = await tools.enable_mcp_server("github", False)
     assert server.is_enabled is False
@@ -316,9 +317,7 @@ async def test_call_mcp_posts_arguments() -> None:
         route = router.post(f"{BASE}/mcp/call").mock(
             return_value=httpx.Response(200, json=call_payload)
         )
-        result = await tools.call_mcp(
-            "github", "search_repos", {"q": "agentfield"}
-        )
+        result = await tools.call_mcp("github", "search_repos", {"q": "agentfield"})
 
     assert isinstance(result, MCPCallResult)
     assert result.is_error is False
@@ -361,9 +360,7 @@ async def test_call_mcp_propagates_error_flag() -> None:
         "duration_ms": 200,
     }
     with respx.mock(assert_all_called=True) as router:
-        router.post(f"{BASE}/mcp/call").mock(
-            return_value=httpx.Response(200, json=error_payload)
-        )
+        router.post(f"{BASE}/mcp/call").mock(return_value=httpx.Response(200, json=error_payload))
         result = await tools.call_mcp("github", "search_repos", {"q": "x"})
     assert result.is_error is True
     assert result.content[0]["text"] == "Rate limited"
@@ -389,13 +386,9 @@ async def test_list_adapters_parses_rows() -> None:
 async def test_set_adapter_enabled_puts_config() -> None:
     with respx.mock(assert_all_called=True) as router:
         route = router.put(f"{BASE}/tools/adapters/sql/enabled").mock(
-            return_value=httpx.Response(
-                200, json=_adapter_row(id="sql", enabled=True)
-            )
+            return_value=httpx.Response(200, json=_adapter_row(id="sql", enabled=True))
         )
-        adapter = await tools.set_adapter_enabled(
-            "sql", True, config={"max_rows": 25}
-        )
+        adapter = await tools.set_adapter_enabled("sql", True, config={"max_rows": 25})
 
     assert adapter.id == "sql"
     body = json.loads(route.calls.last.request.read().decode())
@@ -414,9 +407,7 @@ async def test_call_adapter_posts_arguments() -> None:
         route = router.post(f"{BASE}/tools/call").mock(
             return_value=httpx.Response(200, json=payload)
         )
-        result = await tools.call_adapter(
-            "http", "request", {"url": "https://example.com"}
-        )
+        result = await tools.call_adapter("http", "request", {"url": "https://example.com"})
 
     assert isinstance(result, ToolAdapterCallResult)
     assert result.duration_ms == 12

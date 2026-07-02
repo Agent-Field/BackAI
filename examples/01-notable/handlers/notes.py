@@ -33,7 +33,8 @@ import os
 import time
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any, Optional
+from datetime import UTC
+from typing import Any
 
 import httpx
 import psycopg
@@ -61,11 +62,11 @@ NOTABLE_MODEL = os.getenv("NOTABLE_MODEL", "openrouter/qwen/qwen-2.5-72b-instruc
 
 # psycopg's async connection is cheap to open per-request, but a shared
 # AsyncClient saves on TLS / TCP setup when we fan out to the runtime.
-_runtime_client: Optional[httpx.AsyncClient] = None
+_runtime_client: httpx.AsyncClient | None = None
 
 
 @asynccontextmanager
-async def _lifespan(app: FastAPI):  # noqa: ARG001
+async def _lifespan(app: FastAPI):
     global _runtime_client
     _runtime_client = httpx.AsyncClient(base_url=RUNTIME_URL, timeout=30.0)
     try:
@@ -87,7 +88,7 @@ app = FastAPI(
 
 
 def _require_tenant(
-    x_af_stack_tenant_id: Optional[str], x_af_stack_user_id: Optional[str]
+    x_af_stack_tenant_id: str | None, x_af_stack_user_id: str | None
 ) -> tuple[str, str]:
     """Extract + validate the per-request tenant + user.
 
@@ -122,16 +123,12 @@ async def _tenant_conn(tenant_id: str):
     pooled connection can't leak it to the next caller. psycopg's
     async transaction context wraps everything in a tx for us.
     """
-    async with await psycopg.AsyncConnection.connect(
-        DATABASE_URL, row_factory=dict_row
-    ) as conn:
+    async with await psycopg.AsyncConnection.connect(DATABASE_URL, row_factory=dict_row) as conn:
         async with conn.transaction():
             # We escape the tenant id explicitly — current_setting is
             # plain SQL and a malicious value would be a bug surface.
             # psycopg's literal binding via .execute() handles this.
-            await conn.execute(
-                "SELECT set_config('app.tenant_id', %s, true)", (tenant_id,)
-            )
+            await conn.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant_id,))
             yield conn
 
 
@@ -139,22 +136,16 @@ async def _tenant_conn(tenant_id: str):
 async def _admin_conn():
     """Yield a connection with bypass_rls on — for cross-tenant reads
     in the stats endpoint."""
-    async with await psycopg.AsyncConnection.connect(
-        DATABASE_URL, row_factory=dict_row
-    ) as conn:
+    async with await psycopg.AsyncConnection.connect(DATABASE_URL, row_factory=dict_row) as conn:
         async with conn.transaction():
-            await conn.execute(
-                "SELECT set_config('app.bypass_rls', 'on', true)"
-            )
+            await conn.execute("SELECT set_config('app.bypass_rls', 'on', true)")
             yield conn
 
 
 # ─── AgentField + billing client helpers ─────────────────────────────────
 
 
-async def _call_agent(
-    name: str, payload: dict[str, Any], tenant_id: str
-) -> dict[str, Any]:
+async def _call_agent(name: str, payload: dict[str, Any], tenant_id: str) -> dict[str, Any]:
     """Invoke an AgentField reasoner via the runtime gateway.
 
     The runtime's tenant resolver reads ``x-af-stack-tenant-id`` and
@@ -191,26 +182,22 @@ async def _meter(name: str, qty: float, tenant_id: str) -> None:
         return
     # Month-bucket the period like billing.PeriodBoundary(BucketMonth)
     # does on the Go side. UTC, first of month, +1 month.
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    now = datetime.now(timezone.utc)
-    period_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+    now = datetime.now(UTC)
+    period_start = datetime(now.year, now.month, 1, tzinfo=UTC)
     # Add one calendar month — replicate the Go AddDate(0,1,0) shape.
     if now.month == 12:
-        period_end = datetime(now.year + 1, 1, 1, tzinfo=timezone.utc)
+        period_end = datetime(now.year + 1, 1, 1, tzinfo=UTC)
     else:
-        period_end = datetime(now.year, now.month + 1, 1, tzinfo=timezone.utc)
+        period_end = datetime(now.year, now.month + 1, 1, tzinfo=UTC)
 
     try:
-        async with await psycopg.AsyncConnection.connect(
-            DATABASE_URL
-        ) as conn:
+        async with await psycopg.AsyncConnection.connect(DATABASE_URL) as conn:
             async with conn.transaction():
                 # Bypass RLS — suite_usage_meters is a platform table
                 # and writes to it are operator-level, not tenant-level.
-                await conn.execute(
-                    "SELECT set_config('app.bypass_rls', 'on', true)"
-                )
+                await conn.execute("SELECT set_config('app.bypass_rls', 'on', true)")
                 await conn.execute(
                     """
                     INSERT INTO suite_usage_meters
@@ -266,8 +253,8 @@ async def healthz() -> dict[str, Any]:
 @app.post("/notable/notes", response_model=Note, status_code=201)
 async def create_note(
     body: NoteCreate,
-    x_af_stack_tenant_id: Optional[str] = Header(default=None),
-    x_af_stack_user_id: Optional[str] = Header(default=None),
+    x_af_stack_tenant_id: str | None = Header(default=None),
+    x_af_stack_user_id: str | None = Header(default=None),
 ) -> Note:
     """Create a note. Meters one ``notable_notes_created`` unit.
 
@@ -279,18 +266,16 @@ async def create_note(
     tenant_id, user_id = _require_tenant(x_af_stack_tenant_id, x_af_stack_user_id)
     note_id = str(uuid.uuid4())
     async with _tenant_conn(tenant_id) as conn:
-        row = (
-            await (
-                await conn.execute(
-                    """
+        row = await (
+            await conn.execute(
+                """
                     INSERT INTO notable_notes (id, tenant_id, user_id, title, body, tags)
                     VALUES (%s, %s, %s, %s, %s, %s)
                     RETURNING *
                     """,
-                    (note_id, tenant_id, user_id, body.title, body.body, body.tags),
-                )
-            ).fetchone()
-        )
+                (note_id, tenant_id, user_id, body.title, body.body, body.tags),
+            )
+        ).fetchone()
     # Meter outside the transaction — billing is its own concern.
     await _meter("notable_notes_created", 1, tenant_id)
     return _row_to_note(row)
@@ -298,8 +283,8 @@ async def create_note(
 
 @app.get("/notable/notes", response_model=NoteList)
 async def list_notes(
-    x_af_stack_tenant_id: Optional[str] = Header(default=None),
-    x_af_stack_user_id: Optional[str] = Header(default=None),
+    x_af_stack_tenant_id: str | None = Header(default=None),
+    x_af_stack_user_id: str | None = Header(default=None),
     limit: int = 50,
     offset: int = 0,
 ) -> NoteList:
@@ -307,41 +292,33 @@ async def list_notes(
     tenant_id, _ = _require_tenant(x_af_stack_tenant_id, x_af_stack_user_id)
     # The composite index (tenant_id, updated_at DESC) keeps this O(limit).
     async with _tenant_conn(tenant_id) as conn:
-        rows = (
-            await (
-                await conn.execute(
-                    """
+        rows = await (
+            await conn.execute(
+                """
                     SELECT * FROM notable_notes
                     ORDER BY updated_at DESC
                     LIMIT %s OFFSET %s
                     """,
-                    (limit, offset),
-                )
-            ).fetchall()
-        )
-        total = (
-            await (
-                await conn.execute("SELECT count(*) AS n FROM notable_notes")
-            ).fetchone()
-        )["n"]
+                (limit, offset),
+            )
+        ).fetchall()
+        total = (await (await conn.execute("SELECT count(*) AS n FROM notable_notes")).fetchone())[
+            "n"
+        ]
     return NoteList(notes=[_row_to_note(r) for r in rows], total=total)
 
 
 @app.get("/notable/notes/{note_id}", response_model=Note)
 async def get_note(
     note_id: str,
-    x_af_stack_tenant_id: Optional[str] = Header(default=None),
-    x_af_stack_user_id: Optional[str] = Header(default=None),
+    x_af_stack_tenant_id: str | None = Header(default=None),
+    x_af_stack_user_id: str | None = Header(default=None),
 ) -> Note:
     tenant_id, _ = _require_tenant(x_af_stack_tenant_id, x_af_stack_user_id)
     async with _tenant_conn(tenant_id) as conn:
-        row = (
-            await (
-                await conn.execute(
-                    "SELECT * FROM notable_notes WHERE id = %s", (note_id,)
-                )
-            ).fetchone()
-        )
+        row = await (
+            await conn.execute("SELECT * FROM notable_notes WHERE id = %s", (note_id,))
+        ).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
     return _row_to_note(row)
@@ -350,8 +327,8 @@ async def get_note(
 @app.patch("/notable/notes/{note_id}/summarize", response_model=Note)
 async def summarize_note(
     note_id: str,
-    x_af_stack_tenant_id: Optional[str] = Header(default=None),
-    x_af_stack_user_id: Optional[str] = Header(default=None),
+    x_af_stack_tenant_id: str | None = Header(default=None),
+    x_af_stack_user_id: str | None = Header(default=None),
 ) -> Note:
     """Invoke the summarize agent and store its TLDR back to the row.
 
@@ -371,14 +348,12 @@ async def summarize_note(
     tldr = (result or {}).get("tldr") or ""
 
     async with _tenant_conn(tenant_id) as conn:
-        row = (
-            await (
-                await conn.execute(
-                    "UPDATE notable_notes SET tldr = %s WHERE id = %s RETURNING *",
-                    (tldr, note_id),
-                )
-            ).fetchone()
-        )
+        row = await (
+            await conn.execute(
+                "UPDATE notable_notes SET tldr = %s WHERE id = %s RETURNING *",
+                (tldr, note_id),
+            )
+        ).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
     return _row_to_note(row)
@@ -387,8 +362,8 @@ async def summarize_note(
 @app.patch("/notable/notes/{note_id}/suggest-tags", response_model=Note)
 async def suggest_tags_for_note(
     note_id: str,
-    x_af_stack_tenant_id: Optional[str] = Header(default=None),
-    x_af_stack_user_id: Optional[str] = Header(default=None),
+    x_af_stack_tenant_id: str | None = Header(default=None),
+    x_af_stack_user_id: str | None = Header(default=None),
 ) -> Note:
     """Ask the suggest_tags agent for tags, union them onto the row."""
     tenant_id, user_id = _require_tenant(x_af_stack_tenant_id, x_af_stack_user_id)
@@ -408,14 +383,12 @@ async def suggest_tags_for_note(
             seen.add(t)
 
     async with _tenant_conn(tenant_id) as conn:
-        row = (
-            await (
-                await conn.execute(
-                    "UPDATE notable_notes SET tags = %s WHERE id = %s RETURNING *",
-                    (merged, note_id),
-                )
-            ).fetchone()
-        )
+        row = await (
+            await conn.execute(
+                "UPDATE notable_notes SET tags = %s WHERE id = %s RETURNING *",
+                (merged, note_id),
+            )
+        ).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
     return _row_to_note(row)
@@ -423,7 +396,7 @@ async def suggest_tags_for_note(
 
 @app.get("/notable/stats")
 async def stats(
-    x_af_stack_tenant_id: Optional[str] = Header(default=None),
+    x_af_stack_tenant_id: str | None = Header(default=None),
 ) -> dict[str, Any]:
     """Per-tenant note count + a token-usage snapshot from the billing
     module. The dashboard plugin reads this.
@@ -433,18 +406,16 @@ async def stats(
     you'd put dashboard auth in front of it.
     """
     async with _admin_conn() as conn:
-        rows = (
-            await (
-                await conn.execute(
-                    """
+        rows = await (
+            await conn.execute(
+                """
                     SELECT tenant_id, count(*) AS note_count
                     FROM notable_notes
                     GROUP BY tenant_id
                     ORDER BY note_count DESC
                     """
-                )
-            ).fetchall()
-        )
+            )
+        ).fetchall()
 
     # Token usage comes from the runtime's billing meters list. We don't
     # try to be clever about period boundaries — the dashboard picks the
@@ -508,7 +479,7 @@ if __name__ == "__main__":  # pragma: no cover
 
     uvicorn.run(
         "notes:app",
-        host="0.0.0.0",
+        host="0.0.0.0",  # noqa: S104 - dev server binds all ifaces by design
         port=int(os.getenv("NOTABLE_API_PORT", "8090")),
         log_level=os.getenv("LOG_LEVEL", "info"),
     )

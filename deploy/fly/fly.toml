@@ -90,10 +90,12 @@ kill_timeout  = "30s"
 #   destination = "/var/lib/af-stack/sandbox"
 #   initial_size = "10gb"
 
+# No release_command: the runtime applies DB migrations automatically at boot
+# (cmd/af-stack runs serving.Migrate on startup). There is no `af-stack migrate`
+# subcommand, so a release_command invoking one would fail every deploy.
 [deploy]
   strategy           = "rolling"
   wait_timeout       = "5m"
-  release_command    = "/usr/local/bin/af-stack migrate up"
 
 [[vm]]
   size      = "shared-cpu-2x"

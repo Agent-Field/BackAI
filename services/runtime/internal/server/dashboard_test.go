@@ -38,6 +38,7 @@ func newDashTestServer(t *testing.T) *Server {
 
 func TestListRunsEmptyDB(t *testing.T) {
 	s := newDashTestServer(t)
+	withOperator(s, "owner") // S1b: /api/v1/runs is now operator-gated
 	req := httptest.NewRequest("GET", "/api/v1/runs", nil)
 	rec := httptest.NewRecorder()
 	s.mux.ServeHTTP(rec, req)
@@ -76,6 +77,7 @@ func TestListRunsAcceptsAllFilterParams(t *testing.T) {
 	// Verify the handler runs cleanly when every filter and paging param
 	// is supplied. With no DB, the body should still be an empty list.
 	s := newDashTestServer(t)
+	withOperator(s, "owner") // S1b: /api/v1/runs is now operator-gated
 	req := httptest.NewRequest("GET",
 		"/api/v1/runs?agent=sample.echo&tenant=00000000-0000-0000-0000-000000000000&status=succeeded&limit=10&offset=0",
 		nil)

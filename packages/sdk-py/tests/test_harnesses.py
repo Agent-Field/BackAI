@@ -51,23 +51,37 @@ async def test_list_returns_all_providers() -> None:
     payload = {
         "harnesses": [
             _row(provider="claude-code"),
-            _row(provider="codex", status="needs_auth",
-                 required_env=["OPENAI_API_KEY"], binary_path="/usr/bin/codex"),
-            _row(provider="gemini", status="missing", is_installed=False,
-                 binary_path=None, version=None,
-                 required_env=["GEMINI_API_KEY"]),
-            _row(provider="opencode", status="ready",
-                 binary_path="/usr/bin/opencode", required_env=[]),
+            _row(
+                provider="codex",
+                status="needs_auth",
+                required_env=["OPENAI_API_KEY"],
+                binary_path="/usr/bin/codex",
+            ),
+            _row(
+                provider="gemini",
+                status="missing",
+                is_installed=False,
+                binary_path=None,
+                version=None,
+                required_env=["GEMINI_API_KEY"],
+            ),
+            _row(
+                provider="opencode",
+                status="ready",
+                binary_path="/usr/bin/opencode",
+                required_env=[],
+            ),
         ]
     }
     with respx.mock(assert_all_called=True) as router:
-        router.get(f"{BASE}/harnesses").mock(
-            return_value=httpx.Response(200, json=payload)
-        )
+        router.get(f"{BASE}/harnesses").mock(return_value=httpx.Response(200, json=payload))
         result = await harnesses.list()
     assert len(result.harnesses) == 4
     assert [h.provider for h in result.harnesses] == [
-        "claude-code", "codex", "gemini", "opencode",
+        "claude-code",
+        "codex",
+        "gemini",
+        "opencode",
     ]
     assert result.harnesses[0].status == "ready"
     assert result.harnesses[2].status == "missing"

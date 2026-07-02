@@ -121,9 +121,7 @@ async def test_send_surfaces_structured_error() -> None:
         }
     }
     with respx.mock(assert_all_called=True) as router:
-        router.post(f"{BASE}/notifications").mock(
-            return_value=httpx.Response(503, json=error_body)
-        )
+        router.post(f"{BASE}/notifications").mock(return_value=httpx.Response(503, json=error_body))
         with pytest.raises(AFStackError) as exc:
             await notifications.send(to="user@example.com")
     assert exc.value.code == "NOTIFICATIONS_NOT_CONFIGURED"

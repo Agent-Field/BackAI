@@ -1,7 +1,7 @@
 # Dashboard production image — Next.js 15 with shadcn UI.
 # Multi-stage to keep the final image small and unprivileged.
 
-FROM node:26-alpine AS deps
+FROM node:20-alpine AS deps
 WORKDIR /app
 RUN npm install -g pnpm@9.15.0
 
@@ -14,7 +14,7 @@ COPY apps/backend/pyproject.toml apps/backend/
 
 RUN pnpm install --frozen-lockfile --filter=dashboard...
 
-FROM node:26-alpine AS build
+FROM node:20-alpine AS build
 WORKDIR /app
 RUN npm install -g pnpm@9.15.0
 
@@ -29,7 +29,7 @@ WORKDIR /app/apps/dashboard
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm build
 
-FROM node:26-alpine AS runtime
+FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

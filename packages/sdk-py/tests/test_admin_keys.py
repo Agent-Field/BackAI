@@ -71,9 +71,7 @@ async def test_issue_returns_value_once() -> None:
     issued = _row()
     issued["value"] = "af_abc12345_supersecret"  # only present on issue
     with respx.mock(assert_all_called=True) as router:
-        router.post(f"{BASE}/admin/keys").mock(
-            return_value=httpx.Response(201, json=issued)
-        )
+        router.post(f"{BASE}/admin/keys").mock(return_value=httpx.Response(201, json=issued))
         result = await keys.issue({"tenant_id": "t-1", "scopes": ["read"]})
     assert result.value == "af_abc12345_supersecret"
     assert result.id == "k-1"

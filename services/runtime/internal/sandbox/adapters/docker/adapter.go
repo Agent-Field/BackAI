@@ -63,6 +63,11 @@ import (
 // import it indirectly via the package.
 var ErrAdapterNotImplemented = errors.New("sandbox/docker: not implemented")
 
+// defaultSandboxPidsLimit caps the number of processes a sandbox container may
+// spawn, so untrusted code can't fork-bomb the host. Generous enough for build
+// tooling that spawns many short-lived processes.
+const defaultSandboxPidsLimit = 1024
+
 // Config holds adapter settings.
 //
 // Runtime selects the OCI runtime Docker uses when creating containers.
@@ -328,6 +333,55 @@ func (a *Adapter) ensureImage(ctx context.Context, ref string) error {
 	return nil
 }
 
+// buildHostConfig assembles the container HostConfig for a run spec, including
+// the security hardening applied to every sandbox container. Pure (no daemon
+// call) so the hardening defaults are unit-testable without Docker.
+//
+// Security hardening for untrusted agent code (defense in depth):
+//   - CapDrop ALL: the workload needs no Linux capabilities; dropping them
+//     blunts most container-escape primitives.
+//   - no-new-privileges: blocks setuid/privilege escalation inside the box.
+//   - PidsLimit: caps process count so a fork bomb can't exhaust the host.
+//
+// The daemon's default seccomp/AppArmor profiles still apply (we never set them
+// to "unconfined"). Read-only rootfs and a forced non-root user are deliberately
+// NOT defaulted — they break common write-heavy agent workloads (clone/build);
+// for stronger isolation of untrusted code use the gvisor (runsc) or e2b
+// adapter, which run the workload off the host kernel.
+func buildHostConfig(spec sandbox.RunSpec, runtime string) *container.HostConfig {
+	netMode := container.NetworkMode(network.NetworkBridge)
+	switch spec.Network {
+	case sandbox.NetworkOpen:
+		netMode = container.NetworkMode(network.NetworkBridge)
+	case sandbox.NetworkIsolated:
+		netMode = container.NetworkMode(network.NetworkNone)
+	default:
+		// NetworkRestricted is rejected by RunSpec.Validate (egress filtering
+		// is unimplemented). Should one reach here anyway, fail safe to no
+		// network rather than silently granting a full bridge.
+		netMode = container.NetworkMode(network.NetworkNone)
+	}
+
+	pidsLimit := int64(defaultSandboxPidsLimit)
+	hostCfg := &container.HostConfig{
+		Resources: container.Resources{
+			// Memory in bytes; MemoryGB validated at 1..64.
+			Memory: int64(spec.MemoryGB) * 1024 * 1024 * 1024,
+			// NanoCPUs is 1e9 per core; CPU validated at 1..32.
+			NanoCPUs:  int64(spec.CPU) * 1_000_000_000,
+			PidsLimit: &pidsLimit,
+		},
+		NetworkMode: netMode,
+		AutoRemove:  false, // we remove explicitly in cleanup
+		CapDrop:     []string{"ALL"},
+		SecurityOpt: []string{"no-new-privileges"},
+	}
+	if runtime != "" {
+		hostCfg.Runtime = runtime
+	}
+	return hostCfg
+}
+
 // createContainer builds the Config/HostConfig and asks the daemon for
 // a new container id.
 func (a *Adapter) createContainer(ctx context.Context, spec sandbox.RunSpec) (string, error) {
@@ -342,27 +396,7 @@ func (a *Adapter) createContainer(ctx context.Context, spec sandbox.RunSpec) (st
 		Env:   env,
 	}
 
-	netMode := container.NetworkMode(network.NetworkBridge)
-	switch spec.Network {
-	case sandbox.NetworkOpen, sandbox.NetworkRestricted:
-		netMode = container.NetworkMode(network.NetworkBridge)
-	case sandbox.NetworkIsolated:
-		netMode = container.NetworkMode(network.NetworkNone)
-	}
-
-	hostCfg := &container.HostConfig{
-		Resources: container.Resources{
-			// Memory in bytes; MemoryGB validated at 1..64.
-			Memory: int64(spec.MemoryGB) * 1024 * 1024 * 1024,
-			// NanoCPUs is 1e9 per core; CPU validated at 1..32.
-			NanoCPUs: int64(spec.CPU) * 1_000_000_000,
-		},
-		NetworkMode: netMode,
-		AutoRemove:  false, // we remove explicitly in cleanup
-	}
-	if a.cfg.Runtime != "" {
-		hostCfg.Runtime = a.cfg.Runtime
-	}
+	hostCfg := buildHostConfig(spec, a.cfg.Runtime)
 
 	name := "" // let docker assign — we track via map keyed on RunSpec.ID
 	if spec.ID != "" {

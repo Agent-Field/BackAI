@@ -18,6 +18,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -32,6 +33,7 @@ import (
 
 	"github.com/Agent-Field/backai/services/runtime/internal/hooks"
 	"github.com/Agent-Field/backai/services/runtime/internal/storage"
+	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 )
 
 // storageTracerName is the OTel tracer name used for storage spans.
@@ -98,37 +100,74 @@ func (s *Server) storageReady(w http.ResponseWriter) bool {
 	return true
 }
 
-// objectKey applies the tenant prefix configured in server.Deps. Phase 5
-// keeps multi-tenancy off by default; the prefix is "" and keys pass
-// through untouched. When MT lands, the prefix will be derived from the
-// request's tenant context.
-func (s *Server) objectKey(raw string) string {
-	if s.storagePrefix == "" {
+// tenantStoragePrefix returns the effective object-key prefix for the
+// request's tenant. With multi-tenancy on, every tenant is confined to an
+// isolated namespace (<base>/tenants/<tenant_id>/...) so one tenant can
+// never list, read, or delete another's objects — the S8 fix. With MT off
+// the static configured prefix (cfg.Storage.TenantPrefix) is used
+// unchanged, preserving single-tenant behaviour.
+//
+// The tenant id is a UUID minted server-side, but we still sanitise it to
+// a path-safe segment as defence-in-depth so a malformed id can never
+// escape its prefix.
+func (s *Server) tenantStoragePrefix(ctx context.Context) string {
+	base := s.storagePrefix
+	if !s.multiTenancyEnabled() {
+		return base
+	}
+	seg := sanitizeTenantSegment(tenantctx.TenantID(ctx))
+	if seg == "" {
+		// No resolvable tenant under MT — refuse to fall back to the
+		// shared namespace; use a sentinel that isolates the request from
+		// every real tenant rather than leaking across them.
+		seg = "_unresolved"
+	}
+	tenantPart := "tenants/" + seg
+	if base == "" {
+		return tenantPart
+	}
+	return strings.TrimSuffix(base, "/") + "/" + tenantPart
+}
+
+// sanitizeTenantSegment reduces a tenant id to a path-safe segment,
+// keeping only [A-Za-z0-9_-]. Any other byte (including '/', '.', NUL) is
+// dropped so the segment can never introduce a path separator or a
+// traversal component. A UUID passes through unchanged.
+func sanitizeTenantSegment(id string) string {
+	var b strings.Builder
+	b.Grow(len(id))
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// applyPrefix joins the effective tenant prefix with a raw caller key.
+// prefix "" leaves the key untouched (single-tenant / no configured base).
+func applyPrefix(prefix, raw string) string {
+	if prefix == "" {
 		return raw
 	}
-	if strings.HasSuffix(s.storagePrefix, "/") {
-		return s.storagePrefix + raw
-	}
-	return s.storagePrefix + "/" + raw
+	return strings.TrimSuffix(prefix, "/") + "/" + raw
 }
 
-// stripPrefix removes the tenant prefix from a key returned by the adapter
-// before exposing it to the dashboard. Symmetric with objectKey.
-func (s *Server) stripPrefix(key string) string {
-	if s.storagePrefix == "" {
+// stripPrefix removes the effective tenant prefix from a key returned by
+// the adapter before exposing it to the caller. Symmetric with applyPrefix.
+func stripPrefix(prefix, key string) string {
+	if prefix == "" {
 		return key
 	}
-	p := s.storagePrefix
-	if !strings.HasSuffix(p, "/") {
-		p = p + "/"
-	}
-	return strings.TrimPrefix(key, p)
+	return strings.TrimPrefix(key, strings.TrimSuffix(prefix, "/")+"/")
 }
 
-// toResp converts storage.Object → wire format.
-func (s *Server) toResp(o storage.Object) storageObjectResp {
+// toResp converts storage.Object → wire format, stripping the effective
+// tenant prefix so callers only ever see their own clean keys.
+func (s *Server) toResp(prefix string, o storage.Object) storageObjectResp {
 	resp := storageObjectResp{
-		Key:          s.stripPrefix(o.Key),
+		Key:          stripPrefix(prefix, o.Key),
 		Size:         o.Size,
 		LastModified: o.LastModified.UTC().Format(time.RFC3339),
 	}
@@ -201,7 +240,8 @@ func (s *Server) handleStorageUpload(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	contentType := header.Header.Get("Content-Type")
-	storeKey := s.objectKey(rawKey)
+	prefix := s.tenantStoragePrefix(ctx)
+	storeKey := applyPrefix(prefix, rawKey)
 
 	span.SetAttributes(
 		attribute.String("storage.key", storeKey),
@@ -238,7 +278,7 @@ func (s *Server) handleStorageUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, s.toResp(*obj))
+	writeJSON(w, http.StatusOK, s.toResp(prefix, *obj))
 }
 
 // ─── GET /api/v1/storage/signed-url ───────────────────────────────────────
@@ -286,7 +326,7 @@ func (s *Server) handleStorageSignedURL(w http.ResponseWriter, r *http.Request) 
 		ttl = max
 	}
 
-	storeKey := s.objectKey(rawKey)
+	storeKey := applyPrefix(s.tenantStoragePrefix(ctx), rawKey)
 	span.SetAttributes(
 		attribute.String("storage.key", storeKey),
 		attribute.Float64("storage.ttl_s", ttl.Seconds()),
@@ -336,7 +376,7 @@ func (s *Server) handleStorageDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	storeKey := s.objectKey(rawKey)
+	storeKey := applyPrefix(s.tenantStoragePrefix(ctx), rawKey)
 	span.SetAttributes(attribute.String("storage.key", storeKey))
 
 	transform, err := parseStorageTransform(r.URL.Query())
@@ -431,7 +471,7 @@ func (s *Server) handleStorageDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	storeKey := s.objectKey(rawKey)
+	storeKey := applyPrefix(s.tenantStoragePrefix(ctx), rawKey)
 	span.SetAttributes(attribute.String("storage.key", storeKey))
 
 	if err := s.storage.Delete(ctx, storeKey); err != nil {
@@ -482,7 +522,15 @@ func (s *Server) handleStorageList(w http.ResponseWriter, r *http.Request) {
 		limit = n
 	}
 
-	storePrefix := s.objectKey(rawPrefix)
+	prefix := s.tenantStoragePrefix(ctx)
+	// Confine the listing to the tenant's namespace: even an empty caller
+	// prefix must not escape it, so we always list under `prefix` and only
+	// widen with the caller's raw sub-prefix. This is the crux of the S8
+	// fix — a bare GET /api/v1/storage now returns ONLY this tenant's keys.
+	storePrefix := applyPrefix(prefix, rawPrefix)
+	if rawPrefix == "" {
+		storePrefix = prefix
+	}
 	span.SetAttributes(
 		attribute.String("storage.prefix", storePrefix),
 		attribute.Int("storage.limit", limit),
@@ -490,10 +538,10 @@ func (s *Server) handleStorageList(w http.ResponseWriter, r *http.Request) {
 
 	// The continuation cursor is stored already-prefixed (because the
 	// adapter is what generated it). If a client passes a raw cursor, we
-	// still prepend the tenant prefix when MT is on.
+	// still prepend the effective tenant prefix.
 	cursor := nextToken
-	if cursor != "" && s.storagePrefix != "" && !strings.HasPrefix(cursor, s.storagePrefix) {
-		cursor = s.objectKey(cursor)
+	if cursor != "" && prefix != "" && !strings.HasPrefix(cursor, prefix) {
+		cursor = applyPrefix(prefix, cursor)
 	}
 
 	res, err := s.storage.List(ctx, storePrefix, cursor, limit)
@@ -510,10 +558,10 @@ func (s *Server) handleStorageList(w http.ResponseWriter, r *http.Request) {
 		Prefix:  rawPrefix,
 	}
 	for _, o := range res.Objects {
-		resp.Objects = append(resp.Objects, s.toResp(o))
+		resp.Objects = append(resp.Objects, s.toResp(prefix, o))
 	}
 	if res.NextToken != "" {
-		token := s.stripPrefix(res.NextToken)
+		token := stripPrefix(prefix, res.NextToken)
 		resp.NextToken = &token
 	}
 	writeJSON(w, http.StatusOK, resp)

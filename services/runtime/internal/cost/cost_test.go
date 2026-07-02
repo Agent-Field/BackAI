@@ -275,6 +275,62 @@ func TestAggregateCostForExecutionNilPool(t *testing.T) {
 	}
 }
 
+// ─── S5 default spend ceiling (no-DB unit surface) ────────────────────────
+
+// TestWithDefaultCeilingClampsNegative: a negative ceiling is treated
+// as "disabled" (0), never as a negative cap that would reject every
+// call. Maps to contract item C6.
+func TestWithDefaultCeilingClampsNegative(t *testing.T) {
+	b := NewBudgets(nil, nil).WithDefaultCeilingUSD(-5)
+	if got := b.DefaultCeilingUSD(); got != 0 {
+		t.Errorf("expected negative ceiling clamped to 0, got %v", got)
+	}
+	b2 := NewBudgets(nil, nil).WithDefaultCeilingUSD(42.5)
+	if got := b2.DefaultCeilingUSD(); got != 42.5 {
+		t.Errorf("expected ceiling 42.5, got %v", got)
+	}
+}
+
+// TestDefaultCeilingNilReceiverSafe: the setter/getter tolerate a nil
+// receiver so boot-path wiring can stay branch-free.
+func TestDefaultCeilingNilReceiverSafe(t *testing.T) {
+	var b *Budgets
+	if got := b.WithDefaultCeilingUSD(10); got != nil {
+		t.Errorf("expected nil receiver to stay nil, got %v", got)
+	}
+	if got := b.DefaultCeilingUSD(); got != 0 {
+		t.Errorf("expected 0 from nil receiver, got %v", got)
+	}
+}
+
+// TestCurrentMonthStartUTC: the default-ceiling spend window anchors at
+// midnight UTC on the first of the current month. Maps to contract
+// item C7.
+func TestCurrentMonthStartUTC(t *testing.T) {
+	got := currentMonthStartUTC()
+	now := time.Now().UTC()
+	if got.Day() != 1 || got.Hour() != 0 || got.Minute() != 0 || got.Second() != 0 || got.Nanosecond() != 0 {
+		t.Errorf("expected midnight on the 1st, got %v", got)
+	}
+	if got.Year() != now.Year() || got.Month() != now.Month() {
+		t.Errorf("expected current year/month, got %v (now %v)", got, now)
+	}
+	if got.Location() != time.UTC {
+		t.Errorf("expected UTC, got %v", got.Location())
+	}
+}
+
+// TestHasBudgetNilPoolIgnoresCeiling: with no DB the gate is fully
+// permissive even when a default ceiling is configured — boot mode must
+// never reject. Maps to contract item C4 (degraded variant).
+func TestHasBudgetNilPoolIgnoresCeiling(t *testing.T) {
+	b := NewBudgets(nil, nil).WithDefaultCeilingUSD(1)
+	ok, err := b.HasBudget(context.Background(), "t_abc", 999)
+	if err != nil || !ok {
+		t.Errorf("expected admit with nil pool, got ok=%v err=%v", ok, err)
+	}
+}
+
 // ─── Hook handler payload translation ─────────────────────────────────────
 
 // TestPreCallHandlerNonMapPayloadAdmits confirms unknown payload types

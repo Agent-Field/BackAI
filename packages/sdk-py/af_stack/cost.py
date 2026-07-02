@@ -91,9 +91,7 @@ async def events(
     if to is not None:
         params["to"] = _to_iso(to)
     body = await _http.request_json("GET", "/cost/events", params=params)
-    return CostEventList.model_validate(
-        body or {"events": [], "total": 0, "has_more": False}
-    )
+    return CostEventList.model_validate(body or {"events": [], "total": 0, "has_more": False})
 
 
 def _to_iso(value: str | datetime) -> str:

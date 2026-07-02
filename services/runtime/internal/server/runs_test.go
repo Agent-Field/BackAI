@@ -352,7 +352,7 @@ func TestHandleRunsSubscribeRelaysAndFilters(t *testing.T) {
 // TestHandleRunsSubscribeAFUnreachable verifies the WebSocket emits
 // server.degraded when AgentField is down instead of crashing.
 func TestHandleRunsSubscribeAFUnreachable(t *testing.T) {
-	srv := newTestServerForRuns(t, "http://127.0.0.1:1") // closed port
+	srv := newTestServerForRuns(t, closedLoopbackURL(t)) // just-closed port (refuses fast on any OS)
 
 	ts := httptest.NewServer(srv.mux)
 	defer ts.Close()

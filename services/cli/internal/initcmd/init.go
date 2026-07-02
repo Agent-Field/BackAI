@@ -77,11 +77,22 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	name := fs.String("name", "", "project display name, e.g. DocuChat")
 	color := fs.String("color", "", "primary brand color as #RRGGBB")
 	logo := fs.String("logo", "", "logo file to copy into both app public directories")
+	template := fs.String("template", TemplateNode,
+		"scaffold template: node (rebrand only) | coding-agent (rebrand + a real coding agent)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
 		return fmt.Errorf("init: unexpected argument %q", fs.Arg(0))
+	}
+
+	tmpl := strings.TrimSpace(strings.ToLower(*template))
+	if tmpl == "" {
+		tmpl = TemplateNode
+	}
+	if !validTemplate(tmpl) {
+		return fmt.Errorf("init: unknown --template %q (want one of: %s)",
+			*template, strings.Join(knownTemplates, ", "))
 	}
 
 	projectName := strings.TrimSpace(*name)
@@ -155,14 +166,46 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if err := updateDefaultAgentName(root, slug); err != nil {
 		return err
 	}
+	brandRegenerated := true
 	if err := runBrandGenerator(root); err != nil {
-		return err
+		// Brand CSS/modules are also regenerated at build time, so a missing
+		// pnpm / node_modules (e.g. a fresh clone that hasn't run `pnpm
+		// install` yet) must NOT abort the scaffold: brand.yaml — the source
+		// of truth — is already written above. Warn and carry on so the
+		// hero flow (`init --template coding-agent`) still scaffolds.
+		brandRegenerated = false
+		fmt.Fprintf(stderr, "warning: skipped brand asset regeneration (%v)\n", err)
+		fmt.Fprintf(stderr, "         run `pnpm install && pnpm run generate:brand` once Node deps are present\n")
 	}
 
-	fmt.Fprintf(stdout, "Initialized AF Stack fork for %s\n", projectName)
+	var templateSummary string
+	if tmpl == TemplateCodingAgent {
+		created, skipped, err := scaffoldCodingAgent(root)
+		if err != nil {
+			return err
+		}
+		wired, err := wireCodingAgentCompose(root)
+		if err != nil {
+			return err
+		}
+		envAction, err := ensureHeroEnv(root)
+		if err != nil {
+			return err
+		}
+		templateSummary = summariseCodingAgentScaffold(created, skipped, wired, envAction)
+	}
+
+	fmt.Fprintf(stdout, "Initialized AF Stack fork for %s (template: %s)\n", projectName, tmpl)
 	fmt.Fprintf(stdout, "- brand.yaml updated\n")
-	fmt.Fprintf(stdout, "- brand CSS/modules regenerated\n")
+	if brandRegenerated {
+		fmt.Fprintf(stdout, "- brand CSS/modules regenerated\n")
+	} else {
+		fmt.Fprintf(stdout, "- brand CSS/modules NOT regenerated (run `pnpm run generate:brand` after `pnpm install`)\n")
+	}
 	fmt.Fprintf(stdout, "- default agent node_id set to %s\n", slug)
+	if templateSummary != "" {
+		fmt.Fprint(stdout, templateSummary)
+	}
 	return nil
 }
 

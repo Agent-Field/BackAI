@@ -83,12 +83,14 @@ var publicPrefixes = []string{
 	"/api/v1/cost",
 	"/api/v1/modules",
 	"/api/v1/queues",
-	// The admin/* surface gates its own access via the
-	// multi-tenancy module flag + admin auth (Phase 6 dashboard).
+	// The admin/* surface bypasses tenant resolution but each handler
+	// enforces its own operator auth (adminAccessDenied for the tenancy
+	// routes; operatorGuard for /admin/adapters).
 	"/api/v1/admin",
-	// DB studio (Phase 8.1) — dashboard-only operator surface; the
-	// dashboard's own session auth gates it, the same way admin
-	// routes work.
+	// DB studio (Phase 8.1) — operator-only. Bypasses tenant resolution,
+	// but every /api/v1/db/* route is operator-gated in-handler via
+	// operatorGuard (it can run arbitrary SQL), so a bare API key or an
+	// unauthenticated caller gets 401.
 	"/api/v1/db",
 	// Memory (Phase 8.2). Operator can browse + put + search from the
 	// dashboard. Tenant scoping is enforced at the Store layer via

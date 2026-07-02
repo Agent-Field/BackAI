@@ -126,7 +126,7 @@ async def run(
     timeout_s: int = 300,
     cpu: int = 2,
     memory_gb: int = 4,
-    network: SandboxNetwork | str = "restricted",
+    network: SandboxNetwork | str = "open",
     allow_egress: Sequence[str] | None = None,
     workspace_id: str | None = None,
 ) -> SandboxRun:
@@ -144,8 +144,9 @@ async def run(
 
     ``timeout_s`` (1–86400), ``cpu`` (1–32), ``memory_gb`` (1–64) carry the
     wire defaults from ``SandboxRunInputSchema``; the runtime double-checks
-    every bound. ``network`` defaults to ``"restricted"`` — the runtime
-    honours ``allow_egress`` only when ``network != "isolated"``.
+    every bound. ``network`` defaults to ``"open"``. ``"restricted"`` is not
+    yet supported (the runtime rejects it rather than silently granting full
+    egress); use ``"isolated"`` for no egress.
     """
     if not image:
         raise ValueError("sandbox image must be a non-empty string")
@@ -212,9 +213,7 @@ async def list(  # noqa: A001 — mirrors the JS `sandbox.list()` ergonomics
     if status is not None:
         params["status"] = status
     body = await _http.request_json("GET", "/sandbox/runs", params=params)
-    return SandboxRunList.model_validate(
-        body or {"runs": [], "total": 0, "has_more": False}
-    )
+    return SandboxRunList.model_validate(body or {"runs": [], "total": 0, "has_more": False})
 
 
 async def get(id: str) -> SandboxRun:

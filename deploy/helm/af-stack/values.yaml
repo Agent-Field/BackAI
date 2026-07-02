@@ -20,11 +20,11 @@ image:
   # Pull secrets for private registries.
   pullSecrets: []
   runtime:
-    repository: ghcr.io/agentfield/af-stack-runtime
+    repository: ghcr.io/agent-field/af-stack-runtime
     tag: ""               # Defaults to .Chart.AppVersion when empty.
     pullPolicy: IfNotPresent
   dashboard:
-    repository: ghcr.io/agentfield/af-stack-dashboard
+    repository: ghcr.io/agent-field/af-stack-dashboard
     tag: ""
     pullPolicy: IfNotPresent
 

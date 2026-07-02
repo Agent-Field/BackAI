@@ -164,9 +164,7 @@ async def test_stream_run_events_parses_json_payloads() -> None:
     sys.modules["websockets.asyncio.client"] = fake_client
 
     events: list[RunEvent] = []
-    async for evt in runs._stream_run_events(
-        "ws://localhost:8080/api/v1/realtime/runs"
-    ):
+    async for evt in runs._stream_run_events("ws://localhost:8080/api/v1/realtime/runs"):
         events.append(evt)
 
     assert len(events) == 3

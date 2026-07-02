@@ -19,6 +19,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/crons"
 	"github.com/Agent-Field/backai/services/runtime/internal/jobs"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
+	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
 )
 
 // ─── Wire shapes ──────────────────────────────────────────────────────────
@@ -45,12 +46,17 @@ type setActiveInput struct {
 // ─── Registration ─────────────────────────────────────────────────────────
 
 func (s *Server) registerCronsRoutes() {
-	s.mux.HandleFunc("GET /api/v1/crons", s.handleListCrons)
-	s.mux.HandleFunc("POST /api/v1/crons", s.handleCreateCron)
-	s.mux.HandleFunc("GET /api/v1/crons/{id}", s.handleGetCron)
-	s.mux.HandleFunc("PUT /api/v1/crons/{id}/active", s.handleSetCronActive)
-	s.mux.HandleFunc("POST /api/v1/crons/{id}/trigger", s.handleTriggerCron)
-	s.mux.HandleFunc("DELETE /api/v1/crons/{id}", s.handleDeleteCron)
+	// S1b: crons bypass the tenant resolver (publicPrefixes) and honour an
+	// attacker-controlled ?tenant= filter with no auth (reads AND unauthed
+	// mutations). Gate the whole surface to operators; the dashboard manages
+	// crons via its better-auth session.
+	g := func(h http.HandlerFunc) http.HandlerFunc { return s.operatorGuard(rbac.ResourceAdminCrons, h) }
+	s.mux.HandleFunc("GET /api/v1/crons", g(s.handleListCrons))
+	s.mux.HandleFunc("POST /api/v1/crons", g(s.handleCreateCron))
+	s.mux.HandleFunc("GET /api/v1/crons/{id}", g(s.handleGetCron))
+	s.mux.HandleFunc("PUT /api/v1/crons/{id}/active", g(s.handleSetCronActive))
+	s.mux.HandleFunc("POST /api/v1/crons/{id}/trigger", g(s.handleTriggerCron))
+	s.mux.HandleFunc("DELETE /api/v1/crons/{id}", g(s.handleDeleteCron))
 }
 
 // writeCronsError maps crons package errors to HTTP responses.

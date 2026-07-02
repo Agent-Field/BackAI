@@ -138,9 +138,7 @@ async def complete(
         payload["summary"] = summary
     if diff_url is not None:
         payload["diff_url"] = diff_url
-    body = await _http.request_json(
-        "POST", f"/shipwright/tasks/{id}/complete", json=payload
-    )
+    body = await _http.request_json("POST", f"/shipwright/tasks/{id}/complete", json=payload)
     return ShipwrightTaskResponse.model_validate(body or {})
 
 
