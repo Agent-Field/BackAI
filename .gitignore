@@ -68,6 +68,10 @@ dist/
 # Local verification captures
 development/*.png
 
+# Internal agent build artifacts — never ship
+.codex-artifacts/
+.codex-screenshots/
+
 # Test artifacts
 coverage/
 .nyc_output/
