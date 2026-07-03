@@ -25,6 +25,14 @@ const PUBLIC_PREFIXES = [
 export function middleware(request: NextRequest) {
   const { pathname, search, searchParams } = request.nextUrl
 
+  // Personal mode (AF_STACK_MODE=personal): single-user app, no operator
+  // login. Skip the auth gate entirely so the console opens straight off
+  // the bat. Read server-side only so it stays a true runtime toggle
+  // (NEXT_PUBLIC_* would bake the value at build time).
+  if (process.env.AF_STACK_MODE === "personal") {
+    return NextResponse.next()
+  }
+
   // Static assets and auth API always pass.
   if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) {
     return NextResponse.next()

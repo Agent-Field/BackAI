@@ -2170,6 +2170,10 @@ export const ModulesStateSchema = z.object({
   ),
   workload_modules: z.array(z.string()),
   multi_tenancy_enabled: z.boolean(),
+  // Deployment mode + billing gate. Optional with defaults so the schema
+  // stays compatible with older runtimes that don't emit these yet.
+  mode: z.enum(["saas", "personal"]).optional().default("saas"),
+  billing_enabled: z.boolean().optional().default(true),
 })
 export type ModulesState = z.infer<typeof ModulesStateSchema>
 
@@ -3677,6 +3681,33 @@ export async function isMultiTenancyEnabled(): Promise<boolean> {
   try {
     const state = await api.modulesState()
     return state.multi_tenancy_enabled
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Whether billing/upgrade surfaces should be shown. False in personal mode
+ * or when the billing module is disabled. Read via `api.modulesState`.
+ */
+export async function isBillingEnabled(): Promise<boolean> {
+  try {
+    const state = await api.modulesState()
+    return state.billing_enabled
+  } catch {
+    // Default to showing billing so SaaS deployments are never accidentally
+    // hidden if the modules read fails.
+    return true
+  }
+}
+
+/**
+ * Whether the runtime is in single-user personal mode (auth + billing off).
+ */
+export async function isPersonalMode(): Promise<boolean> {
+  try {
+    const state = await api.modulesState()
+    return state.mode === "personal"
   } catch {
     return false
   }

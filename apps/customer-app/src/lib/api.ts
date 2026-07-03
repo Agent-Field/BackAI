@@ -124,6 +124,16 @@ export const PortalLinkSchema = z.object({
 })
 export type PortalLink = z.infer<typeof PortalLinkSchema>
 
+// Modules/state endpoint — we only read the deployment-mode + billing gate
+// fields the customer-app cares about. mode/billing_enabled are optional
+// with defaults so the schema stays compatible with older runtimes.
+export const ModulesStateSchema = z.object({
+  multi_tenancy_enabled: z.boolean().optional().default(true),
+  mode: z.enum(["saas", "personal"]).optional().default("saas"),
+  billing_enabled: z.boolean().optional().default(true),
+})
+export type ModulesState = z.infer<typeof ModulesStateSchema>
+
 // ─── Transport ────────────────────────────────────────────────────────
 
 type RequestInitWithJson = Omit<RequestInit, "body"> & { json?: unknown }
@@ -206,6 +216,7 @@ async function request<T>(
 // ─── Methods ──────────────────────────────────────────────────────────
 
 export const api = {
+  modulesState: () => request("/api/v1/modules", undefined, ModulesStateSchema),
   cost: (params?: { from?: string; to?: string; tenant?: string }) => {
     const qs = new URLSearchParams()
     if (params?.from) qs.set("from", params.from)
@@ -266,4 +277,33 @@ export const api = {
         PortalLinkSchema,
       ),
   },
+}
+
+// ─── Module gates ─────────────────────────────────────────────────────
+
+/**
+ * Whether billing/upgrade surfaces should be shown. False in personal mode
+ * or when the billing module is disabled. Read via `api.modulesState`.
+ * Defaults to showing billing so SaaS deployments are never accidentally
+ * hidden if the modules read fails.
+ */
+export async function isBillingEnabled(): Promise<boolean> {
+  try {
+    const state = await api.modulesState()
+    return state.billing_enabled
+  } catch {
+    return true
+  }
+}
+
+/**
+ * Whether the runtime is in single-user personal mode (auth + billing off).
+ */
+export async function isPersonalMode(): Promise<boolean> {
+  try {
+    const state = await api.modulesState()
+    return state.mode === "personal"
+  } catch {
+    return false
+  }
 }

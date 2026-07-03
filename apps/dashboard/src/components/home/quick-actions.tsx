@@ -40,7 +40,10 @@ const LINKS: QuickLink[] = [
   },
 ]
 
-export function QuickActions() {
+export function QuickActions({ personal = false }: { personal?: boolean }) {
+  // Personal mode has no API keys to issue and no tenants to add, so those
+  // rows are dropped — leaving only the monitoring/reference links.
+  const links = personal ? LINKS.filter((l) => l.id !== "add-tenant") : LINKS
   return (
     <section
       aria-labelledby="quick-actions-heading"
@@ -55,8 +58,8 @@ export function QuickActions() {
         </h2>
       </header>
       <ul role="list" className="divide-y">
-        <IssueKeyRow />
-        {LINKS.map((link) => (
+        {!personal ? <IssueKeyRow /> : null}
+        {links.map((link) => (
           <QuickLinkRow key={link.id} link={link} />
         ))}
       </ul>

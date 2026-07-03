@@ -35,7 +35,17 @@ const CURL_SNIPPET = (key: string, model: string) =>
     "max_tokens": 64
   }'`
 
-export function WelcomeBlock() {
+// Personal mode has no auth, so the call needs no Authorization header.
+const CURL_SNIPPET_KEYLESS = (model: string) =>
+  `curl -sS http://localhost:8080/api/v1/llm/chat/completions \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "${model}",
+    "messages": [{"role":"user","content":"Hello"}],
+    "max_tokens": 64
+  }'`
+
+export function WelcomeBlock({ personal = false }: { personal?: boolean }) {
   const [dismissed, setDismissed] = useState(false)
   const [revealed, setRevealed] = useState(false)
   const [apiKey, setApiKey] = useState<string | null>(null)
@@ -131,6 +141,65 @@ export function WelcomeBlock() {
 
   const visibleKey = revealed && apiKey ? apiKey : PLACEHOLDER_KEY
   const snippet = CURL_SNIPPET(apiKey ?? "$BACKAI_API_KEY", DEFAULT_MODEL)
+
+  // Personal mode: no auth, so there's no key to issue. Show a keyless
+  // "you're all set" block with a copyable curl that calls the API directly.
+  if (personal) {
+    const keylessSnippet = CURL_SNIPPET_KEYLESS(DEFAULT_MODEL)
+    return (
+      <section
+        aria-labelledby="welcome-heading"
+        className="rounded-md border bg-card"
+      >
+        <header className="flex items-center justify-between border-b px-row-x py-row-y">
+          <h2
+            id="welcome-heading"
+            className="text-body font-medium text-foreground"
+          >
+            Welcome to BackAI — personal mode
+          </h2>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Dismiss welcome"
+            className="size-7"
+            onClick={handleDismiss}
+          >
+            <X className="size-3.5" aria-hidden />
+          </Button>
+        </header>
+        <div className="flex flex-col gap-tile px-row-x py-tile">
+          <p className="text-meta text-muted-foreground">
+            Auth and billing are off. No API key needed — call the API
+            directly. This console is here to monitor and verify.
+          </p>
+          <div className="flex min-w-0 flex-col gap-tile-tight">
+            <span className="text-eyebrow uppercase tracking-wide text-muted-foreground">
+              Try it
+            </span>
+            <pre className="overflow-x-auto rounded-md border bg-background px-row-x py-row-y font-mono text-meta text-foreground">
+              {keylessSnippet}
+            </pre>
+            <div className="flex items-center justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 shrink-0 gap-inline text-meta"
+                onClick={() => copy(keylessSnippet, "snippet")}
+              >
+                {copiedSnippet ? (
+                  <Check className="size-3.5 text-success" aria-hidden />
+                ) : (
+                  <Copy className="size-3.5" aria-hidden />
+                )}
+                {copiedSnippet ? "Copied" : "Copy snippet"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </section>
+    )
+  }
 
   return (
     <section
