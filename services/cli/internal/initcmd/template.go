@@ -133,6 +133,11 @@ directly is the fallback.
   Don't reimplement either — call them.
 - Multi-tenancy is ON. Never hardcode a tenant; read it from request context.
 - Secrets belong in the vault (GH_TOKEN etc.), never in code or committed .env.
+- Billing is turnkey — never build plan logic. Gate features with
+  `+"`GET /api/v1/billing/entitlements`"+`, meter usage with
+  `+"`POST /api/v1/billing/meter`"+`, upgrade via
+  `+"`POST /api/v1/billing/checkout`"+`. Plans + Stripe keys live in the
+  operator dashboard (Platform -> Billing), not in code.
 `, nodeID)
 }
 
