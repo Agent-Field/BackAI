@@ -34,23 +34,38 @@ execution all live together.
 
 ## Canonical DX
 
-The default path is **fork and edit**:
+The front door is **CLI-first** — scaffold a new app that consumes the
+backend, the way `create-next-app` scaffolds a frontend:
+
+```bash
+af-stack init my-app      # scaffold a project that talks to the backend
+cd my-app
+cp .env.example .env      # point AF_STACK_URL at your backend
+npm install && npm start
+```
+
+Your product code lives in *your* project and talks to one backend behind
+one base URL (`AF_STACK_URL`) with Supabase-shaped namespaces —
+`suite.agents`, `suite.llm`, `suite.storage`, `suite.billing`, … — and AI
+as a first-class primitive. Run a backend locally with `af-stack dev`.
+
+**Fork and edit** remains fully supported as the power-user / self-host
+path — the repo is the product, closer to Cal.com or Plane than a hosted
+BaaS. Inside a checkout, `af-stack init` (flags only, no project name)
+re-themes the fork, and `af-stack init --template coding-agent` scaffolds
+the hero coding-agent app:
 
 ```bash
 git clone https://github.com/Agent-Field/backai supportdesk-ai
 cd supportdesk-ai
-# Optional once you replace the default app:
-# af-stack init --name "DocuChat" --color "#0A66C2" --logo ./logo.png
+af-stack init --name "DocuChat" --color "#0A66C2" --logo ./logo.png
 docker compose up
 ```
 
-Your product code lives inside the fork. You brand it, add agents,
-customize the customer app, add workload modules, add dashboard plugins,
-and deploy the whole thing as one unit.
-
-API-only consumption is supported for mobile apps and existing products,
-but it is the secondary path. The primary experience is closer to
-Cal.com or Plane than to a hosted BaaS: the repo is the product.
+The CLI is the measurable front door: `af-stack` emits **anonymous,
+opt-out** usage telemetry (off unless a collection endpoint is
+configured) so adoption is visible without tracking who you are — see
+[`TELEMETRY.md`](TELEMETRY.md).
 
 ## What You Edit
 
