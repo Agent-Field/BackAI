@@ -164,7 +164,7 @@ func sanitizeCommand(command string) string {
 		return "unknown"
 	}
 	for _, r := range command {
-		if !(r >= 'a' && r <= 'z') && r != '-' {
+		if (r < 'a' || r > 'z') && r != '-' {
 			return "unknown"
 		}
 	}

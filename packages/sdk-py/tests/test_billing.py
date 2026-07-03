@@ -161,9 +161,7 @@ async def test_meter_posts_increment() -> None:
     import json as _json
 
     with respx.mock(assert_all_called=True) as router:
-        route = router.post(f"{BASE}/billing/meter").mock(
-            return_value=httpx.Response(204)
-        )
+        route = router.post(f"{BASE}/billing/meter").mock(return_value=httpx.Response(204))
         result = await billing.meter("sandbox_seconds", 1.5, tenant_id="t1")
 
     assert result is None
