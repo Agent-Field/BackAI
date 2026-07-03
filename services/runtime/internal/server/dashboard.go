@@ -29,6 +29,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/Agent-Field/backai/services/runtime/internal/config"
 	"github.com/Agent-Field/backai/services/runtime/internal/cost"
 )
 
@@ -827,9 +828,15 @@ type moduleEntry struct {
 
 // modulesStateResponse matches ModulesStateSchema.
 type modulesStateResponse struct {
-	Modules             []moduleEntry `json:"modules"`
-	WorkloadModules     []string      `json:"workload_modules"`
-	MultiTenancyEnabled bool          `json:"multi_tenancy_enabled"`
+	Modules []moduleEntry `json:"modules"`
+	// Mode is the deployment mode: "saas" or "personal". Both frontends
+	// read it to decide whether to skip login and hide the billing surface.
+	Mode                string   `json:"mode"`
+	WorkloadModules     []string `json:"workload_modules"`
+	MultiTenancyEnabled bool     `json:"multi_tenancy_enabled"`
+	// BillingEnabled is false in personal mode (or when the billing module
+	// is disabled); the frontends hide billing/upgrade surfaces when false.
+	BillingEnabled bool `json:"billing_enabled"`
 }
 
 // v1ModuleCatalogue is the canonical list of core suite modules for v1.
@@ -887,6 +894,16 @@ func (s *Server) handleModulesState(w http.ResponseWriter, r *http.Request) {
 		if v, ok := cfgEnabled[c.ID]; ok {
 			on = v
 		}
+		// Personal mode is the master switch: it forces multi-tenancy and
+		// billing off regardless of their individual flags, so report the
+		// effective state the runtime actually enforces (see multiTenancyEnabled
+		// / billingEnabled) — never the raw config flag.
+		switch c.ID {
+		case "multi-tenancy":
+			on = s.multiTenancyEnabled()
+		case "billing":
+			on = s.billingEnabled()
+		}
 		entry := moduleEntry{ID: c.ID, Name: c.Name, Enabled: on}
 		if a, ok := cfgAdapters[c.ID]; ok && a != "" {
 			entry.Adapter = a
@@ -902,10 +919,16 @@ func (s *Server) handleModulesState(w http.ResponseWriter, r *http.Request) {
 		workload = []string{}
 	}
 
+	mode := s.cfg.Mode
+	if mode == "" {
+		mode = config.ModeSaaS
+	}
 	resp := modulesStateResponse{
 		Modules:             entries,
+		Mode:                mode,
 		WorkloadModules:     workload,
 		MultiTenancyEnabled: mtEnabled,
+		BillingEnabled:      s.billingEnabled(),
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
