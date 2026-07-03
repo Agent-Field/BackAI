@@ -13,6 +13,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/audit"
 	obserrors "github.com/Agent-Field/backai/services/runtime/internal/observability/errors"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
+	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
 )
 
 type errorGroupWire struct {
@@ -38,12 +39,14 @@ type errorListResponse struct {
 }
 
 func (s *Server) registerAdminErrorsRoutes() {
-	s.mux.HandleFunc("GET /api/v1/admin/errors", s.handleAdminListErrors)
-	s.mux.HandleFunc("GET /api/v1/admin/errors/{id}", s.handleAdminGetError)
-	s.mux.HandleFunc("GET /api/v1/admin/errors/capabilities", s.handleAdminErrorCapabilities)
-	s.mux.HandleFunc("POST /api/v1/admin/errors/{id}/mute", s.handleAdminMuteError)
-	s.mux.HandleFunc("POST /api/v1/admin/errors/{id}/resolve", s.handleAdminResolveError)
-	s.mux.HandleFunc("POST /api/v1/admin/errors/{id}/reopen", s.handleAdminReopenError)
+	// S1b: /api/v1/admin is on publicPrefixes (bypasses the tenant
+	// resolver), so each handler must enforce operator auth itself.
+	s.mux.HandleFunc("GET /api/v1/admin/errors", s.operatorGuard(rbac.ResourceAdminErrors, s.handleAdminListErrors))
+	s.mux.HandleFunc("GET /api/v1/admin/errors/{id}", s.operatorGuard(rbac.ResourceAdminErrors, s.handleAdminGetError))
+	s.mux.HandleFunc("GET /api/v1/admin/errors/capabilities", s.operatorGuard(rbac.ResourceAdminErrors, s.handleAdminErrorCapabilities))
+	s.mux.HandleFunc("POST /api/v1/admin/errors/{id}/mute", s.operatorGuard(rbac.ResourceAdminErrors, s.handleAdminMuteError))
+	s.mux.HandleFunc("POST /api/v1/admin/errors/{id}/resolve", s.operatorGuard(rbac.ResourceAdminErrors, s.handleAdminResolveError))
+	s.mux.HandleFunc("POST /api/v1/admin/errors/{id}/reopen", s.operatorGuard(rbac.ResourceAdminErrors, s.handleAdminReopenError))
 }
 
 func (s *Server) handleAdminListErrors(w http.ResponseWriter, r *http.Request) {

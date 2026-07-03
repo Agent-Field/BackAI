@@ -12,6 +12,7 @@ import (
 
 	"github.com/Agent-Field/backai/services/runtime/internal/observability/traces"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
+	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
 )
 
 type traceSummaryWire struct {
@@ -54,9 +55,11 @@ type traceDetailResponse struct {
 }
 
 func (s *Server) registerTraceRoutes() {
-	s.mux.HandleFunc("GET /api/v1/admin/traces", s.handleAdminSearchTraces)
-	s.mux.HandleFunc("GET /api/v1/admin/traces/{trace_id}", s.handleAdminGetTrace)
-	s.mux.HandleFunc("GET /api/v1/admin/traces/capabilities", s.handleAdminTraceCapabilities)
+	// S1b: /api/v1/admin is on publicPrefixes (bypasses the tenant
+	// resolver), so each handler must enforce operator auth itself.
+	s.mux.HandleFunc("GET /api/v1/admin/traces", s.operatorGuard(rbac.ResourceAdminTraces, s.handleAdminSearchTraces))
+	s.mux.HandleFunc("GET /api/v1/admin/traces/{trace_id}", s.operatorGuard(rbac.ResourceAdminTraces, s.handleAdminGetTrace))
+	s.mux.HandleFunc("GET /api/v1/admin/traces/capabilities", s.operatorGuard(rbac.ResourceAdminTraces, s.handleAdminTraceCapabilities))
 }
 
 func (s *Server) handleAdminSearchTraces(w http.ResponseWriter, r *http.Request) {

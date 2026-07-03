@@ -130,6 +130,7 @@ func TestQueueSummaryEmptyManager(t *testing.T) {
 	// With no jobs.Manager wired, the queue-summary endpoint must still
 	// return the QueueSummarySchema shape with zeros + an empty recent.
 	s := newDashTestServer(t)
+	withOperator(s, "owner") // route is operator-gated (S1b)
 	req := httptest.NewRequest("GET", "/api/v1/queues/summary", nil)
 	rec := httptest.NewRecorder()
 	s.mux.ServeHTTP(rec, req)

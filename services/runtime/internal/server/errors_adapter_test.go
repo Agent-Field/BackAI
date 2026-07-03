@@ -56,6 +56,7 @@ func (s *stubErrorsStore) Capabilities() obserrors.Capabilities { return s.caps 
 func TestAdminErrorsListGetCapabilitiesAndMutation(t *testing.T) {
 	store := &stubErrorsStore{caps: obserrors.Capabilities{SupportsList: true, SupportsGet: true, SupportsMute: true, SupportsResolve: true, Persistence: "volatile"}}
 	srv := New(config.Default(), testLogger(), Deps{ErrorsStore: store})
+	withOperator(srv, "owner") // routes are operator-gated (S1b)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/errors", nil)
 	rr := httptest.NewRecorder()
 	srv.srv.Handler.ServeHTTP(rr, req)
@@ -97,6 +98,7 @@ func TestAdminErrorsListGetCapabilitiesAndMutation(t *testing.T) {
 
 func TestAdminErrorsUnsupportedCapabilityAndOpenAPI(t *testing.T) {
 	srv := New(config.Default(), testLogger(), Deps{ErrorsStore: &stubErrorsStore{caps: obserrors.Capabilities{SupportsList: true}}})
+	withOperator(srv, "owner")
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/errors/g1/resolve", nil)
 	rr := httptest.NewRecorder()
 	srv.srv.Handler.ServeHTTP(rr, req)

@@ -627,7 +627,8 @@ func (s *Server) registerRoutes() {
 	s.openapi.Register("GET", "/api/v1/runs", openapi.RouteMeta{
 		Summary: "List recent agent runs", Tags: []string{"dashboard"},
 	})
-	s.mux.HandleFunc("GET /api/v1/reasoners/analytics", s.handleReasonersAnalytics)
+	// S1b: cross-tenant cost aggregate — operator-only, like /api/v1/runs.
+	s.mux.HandleFunc("GET /api/v1/reasoners/analytics", s.operatorGuard(rbac.ResourceAdminReasoners, s.handleReasonersAnalytics))
 	s.openapi.Register("GET", "/api/v1/reasoners/analytics", openapi.RouteMeta{
 		Summary: "Reasoner cost, latency, and error analytics", Tags: []string{"dashboard"},
 	})
@@ -669,7 +670,9 @@ func (s *Server) registerRoutes() {
 	s.openapi.Register("GET", "/api/v1/modules", openapi.RouteMeta{
 		Summary: "Module enablement state", Tags: []string{"dashboard"},
 	})
-	s.mux.HandleFunc("GET /api/v1/queues/summary", s.handleQueueSummary)
+	// S1b: /api/v1/queues is on publicPrefixes — cross-tenant job summary,
+	// operator-only.
+	s.mux.HandleFunc("GET /api/v1/queues/summary", s.operatorGuard(rbac.ResourceAdminQueues, s.handleQueueSummary))
 	s.openapi.Register("GET", "/api/v1/queues/summary", openapi.RouteMeta{
 		Summary: "Background jobs queue summary", Tags: []string{"dashboard"},
 	})
@@ -748,6 +751,8 @@ func (s *Server) registerRoutes() {
 	s.registerAdminServicesOpenAPI()
 	s.registerAdminEventsRoutes()
 	s.registerAdminEventsOpenAPI()
+	s.registerAdminSessionsRoutes()
+	s.registerAdminSessionsOpenAPI()
 	s.registerAdminAnchorsRoutes()
 	s.registerAdminAnchorsOpenAPI()
 	s.registerAdminDemoRoutes()

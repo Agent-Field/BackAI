@@ -13,11 +13,15 @@ import (
 	"time"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/activity"
+	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
 )
 
 func (s *Server) registerActivityRoutes() {
 	s.mux.HandleFunc("GET /api/v1/activity", s.handleListActivity)
 	s.mux.HandleFunc("POST /api/v1/activity", s.handleLogActivity)
+	// Operator cross-tenant view of the same log (People → Activity log).
+	s.mux.HandleFunc("GET /api/v1/admin/activity",
+		s.operatorGuard(rbac.ResourceAdminActivity, s.handleAdminListActivity))
 }
 
 func (s *Server) activityUnavailable(w http.ResponseWriter) bool {
@@ -123,6 +127,52 @@ func (s *Server) handleListActivity(w http.ResponseWriter, r *http.Request) {
 	}
 
 	page, err := s.activity.List(ctx, filter)
+	if err != nil {
+		span.RecordError(err)
+		writeActivityError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
+}
+
+// handleAdminListActivity is the operator variant of handleListActivity:
+// cross-tenant (RLS bypassed in the store) with an optional ?tenant=
+// filter. Route is operator-gated in registerActivityRoutes.
+func (s *Server) handleAdminListActivity(w http.ResponseWriter, r *http.Request) {
+	ctx, span := s.dashTracer().Start(r.Context(), "dashboard.activity.admin_list")
+	defer span.End()
+	if s.activityUnavailable(w) {
+		return
+	}
+
+	q := r.URL.Query()
+	limit, offset := parsePaging(q.Get("limit"), q.Get("offset"))
+	filter := activity.ListFilter{
+		UserID:       strings.TrimSpace(q.Get("user_id")),
+		Action:       strings.TrimSpace(q.Get("action")),
+		ResourceType: strings.TrimSpace(q.Get("resource_type")),
+		ResourceID:   strings.TrimSpace(q.Get("resource_id")),
+		Limit:        limit,
+		Offset:       offset,
+	}
+	if from := strings.TrimSpace(q.Get("from")); from != "" {
+		t, err := time.Parse(time.RFC3339, from)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "from must be RFC3339", nil)
+			return
+		}
+		filter.From = &t
+	}
+	if to := strings.TrimSpace(q.Get("to")); to != "" {
+		t, err := time.Parse(time.RFC3339, to)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "to must be RFC3339", nil)
+			return
+		}
+		filter.To = &t
+	}
+
+	page, err := s.activity.ListAll(ctx, strings.TrimSpace(q.Get("tenant")), filter)
 	if err != nil {
 		span.RecordError(err)
 		writeActivityError(w, err)

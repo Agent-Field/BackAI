@@ -25,6 +25,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/jobs"
+	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 )
 
 // ─── Shapes mirroring apps/dashboard/src/lib/api.ts ───────────────────────
@@ -150,6 +151,12 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(q.Get("name"))
 	state := strings.TrimSpace(q.Get("state"))
 	tenant := strings.TrimSpace(q.Get("tenant"))
+	// S1b: the ?tenant= filter is caller-controlled. Only operators may
+	// list across tenants; tenant-authenticated callers are pinned to
+	// their own tenant regardless of the filter they sent.
+	if s.multiTenancyEnabled() && !s.callerIsOperator(r) {
+		tenant = tenantctx.TenantID(ctx)
+	}
 
 	span.SetAttributes(
 		attribute.Int("paging.limit", limit),
@@ -206,7 +213,22 @@ func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, errEnvelope("NOT_FOUND", err.Error()))
 		return
 	}
-	writeJSON(w, http.StatusOK, marshalJobRow(row))
+	rec := marshalJobRow(row)
+	if jobHiddenFromCaller(s, r, rec) {
+		writeJSON(w, http.StatusNotFound, errEnvelope("NOT_FOUND", "job not found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, rec)
+}
+
+// jobHiddenFromCaller enforces per-tenant visibility on single-job reads:
+// non-operator callers only see jobs whose args carry their own tenant id.
+func jobHiddenFromCaller(s *Server, r *http.Request, rec jobRecord) bool {
+	if !s.multiTenancyEnabled() || s.callerIsOperator(r) {
+		return false
+	}
+	caller := tenantctx.TenantID(r.Context())
+	return rec.TenantID == nil || caller == "" || *rec.TenantID != caller
 }
 
 // handleRetryJob marks a job retryable.
@@ -221,6 +243,14 @@ func (s *Server) handleRetryJob(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, errEnvelope("VALIDATION_FAILED", "id must be an integer"))
+		return
+	}
+	if existing, err := s.jobs.Get(ctx, id); err != nil {
+		span.RecordError(err)
+		writeJSON(w, http.StatusNotFound, errEnvelope("NOT_FOUND", err.Error()))
+		return
+	} else if jobHiddenFromCaller(s, r, marshalJobRow(existing)) {
+		writeJSON(w, http.StatusNotFound, errEnvelope("NOT_FOUND", "job not found"))
 		return
 	}
 	row, err := s.jobs.Retry(ctx, id)

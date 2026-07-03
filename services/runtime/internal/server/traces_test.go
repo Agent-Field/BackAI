@@ -56,6 +56,7 @@ func (s stubTracesStore) Capabilities() traces.Capabilities { return s.caps }
 
 func TestAdminTracesSearchAndCapabilities(t *testing.T) {
 	srv := New(config.Default(), testLogger(), Deps{TracesStore: stubTracesStore{caps: traces.Capabilities{SupportsTraceQL: true, NativeQueryLang: "traceql", MaxResultsPerQuery: 100}}})
+	withOperator(srv, "owner") // routes are operator-gated (S1b)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/traces?service=runtime&limit=1", nil)
 	rr := httptest.NewRecorder()
 	srv.srv.Handler.ServeHTTP(rr, req)
@@ -87,6 +88,7 @@ func TestAdminTracesSearchAndCapabilities(t *testing.T) {
 
 func TestAdminTracesGetAndNotFound(t *testing.T) {
 	srv := New(config.Default(), testLogger(), Deps{TracesStore: stubTracesStore{}})
+	withOperator(srv, "owner")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/traces/abc", nil)
 	rr := httptest.NewRecorder()
 	srv.srv.Handler.ServeHTTP(rr, req)
@@ -111,6 +113,7 @@ func TestAdminTracesGetAndNotFound(t *testing.T) {
 
 func TestAdminTracesNoBackend(t *testing.T) {
 	srv := New(config.Default(), testLogger(), Deps{TracesStore: stubTracesStore{err: traces.ErrNoBackend}})
+	withOperator(srv, "owner")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/traces/abc", nil)
 	rr := httptest.NewRecorder()
 	srv.srv.Handler.ServeHTTP(rr, req)
@@ -119,6 +122,7 @@ func TestAdminTracesNoBackend(t *testing.T) {
 	}
 
 	srv = New(config.Default(), testLogger(), Deps{TracesStore: stubTracesStore{err: errors.New("boom")}})
+	withOperator(srv, "owner")
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/traces", nil)
 	rr = httptest.NewRecorder()
 	srv.srv.Handler.ServeHTTP(rr, req)
