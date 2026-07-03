@@ -359,7 +359,11 @@ export const LogLineSchema = z.object({
   msg: z.string(),
   request_id: z.string().optional(),
   tenant_id: z.string().optional(),
+  trace_id: z.string().optional(),
   agent: z.string().optional(),
+  // Structured slog fields — logLineWire in services/runtime/internal/
+  // server/logs.go sends them; without this entry zod strips them.
+  fields: z.record(z.string(), z.unknown()).optional(),
 })
 export type LogLine = z.infer<typeof LogLineSchema>
 
@@ -2041,6 +2045,53 @@ export const AuditListSchema = z.object({
 })
 export type AuditList = z.infer<typeof AuditListSchema>
 
+// Customer-facing user-activity log (suite_user_activity), operator view.
+// Mirrors activity.Entry in services/runtime/internal/activity/types.go.
+export const ActivityEntrySchema = z.object({
+  id: z.string(),
+  tenant_id: z.string(),
+  user_id: z.string().nullable(),
+  api_key_id: z.string().nullable(),
+  actor_type: z.string(),
+  action: z.string(),
+  resource_type: z.string().nullable(),
+  resource_id: z.string().nullable(),
+  metadata: z.record(z.string(), z.unknown()),
+  ip: z.string().nullable(),
+  user_agent: z.string().nullable(),
+  occurred_at: z.string(),
+})
+export type ActivityEntry = z.infer<typeof ActivityEntrySchema>
+
+export const ActivityPageSchema = z.object({
+  entries: z.array(ActivityEntrySchema),
+  total: z.number(),
+  has_more: z.boolean(),
+})
+export type ActivityPage = z.infer<typeof ActivityPageSchema>
+
+// Live better-auth sessions (operator + customer) — mirrors sessionWire in
+// services/runtime/internal/server/admin_sessions.go.
+export const SessionInfoSchema = z.object({
+  id: z.string(),
+  user_id: z.string(),
+  email: z.string(),
+  name: z.string().nullable(),
+  ip_address: z.string().nullable(),
+  user_agent: z.string().nullable(),
+  is_operator: z.boolean(),
+  created_at: z.string(),
+  expires_at: z.string(),
+})
+export type SessionInfo = z.infer<typeof SessionInfoSchema>
+
+export const SessionListSchema = z.object({
+  sessions: z.array(SessionInfoSchema),
+  total: z.number(),
+  has_more: z.boolean(),
+})
+export type SessionList = z.infer<typeof SessionListSchema>
+
 export const ModulesStateSchema = z.object({
 	modules: z.array(
     z.object({
@@ -2967,8 +3018,18 @@ export const api = {
       request("/api/v1/db/sql/history", undefined, SQLHistorySchema),
   },
   reasoners: {
-    analytics: () =>
-      request("/api/v1/reasoners/analytics", undefined, ReasonerAnalyticsSchema),
+    analytics: (params?: { from?: string; to?: string; limit?: number }) => {
+      const qs = new URLSearchParams()
+      if (params?.from) qs.set("from", params.from)
+      if (params?.to) qs.set("to", params.to)
+      if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+      const q = qs.toString()
+      return request(
+        `/api/v1/reasoners/analytics${q ? "?" + q : ""}`,
+        undefined,
+        ReasonerAnalyticsSchema,
+      )
+    },
   },
   memory: {
     list: (params?: {
@@ -3289,6 +3350,56 @@ export const api = {
           AuditListSchema,
         )
       },
+    },
+    activity: {
+      list: (params?: {
+        tenant?: string
+        user_id?: string
+        action?: string
+        resource_type?: string
+        limit?: number
+        offset?: number
+      }) => {
+        const qs = new URLSearchParams()
+        if (params?.tenant) qs.set("tenant", params.tenant)
+        if (params?.user_id) qs.set("user_id", params.user_id)
+        if (params?.action) qs.set("action", params.action)
+        if (params?.resource_type) qs.set("resource_type", params.resource_type)
+        if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+        if (params?.offset !== undefined) qs.set("offset", String(params.offset))
+        const q = qs.toString()
+        return request(
+          `/api/v1/admin/activity${q ? "?" + q : ""}`,
+          undefined,
+          ActivityPageSchema,
+        )
+      },
+    },
+    sessions: {
+      list: (params?: {
+        email?: string
+        include_expired?: boolean
+        limit?: number
+        offset?: number
+      }) => {
+        const qs = new URLSearchParams()
+        if (params?.email) qs.set("email", params.email)
+        if (params?.include_expired) qs.set("include_expired", "true")
+        if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+        if (params?.offset !== undefined) qs.set("offset", String(params.offset))
+        const q = qs.toString()
+        return request(
+          `/api/v1/admin/sessions${q ? "?" + q : ""}`,
+          undefined,
+          SessionListSchema,
+        )
+      },
+      revoke: (id: string) =>
+        request(
+          `/api/v1/admin/sessions/${encodeURIComponent(id)}`,
+          { method: "DELETE" },
+          z.object({ revoked: z.boolean() }),
+        ),
     },
 	  },
 
