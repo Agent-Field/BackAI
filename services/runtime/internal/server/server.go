@@ -6,6 +6,8 @@ package server
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -792,6 +794,7 @@ func (s *Server) registerRoutes() {
 	// endpoint CRUD) return 503 when no store is wired; the list
 	// endpoint degrades to an empty page.
 	s.registerWebhooksRoutes()
+	s.registerWebhookSubscriptionRoutes()
 	s.registerWebhooksOpenAPI()
 
 	// Billing (Phase 10.4). Read endpoints serve empty / synthesised
@@ -1576,6 +1579,12 @@ func loadCORSAllowlist() map[string]struct{} {
 func withLogging(log *slog.Logger, ring *metricsRing, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		// Correlation id: prefer the W3C traceparent trace-id the caller
+		// sent (so every call a client makes under one traceparent shares
+		// a trace_id on the Logs page), else a fresh id. The ring logger's
+		// populateLineField routes a "trace_id" attr into the log line's
+		// trace column, which the dashboard Logs view surfaces + filters.
+		traceID := requestTraceID(r)
 		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(sw, r)
 		dur := time.Since(start)
@@ -1584,9 +1593,39 @@ func withLogging(log *slog.Logger, ring *metricsRing, next http.Handler) http.Ha
 			"path", r.URL.Path,
 			"status", sw.status,
 			"duration_ms", dur.Milliseconds(),
+			"trace_id", traceID,
 		)
 		ring.observe(r.URL.Path, dur.Milliseconds(), sw.status)
 	})
+}
+
+// requestTraceID returns a correlation id for the request. It extracts the
+// 32-hex trace-id from a W3C `traceparent` header
+// (00-<trace>-<span>-<flags>) when present + well-formed, so a client that
+// stamps one traceparent across a burst of calls sees them grouped on the
+// Logs page. Falls back to a random 16-hex id.
+func requestTraceID(r *http.Request) string {
+	if tp := strings.TrimSpace(r.Header.Get("traceparent")); tp != "" {
+		parts := strings.Split(tp, "-")
+		if len(parts) >= 2 && len(parts[1]) == 32 && isHex(parts[1]) {
+			return parts[1]
+		}
+	}
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err == nil {
+		return hex.EncodeToString(b[:])
+	}
+	return "unknown"
+}
+
+func isHex(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 type statusWriter struct {
