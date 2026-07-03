@@ -94,6 +94,7 @@ type settingsStatus struct {
 	Source           string `json:"source"`
 	SecretKeySet     bool   `json:"secret_key_set"`
 	SecretKeyLast4   string `json:"secret_key_last4"`
+	KeyMode          string `json:"key_mode"`
 	WebhookSecretSet bool   `json:"webhook_secret_set"`
 	WebhookPath      string `json:"webhook_path"`
 	SettingsWritable bool   `json:"settings_writable"`
@@ -108,8 +109,18 @@ func runStatus(ctx context.Context, c *client.Client, stdout io.Writer) error {
 	fmt.Fprintf(stdout, "mode:     %s\n", s.Mode)
 	fmt.Fprintf(stdout, "key:      %s\n", keyState(s))
 	if s.Mode == "real" {
+		km := s.KeyMode
+		if km == "" {
+			km = "unknown"
+		}
+		// Make live↔test explicit: prices provisioned under one mode's key
+		// 404 at checkout under the other, so surfacing this avoids the
+		// classic "switched keys, checkout broke" trap.
+		fmt.Fprintf(stdout, "stripe:   %s mode\n", km)
 		fmt.Fprintln(stdout, "\nStripe is live. `af-stack billing plan set` will auto-provision")
 		fmt.Fprintln(stdout, "the Stripe Product + Price for any paid plan.")
+		fmt.Fprintln(stdout, "Prices are tied to this key — if you swap keys (e.g. test↔live),")
+		fmt.Fprintln(stdout, "saving the new key re-provisions every paid plan automatically.")
 		return nil
 	}
 	// Not live — the one human step: provide a key.
