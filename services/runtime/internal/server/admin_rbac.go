@@ -6,12 +6,14 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
+	"github.com/Agent-Field/backai/services/runtime/internal/tenancy"
 )
 
 type operatorPrincipal struct {
@@ -90,6 +92,12 @@ func (s *Server) resolveOperatorPrincipal(ctx context.Context, r *http.Request) 
 	}
 	token := betterAuthSessionToken(r)
 	if token == "" {
+		// No browser session — fall back to an operator API key so
+		// non-interactive callers (af-stack CLI, CI) can reach the
+		// operator surface. See resolveOperatorBearer for the rules.
+		if p, ok := s.resolveOperatorBearer(ctx, r); ok {
+			return p, nil
+		}
 		return operatorPrincipal{}, errNoSession
 	}
 
@@ -116,8 +124,66 @@ func (s *Server) resolveOperatorPrincipal(ctx context.Context, r *http.Request) 
 	return p, nil
 }
 
+// resolveOperatorBearer maps an Authorization Bearer API key onto an
+// operator principal. To qualify, the key must be minted on the default
+// (zero-uuid) tenant AND carry an explicit operator scope — ordinary
+// tenant keys never pass. Scope "operator" grants the admin role
+// (read + non-destructive writes); "operator:owner" grants owner.
+// Such keys are only mintable through the already-operator-gated
+// POST /api/v1/admin/keys or by `af-stack operator key` (direct DB access).
+func (s *Server) resolveOperatorBearer(ctx context.Context, r *http.Request) (operatorPrincipal, bool) {
+	if s.tenancy == nil {
+		return operatorPrincipal{}, false
+	}
+	auth := strings.TrimSpace(r.Header.Get("Authorization"))
+	const bearer = "Bearer "
+	if len(auth) <= len(bearer) || !strings.EqualFold(auth[:len(bearer)], bearer) {
+		return operatorPrincipal{}, false
+	}
+	k, err := s.tenancy.VerifyKey(ctx, strings.TrimSpace(auth[len(bearer):]))
+	if err != nil || k.TenantID != tenancy.DefaultTenantID {
+		return operatorPrincipal{}, false
+	}
+	role := ""
+	for _, scope := range k.Scopes {
+		switch strings.TrimSpace(scope) {
+		case "operator:owner":
+			role = rbac.RoleOwner
+		case "operator":
+			if role == "" {
+				role = rbac.RoleAdmin
+			}
+		}
+	}
+	if role == "" {
+		return operatorPrincipal{}, false
+	}
+	email := ""
+	if k.Name != nil {
+		email = *k.Name
+	}
+	return operatorPrincipal{
+		UserID: "api-key:" + k.ID,
+		Email:  email,
+		Role:   role,
+	}, true
+}
+
 func adminAction(method string) string {
 	return rbac.ActionForMethod(method)
+}
+
+// callerIsOperator reports whether the request carries a valid operator
+// session. Dual-audience endpoints (e.g. jobs, reachable by tenant API
+// keys AND the operator dashboard) use it to decide whether cross-tenant
+// filters may be honoured.
+func (s *Server) callerIsOperator(r *http.Request) bool {
+	resolve := s.operatorResolver
+	if resolve == nil {
+		resolve = s.resolveOperatorPrincipal
+	}
+	p, err := resolve(r.Context(), r)
+	return err == nil && p.Role != ""
 }
 
 // operatorGuard wraps h with the operator-auth gate (better-auth session ->

@@ -2,9 +2,10 @@
 
 "use client"
 
-import { Bell, ChevronDown, MoonStar, Search, Sun } from "lucide-react"
+import { Bell, Check, ChevronDown, MoonStar, Search, Sun } from "lucide-react"
 import { useTheme } from "next-themes"
 import Link from "next/link"
+import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
@@ -44,14 +45,9 @@ import { polling } from "@/lib/theme"
 interface TopBarProps {
   initialAnchors: AdminAnchors | null
   tenants: { id: string; name: string }[]
-  activeTenantId?: string
 }
 
-export function TopBar({
-  initialAnchors,
-  tenants,
-  activeTenantId,
-}: TopBarProps) {
+export function TopBar({ initialAnchors, tenants }: TopBarProps) {
   const [anchors, setAnchors] = useState<AdminAnchors | null>(initialAnchors)
 
   useEffect(() => {
@@ -71,8 +67,6 @@ export function TopBar({
     }
   }, [])
 
-  const activeTenant = tenants.find((t) => t.id === activeTenantId) ?? tenants[0]
-
   return (
     <header className="sticky top-0 z-30 flex h-12 shrink-0 items-center border-b bg-background/95 px-page-x backdrop-blur supports-[backdrop-filter]:bg-background/80">
       {/* Left: identity */}
@@ -82,7 +76,7 @@ export function TopBar({
           BackAI
         </span>
         {tenants.length > 0 ? (
-          <TenantSwitcher tenants={tenants} activeTenant={activeTenant} />
+          <TenantSwitcher tenants={tenants} />
         ) : (
           <Badge
             variant="outline"
@@ -180,16 +174,28 @@ export function TopBar({
   )
 }
 
+// The operator console is cross-tenant by design: Cost, Runs, Health and
+// the Tenants list all aggregate every tenant, and a single tenant's
+// detail lives at /people/tenants/{id}. So "the current tenant" isn't a
+// global filter — it's simply whether you're looking at one tenant's
+// drilldown. This switcher reflects that: it shows "All tenants" (→ the
+// aggregated Tenants list) everywhere except a drilldown, where it shows
+// that tenant, and every row navigates to a real view.
 function TenantSwitcher({
   tenants,
-  activeTenant,
 }: {
   tenants: { id: string; name: string }[]
-  activeTenant?: { id: string; name: string }
 }) {
-  const friendlyLabel = activeTenant
-    ? friendlyTenantName(activeTenant.name)
-    : "All tenants"
+  const pathname = usePathname()
+  const router = useRouter()
+
+  const match = pathname.match(/^\/people\/tenants\/([^/]+)/)
+  const activeId = match ? decodeURIComponent(match[1]) : null
+  const activeTenant = activeId
+    ? tenants.find((t) => t.id === activeId)
+    : undefined
+  const label = activeTenant ? friendlyTenantName(activeTenant.name) : "All tenants"
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -201,14 +207,36 @@ function TenantSwitcher({
           />
         }
       >
-        <span className="truncate">{friendlyLabel}</span>
+        <span className="truncate">{label}</span>
         <ChevronDown className="size-3 shrink-0" aria-hidden />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-64">
-        <DropdownMenuLabel>Switch tenant</DropdownMenuLabel>
+        <DropdownMenuLabel>View tenant</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => router.push("/people/tenants")}>
+          <Check
+            className={`size-3.5 shrink-0 ${activeId ? "opacity-0" : "opacity-100"}`}
+            aria-hidden
+          />
+          <span className="flex-1 truncate text-body text-foreground">
+            All tenants
+          </span>
+          <span className="text-meta tabular-nums text-muted-foreground">
+            {tenants.length}
+          </span>
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
         {tenants.map((t) => (
-          <DropdownMenuItem key={t.id}>
+          <DropdownMenuItem
+            key={t.id}
+            onClick={() =>
+              router.push(`/people/tenants/${encodeURIComponent(t.id)}`)
+            }
+          >
+            <Check
+              className={`mt-0.5 size-3.5 shrink-0 ${activeId === t.id ? "opacity-100" : "opacity-0"}`}
+              aria-hidden
+            />
             <div className="flex min-w-0 flex-1 flex-col gap-tile-tight">
               <span className="truncate text-body text-foreground">
                 {friendlyTenantName(t.name)}
@@ -314,6 +342,14 @@ function CmdKTrigger() {
 
 function ThemeToggle() {
   const { setTheme, resolvedTheme } = useTheme()
+  // next-themes can't know the resolved theme during SSR, so the icon it
+  // picks on the server won't match the client's first render → React
+  // hydration mismatch (and a full client re-render of the subtree). Gate
+  // the theme-dependent icon behind a mounted flag: SSR and the first
+  // client render both show the neutral placeholder, then we swap in the
+  // real icon after mount.
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
   const dark = resolvedTheme === "dark"
   return (
     <Tooltip>
@@ -328,7 +364,9 @@ function ThemeToggle() {
           />
         }
       >
-        {dark ? (
+        {!mounted ? (
+          <Sun className="size-icon-inline text-muted-foreground opacity-0" aria-hidden />
+        ) : dark ? (
           <Sun className="size-icon-inline text-muted-foreground" aria-hidden />
         ) : (
           <MoonStar className="size-icon-inline text-muted-foreground" aria-hidden />

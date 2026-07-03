@@ -419,6 +419,7 @@ func TestModulesStateRespectsConfigOverrides(t *testing.T) {
 
 func TestQueueSummaryStub(t *testing.T) {
 	s := newDashTestServer(t)
+	withOperator(s, "owner") // route is operator-gated (S1b)
 	req := httptest.NewRequest("GET", "/api/v1/queues/summary", nil)
 	rec := httptest.NewRecorder()
 	s.mux.ServeHTTP(rec, req)

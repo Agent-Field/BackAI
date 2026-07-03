@@ -48,6 +48,7 @@ import (
 
 	"github.com/Agent-Field/backai/services/runtime/internal/appmetrics"
 	"github.com/Agent-Field/backai/services/runtime/internal/audit"
+	"github.com/Agent-Field/backai/services/runtime/internal/cost"
 	"github.com/Agent-Field/backai/services/runtime/internal/guardrails"
 	"github.com/Agent-Field/backai/services/runtime/internal/hooks"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmcache"
@@ -1572,13 +1573,19 @@ func modalityFromOperation(op string) string {
 }
 
 // classifyHookError inspects a pre-call hook error and returns the
-// (code, message, status) tuple to render. Phase 7.2's budget guard
-// returns an APIError with code BUDGET_EXCEEDED; anything else is
-// rendered as a generic FORBIDDEN.
+// (code, message, status) tuple to render. The budget guard returns the
+// cost.ErrBudgetExceeded sentinel (wrapped) — map it to the documented
+// 402 BUDGET_EXCEEDED contract; APIErrors carry their own code/status;
+// anything else is rendered as a generic FORBIDDEN.
 func classifyHookError(err error) (string, string, int) {
 	var apiErr *llmgateway.APIError
 	if errors.As(err, &apiErr) {
 		return apiErr.Code, apiErr.Message, apiErr.HTTPStatus()
+	}
+	if errors.Is(err, cost.ErrBudgetExceeded) {
+		return llmgateway.ErrCodeBudgetExceeded,
+			"tenant monthly budget exhausted — raise the cap in the operator dashboard (Cost → Budgets)",
+			http.StatusPaymentRequired
 	}
 	return "POLICY_VIOLATION", err.Error(), http.StatusForbidden
 }

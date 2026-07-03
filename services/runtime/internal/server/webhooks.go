@@ -34,6 +34,7 @@ import (
 	"strings"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
+	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
 	"github.com/Agent-Field/backai/services/runtime/internal/webhooks"
 )
 
@@ -67,15 +68,20 @@ func (s *Server) registerWebhooksRoutes() {
 	s.mux.HandleFunc("POST /webhooks/in/{slug}", s.handleInboundWebhook)
 
 	// Phase 10.2: dashboard endpoint CRUD.
-	s.mux.HandleFunc("GET /api/v1/webhooks/endpoints", s.handleListWebhookEndpoints)
-	s.mux.HandleFunc("POST /api/v1/webhooks/endpoints", s.handleCreateWebhookEndpoint)
-	s.mux.HandleFunc("DELETE /api/v1/webhooks/endpoints/{id}", s.handleDeleteWebhookEndpoint)
+	// S1b: /api/v1/webhooks is on publicPrefixes (bypasses the tenant
+	// resolver) and the store reads cross-tenant via bypass_rls, so every
+	// REST route must enforce operator auth itself. `send` in particular
+	// was an unauthenticated outbound relay (runtime POSTs an arbitrary
+	// payload to an arbitrary URL) before this gate.
+	s.mux.HandleFunc("GET /api/v1/webhooks/endpoints", s.operatorGuard(rbac.ResourceAdminWebhooks, s.handleListWebhookEndpoints))
+	s.mux.HandleFunc("POST /api/v1/webhooks/endpoints", s.operatorGuard(rbac.ResourceAdminWebhooks, s.handleCreateWebhookEndpoint))
+	s.mux.HandleFunc("DELETE /api/v1/webhooks/endpoints/{id}", s.operatorGuard(rbac.ResourceAdminWebhooks, s.handleDeleteWebhookEndpoint))
 
 	// Outbound (Phase 10.3).
-	s.mux.HandleFunc("POST /api/v1/webhooks/send", s.handleWebhookSend)
-	s.mux.HandleFunc("GET /api/v1/webhooks/deliveries", s.handleWebhookListDeliveries)
-	s.mux.HandleFunc("GET /api/v1/webhooks/deliveries/{id}", s.handleWebhookGetDelivery)
-	s.mux.HandleFunc("POST /api/v1/webhooks/deliveries/{id}/retry", s.handleWebhookRetryDelivery)
+	s.mux.HandleFunc("POST /api/v1/webhooks/send", s.operatorGuard(rbac.ResourceAdminWebhooks, s.handleWebhookSend))
+	s.mux.HandleFunc("GET /api/v1/webhooks/deliveries", s.operatorGuard(rbac.ResourceAdminWebhooks, s.handleWebhookListDeliveries))
+	s.mux.HandleFunc("GET /api/v1/webhooks/deliveries/{id}", s.operatorGuard(rbac.ResourceAdminWebhooks, s.handleWebhookGetDelivery))
+	s.mux.HandleFunc("POST /api/v1/webhooks/deliveries/{id}/retry", s.operatorGuard(rbac.ResourceAdminWebhooks, s.handleWebhookRetryDelivery))
 }
 
 // registerWebhooksOpenAPI describes the routes Phases 10.2 + 10.3 add.

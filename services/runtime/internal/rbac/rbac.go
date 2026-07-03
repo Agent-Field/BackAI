@@ -43,6 +43,17 @@ const (
 	ResourceAdminRuns    = "admin:runs"
 	ResourceAdminCrons   = "admin:crons"
 	ResourceAdminSkills  = "admin:skills"
+
+	// S1b (second pass): remaining operator-only surfaces that sat on
+	// publicPrefixes with no in-handler gate.
+	ResourceAdminErrors    = "admin:errors"
+	ResourceAdminTraces    = "admin:traces"
+	ResourceAdminEvents    = "admin:events"
+	ResourceAdminQueues    = "admin:queues"
+	ResourceAdminWebhooks  = "admin:webhooks"
+	ResourceAdminSessions  = "admin:sessions"
+	ResourceAdminActivity  = "admin:activity"
+	ResourceAdminReasoners = "admin:reasoners"
 )
 
 const casbinModel = `

@@ -63,8 +63,13 @@ var (
 // returns nil (fail-open) so a flaky PG can't take down /api/v1/llm/*.
 func PreCallHandler(b *Budgets) hooks.Handler {
 	return func(ctx context.Context, payload any) (any, error) {
-		m, ok := payload.(map[string]any)
-		if !ok {
+		// The gateway fires a typed LLMPreCallPayload struct, not a map.
+		// The old bare type assertion here always failed on it and the
+		// "unknown shape -> admit" fallback silently waved every call
+		// through — budgets were recorded but never enforced. Coerce the
+		// same way PostCallHandler does.
+		m := coerceToMap(payload)
+		if m == nil {
 			// Unknown shape -> admit. We never reject on parse failure.
 			return payload, nil
 		}
@@ -73,7 +78,11 @@ func PreCallHandler(b *Budgets) hooks.Handler {
 			return payload, nil
 		}
 		estimated := 0.001
-		if v, ok := m["estimated_usd"].(float64); ok {
+		// The gateway's json tag is estimated_cost_usd; accept the older
+		// estimated_usd key too for map-shaped callers.
+		if v, ok := m["estimated_cost_usd"].(float64); ok {
+			estimated = v
+		} else if v, ok := m["estimated_usd"].(float64); ok {
 			estimated = v
 		}
 		ok2, err := b.HasBudget(ctx, tenantID, estimated)

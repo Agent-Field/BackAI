@@ -53,15 +53,22 @@ function DropdownMenuGroup({ ...props }: MenuPrimitive.Group.Props) {
   return <MenuPrimitive.Group data-slot="dropdown-menu-group" {...props} />
 }
 
+// A standalone menu heading. Base UI's Menu.GroupLabel throws
+// "MenuGroupContext is missing" unless it is nested inside a Menu.Group,
+// which every call site in this app omits (shadcn's Radix label needed no
+// group, so the port over-constrained it). Render a plain non-interactive
+// div so the label works anywhere inside a menu; wrap it in
+// DropdownMenuGroup yourself when you want the group aria-labelledby link.
 function DropdownMenuLabel({
   className,
   inset,
   ...props
-}: MenuPrimitive.GroupLabel.Props & {
+}: React.ComponentProps<"div"> & {
   inset?: boolean
 }) {
   return (
-    <MenuPrimitive.GroupLabel
+    <div
+      role="presentation"
       data-slot="dropdown-menu-label"
       data-inset={inset}
       className={cn(

@@ -241,19 +241,62 @@ function BudgetsCard({
 }) {
   const rows = sortedBudgetRows(budgets)
   const [editing, setEditing] = useState<Budget | null>(null)
+  const [newTenant, setNewTenant] = useState("")
+  // Tenants that don't have a budget yet — candidates for the creator.
+  // Without this the card was edit-only: the dialog could only open from
+  // an existing row, so on a fresh stack budgets could never be created.
+  const budgeted = new Set(rows.map((b) => b.tenant_id))
+  const candidates = Object.entries(tenantLookup).filter(
+    ([id]) => !budgeted.has(id),
+  )
+  const startCreate = () => {
+    const tenantId = newTenant || candidates[0]?.[0]
+    if (!tenantId) return
+    // Synthetic record for the dialog; PUT /api/v1/admin/budgets upserts.
+    setEditing({
+      tenant_id: tenantId,
+      monthly_usd: 0,
+      alert_threshold_pct: 80,
+      spent_this_period_usd: 0,
+      remaining_usd: 0,
+      resets_at: "",
+    })
+  }
   return (
     <div id="budgets" className="rounded-md border bg-card">
       <header className="flex items-center justify-between border-b px-row-x py-row-y">
         <span className="text-body font-medium text-foreground">Budgets</span>
-        <span className="text-meta text-muted-foreground">
-          {rows.length} configured
+        <span className="flex items-center gap-inline">
+          <span className="text-meta text-muted-foreground">
+            {rows.length} configured
+          </span>
+          {candidates.length > 0 ? (
+            <>
+              <select
+                aria-label="Tenant to budget"
+                value={newTenant}
+                onChange={(e) => setNewTenant(e.target.value)}
+                className="h-7 rounded-md border bg-transparent px-1.5 text-meta text-muted-foreground"
+              >
+                {candidates.map(([id, name]) => (
+                  <option key={id} value={id}>
+                    {name || id.slice(0, 8)}
+                  </option>
+                ))}
+              </select>
+              <Button variant="outline" size="sm" className="h-7" onClick={startCreate}>
+                Set budget
+              </Button>
+            </>
+          ) : null}
         </span>
       </header>
       {rows.length === 0 ? (
         <div className="flex flex-col items-start gap-stack px-row-x py-tile">
           <p className="text-meta text-muted-foreground">
-            No tenant budgets configured yet. Setting a budget surfaces
-            alerts in the Inbox when consumption crosses the threshold.
+            No tenant budgets configured yet. Pick a tenant above and set a
+            monthly cap — overruns return HTTP 402 to the customer and
+            alerts land in the Inbox at the threshold.
           </p>
         </div>
       ) : (

@@ -38,6 +38,22 @@ func TestS1bSurfacesRejectUnauthenticated(t *testing.T) {
 		{"POST", "/api/v1/crons"},
 		{"GET", "/api/v1/skills"},
 		{"POST", "/api/v1/skills"},
+		// S1b second pass (sidebar-real-pages): previously ungated.
+		{"GET", "/api/v1/admin/errors"},
+		{"GET", "/api/v1/admin/errors/capabilities"},
+		{"POST", "/api/v1/admin/errors/some_id/mute"},
+		{"GET", "/api/v1/admin/traces"},
+		{"GET", "/api/v1/admin/traces/capabilities"},
+		{"GET", "/api/v1/admin/events"},
+		{"GET", "/api/v1/queues/summary"},
+		{"GET", "/api/v1/webhooks/endpoints"},
+		{"POST", "/api/v1/webhooks/endpoints"},
+		{"GET", "/api/v1/webhooks/deliveries"},
+		{"POST", "/api/v1/webhooks/send"},
+		{"GET", "/api/v1/reasoners/analytics"},
+		{"GET", "/api/v1/admin/sessions"},
+		{"DELETE", "/api/v1/admin/sessions/some_id"},
+		{"GET", "/api/v1/admin/activity"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
@@ -65,6 +81,15 @@ func TestS1bSurfacesAllowOperator(t *testing.T) {
 		"/api/v1/runs",
 		"/api/v1/crons",
 		"/api/v1/skills",
+		// S1b second pass (sidebar-real-pages).
+		"/api/v1/admin/errors",
+		"/api/v1/admin/traces",
+		"/api/v1/admin/events",
+		"/api/v1/queues/summary",
+		"/api/v1/webhooks/endpoints",
+		"/api/v1/webhooks/deliveries",
+		"/api/v1/reasoners/analytics",
+		"/api/v1/admin/sessions",
 	}
 	for _, path := range cases {
 		t.Run(path, func(t *testing.T) {

@@ -172,6 +172,97 @@ func (s *Store) List(ctx context.Context, f ListFilter) (Page, error) {
 	return out, nil
 }
 
+// ListAll is the operator cross-tenant variant of List. It bypasses RLS
+// inside a transaction (suite_user_activity forces RLS on app.tenant_id)
+// and honours an optional tenant filter instead of deriving one from the
+// request context. Callers MUST gate it behind operator auth.
+func (s *Store) ListAll(ctx context.Context, tenantID string, f ListFilter) (Page, error) {
+	ctx, span := s.tracer.Start(ctx, "activity.list_all", trace.WithAttributes(
+		attribute.String("activity.tenant", tenantID),
+		attribute.Int("activity.limit", f.Limit),
+	))
+	defer span.End()
+
+	conds := []string{"true"}
+	args := []any{}
+	bind := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	if tenantID != "" {
+		conds = append(conds, "tenant_id::text = "+bind(tenantID))
+	}
+	if f.UserID != "" {
+		conds = append(conds, "user_id::text = "+bind(f.UserID))
+	}
+	if f.Action != "" {
+		conds = append(conds, "action = "+bind(f.Action))
+	}
+	if f.ResourceType != "" {
+		conds = append(conds, "resource_type = "+bind(f.ResourceType))
+	}
+	if f.ResourceID != "" {
+		conds = append(conds, "resource_id = "+bind(f.ResourceID))
+	}
+	if f.From != nil {
+		conds = append(conds, "occurred_at >= "+bind(f.From.UTC()))
+	}
+	if f.To != nil {
+		conds = append(conds, "occurred_at <= "+bind(f.To.UTC()))
+	}
+	where := " where " + strings.Join(conds, " and ")
+	limit := clampLimit(f.Limit)
+	offset := clampOffset(f.Offset)
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Page{Entries: []Entry{}}, fmt.Errorf("activity: begin: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if _, err := tx.Exec(ctx, `set local app.bypass_rls = 'on'`); err != nil {
+		return Page{Entries: []Entry{}}, fmt.Errorf("activity: bypass: %w", err)
+	}
+
+	var total int
+	if err := tx.QueryRow(ctx, "select count(*) from suite_user_activity"+where, args...).Scan(&total); err != nil {
+		span.RecordError(err)
+		return Page{Entries: []Entry{}}, fmt.Errorf("activity: count: %w", err)
+	}
+
+	pageArgs := append([]any{}, args...)
+	pageArgs = append(pageArgs, limit, offset)
+	rowsSQL := `select id::text, tenant_id::text, user_id::text, api_key_id::text,
+		              actor_type, action, resource_type, resource_id, metadata,
+		              ip::text, user_agent, occurred_at
+		         from suite_user_activity` + where +
+		fmt.Sprintf(" order by occurred_at desc limit $%d offset $%d", len(pageArgs)-1, len(pageArgs))
+	rows, err := tx.Query(ctx, rowsSQL, pageArgs...)
+	if err != nil {
+		span.RecordError(err)
+		return Page{Entries: []Entry{}}, fmt.Errorf("activity: list_all: %w", err)
+	}
+	defer rows.Close()
+
+	out := Page{Entries: []Entry{}, Total: total}
+	for rows.Next() {
+		entry, scanErr := scanEntry(rows)
+		if scanErr != nil {
+			span.RecordError(scanErr)
+			return Page{Entries: []Entry{}}, fmt.Errorf("activity: scan: %w", scanErr)
+		}
+		out.Entries = append(out.Entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return Page{Entries: []Entry{}}, fmt.Errorf("activity: iter: %w", err)
+	}
+	rows.Close()
+	if err := tx.Commit(ctx); err != nil {
+		return Page{Entries: []Entry{}}, fmt.Errorf("activity: commit: %w", err)
+	}
+	out.HasMore = offset+len(out.Entries) < total
+	return out, nil
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }

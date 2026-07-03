@@ -31,6 +31,7 @@ import (
 
 	"github.com/Agent-Field/backai/services/runtime/internal/activity"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
+	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
 )
 
 // adminEvent is the typed union the dashboard renders one per row.
@@ -58,7 +59,10 @@ const (
 )
 
 func (s *Server) registerAdminEventsRoutes() {
-	s.mux.HandleFunc("GET /api/v1/admin/events", s.handleAdminEvents)
+	// S1b: /api/v1/admin is on publicPrefixes (bypasses the tenant
+	// resolver), and this feed aggregates cross-tenant runs, webhook
+	// deliveries, and alerts — it must enforce operator auth itself.
+	s.mux.HandleFunc("GET /api/v1/admin/events", s.operatorGuard(rbac.ResourceAdminEvents, s.handleAdminEvents))
 }
 
 func (s *Server) registerAdminEventsOpenAPI() {

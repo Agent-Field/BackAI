@@ -62,7 +62,18 @@ func (s *Server) handleReasonersAnalytics(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) queryReasonerAnalytics(ctx context.Context, from, to time.Time, limit int) ([]reasonerAnalyticsRow, error) {
-	rows, err := s.db.Pool.Query(ctx, `
+	// Operator cross-tenant aggregate over the RLS-protected
+	// suite_cost_events table — same bypass pattern as queryRuns
+	// (dashboard.go). The route is operator-gated in server.go.
+	tx, err := s.db.Pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if _, err := tx.Exec(ctx, `set local app.bypass_rls = 'on'`); err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(ctx, `
         select
           coalesce(agent, 'none') as agent,
           coalesce(reasoner, 'none') as reasoner,
@@ -110,7 +121,11 @@ func (s *Server) queryReasonerAnalytics(ctx context.Context, from, to time.Time,
 		row.TopCallerAgent = row.Agent
 		out = append(out, row)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	return out, tx.Commit(ctx)
 }
 
 func parseAnalyticsWindow(r *http.Request) (time.Time, time.Time) {

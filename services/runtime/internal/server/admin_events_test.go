@@ -18,6 +18,7 @@ import (
 
 func TestAdminEventsEmptyDeps(t *testing.T) {
 	s := newDashTestServer(t)
+	withOperator(s, "owner") // route is operator-gated (S1b)
 	req := httptest.NewRequest("GET", "/api/v1/admin/events", nil)
 	rec := httptest.NewRecorder()
 	s.mux.ServeHTTP(rec, req)
@@ -42,6 +43,7 @@ func TestAdminEventsEmptyDeps(t *testing.T) {
 
 func TestAdminEventsRespectsLimitParam(t *testing.T) {
 	s := newDashTestServer(t)
+	withOperator(s, "owner")
 	req := httptest.NewRequest("GET", "/api/v1/admin/events?limit=5", nil)
 	rec := httptest.NewRecorder()
 	s.mux.ServeHTTP(rec, req)
@@ -59,6 +61,7 @@ func TestAdminEventsRespectsLimitParam(t *testing.T) {
 
 func TestAdminEventsKindFilterEmpty(t *testing.T) {
 	s := newDashTestServer(t)
+	withOperator(s, "owner")
 	// Bogus kind so the filter excludes everything; response should still
 	// be a well-formed empty-list envelope, not a 4xx.
 	req := httptest.NewRequest("GET", "/api/v1/admin/events?kind=does.not.exist", nil)
