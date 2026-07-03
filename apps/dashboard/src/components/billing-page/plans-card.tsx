@@ -23,10 +23,13 @@ import { PlanFormDialog } from "./plan-form-dialog"
 
 interface PlansCardProps {
   plans: BillingPlan[]
+  /** True when a live Stripe key is configured — paid plans then need a
+   *  Price ID or hosted checkout can't create a session. */
+  realMode?: boolean
   onMutated: () => Promise<void> | void
 }
 
-export function PlansCard({ plans, onMutated }: PlansCardProps) {
+export function PlansCard({ plans, realMode = false, onMutated }: PlansCardProps) {
   const [editing, setEditing] = useState<BillingPlan | null>(null)
   const [creating, setCreating] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -149,6 +152,13 @@ export function PlansCard({ plans, onMutated }: PlansCardProps) {
                       <code className="font-mono text-meta text-muted-foreground">
                         {plan.stripe_price_id}
                       </code>
+                    ) : realMode && plan.price_usd_month > 0 ? (
+                      <span
+                        className="text-meta text-amber-600 dark:text-amber-500"
+                        title="Stripe is live but this paid plan has no Price ID — hosted checkout can't create a session. Add a Stripe Price ID."
+                      >
+                        ⚠ no Price ID
+                      </span>
                     ) : (
                       <span className="text-meta text-muted-foreground">—</span>
                     )}

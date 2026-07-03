@@ -117,7 +117,11 @@ export function BillingShell({ initialSnapshot }: BillingShellProps) {
         />
       )}
 
-      <PlansCard plans={plans} onMutated={() => refresh()} />
+      <PlansCard
+        plans={plans}
+        realMode={settings !== null && settings.mode === "real"}
+        onMutated={() => refresh()}
+      />
     </div>
   )
 }
