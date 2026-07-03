@@ -55,10 +55,10 @@ import (
 	"github.com/Agent-Field/backai/services/cli/internal/admincmd"
 	"github.com/Agent-Field/backai/services/cli/internal/client"
 	"github.com/Agent-Field/backai/services/cli/internal/initcmd"
-	"github.com/Agent-Field/backai/services/cli/internal/upgradecmd"
 	"github.com/Agent-Field/backai/services/cli/internal/mcp"
 	"github.com/Agent-Field/backai/services/cli/internal/project"
 	"github.com/Agent-Field/backai/services/cli/internal/telemetry"
+	"github.com/Agent-Field/backai/services/cli/internal/upgradecmd"
 )
 
 // version is overridden at build time via -ldflags "-X main.version=..."
