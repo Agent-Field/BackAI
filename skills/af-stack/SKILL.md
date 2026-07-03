@@ -56,7 +56,7 @@ Every other directory is platform code you don't edit.
 |---|---|---|---|
 | **Customer App** | `apps/customer-app/src/app/(app)/...` | TypeScript / React | Branded SaaS pages the customer sees (sign-up, dashboard, billing, app-specific UI) |
 | **Agent** | `apps/backend/agents/<name>/` | Python | AgentField agent definition + reasoners + harness use + MCP server registration |
-| **Workload Module** | `examples/<id>/handlers/` (today: Python FastAPI sidecar) OR `services/runtime/internal/modules/<id>/` (Go in-runtime, when eventually ships) | Python (sidecar) or Go (in-runtime) | Backend HTTP routes + DB migrations + jobs + crons that aren't core platform |
+| **Workload Module** | `workload-modules/<id>/` (scaffold with `af-stack module new <id>`) | Python (sidecar) or Go (in-runtime) | Backend HTTP routes + DB migrations + jobs + crons that aren't core platform |
 | **Dashboard Plugin** | `apps/dashboard/plugins/<id>/` | TypeScript / React | Operator-console read-only tabs (charts, lists, status) |
 
 Plus:
@@ -175,8 +175,8 @@ These are non-negotiable. Each has a detailed rationale in `rules/`.
 4. **Agent tools = MCP or `app.tools.*`.** Tools that agents call live
    in the agent container (claude-code, codex) or as MCP servers (stdio
    via uvx / SSE). Don't wire tools into runtime handlers.
-5. **Workload modules live under `examples/<id>/handlers/` (Python sidecar,
-   current) or `services/runtime/internal/modules/<id>/` (Go, eventually).**
+5. **Workload modules live under `workload-modules/<id>/`** (scaffold with
+   `af-stack module new <id>`).
    Don't add new backend HTTP routes directly into
    `services/runtime/internal/server/`. See [`rules/workload-modules.md`](rules/workload-modules.md).
 6. **Dashboard plugins are read-only.** Operator console shows state;

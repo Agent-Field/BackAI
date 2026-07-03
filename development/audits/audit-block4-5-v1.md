@@ -87,7 +87,7 @@ And `page-model.ts:215-227`: KPI label "Endpoint gap: 1, admin errors endpoint, 
 
 **Net-new dependencies, not mentioned as such.**
 
-- Go runtime: `grep sentry /Users/santoshkumarradha/Documents/agentfield/code/platform/backai/go.mod` → **no match.** `getsentry/sentry-go` is not currently a dependency. Adding it (plus its slog/http middleware) is part of Block 5's cost.
+- Go runtime: `grep sentry go.mod` → **no match.** `getsentry/sentry-go` is not currently a dependency. Adding it (plus its slog/http middleware) is part of Block 5's cost.
 - Python agents: `apps/backend/pyproject.toml`, `apps/backend/agents/supportdesk/requirements.txt`, `apps/backend/agents/sample/requirements.txt` → **no `sentry-sdk` anywhere.**
 
 The doc's note ("runtime + agents use Sentry SDK") implies pre-existing wiring. It's actually new work. Surface this in Block 5 acceptance criteria.
