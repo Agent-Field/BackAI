@@ -165,6 +165,11 @@ func (a *Adapter) GetCustomer(ctx context.Context, id string) (billing.Customer,
 	return wireToCustomer(wire), nil
 }
 
+// CreateCheckoutSession is not part of the remote adapter protocol (v1).
+func (a *Adapter) CreateCheckoutSession(_ context.Context, _, _, _, _, _ string) (string, error) {
+	return "", fmt.Errorf("%w: remote billing adapters do not support hosted checkout", billing.ErrBillingUnavailable)
+}
+
 // CreatePortalLink implements billing.Client by POST /v1/customers/{id}/portal.
 func (a *Adapter) CreatePortalLink(ctx context.Context, customerID, returnURL string) (billing.PortalLink, error) {
 	if customerID == "" {
