@@ -57,6 +57,7 @@ import (
 	"github.com/Agent-Field/backai/services/cli/internal/client"
 	"github.com/Agent-Field/backai/services/cli/internal/initcmd"
 	"github.com/Agent-Field/backai/services/cli/internal/mcp"
+	"github.com/Agent-Field/backai/services/cli/internal/modecmd"
 	"github.com/Agent-Field/backai/services/cli/internal/project"
 	"github.com/Agent-Field/backai/services/cli/internal/telemetry"
 	"github.com/Agent-Field/backai/services/cli/internal/upgradecmd"
@@ -134,6 +135,8 @@ func run(args []string) error {
 			context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
 		return project.RunDev(ctx, rest, os.Stdout, os.Stderr)
+	case "mode":
+		return modecmd.Run(rest, os.Stdout, os.Stderr)
 	case "agent":
 		return project.RunAgent(rest, os.Stdout, os.Stderr)
 	case "module":
@@ -211,6 +214,7 @@ Commands:
   init       Scaffold a new app (af-stack init <name>); flags-only re-themes this fork
   upgrade    Pull the latest upstream AF Stack into this fork (--check for a dry run)
   dev        Start docker compose for local development
+  mode       Switch personal (auth+billing off) ⇄ saas (af-stack mode [personal|saas])
   agent      Agent scaffold commands
   module     Workload module scaffold commands
   plugin     Dashboard plugin scaffold commands
@@ -241,6 +245,8 @@ Examples:
   af-stack upgrade --check                          # what would an upgrade bring? (commits, migrations, conflicts)
   af-stack upgrade                                  # backup DB, merge upstream, print rebuild steps
   af-stack dev --detach
+  af-stack mode personal                            # single-user app: no login, no billing
+  af-stack mode saas                                # back to multi-tenant SaaS
   af-stack agent new researcher
   af-stack adapter list
   af-stack deploy helm
