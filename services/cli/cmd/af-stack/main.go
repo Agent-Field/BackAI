@@ -16,15 +16,30 @@
 //	af-stack adapter list                             Show active adapter choices
 //	af-stack deploy <target>                          Deploy via helm/fly/railway/render
 //	af-stack operator create --email <email>          Allow an operator
+//	af-stack operator key [--owner]                   Mint an operator API key (direct DB)
 //	af-stack mcp list                                List configured MCP servers
 //	af-stack mcp add <name> --transport ...          Register a new MCP server
 //	af-stack mcp remove <name>                       Remove an MCP server
 //	af-stack mcp call <server> <tool> [--json ...]   Invoke an MCP tool
 //
+// Operator REST surface (require AF_STACK_API_KEY set to an operator key):
+//
+//	af-stack keys list|issue|rotate|revoke|spend      Manage tenant API keys
+//	af-stack agents list                              Registered agents + reasoners
+//	af-stack reasoners                                Per-reasoner analytics
+//	af-stack logs                                     Runtime log lines
+//	af-stack errors list|resolve|mute|reopen          Error groups
+//	af-stack audit                                    Operator audit log
+//	af-stack sessions list|revoke                     Live user sessions
+//	af-stack runs                                     Recent agent runs
+//	af-stack tenants list                             Tenants
+//	af-stack activity                                 Customer activity log
+//
 // Environment:
 //
 //	AF_STACK_URL       Runtime base URL (default http://localhost:8080)
 //	AF_STACK_API_KEY   Bearer token (optional; required against an auth-on runtime)
+//	DATABASE_URL       Postgres URL (operator create / operator key only)
 package main
 
 import (
@@ -35,6 +50,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/Agent-Field/backai/services/cli/internal/admincmd"
 	"github.com/Agent-Field/backai/services/cli/internal/client"
 	"github.com/Agent-Field/backai/services/cli/internal/initcmd"
 	"github.com/Agent-Field/backai/services/cli/internal/mcp"
@@ -105,6 +121,37 @@ func run() error {
 		defer cancel()
 		c := client.New()
 		return mcp.Run(ctx, c, rest, os.Stdout, os.Stderr)
+	case "keys", "agents", "reasoners", "logs", "errors", "audit",
+		"sessions", "runs", "tenants", "activity":
+		// Operator REST surface. Requires AF_STACK_API_KEY set to an
+		// operator key — mint one with `af-stack operator key`.
+		ctx, cancel := signal.NotifyContext(
+			context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		c := client.New()
+		switch cmd {
+		case "keys":
+			return admincmd.RunKeys(ctx, c, rest, os.Stdout, os.Stderr)
+		case "agents":
+			return admincmd.RunAgents(ctx, c, rest, os.Stdout, os.Stderr)
+		case "reasoners":
+			return admincmd.RunReasoners(ctx, c, rest, os.Stdout, os.Stderr)
+		case "logs":
+			return admincmd.RunLogs(ctx, c, rest, os.Stdout, os.Stderr)
+		case "errors":
+			return admincmd.RunErrors(ctx, c, rest, os.Stdout, os.Stderr)
+		case "audit":
+			return admincmd.RunAudit(ctx, c, rest, os.Stdout, os.Stderr)
+		case "sessions":
+			return admincmd.RunSessions(ctx, c, rest, os.Stdout, os.Stderr)
+		case "runs":
+			return admincmd.RunRuns(ctx, c, rest, os.Stdout, os.Stderr)
+		case "tenants":
+			return admincmd.RunTenants(ctx, c, rest, os.Stdout, os.Stderr)
+		case "activity":
+			return admincmd.RunActivity(ctx, c, rest, os.Stdout, os.Stderr)
+		}
+		return nil
 	default:
 		writeUsage(os.Stderr)
 		return fmt.Errorf("unknown command %q", cmd)
@@ -125,24 +172,39 @@ Commands:
   plugin     Dashboard plugin scaffold commands
   adapter    Adapter discovery commands
   deploy     Deploy wrappers for helm/fly/railway/render
-  operator   Operator bootstrap commands
+  operator   Operator bootstrap commands (create, key)
   mcp        Model Context Protocol server + tool management
   version    Print the CLI version
+
+Operator commands (need AF_STACK_API_KEY = operator key; mint one with
+`+"`af-stack operator key`"+`):
+  keys       API keys: list | issue | rotate | revoke | spend
+  agents     Registered agents: list
+  reasoners  Per-reasoner cost/latency/error analytics
+  logs       Runtime logs (filters: --level --service --search)
+  errors     Error groups: list | resolve | mute | reopen
+  audit      Operator audit log
+  sessions   Live user sessions: list | revoke
+  runs       Recent agent runs
+  tenants    Tenants: list
+  activity   Customer activity log (cross-tenant)
 
 Examples:
   af-stack init --name "DocuChat" --color "#0A66C2" --logo ./logo.png
   af-stack dev --detach
   af-stack agent new researcher
-  af-stack module new notes
-  af-stack plugin new tenant-health
   af-stack adapter list
   af-stack deploy helm
   af-stack operator create --email founder@example.com
-  af-stack mcp list
-  af-stack mcp add github --transport stdio --command "uvx mcp-server-github" --env GITHUB_TOKEN=secret:github_token
+  af-stack operator key --owner        # mint an operator API key (needs DATABASE_URL)
+  af-stack keys issue --tenant <uuid> --name ci
+  af-stack logs --level error --limit 100
+  af-stack reasoners --limit 20
+  af-stack sessions list
   af-stack mcp call github search_repos --json '{"q":"agentfield"}'
 
 Environment:
   AF_STACK_URL       Runtime base URL (default http://localhost:8080)
-  AF_STACK_API_KEY   Bearer token used as authorization (optional)`)
+  AF_STACK_API_KEY   Bearer token used as authorization (operator key for admin commands)
+  DATABASE_URL       Postgres URL (operator create / operator key only)`)
 }

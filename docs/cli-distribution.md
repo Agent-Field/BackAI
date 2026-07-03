@@ -83,14 +83,26 @@ af-stack plugin new <id>
 af-stack mcp add/list/remove <url>
 af-stack adapter list
 
-# Identity + multi-tenancy
-af-stack tenant create/list/update
-af-stack user create/list/disable
-af-stack secrets set/get/list/delete/rotate
-af-stack keys issue/rotate/revoke
+# Identity + multi-tenancy (shipped: operator/keys/tenants/sessions)
+af-stack operator create --email <email>    # allow a dashboard operator
+af-stack operator key [--owner]             # mint an operator API key (needs DATABASE_URL)
+af-stack keys list/issue/rotate/revoke/spend
+af-stack tenants list
+af-stack sessions list/revoke
+af-stack user create/list/disable           # planned
+af-stack secrets set/get/list/delete/rotate # planned
+
+# Observability (shipped — all take AF_STACK_API_KEY = operator key)
+af-stack logs --level error --limit 100
+af-stack errors list/resolve/mute/reopen
+af-stack audit --tenant <id>
+af-stack runs --agent <id> --status failed
+af-stack agents list
+af-stack reasoners
+af-stack activity --tenant <id>
 
 # Database
-af-stack db migrate / rollback / status
+af-stack db migrate / rollback / status     # planned
 
 # Deploy
 af-stack deploy --target=fly|railway|render|helm

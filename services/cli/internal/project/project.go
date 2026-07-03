@@ -6,6 +6,8 @@ package project
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/base32"
 	"errors"
 	"flag"
 	"fmt"
@@ -19,6 +21,7 @@ import (
 	"unicode"
 
 	"github.com/jackc/pgx/v5"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type commandRunner func(ctx context.Context, dir string, name string, args []string, stdout, stderr io.Writer) error
@@ -136,9 +139,92 @@ func RunOperator(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	switch args[0] {
 	case "create":
 		return runOperatorCreate(ctx, args[1:], stdout, stderr)
+	case "key":
+		return runOperatorKey(ctx, args[1:], stdout, stderr)
 	default:
 		return fmt.Errorf("operator: unknown subcommand %q", args[0])
 	}
+}
+
+// runOperatorKey mints an OPERATOR API key by writing suite_api_keys
+// directly (same bootstrap posture as `operator create` — it needs
+// DATABASE_URL, not a running session). The key is minted on the
+// default zero-uuid tenant with scope "operator" (or "operator:owner"
+// with --owner); the runtime's operator gate recognises exactly that
+// combination (see resolveOperatorBearer in the runtime). Token shape
+// mirrors tenancy.IssueKey: af_<15 base32>_<48 base32>, secret
+// bcrypt-hashed at cost 12.
+func runOperatorKey(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("af-stack operator key", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	nameFlag := fs.String("name", "af-stack CLI", "key name")
+	ownerFlag := fs.Bool("owner", false, "grant the owner role (adds destructive permissions)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		dbURL = os.Getenv("AF_STACK_DATABASE_URL")
+	}
+	if dbURL == "" {
+		return errors.New("operator key: DATABASE_URL or AF_STACK_DATABASE_URL is required")
+	}
+
+	prefix, err := randomBase32(9) // 15 chars
+	if err != nil {
+		return err
+	}
+	secret, err := randomBase32(30) // 48 chars
+	if err != nil {
+		return err
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(secret), 12)
+	if err != nil {
+		return err
+	}
+	scope := "operator"
+	if *ownerFlag {
+		scope = "operator:owner"
+	}
+
+	conn, err := pgx.Connect(ctx, dbURL)
+	if err != nil {
+		return err
+	}
+	defer conn.Close(ctx)
+
+	const zeroTenant = "00000000-0000-0000-0000-000000000000"
+	var id string
+	err = conn.QueryRow(ctx, `
+		insert into suite_api_keys (tenant_id, prefix, hashed_secret, name, scopes)
+		values ($1, $2, $3, $4, $5)
+		returning id::text
+	`, zeroTenant, prefix, string(hash), strings.TrimSpace(*nameFlag), []string{scope}).Scan(&id)
+	if err != nil {
+		return fmt.Errorf("operator key: insert: %w", err)
+	}
+
+	fmt.Fprintf(stdout, `operator key minted (id %s, scope %s)
+
+  af_%s_%s
+
+Store it now — it is shown exactly once. Use it with:
+
+  export AF_STACK_API_KEY=af_%s_%s
+  af-stack keys list
+`, id, scope, prefix, secret, prefix, secret)
+	return nil
+}
+
+// randomBase32 returns a lower-case base32 string with bytesN bytes of
+// entropy — the same encoding tenancy.randomToken uses.
+func randomBase32(bytesN int) (string, error) {
+	buf := make([]byte, bytesN)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return strings.ToLower(
+		base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(buf)), nil
 }
 
 func runAgentNew(args []string, stdout, _ io.Writer) error {
