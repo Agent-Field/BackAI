@@ -124,11 +124,19 @@ services:
       # production with `openssl rand -hex 32`.
       AF_STACK_AUTH_SECRET: ${AF_STACK_AUTH_SECRET:-dev-secret-change-me-in-prod}
       AF_STACK_KMS_KEY: ${AF_STACK_KMS_KEY:-dev-secret-change-me}
+      # Deployment mode master switch: "saas" (default, multi-tenant with
+      # auth + billing governed by their module flags) or "personal" (a
+      # single-user app — auth and billing are forced OFF, so the app runs
+      # with no login and no paywall under the default tenant). Flip it with
+      # AF_STACK_MODE=personal (or run: af-stack mode personal) and restart.
+      AF_STACK_MODE: ${AF_STACK_MODE:-saas}
       # Module enable flags. AF_STACK_MODULE_<UPPER_SNAKE>=true flips a
       # module on regardless of what config.yaml says. Helpful for
       # docker-compose where file mounts may not be readable by the
-      # distroless nonroot user.
+      # distroless nonroot user. In personal mode these are overridden:
+      # multi-tenancy and billing are forced off regardless of these values.
       AF_STACK_MODULE_MULTI_TENANCY: ${AF_STACK_MODULE_MULTI_TENANCY:-false}
+      AF_STACK_MODULE_BILLING: ${AF_STACK_MODULE_BILLING:-true}
       # LLM gateway (Phase 7) — points at the LiteLLM sidecar. Customers
       # call /api/v1/llm/* on this runtime; we forward to LiteLLM which
       # routes to OpenRouter / OpenAI / Anthropic / Google / Mistral /
@@ -233,6 +241,10 @@ services:
     environment:
       DATABASE_URL: postgres://afstack:afstack@postgres:5432/afstack?sslmode=disable
       AF_STACK_AUTH_SECRET: ${AF_STACK_AUTH_SECRET:-dev-secret-change-me-in-prod}
+      # Deployment mode. In "personal" the dashboard middleware skips the
+      # operator login and the billing surface is hidden. Read server-side
+      # only (not NEXT_PUBLIC) so it stays a true runtime toggle.
+      AF_STACK_MODE: ${AF_STACK_MODE:-saas}
       # Default operator account, seeded on first boot so the console is
       # usable immediately (no signup wizard). CHANGE THE PASSWORD after your
       # first login. Seeding only runs while suite_operators is empty, so
@@ -277,6 +289,10 @@ services:
     environment:
       DATABASE_URL: postgres://afstack:afstack@postgres:5432/afstack?sslmode=disable
       AF_STACK_AUTH_SECRET: ${AF_STACK_AUTH_SECRET:-dev-secret-change-me-in-prod}
+      # Deployment mode. In "personal" the customer app skips sign-in and
+      # boots straight into the product as a single implicit user. Read
+      # server-side only (not NEXT_PUBLIC) so it stays a true runtime toggle.
+      AF_STACK_MODE: ${AF_STACK_MODE:-saas}
       BETTER_AUTH_URL: http://localhost:${AF_STACK_CUSTOMER_APP_PORT:-34000}
       BETTER_AUTH_TRUSTED_ORIGINS: ${BETTER_AUTH_TRUSTED_ORIGINS:-http://localhost:${AF_STACK_CUSTOMER_APP_PORT:-34000},http://localhost:${AF_STACK_DASHBOARD_PORT:-33000}}
       # Server-side proxy calls use Docker DNS.

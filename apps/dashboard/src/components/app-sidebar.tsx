@@ -49,6 +49,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import * as React from "react"
 
+import { api } from "@/lib/api"
 import {
   Sidebar,
   SidebarContent,
@@ -166,8 +167,51 @@ const GROUPS: NavGroup[] = [
   },
 ]
 
+// Nav items whose whole purpose is billing. Hidden whenever billing is off
+// (personal mode, or the billing module disabled in SaaS).
+const BILLING_ITEM_IDS = new Set(["billing", "budgets"])
+
+// Nav items whose whole purpose is auth / multi-tenancy / API-key management.
+// In personal mode there are no tenants, logins, or API keys to manage, so
+// these are hidden — leaving a clean panel for monitoring and verifying
+// (Home, Cost, Health, Runs, Errors, Logs, Audit, Activity, Build surfaces).
+const AUTH_ITEM_IDS = new Set(["tenants", "users", "keys", "sessions", "oauth"])
+
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const pathname = usePathname()
+  // The sidebar mirrors what the runtime actually enforces, read once from
+  // GET /api/v1/modules. Defaults keep every surface visible so a failed read
+  // never hides anything in a real SaaS deployment.
+  const [billingOff, setBillingOff] = React.useState(false)
+  const [personal, setPersonal] = React.useState(false)
+  React.useEffect(() => {
+    let alive = true
+    api
+      .modulesState()
+      .then((state) => {
+        if (!alive) return
+        setBillingOff(!state.billing_enabled)
+        setPersonal(state.mode === "personal")
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const groups = React.useMemo(() => {
+    if (!billingOff && !personal) return GROUPS
+    return GROUPS.map((g) => ({
+      ...g,
+      items: g.items.filter((i) => {
+        if (billingOff && BILLING_ITEM_IDS.has(i.id)) return false
+        if (personal && AUTH_ITEM_IDS.has(i.id)) return false
+        return true
+      }),
+      // Drop a group that ends up empty (e.g. People with everything hidden).
+    })).filter((g) => g.items.length > 0)
+  }, [billingOff, personal])
+
   return (
     <Sidebar variant="sidebar" {...props}>
       <SidebarHeader className="px-row-x py-stack">
@@ -184,7 +228,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <div className="flex min-w-0 flex-col leading-tight">
                 <span className="truncate text-body font-semibold">BackAI</span>
                 <span className="truncate text-meta text-muted-foreground">
-                  Operator console
+                  {personal ? "Personal mode · monitor only" : "Operator console"}
                 </span>
               </div>
             </SidebarMenuButton>
@@ -205,7 +249,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
-        {GROUPS.map((group) => (
+        {groups.map((group) => (
           <SidebarGroup key={group.id}>
             <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
             <SidebarGroupContent>

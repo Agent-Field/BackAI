@@ -33,7 +33,13 @@ import { WelcomeBlock } from "./welcome-block"
 // an internal scroll fallback. Result: a single visual row, no ragged
 // bottom edge.
 
-export function HomeShell({ snapshot: initial }: { snapshot: HomeSnapshot }) {
+export function HomeShell({
+  snapshot: initial,
+  personal = false,
+}: {
+  snapshot: HomeSnapshot
+  personal?: boolean
+}) {
   const [snapshot, setSnapshot] = useState(initial)
 
   useEffect(() => {
@@ -79,7 +85,7 @@ export function HomeShell({ snapshot: initial }: { snapshot: HomeSnapshot }) {
       {!snapshot.runtimeReachable ? (
         <RuntimeUnreachable details={firstErrorMessage(snapshot)} />
       ) : null}
-      <WelcomeBlock />
+      <WelcomeBlock personal={personal} />
       <KpiStrip tiles={tiles} />
       <div className="grid gap-section lg:grid-cols-3">
         <div className="lg:col-span-2">
@@ -89,7 +95,7 @@ export function HomeShell({ snapshot: initial }: { snapshot: HomeSnapshot }) {
           className="flex flex-col gap-section"
           style={{ height: ACTIVITY_FEED_HEIGHT_PX }}
         >
-          <QuickActions />
+          <QuickActions personal={personal} />
           <BackingServicesStrip services={snapshot.services} />
         </div>
       </div>

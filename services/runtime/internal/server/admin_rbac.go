@@ -46,6 +46,13 @@ func (s *Server) operatorAccessDenied(
 	resource string,
 	action string,
 ) bool {
+	// Personal mode is a single-user app with no operator login. The operator
+	// RBAC gate is normally orthogonal to multi-tenancy, so it must be
+	// short-circuited explicitly here or the dashboard would still demand a
+	// login even with auth "off".
+	if s.personalMode() {
+		return false
+	}
 	resolve := s.operatorResolver
 	if resolve == nil {
 		resolve = s.resolveOperatorPrincipal

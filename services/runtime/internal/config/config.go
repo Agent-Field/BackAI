@@ -15,8 +15,26 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Deployment mode constants. Mode is the single master switch that turns
+// whole feature families on or off, so an operator can run BackAI either as
+// a multi-tenant SaaS (the default) or as a single-user personal app.
+const (
+	// ModeSaaS is the default: multi-tenant auth + billing/budget enforcement
+	// are governed by their individual module flags.
+	ModeSaaS = "saas"
+	// ModePersonal is the single-user app mode: auth (multi-tenancy + operator
+	// RBAC) and billing (Stripe + budget paywall) are forced OFF regardless of
+	// their individual module flags, so the app runs straight off the bat with
+	// no login and no paywall. Everything is owned by the default tenant.
+	ModePersonal = "personal"
+)
+
 // Config is the top-level runtime configuration.
 type Config struct {
+	// Mode is the deployment mode: "saas" (default) or "personal". Personal
+	// mode forces auth and billing off (see PersonalMode). Set via
+	// AF_STACK_MODE. Both frontends read it (server-side) to skip login.
+	Mode          string              `yaml:"mode"`
 	Server        ServerConfig        `yaml:"server"`
 	Database      DatabaseConfig      `yaml:"database"`
 	AgentField    AgentFieldConfig    `yaml:"agentfield"`
@@ -205,9 +223,30 @@ type ObservabilityConfig struct {
 	Enabled      bool   `yaml:"enabled"`
 }
 
+// PersonalMode reports whether the runtime is in single-user personal mode.
+// When true, callers must treat auth and billing as disabled.
+func (c Config) PersonalMode() bool {
+	return strings.EqualFold(strings.TrimSpace(c.Mode), ModePersonal)
+}
+
+// BillingEnabled reports whether billing/budget enforcement should run.
+// It is off in personal mode, and off when the billing module is explicitly
+// disabled (AF_STACK_MODULE_BILLING=false); otherwise it defaults on so
+// existing SaaS deployments keep their paywall without any config change.
+func (c Config) BillingEnabled() bool {
+	if c.PersonalMode() {
+		return false
+	}
+	if v, ok := c.Modules.Enabled["billing"]; ok {
+		return v
+	}
+	return true
+}
+
 // Default returns a Config populated with sensible defaults.
 func Default() Config {
 	return Config{
+		Mode: ModeSaaS,
 		Server: ServerConfig{
 			HTTPAddr:        ":8080",
 			MetricsAddr:     ":9090",
@@ -285,6 +324,10 @@ func Load(path string) (Config, error) {
 //
 // These take precedence over the YAML file.
 func applyEnvOverrides(cfg *Config) {
+	// AF_STACK_MODE is the master switch: "saas" (default) or "personal".
+	if v := os.Getenv("AF_STACK_MODE"); v != "" {
+		cfg.Mode = strings.ToLower(strings.TrimSpace(v))
+	}
 	if v := os.Getenv("AF_STACK_HTTP_ADDR"); v != "" {
 		cfg.Server.HTTPAddr = v
 	}
@@ -457,6 +500,11 @@ func applyEnvOverrides(cfg *Config) {
 
 // validate returns an error if the config is in a non-runnable state.
 func validate(cfg Config) error {
+	switch strings.ToLower(strings.TrimSpace(cfg.Mode)) {
+	case "", ModeSaaS, ModePersonal:
+	default:
+		return fmt.Errorf("mode must be %s|%s, got %q (set AF_STACK_MODE)", ModeSaaS, ModePersonal, cfg.Mode)
+	}
 	if cfg.Server.HTTPAddr == "" {
 		return fmt.Errorf("server.http_addr is required")
 	}

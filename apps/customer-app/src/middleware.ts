@@ -13,6 +13,14 @@ const PUBLIC_PREFIXES = ["/sign-in", "/sign-up", "/api/", "/_next", "/favicon"]
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
+  // Personal mode (AF_STACK_MODE=personal): single-user app, no customer
+  // sign-in. Skip the auth gate entirely so the app opens straight off the
+  // bat. Read server-side only so it stays a true runtime toggle
+  // (NEXT_PUBLIC_* would bake the value at build time).
+  if (process.env.AF_STACK_MODE === "personal") {
+    return NextResponse.next()
+  }
+
   if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) {
     return NextResponse.next()
   }

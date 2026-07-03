@@ -253,3 +253,76 @@ func TestErrorsBackendAlias(t *testing.T) {
 		t.Fatalf("validate: %v", err)
 	}
 }
+
+// ─── Deployment mode (AF_STACK_MODE) ──────────────────────────────────────
+
+func TestModeDefaultsToSaaS(t *testing.T) {
+	cfg := Default()
+	if cfg.Mode != ModeSaaS {
+		t.Errorf("default mode = %q, want %q", cfg.Mode, ModeSaaS)
+	}
+	if cfg.PersonalMode() {
+		t.Error("default config should not be personal mode")
+	}
+}
+
+func TestModeEnvOverride(t *testing.T) {
+	t.Setenv("AF_STACK_AGENTFIELD_URL", "http://af:8081")
+	t.Setenv("AF_STACK_MODE", "personal")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.PersonalMode() {
+		t.Errorf("mode = %q, want personal", cfg.Mode)
+	}
+}
+
+func TestModeInvalidRejected(t *testing.T) {
+	cfg := Default()
+	cfg.Mode = "bogus"
+	if err := validate(cfg); err == nil {
+		t.Fatal("validate should reject an unknown mode")
+	}
+}
+
+func TestModeEmptyIsAllowed(t *testing.T) {
+	// An empty mode is treated as saas (back-compat with older configs).
+	cfg := Default()
+	cfg.Mode = ""
+	if err := validate(cfg); err != nil {
+		t.Fatalf("empty mode should validate: %v", err)
+	}
+	if cfg.PersonalMode() {
+		t.Error("empty mode should not be personal")
+	}
+}
+
+func TestBillingEnabledMatrix(t *testing.T) {
+	cases := []struct {
+		name    string
+		mode    string
+		billing *bool // nil = unset in Modules.Enabled
+		want    bool
+	}{
+		{"saas default (unset) => on", ModeSaaS, nil, true},
+		{"saas explicit true => on", ModeSaaS, boolPtr(true), true},
+		{"saas explicit false => off", ModeSaaS, boolPtr(false), false},
+		{"personal unset => off", ModePersonal, nil, false},
+		{"personal even if flag true => off", ModePersonal, boolPtr(true), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.Mode = tc.mode
+			if tc.billing != nil {
+				cfg.Modules.Enabled = map[string]bool{"billing": *tc.billing}
+			}
+			if got := cfg.BillingEnabled(); got != tc.want {
+				t.Errorf("BillingEnabled() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }

@@ -42,11 +42,53 @@ async function isOperator(user: { id: string; email: string }): Promise<boolean>
   }
 }
 
+/**
+ * Personal mode (AF_STACK_MODE=personal): single-user app, no operator
+ * login. Read server-side only so it stays a true runtime toggle.
+ */
+export function isPersonalMode(): boolean {
+  return process.env.AF_STACK_MODE === "personal"
+}
+
+// Synthetic operator session used in personal mode, where there is no
+// login and therefore no real better-auth session. No caller reads its
+// fields today (the layout only uses it as a redirect gate), but we shape
+// it like a real session so any future consumer degrades gracefully.
+function personalOperatorSession() {
+  const now = new Date()
+  return {
+    session: {
+      id: "personal",
+      token: "personal",
+      userId: "personal",
+      expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+      createdAt: now,
+      updatedAt: now,
+    },
+    user: {
+      id: "personal",
+      email: "you@localhost",
+      name: "Personal",
+      emailVerified: true,
+      createdAt: now,
+      updatedAt: now,
+    },
+  }
+}
+
 export async function getServerSession() {
+  if (isPersonalMode()) {
+    return personalOperatorSession() as Awaited<ReturnType<typeof auth.api.getSession>>
+  }
   return auth.api.getSession({ headers: await headers() })
 }
 
 export async function requireOperator() {
+  // Personal mode has no login gate — return a synthetic operator so
+  // operator-gated server components render without a real session.
+  if (isPersonalMode()) {
+    return personalOperatorSession() as NonNullable<Awaited<ReturnType<typeof auth.api.getSession>>>
+  }
   const session = await getServerSession()
   if (!session) {
     redirect("/login")

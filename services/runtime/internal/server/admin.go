@@ -75,10 +75,28 @@ func (s *Server) registerAdminRoutes() {
 
 // ─── Gating + error helpers ───────────────────────────────────────────────
 
+// personalMode reports whether the runtime is in single-user personal mode
+// (AF_STACK_MODE=personal). In personal mode auth and billing are forced off.
+func (s *Server) personalMode() bool {
+	return s.cfg.PersonalMode()
+}
+
+// billingEnabled reports whether billing/budget enforcement should run.
+// Off in personal mode or when the billing module is explicitly disabled.
+func (s *Server) billingEnabled() bool {
+	return s.cfg.BillingEnabled()
+}
+
 // multiTenancyEnabled returns true when the multi-tenancy module flag
 // is on. Mirrors the resolution in dashboard.go's handleModulesState so
 // admin gating and the GET /api/v1/modules response can never disagree.
+//
+// Personal mode forces this off: a single-user app has no tenants to
+// isolate, so the runtime runs under the default tenant with no auth.
 func (s *Server) multiTenancyEnabled() bool {
+	if s.personalMode() {
+		return false
+	}
 	cfg := s.cfg.Modules.Enabled
 	if cfg == nil {
 		return false

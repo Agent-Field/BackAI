@@ -35,6 +35,12 @@ type Budgets struct {
 	// spend on self-serve tenants that never had a budget configured,
 	// independent of LiteLLM's own per-key limits.
 	defaultMonthlyUSD float64
+
+	// disabled turns the budget gate off entirely: HasBudget always
+	// returns permissive. Used by personal mode (single-user app, no
+	// paywall). Spend is still recorded so usage/cost reporting keeps
+	// working — only the HTTP 402 enforcement is removed.
+	disabled bool
 }
 
 // NewBudgets constructs a Budgets. Pool/log may be nil — in nil-pool
@@ -58,6 +64,17 @@ func (b *Budgets) WithDefaultCeilingUSD(usd float64) *Budgets {
 		usd = 0
 	}
 	b.defaultMonthlyUSD = usd
+	return b
+}
+
+// WithDisabled turns the budget gate off (HasBudget always permissive)
+// when off is true. Chainable. Personal mode uses this to remove the
+// paywall while keeping spend metering intact.
+func (b *Budgets) WithDisabled(off bool) *Budgets {
+	if b == nil {
+		return b
+	}
+	b.disabled = off
 	return b
 }
 
@@ -250,6 +267,10 @@ func (b *Budgets) Spent(ctx context.Context, tenantID string, periodStart time.T
 // fires on "already over" rather than predictive overshoot.
 func (b *Budgets) HasBudget(ctx context.Context, tenantID string, estimatedUSD float64) (bool, error) {
 	if b == nil || b.pool == nil {
+		return true, nil
+	}
+	if b.disabled {
+		// Personal mode: no paywall. Spend is still recorded elsewhere.
 		return true, nil
 	}
 	if tenantID == "" {

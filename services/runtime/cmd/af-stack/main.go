@@ -165,6 +165,14 @@ func defaulted(value, fallback string) string {
 	return value
 }
 
+// billingDisabledReason explains why billing is off, for boot logs.
+func billingDisabledReason(cfg config.Config) string {
+	if cfg.PersonalMode() {
+		return "personal mode (AF_STACK_MODE=personal)"
+	}
+	return "billing module disabled (AF_STACK_MODULE_BILLING=false)"
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -685,7 +693,12 @@ func main() {
 		"version", version,
 		"http_addr", cfg.Server.HTTPAddr,
 		"agentfield_url", cfg.AgentField.URL,
+		"mode", defaulted(cfg.Mode, config.ModeSaaS),
 	)
+	if cfg.PersonalMode() {
+		log.Warn("personal mode active — auth and billing are OFF; the app runs single-user under the default tenant",
+			"switch_back", "set AF_STACK_MODE=saas (or run: af-stack mode saas) and restart")
+	}
 
 	// Phase 14.3 graceful shutdown.
 	//
@@ -1150,8 +1163,14 @@ func main() {
 		// AF_STACK_DEFAULT_MONTHLY_BUDGET_USD overrides the built-in
 		// default; set it to 0 to opt back into unlimited.
 		defaultCeiling := envFloat("AF_STACK_DEFAULT_MONTHLY_BUDGET_USD", defaultTenantMonthlyBudgetUSD)
-		costBudgets = cost.NewBudgets(database.Pool, log).WithDefaultCeilingUSD(defaultCeiling)
-		if defaultCeiling > 0 {
+		costBudgets = cost.NewBudgets(database.Pool, log).
+			WithDefaultCeilingUSD(defaultCeiling).
+			WithDisabled(!cfg.BillingEnabled())
+		if !cfg.BillingEnabled() {
+			log.Info("cost: budget enforcement disabled",
+				"reason", billingDisabledReason(cfg),
+				"note", "LLM calls will not be blocked by budget; spend is still metered")
+		} else if defaultCeiling > 0 {
 			log.Info("cost: default per-tenant monthly spend ceiling active",
 				"default_monthly_usd", defaultCeiling,
 				"note", "applies only to tenants without an explicit budget; set AF_STACK_DEFAULT_MONTHLY_BUDGET_USD=0 to disable")
@@ -1501,22 +1520,31 @@ func main() {
 		if database != nil && database.Pool != nil {
 			billingStore = billing.NewStore(database.Pool, log)
 		}
-		billingClient := billing.NewClientFromEnv(log)
-		billingSvc = billing.NewService(billingStore, billingClient, billing.NewMeterRegistry(), log)
-		// Operator-panel keys (vault) beat env vars when present, so
-		// menu-driven setup survives restarts.
-		if billingSettingsStore != nil {
-			sk, ws, fromVault, serr := billingSettingsStore.StripeKeys(ctx,
-				os.Getenv(billing.EnvSecretKey), os.Getenv(billing.EnvWebhookSecret))
-			if serr != nil {
-				log.Warn("billing: reading operator settings failed; using env keys", "error", serr)
-			} else if fromVault {
-				billingSvc.SwapClient(billing.NewStripeClientFromConfig(sk, ws, log))
-				log.Info("billing: stripe keys loaded from operator settings")
+		if !cfg.BillingEnabled() {
+			// Personal mode (or billing module off): no external provider,
+			// no Stripe keys, no paywall. Construct the service with a nil
+			// client so read endpoints still serve synthesised free-plan
+			// rows and the dashboard renders without a billing surface.
+			billingSvc = billing.NewService(billingStore, nil, billing.NewMeterRegistry(), log)
+			log.Info("billing: disabled", "reason", billingDisabledReason(cfg))
+		} else {
+			billingClient := billing.NewClientFromEnv(log)
+			billingSvc = billing.NewService(billingStore, billingClient, billing.NewMeterRegistry(), log)
+			// Operator-panel keys (vault) beat env vars when present, so
+			// menu-driven setup survives restarts.
+			if billingSettingsStore != nil {
+				sk, ws, fromVault, serr := billingSettingsStore.StripeKeys(ctx,
+					os.Getenv(billing.EnvSecretKey), os.Getenv(billing.EnvWebhookSecret))
+				if serr != nil {
+					log.Warn("billing: reading operator settings failed; using env keys", "error", serr)
+				} else if fromVault {
+					billingSvc.SwapClient(billing.NewStripeClientFromConfig(sk, ws, log))
+					log.Info("billing: stripe keys loaded from operator settings")
+				}
 			}
+			// Plan catalog -> in-process plan budget registry (HasBudget).
+			billingSvc.SyncPlanBudgets(ctx)
 		}
-		// Plan catalog -> in-process plan budget registry (HasBudget).
-		billingSvc.SyncPlanBudgets(ctx)
 	}
 
 	// Skills (Phase 11.3). The Store + Installer are independent: the

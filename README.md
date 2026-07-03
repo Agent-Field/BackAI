@@ -170,9 +170,12 @@ git clone https://github.com/Agent-Field/backai supportdesk-ai
 cd supportdesk-ai
 cp .env.example .env
 # Optional: set OPENROUTER_API_KEY for live model calls.
-node scripts/preflight.mjs
+node scripts/preflight.mjs --fix   # allocate conflict-free ports; prints every service URL
 docker compose up
 ```
+
+> Or just run **`af-stack dev`**, which does the preflight (auto port
+> allocation + a "what runs where" map) and starts Docker in one step.
 
 Open the customer app first:
 
@@ -193,7 +196,25 @@ curl -X POST http://localhost:8080/api/v1/agents/sample.echo \
 # → {"status":"succeeded","result":{"echoed":{"message":"hello world"}}, ...}
 ```
 
+### Personal mode (no auth, no billing)
+
+Just running BackAI for yourself? Turn off login and billing with one
+switch — the app then boots straight into the product, no sign-in and no
+paywall:
+
+```bash
+af-stack mode personal   # or set AF_STACK_MODE=personal in .env
+docker compose up -d      # restart to apply
+```
+
+Flip back to the multi-tenant SaaS defaults any time with `af-stack mode
+saas`. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md#deployment-mode-saas-vs-personal)
+for exactly what each mode changes (and the default-tenant data caveat).
+
 ### Operator login
+
+> Skip this section if you're running in **personal mode** — there is no
+> login.
 
 A default operator account is **seeded on first boot**, so the admin
 dashboard is usable immediately — there is no signup wizard.
@@ -211,17 +232,44 @@ operator exists yet, so changing those values later — or changing the
 password in the console — is never overwritten on restart. To provision
 operators another way, set `AF_STACK_DEFAULT_OPERATOR_DISABLED=true`.
 
-### Port overrides
+### Ports & running multiple apps side by side
 
-If a local port is already in use, or if two BackAI services are configured to
-publish the same host port, the preflight fails before Docker starts and prints
-the exact override to use. Keep unrelated local services running and pick an
-unused port instead:
+Every BackAI app defaults to the same host ports (`33000` admin, `34000`
+customer app, `8080` API, …), so running two at once — e.g. two apps forked
+from the template, or one next to a CourtSim demo — collides.
+
+**`af-stack dev` handles this for you.** Before starting Docker it runs the
+preflight in auto-allocate mode: any port already in use is reassigned to the
+next free one and written to `.env` (stable across restarts), a unique
+`COMPOSE_PROJECT_NAME` is set from the folder name, and it prints a "what runs
+where" map so you (or an agent) know every service URL without guessing:
+
+```text
+$ af-stack dev
+BackAI preflight: allocated conflict-free ports (written to .env):
+  Admin dashboard: 33000 → 33001 (AF_STACK_DASHBOARD_PORT)
+  Customer app:    34000 → 34001 (AF_STACK_CUSTOMER_APP_PORT)
+  BackAI runtime:  8080  → 8083  (AF_STACK_PORT)
+  Compose project: COMPOSE_PROJECT_NAME=my-app
+
+BackAI stack "my-app" — what runs where (host ports):
+  Customer app    http://localhost:34001
+  Admin console   http://localhost:33001
+  API runtime     http://localhost:8083/api/v1
+  ...
+  Logs / control:  docker compose -p my-app logs -f
+```
+
+If you drive Docker directly instead of `af-stack dev`, run the allocator
+yourself first (or plain `node scripts/preflight.mjs` for a read-only conflict
+check that prints suggestions without editing `.env`):
 
 ```bash
-AF_STACK_PORT=38080 docker compose up
-AF_STACK_DASHBOARD_PORT=33001 docker compose up
+node scripts/preflight.mjs --fix   # allocate free ports into .env, then:
+docker compose up
 ```
+
+Pass `af-stack dev --no-preflight` to opt out and use the ports as configured.
 
 To enable multi-tenancy: set `modules.multi-tenancy.enabled: true` in
 `apps/backend/config.yaml`. See [`docs/multi-tenancy.md`](docs/multi-tenancy.md)

@@ -40,6 +40,7 @@ func RunDev(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	fs.SetOutput(stderr)
 	detach := fs.Bool("detach", false, "run docker compose in detached mode")
 	noOpen := fs.Bool("no-open", false, "do not open the dashboard URL")
+	noPreflight := fs.Bool("no-preflight", false, "skip the port preflight/auto-allocation step")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -47,15 +48,65 @@ func RunDev(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	if err != nil {
 		return err
 	}
+
+	// Auto-allocate conflict-free host ports (and a stable COMPOSE_PROJECT_NAME)
+	// into .env before starting, so multiple BackAI apps run side by side
+	// without EADDRINUSE. The script also prints a "what runs where" map so an
+	// agent reading stdout knows every service URL without guessing.
+	if !*noPreflight {
+		if err := runPreflight(ctx, root, stdout, stderr); err != nil {
+			fmt.Fprintf(stderr, "port preflight skipped: %v\n", err)
+		}
+	}
+
 	composeArgs := []string{"compose", "up"}
 	if *detach {
 		composeArgs = append(composeArgs, "-d")
 	}
 	if *detach && !*noOpen {
-		defer openURL(ctx, "http://localhost:3000", stderr)
+		dashPort := readEnvValue(root, "AF_STACK_DASHBOARD_PORT", "33000")
+		defer openURL(ctx, "http://localhost:"+dashPort, stderr)
 	}
 	fmt.Fprintln(stdout, "Starting AF Stack with docker compose...")
 	return runCommand(ctx, root, "docker", composeArgs, stdout, stderr)
+}
+
+// runPreflight runs scripts/preflight.mjs --fix from the repo root. It
+// allocates free host ports into .env and prints the endpoint map. Missing
+// node or script is non-fatal — the caller logs and continues.
+func runPreflight(ctx context.Context, root string, stdout, stderr io.Writer) error {
+	script := filepath.Join(root, "scripts", "preflight.mjs")
+	if _, err := os.Stat(script); err != nil {
+		return fmt.Errorf("preflight script not found (%s)", script)
+	}
+	if _, err := exec.LookPath("node"); err != nil {
+		return fmt.Errorf("node not installed")
+	}
+	return runCommand(ctx, root, "node", []string{script, "--fix"}, stdout, stderr)
+}
+
+// readEnvValue returns the value of key from <root>/.env, falling back to the
+// process environment and then def. Kept intentionally small — it only needs
+// to resolve a port for the browser-open URL.
+func readEnvValue(root, key, def string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	data, err := os.ReadFile(filepath.Join(root, ".env"))
+	if err != nil {
+		return def
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if ok && strings.TrimSpace(k) == key {
+			return strings.Trim(strings.TrimSpace(v), `"'`)
+		}
+	}
+	return def
 }
 
 func RunAgent(args []string, stdout, stderr io.Writer) error {
