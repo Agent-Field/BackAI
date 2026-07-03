@@ -30,10 +30,11 @@ type SettingsCipher interface {
 	Decrypt(envelope []byte) ([]byte, error)
 }
 
-// Setting keys.
+// Setting keys (row identifiers in suite_billing_settings — the values
+// are the credentials; these are just their column keys).
 const (
 	SettingStripeSecretKey     = "stripe_secret_key"
-	SettingStripeWebhookSecret = "stripe_webhook_secret"
+	SettingStripeWebhookSecret = "stripe_webhook_secret" // #nosec G101 -- key name, not a credential
 )
 
 // SettingsStore reads/writes encrypted billing settings.

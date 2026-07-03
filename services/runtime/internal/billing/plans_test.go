@@ -61,7 +61,7 @@ func TestCheckout_StubAppliesDirectlyAndFiresHook(t *testing.T) {
 	svc := NewService(nil, &stubStripeClient{log: slog.Default()}, nil, slog.Default())
 
 	fired := false
-	svc.SetOnPlanApplied(func(_ context.Context, tenantID string, plan Plan) {
+	svc.SetOnPlanApplied(func(_ context.Context, tenantID string, _ Plan) {
 		fired = true
 		if tenantID != "t-1" {
 			t.Fatalf("hook tenant = %s", tenantID)
