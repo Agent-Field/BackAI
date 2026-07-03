@@ -258,6 +258,7 @@ func (s *Server) billingSettingsStatus(r *http.Request) map[string]any {
 		"source":             source,
 		"secret_key_set":     secretKey != "",
 		"secret_key_last4":   last4,
+		"key_mode":           billing.StripeKeyMode(secretKey),
 		"webhook_secret_set": webhookSecret != "",
 		"webhook_path":       "/webhooks/in/stripe",
 		"settings_writable":  s.billingSettings != nil,
@@ -286,6 +287,11 @@ func (s *Server) handleAdminPutBillingSettings(w http.ResponseWriter, r *http.Re
 		return
 	}
 	ctx := r.Context()
+	// Capture the effective secret key BEFORE writing, so we can tell
+	// whether the secret key actually changed (and thus whether prices
+	// provisioned by the old key are now orphaned).
+	prevSecret, _, _, _ := s.billingSettings.StripeKeys(ctx,
+		os.Getenv(billing.EnvSecretKey), os.Getenv(billing.EnvWebhookSecret))
 	if in.StripeSecretKey != nil {
 		if err := s.billingSettings.Set(ctx, billing.SettingStripeSecretKey, *in.StripeSecretKey); err != nil {
 			writeBillingError(w, err)
@@ -307,6 +313,23 @@ func (s *Server) handleAdminPutBillingSettings(w http.ResponseWriter, r *http.Re
 		return
 	}
 	s.billing.SwapClient(billing.NewStripeClientFromConfig(secretKey, webhookSecret, s.log))
+
+	// A stored stripe_price_id is only valid for the key that created it.
+	// When the secret key changes, every provisioned Price is orphaned and
+	// checkout would 404 ("No such price … a test mode key was used").
+	// Re-provision the catalog under the new key so nobody is left in a
+	// broken state. Only fires on an actual key change (no churn on webhook
+	// -secret-only saves or identical re-saves); a no-op in stub mode.
+	var reconciled []string
+	keyChanged := strings.TrimSpace(prevSecret) != strings.TrimSpace(secretKey)
+	if keyChanged {
+		if rp, rerr := s.billing.ReconcilePlanPrices(ctx); rerr != nil {
+			s.log.Warn("billing: reconcile plan prices after key change failed", "err", rerr)
+		} else {
+			reconciled = rp
+		}
+	}
+
 	s.audit.Write(ctx, r, audit.Event{
 		Action:       "billing.settings.update",
 		ResourceType: "billing_settings",
@@ -314,7 +337,15 @@ func (s *Server) handleAdminPutBillingSettings(w http.ResponseWriter, r *http.Re
 		Metadata: map[string]any{
 			"secret_key_updated":     in.StripeSecretKey != nil,
 			"webhook_secret_updated": in.StripeWebhookSecret != nil,
+			"key_changed":            keyChanged,
+			"reconciled_plans":       reconciled,
 		},
 	})
-	writeJSON(w, http.StatusOK, s.billingSettingsStatus(r))
+	status := s.billingSettingsStatus(r)
+	if keyChanged {
+		// Always surface the field on a key change (even when empty) so the
+		// caller can distinguish "reconciled nothing" from "did not run".
+		status["reconciled_plans"] = reconciled
+	}
+	writeJSON(w, http.StatusOK, status)
 }

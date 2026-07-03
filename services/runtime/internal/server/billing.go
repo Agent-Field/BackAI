@@ -160,6 +160,9 @@ func writeBillingError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, billing.ErrInvalidInput):
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error(), nil)
+	case errors.Is(err, billing.ErrPriceStale):
+		writeError(w, http.StatusConflict, "BILLING_PRICE_STALE",
+			err.Error()+" — re-provision it with `af-stack billing plan set` or the dashboard Billing page, then retry.", nil)
 	case errors.Is(err, billing.ErrNotFound):
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "billing customer not found", nil)
 	case errors.Is(err, billing.ErrBillingUnavailable):

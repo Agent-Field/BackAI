@@ -433,6 +433,77 @@ func (s *Service) UpsertPlan(ctx context.Context, p Plan) (Plan, error) {
 	return out, nil
 }
 
+// paidPlans returns the subset of a catalog that carries a Stripe price
+// (price > 0). Free plans have no Stripe object, so they're never
+// reconciled. Pure so it can be unit-tested without a database.
+func paidPlans(plans []Plan) []Plan {
+	out := make([]Plan, 0, len(plans))
+	for _, p := range plans {
+		if p.PriceUSDMonth > 0 {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// ReconcilePlanPrices re-provisions every paid plan's Stripe Price under
+// the currently-active client. A stored stripe_price_id is only valid for
+// the exact Stripe key (account + mode) that created it: when an operator
+// swaps keys — most commonly flipping live↔test — the old prices 404 at
+// checkout ("No such price … a similar object exists in live mode, but a
+// test mode key was used"). The operator billing-settings handler calls
+// this after a key change so the catalog re-points at fresh Product+Price
+// objects under the new key and checkout keeps working without anyone
+// touching the Stripe dashboard.
+//
+// Stub mode is a no-op — stub checkout applies plans directly and ignores
+// prices. Best-effort per plan: if re-provisioning a plan fails under the
+// new key, its stale price is cleared (set NULL) so checkout returns a
+// clean "no price" path instead of a wrong-mode 404, and the remaining
+// plans are still reconciled. Returns the ids of the plans whose price was
+// successfully re-provisioned.
+func (s *Service) ReconcilePlanPrices(ctx context.Context) ([]string, error) {
+	if s == nil || s.store == nil {
+		return nil, nil
+	}
+	client := s.Client()
+	if client == nil || client.IsStub() {
+		return nil, nil
+	}
+	plans, err := s.store.ListPlans(ctx)
+	if err != nil {
+		return nil, err
+	}
+	reconciled := make([]string, 0)
+	for _, p := range paidPlans(plans) {
+		// Clearing the price makes UpsertPlan re-provision it under the
+		// active client, minting a fresh Price on the new key.
+		cleared := p
+		cleared.StripePriceID = nil
+		updated, uerr := s.UpsertPlan(ctx, cleared)
+		if uerr != nil {
+			// Provisioning failed under the new key. Persist the cleared
+			// price directly so checkout fails cleanly rather than hitting
+			// the old key's now-invalid price, then keep going.
+			if _, cerr := s.store.UpsertPlan(ctx, cleared); cerr != nil {
+				s.log.Warn("billing: reconcile could not clear stale price",
+					"plan", p.ID, "provision_err", uerr, "clear_err", cerr)
+			} else {
+				s.log.Warn("billing: reconcile cleared stale price (re-provision failed)",
+					"plan", p.ID, "err", uerr)
+			}
+			continue
+		}
+		if updated.StripePriceID != nil && *updated.StripePriceID != "" {
+			reconciled = append(reconciled, updated.ID)
+		}
+	}
+	if len(reconciled) > 0 {
+		s.log.Info("billing: reconciled plan prices after key change", "plans", reconciled)
+	}
+	return reconciled, nil
+}
+
 // DeletePlan removes a catalog row (the default plan is protected).
 func (s *Service) DeletePlan(ctx context.Context, id string) error {
 	if s == nil || s.store == nil {
