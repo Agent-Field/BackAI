@@ -53,6 +53,7 @@ import (
 	"time"
 
 	"github.com/Agent-Field/backai/services/cli/internal/admincmd"
+	"github.com/Agent-Field/backai/services/cli/internal/billingcmd"
 	"github.com/Agent-Field/backai/services/cli/internal/client"
 	"github.com/Agent-Field/backai/services/cli/internal/initcmd"
 	"github.com/Agent-Field/backai/services/cli/internal/mcp"
@@ -157,6 +158,12 @@ func run(args []string) error {
 		defer cancel()
 		c := client.New()
 		return mcp.Run(ctx, c, rest, os.Stdout, os.Stderr)
+	case "billing":
+		ctx, cancel := signal.NotifyContext(
+			context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		c := client.New()
+		return billingcmd.Run(ctx, c, rest, os.Stdout, os.Stderr)
 	case "keys", "agents", "reasoners", "logs", "errors", "audit",
 		"sessions", "runs", "tenants", "activity":
 		// Operator REST surface. Requires AF_STACK_API_KEY set to an
@@ -211,6 +218,7 @@ Commands:
   deploy     Deploy wrappers for helm/fly/railway/render
   operator   Operator bootstrap commands (create, key)
   mcp        Model Context Protocol server + tool management
+  billing    Set up Stripe billing: plans + pricing (agent-first)
   version    Print the CLI version
 
 Operator commands (need AF_STACK_API_KEY = operator key; mint one with

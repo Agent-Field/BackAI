@@ -404,6 +404,25 @@ func (s *Service) UpsertPlan(ctx context.Context, p Plan) (Plan, error) {
 	if s == nil || s.store == nil {
 		return Plan{}, fmt.Errorf("%w: no database", ErrBillingUnavailable)
 	}
+	// Agent-first: when Stripe is live and this is a paid plan with no
+	// Price yet, provision the Stripe Product + Price automatically so
+	// nobody has to touch the Stripe dashboard. Stub mode skips this —
+	// its checkout applies plans directly.
+	if p.PriceUSDMonth > 0 && (p.StripePriceID == nil || strings.TrimSpace(*p.StripePriceID) == "") {
+		client := s.Client()
+		if client != nil && !client.IsStub() {
+			name := strings.TrimSpace(p.Name)
+			if name == "" {
+				name = p.ID
+			}
+			cents := int64(p.PriceUSDMonth*100 + 0.5)
+			priceID, perr := client.EnsurePrice(ctx, p.ID, name, cents, "usd")
+			if perr != nil {
+				return Plan{}, fmt.Errorf("provision stripe price for plan %q: %w", p.ID, perr)
+			}
+			p.StripePriceID = &priceID
+		}
+	}
 	out, err := s.store.UpsertPlan(ctx, p)
 	if err != nil {
 		return Plan{}, err

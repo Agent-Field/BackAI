@@ -29,6 +29,8 @@ import (
 	stripeportal "github.com/stripe/stripe-go/v82/billingportal/session"
 	stripecheckout "github.com/stripe/stripe-go/v82/checkout/session"
 	stripecustomer "github.com/stripe/stripe-go/v82/customer"
+	stripeprice "github.com/stripe/stripe-go/v82/price"
+	stripeproduct "github.com/stripe/stripe-go/v82/product"
 	stripewebhook "github.com/stripe/stripe-go/v82/webhook"
 )
 
@@ -55,6 +57,13 @@ type Client interface {
 	// subscription events back to a tenant. Adapters without a hosted
 	// checkout (lago, remote) return ErrBillingUnavailable.
 	CreateCheckoutSession(ctx context.Context, customerID, priceID, successURL, cancelURL, tenantID string) (string, error)
+	// EnsurePrice provisions a recurring monthly Stripe Price for a plan
+	// and returns its id — so operators/agents never touch the Stripe
+	// dashboard. planID tags the Product's metadata for traceability;
+	// name is the human Product name; amountCents is the monthly price in
+	// the smallest currency unit; currency defaults to "usd" when empty.
+	// Adapters without hosted billing return ErrBillingUnavailable.
+	EnsurePrice(ctx context.Context, planID, name string, amountCents int64, currency string) (string, error)
 	// VerifyWebhook validates the Stripe-Signature header against body
 	// + the configured webhook secret. Returns the decoded event JSON
 	// (as a *stripe.Event) on success.
@@ -226,6 +235,42 @@ func (c *realStripeClient) CreateCheckoutSession(_ context.Context, customerID, 
 	return sess.URL, nil
 }
 
+func (c *realStripeClient) EnsurePrice(_ context.Context, planID, name string, amountCents int64, currency string) (string, error) {
+	if amountCents <= 0 {
+		return "", fmt.Errorf("%w: amount must be positive to create a price", ErrInvalidInput)
+	}
+	if currency == "" {
+		currency = "usd"
+	}
+	if name == "" {
+		name = planID
+	}
+	// Create a Product tagged with the plan id, then a recurring monthly
+	// Price on it. Stripe Prices are immutable, so a plan's price change
+	// provisions a fresh Price (the caller only calls this when the plan
+	// has no stored price id).
+	prod, err := stripeproduct.New(&stripe.ProductParams{
+		Name:     stripe.String(name),
+		Metadata: map[string]string{"af_plan_id": planID},
+	})
+	if err != nil {
+		return "", fmt.Errorf("%w: create product: %v", ErrStripeUnavailable, err)
+	}
+	price, err := stripeprice.New(&stripe.PriceParams{
+		Product:    stripe.String(prod.ID),
+		Currency:   stripe.String(currency),
+		UnitAmount: stripe.Int64(amountCents),
+		Recurring:  &stripe.PriceRecurringParams{Interval: stripe.String("month")},
+		Metadata:   map[string]string{"af_plan_id": planID},
+	})
+	if err != nil {
+		return "", fmt.Errorf("%w: create price: %v", ErrStripeUnavailable, err)
+	}
+	c.log.Info("billing: provisioned stripe price",
+		"plan", planID, "product", prod.ID, "price", price.ID, "amount_cents", amountCents)
+	return price.ID, nil
+}
+
 func (c *realStripeClient) VerifyWebhook(body []byte, sigHeader string) (*stripe.Event, error) {
 	if c.webhookSecret == "" {
 		return nil, fmt.Errorf("%w: %s unset", ErrSignatureInvalid, EnvWebhookSecret)
@@ -299,6 +344,16 @@ func (c *stubStripeClient) CreateCheckoutSession(_ context.Context, _, priceID, 
 	c.log.Info("billing: stub checkout (no Stripe key) — plan applied locally",
 		"price_id", priceID)
 	return successURL, nil
+}
+
+func (c *stubStripeClient) EnsurePrice(_ context.Context, planID, _ string, amountCents int64, _ string) (string, error) {
+	// No Stripe account — return a deterministic placeholder id. Stub-mode
+	// checkout applies plans directly and never consults this, so it only
+	// needs to be non-empty and obviously fake.
+	if amountCents <= 0 {
+		return "", fmt.Errorf("%w: amount must be positive to create a price", ErrInvalidInput)
+	}
+	return "price_stub_" + sanitiseStubID(planID), nil
 }
 
 func (c *stubStripeClient) VerifyWebhook(_ []byte, _ string) (*stripe.Event, error) {

@@ -148,3 +148,19 @@ func TestSettingsStore_Degraded(t *testing.T) {
 		t.Fatalf("env fallback broken: %s %s %v %v", sk, ws, fromVault, err)
 	}
 }
+
+// Contract: stub EnsurePrice returns a deterministic fake id (checkout
+// never uses it in stub mode) and rejects a non-positive amount.
+func TestStubClient_EnsurePrice(t *testing.T) {
+	c := &stubStripeClient{log: slog.Default()}
+	id, err := c.EnsurePrice(context.Background(), "pro", "Pro", 2900, "usd")
+	if err != nil {
+		t.Fatalf("stub EnsurePrice: %v", err)
+	}
+	if !strings.HasPrefix(id, "price_stub_") {
+		t.Fatalf("stub price id = %q, want price_stub_ prefix", id)
+	}
+	if _, err := c.EnsurePrice(context.Background(), "pro", "Pro", 0, "usd"); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput for zero amount, got %v", err)
+	}
+}
