@@ -198,7 +198,7 @@ Usage:
   af-stack <command> [args...]
 
 Commands:
-  init       Scaffold a new app on the AF Stack backend (use --brand to re-theme a fork)
+  init       Scaffold a new app (af-stack init <name>); flags-only re-themes this fork
   dev        Start docker compose for local development
   agent      Agent scaffold commands
   module     Workload module scaffold commands
@@ -224,7 +224,8 @@ Operator commands (need AF_STACK_API_KEY = operator key; mint one with
 
 Examples:
   af-stack init my-app                              # scaffold a new project that consumes the stack
-  af-stack init --brand --name "DocuChat" --color "#0A66C2"   # re-theme a fork (power-user path)
+  af-stack init --template coding-agent             # in-checkout: rebrand + scaffold the hero coding agent
+  af-stack init --name "DocuChat" --color "#0A66C2" # in-checkout: re-theme this fork
   af-stack dev --detach
   af-stack agent new researcher
   af-stack adapter list

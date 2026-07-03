@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package initcmd implements the `af-stack init` fork-bootstrap command.
+// Package initcmd implements `af-stack init` in two modes. Given a
+// positional project name (`af-stack init my-app`), it scaffolds a NEW
+// project that consumes the stack over /api/v1 (scaffold.go) — the
+// CLI-first front door. Without one, it keeps the in-checkout behavior:
+// re-theme this fork and optionally scaffold a --template (this file and
+// template.go).
 package initcmd
 
 import (
@@ -71,7 +76,17 @@ var hexColorRE = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 var composeNodeIDRE = regexp.MustCompile(`(?m)^\s+NODE_ID:\s*([A-Za-z0-9_.-]+)\s*$`)
 
 // Run handles `af-stack init`.
+//
+// A leading positional argument is a project name and selects the CLI-first
+// scaffold: a new directory with a starter app that consumes the backend.
+// All-flag invocations (`--name`, `--template coding-agent`, …) keep the
+// in-checkout rebrand/template behavior, so existing docs and acceptance
+// flows are unchanged.
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	if len(args) > 0 && !strings.HasPrefix(strings.TrimSpace(args[0]), "-") {
+		return runScaffold(args, stdout, stderr)
+	}
+
 	fs := flag.NewFlagSet("af-stack init", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	name := fs.String("name", "", "project display name, e.g. DocuChat")
