@@ -226,3 +226,83 @@ func read(t *testing.T, root, rel string) string {
 	}
 	return string(raw)
 }
+
+func TestReadEnvValue(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, ".env", "AF_STACK_DASHBOARD_PORT=33200\n# comment\nAF_STACK_PORT = \"8280\"\n")
+
+	if got := readEnvValue(root, "AF_STACK_DASHBOARD_PORT", "33000"); got != "33200" {
+		t.Errorf("dashboard port = %q, want 33200", got)
+	}
+	// Quotes and surrounding spaces are trimmed.
+	if got := readEnvValue(root, "AF_STACK_PORT", "8080"); got != "8280" {
+		t.Errorf("runtime port = %q, want 8280", got)
+	}
+	// Missing key falls back to the default.
+	if got := readEnvValue(root, "MISSING_KEY", "33000"); got != "33000" {
+		t.Errorf("missing key = %q, want default 33000", got)
+	}
+	// Process env takes precedence over .env.
+	t.Setenv("AF_STACK_DASHBOARD_PORT", "39999")
+	if got := readEnvValue(root, "AF_STACK_DASHBOARD_PORT", "33000"); got != "39999" {
+		t.Errorf("env override = %q, want 39999", got)
+	}
+}
+
+func TestReadEnvValueNoFile(t *testing.T) {
+	root := t.TempDir() // no .env
+	if got := readEnvValue(root, "AF_STACK_DASHBOARD_PORT", "33000"); got != "33000" {
+		t.Errorf("no .env = %q, want default 33000", got)
+	}
+}
+
+// --no-preflight starts the stack with a single `docker compose up` and never
+// shells out to the preflight script.
+func TestRunDevNoPreflightRunsComposeOnly(t *testing.T) {
+	root := fakeRepo(t)
+	restoreCwd := chdir(t, root)
+	defer restoreCwd()
+	old := runCommand
+	defer func() { runCommand = old }()
+
+	var calls [][]string
+	runCommand = func(_ context.Context, _ string, name string, args []string, _, _ io.Writer) error {
+		calls = append(calls, append([]string{name}, args...))
+		return nil
+	}
+
+	if err := RunDev(context.Background(), []string{"--no-preflight", "--detach", "--no-open"}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("RunDev returned error: %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("expected exactly 1 command, got %d: %v", len(calls), calls)
+	}
+	if got := strings.Join(calls[0], " "); got != "docker compose up -d" {
+		t.Fatalf("command = %q, want 'docker compose up -d'", got)
+	}
+}
+
+// With no preflight script present, RunDev logs and continues to compose
+// rather than failing.
+func TestRunDevMissingPreflightScriptIsNonFatal(t *testing.T) {
+	root := fakeRepo(t) // fakeRepo has no scripts/preflight.mjs
+	restoreCwd := chdir(t, root)
+	defer restoreCwd()
+	old := runCommand
+	defer func() { runCommand = old }()
+
+	var composeRan bool
+	runCommand = func(_ context.Context, _ string, name string, args []string, _, _ io.Writer) error {
+		if name == "docker" && len(args) > 0 && args[0] == "compose" {
+			composeRan = true
+		}
+		return nil
+	}
+
+	if err := RunDev(context.Background(), nil, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("RunDev returned error: %v", err)
+	}
+	if !composeRan {
+		t.Fatal("docker compose was not run when preflight script was absent")
+	}
+}
