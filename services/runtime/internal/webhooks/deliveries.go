@@ -249,9 +249,25 @@ func (s *DeliveryStore) List(ctx context.Context, f ListFilters) (*ListResult, e
 		whereClause = "where " + strings.Join(where, " and ")
 	}
 
+	// The deliveries list is served only through the operator-gated
+	// handler (the /api/v1/webhooks surface bypasses the tenant resolver,
+	// so no app.tenant_id is bound). Read cross-tenant via bypass_rls so
+	// the operator console sees every tenant's deliveries — outbound rows
+	// are stamped with the emitting tenant and would otherwise be filtered
+	// out by RLS. Callers narrow to one tenant with the explicit `tenant`
+	// filter (f.TenantID), which is applied in the WHERE clause above.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("webhooks: list begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return nil, fmt.Errorf("webhooks: list set bypass: %w", err)
+	}
+
 	countQ := "select count(*) from suite_webhook_deliveries " + whereClause
 	var total int
-	if err := s.pool.QueryRow(ctx, countQ, args...).Scan(&total); err != nil {
+	if err := tx.QueryRow(ctx, countQ, args...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("webhooks: list count: %w", err)
 	}
 
@@ -282,22 +298,25 @@ func (s *DeliveryStore) List(ctx context.Context, f ListFilters) (*ListResult, e
     `, whereClause, len(args)+1, len(args)+2)
 	args = append(args, f.Limit, f.Offset)
 
-	rows, err := s.pool.Query(ctx, listQ, args...)
+	rows, err := tx.Query(ctx, listQ, args...)
 	if err != nil {
 		return nil, fmt.Errorf("webhooks: list query: %w", err)
 	}
-	defer rows.Close()
-
 	out := make([]Delivery, 0, f.Limit)
 	for rows.Next() {
 		d, err := scanDelivery(rows)
 		if err != nil {
+			rows.Close()
 			return nil, fmt.Errorf("webhooks: list scan: %w", err)
 		}
 		out = append(out, *d)
 	}
+	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("webhooks: list rows: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("webhooks: list commit: %w", err)
 	}
 
 	return &ListResult{
