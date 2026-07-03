@@ -228,6 +228,18 @@ AF Stack backend over HTTP — it is not a fork of the stack itself.
   (Python) and use the ` + "`suite.*`" + ` namespaces — ` + "`suite.agents`" + `,
   ` + "`suite.llm`" + `, ` + "`suite.storage`" + `, ` + "`suite.billing`" + `, ` + "`suite.auth`" + `.
 
+## Billing: never build it yourself
+The backend ships a turnkey pricing engine — plan catalog, hosted Stripe
+checkout, entitlements, and hard budget enforcement (402s). Your job is
+three calls, not a billing system:
+- gate paid features with ` + "`GET /api/v1/billing/entitlements`" + ` (plan +
+  entitlements + current usage in one read),
+- record usage with ` + "`POST /api/v1/billing/meter`" + `,
+- send upgrades to ` + "`POST /api/v1/billing/checkout`" + ` (returns the hosted
+  checkout URL; in keyless dev mode the plan applies instantly).
+Plans and Stripe keys are configured by the operator in the dashboard
+(Platform → Billing) — do not hardcode prices or plan logic in app code.
+
 ## Ground rules
 - The backend owns auth, tenancy, billing, and secrets — call it, don't
   reimplement it here.
