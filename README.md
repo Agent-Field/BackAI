@@ -35,7 +35,20 @@ execution all live together.
 ## Canonical DX
 
 The front door is **CLI-first** — scaffold a new app that consumes the
-backend, the way `create-next-app` scaffolds a frontend:
+backend, the way `create-next-app` scaffolds a frontend.
+
+Install the `af-stack` CLI (single static binary — pick one):
+
+```bash
+# Linux / macOS — download the latest release binary + verify checksum
+curl -fsSL https://raw.githubusercontent.com/Agent-Field/backai/main/scripts/install.sh | bash
+
+# or, with a Go toolchain (≥ 1.25):
+go install github.com/Agent-Field/backai/services/cli/cmd/af-stack@latest
+```
+
+Windows binaries and more detail (version pinning, direct download) are in
+[`docs/cli-distribution.md`](docs/cli-distribution.md). Then:
 
 ```bash
 af-stack init my-app      # scaffold a project that talks to the backend
@@ -99,7 +112,7 @@ is historical design material. See [`docs/repo-map.md`](docs/repo-map.md).
 | Identity    | better-auth, seeded default operator          | OAuth providers, trusted origins, default operator credentials.  |
 | LLM routing | AgentField path + LiteLLM sidecar             | Provider keys, model map, budgets, virtual-key strategy.         |
 | Sandboxes   | Docker in dev, e2b/gVisor/Firecracker options | Adapter choice, limits, provider credentials.                    |
-| Delivery    | Svix for outbound webhooks, log notifications | Resend/Postmark/etc. notifications, billing adapter.             |
+| Delivery    | Native in-process outbound webhooks (Svix optional), log notifications | Resend/Postmark/etc. notifications, billing adapter.             |
 | Deploy      | Docker Compose, Helm, Fly, Railway, Render    | Your domains, secrets, scaling, managed services.                |
 
 For the layered architecture and OSS placement, read
