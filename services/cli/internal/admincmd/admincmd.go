@@ -175,7 +175,7 @@ func RunKeys(ctx context.Context, c *client.Client, args []string, stdout, stder
 
 // ─── agents ───────────────────────────────────────────────────────────────
 
-func RunAgents(ctx context.Context, c *client.Client, args []string, stdout, stderr io.Writer) error {
+func RunAgents(ctx context.Context, c *client.Client, args []string, stdout, _ io.Writer) error {
 	if len(args) > 0 && args[0] != "list" {
 		return fmt.Errorf("agents: unknown subcommand %q (only: list)", args[0])
 	}
@@ -516,7 +516,7 @@ func RunRuns(ctx context.Context, c *client.Client, args []string, stdout, stder
 
 // ─── tenants ──────────────────────────────────────────────────────────────
 
-func RunTenants(ctx context.Context, c *client.Client, args []string, stdout, stderr io.Writer) error {
+func RunTenants(ctx context.Context, c *client.Client, args []string, stdout, _ io.Writer) error {
 	if len(args) > 0 && args[0] != "list" {
 		return fmt.Errorf("tenants: unknown subcommand %q (only: list)", args[0])
 	}
