@@ -200,6 +200,14 @@ func (s *Store) ListMeters(ctx context.Context, f MeterFilters) ([]UsageMeter, e
 	if !s.HasPool() {
 		return []UsageMeter{}, nil
 	}
+	// RLS: writes bind the tenant (IncrementMeter), so reads must too or
+	// the force policy filters every row and the endpoint reports zero
+	// usage forever. Tenant-scoped reads bind that tenant; the operator's
+	// cross-tenant listing (no tenant filter) reads via bypass_rls below,
+	// mirroring webhooks/deliveries.go.
+	if f.TenantID != "" {
+		ctx = tenantctx.WithTenant(ctx, f.TenantID, "")
+	}
 	conds := []string{}
 	args := []any{}
 	if f.TenantID != "" {
@@ -224,22 +232,50 @@ func (s *Store) ListMeters(ctx context.Context, f MeterFilters) ([]UsageMeter, e
 		  from suite_usage_meters
 	` + where + ` order by period_start desc, meter asc`
 
-	rows, err := s.pool.Query(ctx, q, args...)
+	scan := func(rows pgx.Rows) ([]UsageMeter, error) {
+		defer rows.Close()
+		out := make([]UsageMeter, 0)
+		for rows.Next() {
+			m, err := scanMeter(rows)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, m)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("billing: iterate meters: %w", err)
+		}
+		return out, nil
+	}
+
+	if f.TenantID != "" {
+		rows, err := s.pool.Query(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("billing: list meters: %w", err)
+		}
+		return scan(rows)
+	}
+
+	// Operator cross-tenant listing: no tenant to bind, so read inside a
+	// bypass_rls transaction (same pattern as the deliveries store).
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("billing: list meters begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return nil, fmt.Errorf("billing: list meters bypass: %w", err)
+	}
+	rows, err := tx.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("billing: list meters: %w", err)
 	}
-	defer rows.Close()
-
-	out := make([]UsageMeter, 0)
-	for rows.Next() {
-		m, err := scanMeter(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, m)
+	out, err := scan(rows)
+	if err != nil {
+		return nil, err
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("billing: iterate meters: %w", err)
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("billing: list meters commit: %w", err)
 	}
 	return out, nil
 }
@@ -297,6 +333,11 @@ func (s *Store) GetTotalForPeriod(
 ) (float64, error) {
 	if !s.HasPool() {
 		return 0, nil
+	}
+	// RLS: bind the tenant or the force policy hides the rows and every
+	// budget check sees $0 spent (fail-open).
+	if strings.TrimSpace(tenantID) != "" {
+		ctx = tenantctx.WithTenant(ctx, tenantID, "")
 	}
 	var total float64
 	err := s.pool.QueryRow(ctx, `

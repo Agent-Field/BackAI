@@ -14,6 +14,9 @@ SDK call                            Endpoint
 :func:`portal_link`                 ``POST   /api/v1/billing/customers/{tenantId}/portal``
 :func:`meter`                       ``POST   /api/v1/billing/meter``
 :func:`has_budget`                  (in-process — checks the tenant's plan cap)
+:func:`plans`                       ``GET    /api/v1/billing/plans``
+:func:`checkout`                    ``POST   /api/v1/billing/checkout``
+:func:`entitlements`                ``GET    /api/v1/billing/entitlements``
 ==================================  =======================================================
 
 The Pydantic models mirror the zod schemas in ``lib/api.ts`` exactly —
@@ -107,6 +110,61 @@ class PortalLink(BaseModel):
     expires_at: str
 
 
+class BillingPlan(BaseModel):
+    """One catalog plan row (turnkey billing).
+
+    Mirrors ``billing.Plan`` on the runtime (``GET /api/v1/billing/plans``).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    name: str
+    stripe_price_id: str | None = None
+    price_usd_month: float = 0.0
+    llm_budget_usd: float | None = None
+    entitlements: dict[str, Any] = Field(default_factory=dict)
+    is_default: bool = False
+    created_at: str
+    updated_at: str
+
+
+class BillingPlanList(BaseModel):
+    """The plans catalog, default plan first."""
+
+    model_config = ConfigDict(extra="allow")
+
+    plans: list[BillingPlan] = Field(default_factory=list)
+
+
+class CheckoutResult(BaseModel):
+    """Result of starting a hosted checkout.
+
+    ``applied_directly`` is True in stub/dev mode: there is no payment
+    provider to check out against, so the plan was applied immediately
+    and ``url`` is empty — treat the purchase as complete, no redirect.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    url: str = ""
+    applied_directly: bool = False
+
+
+class Entitlements(BaseModel):
+    """A tenant's plan + entitlements + current-period meter usage.
+
+    ``usage`` maps meter name → summed quantity for the current period.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    tenant_id: str
+    plan: BillingPlan
+    entitlements: dict[str, Any] = Field(default_factory=dict)
+    usage: dict[str, float] = Field(default_factory=dict)
+
+
 # ─── Read surface ─────────────────────────────────────────────────────────
 
 
@@ -148,6 +206,25 @@ async def meters(
     return UsageMeterList.model_validate(body or {"meters": [], "total_cost_usd": 0.0})
 
 
+async def plans() -> BillingPlanList:
+    """List the plans catalog (default plan first, then by price)."""
+    body = await _http.request_json("GET", "/billing/plans")
+    return BillingPlanList.model_validate(body or {"plans": []})
+
+
+async def entitlements(*, tenant: str | None = None) -> Entitlements:
+    """Fetch a tenant's plan, entitlements, and current-period usage.
+
+    ``tenant`` is optional when the credential is tenant-scoped — the
+    runtime resolves the tenant from the request context.
+    """
+    params: dict[str, Any] = {}
+    if tenant:
+        params["tenant"] = tenant
+    body = await _http.request_json("GET", "/billing/entitlements", params=params)
+    return Entitlements.model_validate(body or {})
+
+
 # ─── Write surface ────────────────────────────────────────────────────────
 
 
@@ -168,6 +245,35 @@ async def portal_link(tenant_id: str, return_url: str | None = None) -> PortalLi
         json=payload or None,
     )
     return PortalLink.model_validate(body or {})
+
+
+async def checkout(
+    plan_id: str,
+    success_url: str,
+    *,
+    cancel_url: str | None = None,
+    tenant_id: str | None = None,
+) -> CheckoutResult:
+    """Start a hosted checkout for ``plan_id``.
+
+    Real mode returns the hosted checkout page URL to redirect the
+    customer to. In stub/dev mode (no payment keys on the runtime) the
+    plan is applied immediately and ``applied_directly`` is True — no
+    redirect needed. Pass ``tenant_id`` when calling on behalf of a
+    tenant (multi-tenant app backends); when omitted the runtime uses
+    the tenant resolved from the credential.
+    """
+    if not plan_id:
+        raise ValueError("plan_id must be a non-empty string")
+    if not success_url:
+        raise ValueError("success_url must be a non-empty string")
+    payload: dict[str, Any] = {"plan_id": plan_id, "success_url": success_url}
+    if cancel_url:
+        payload["cancel_url"] = cancel_url
+    if tenant_id:
+        payload["tenant_id"] = tenant_id
+    body = await _http.request_json("POST", "/billing/checkout", json=payload)
+    return CheckoutResult.model_validate(body or {})
 
 
 # ─── In-process verbs (forwarded via the customer endpoint) ───────────────
@@ -228,14 +334,21 @@ async def has_budget(tenant_id: str, additional_usd: float) -> bool:
 __all__ = [
     "BillingCustomer",
     "BillingCustomerList",
+    "BillingPlan",
+    "BillingPlanList",
     "Bucket",
+    "CheckoutResult",
+    "Entitlements",
     "PortalLink",
     "UsageMeter",
     "UsageMeterList",
+    "checkout",
     "customer",
     "customers",
+    "entitlements",
     "has_budget",
     "meter",
     "meters",
+    "plans",
     "portal_link",
 ]

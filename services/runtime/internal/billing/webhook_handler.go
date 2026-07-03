@@ -114,6 +114,9 @@ type subscriptionEvent struct {
 				Nickname string `json:"nickname"`
 				Product  string `json:"product"`
 			} `json:"plan"`
+			Price struct {
+				ID string `json:"id"`
+			} `json:"price"`
 		} `json:"data"`
 	} `json:"items"`
 	Metadata map[string]string `json:"metadata"`
@@ -137,7 +140,22 @@ func (s *Service) handleSubscriptionUpdated(ctx context.Context, ev *stripe.Even
 		return nil
 	}
 	stripeID := sub.Customer
-	plan := strings.TrimSpace(sub.Items.Data[0].Plan.Nickname)
+	// Resolve the catalog plan from the subscription's Stripe Price id —
+	// that binding is what the operator configured on the plans page. The
+	// price nickname is only a fallback for uncatalogued prices.
+	plan := ""
+	var catalogPlan *Plan
+	if len(sub.Items.Data) > 0 {
+		if priceID := strings.TrimSpace(sub.Items.Data[0].Price.ID); priceID != "" {
+			if p, perr := s.store.PlanByStripePrice(ctx, priceID); perr == nil {
+				catalogPlan = &p
+				plan = p.ID
+			}
+		}
+		if plan == "" {
+			plan = strings.TrimSpace(sub.Items.Data[0].Plan.Nickname)
+		}
+	}
 	if plan == "" {
 		plan = "free"
 	}
@@ -160,6 +178,11 @@ func (s *Service) handleSubscriptionUpdated(ctx context.Context, ev *stripe.Even
 	}
 	if _, err := s.store.UpsertCustomer(ctx, c); err != nil {
 		return fmt.Errorf("billing: upsert from subscription: %w", err)
+	}
+	// Close the loop: applying a plan is more than recording it — the
+	// server-side hook pushes the plan's enforced LLM budget etc.
+	if catalogPlan != nil {
+		s.firePlanApplied(ctx, tenantID, *catalogPlan)
 	}
 	return nil
 }

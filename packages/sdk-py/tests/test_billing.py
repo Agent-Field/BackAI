@@ -49,6 +49,22 @@ def _meter_row(**overrides: object) -> dict[str, object]:
     return base
 
 
+def _plan_row(**overrides: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "id": "pro",
+        "name": "Pro",
+        "stripe_price_id": "price_1QStubPro",
+        "price_usd_month": 29.0,
+        "llm_budget_usd": 50.0,
+        "entitlements": {"max_agents": 10, "priority_support": True},
+        "is_default": False,
+        "created_at": "2026-07-01T00:00:00Z",
+        "updated_at": "2026-07-01T00:00:00Z",
+    }
+    base.update(overrides)
+    return base
+
+
 @pytest.fixture(autouse=True)
 async def reset_http_client(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AF_STACK_URL", "http://localhost:8080")
@@ -220,7 +236,135 @@ async def test_has_budget_permissive_without_tenant() -> None:
     assert await billing.has_budget("", 100.0) is True
 
 
+async def test_plans_returns_parsed_catalog() -> None:
+    body = {
+        "plans": [
+            _plan_row(
+                id="free",
+                name="Free",
+                stripe_price_id=None,
+                price_usd_month=0.0,
+                llm_budget_usd=None,
+                entitlements={},
+                is_default=True,
+            ),
+            _plan_row(),
+        ],
+    }
+    with respx.mock(assert_all_called=True) as router:
+        router.get(f"{BASE}/billing/plans").mock(return_value=httpx.Response(200, json=body))
+        result = await billing.plans()
+    assert len(result.plans) == 2
+    free, pro = result.plans
+    assert free.id == "free"
+    assert free.is_default is True
+    assert free.stripe_price_id is None
+    assert free.llm_budget_usd is None
+    assert free.entitlements == {}
+    assert pro.id == "pro"
+    assert pro.price_usd_month == 29.0
+    assert pro.llm_budget_usd == 50.0
+    assert pro.entitlements == {"max_agents": 10, "priority_support": True}
+
+
+async def test_checkout_posts_minimal_payload() -> None:
+    import json as _json
+
+    body = {"url": "https://checkout.stripe.com/c/pay/cs_test_123", "applied_directly": False}
+    with respx.mock(assert_all_called=True) as router:
+        route = router.post(f"{BASE}/billing/checkout").mock(
+            return_value=httpx.Response(200, json=body)
+        )
+        result = await billing.checkout("pro", "https://app.example.com/thanks")
+    sent = _json.loads(route.calls[0].request.content)
+    # Optional fields stay off the wire when not given.
+    assert sent == {"plan_id": "pro", "success_url": "https://app.example.com/thanks"}
+    assert result.url == "https://checkout.stripe.com/c/pay/cs_test_123"
+    assert result.applied_directly is False
+
+
+async def test_checkout_sends_optional_fields() -> None:
+    import json as _json
+
+    body = {"url": "https://checkout.stripe.com/c/pay/cs_test_456", "applied_directly": False}
+    with respx.mock(assert_all_called=True) as router:
+        route = router.post(f"{BASE}/billing/checkout").mock(
+            return_value=httpx.Response(200, json=body)
+        )
+        await billing.checkout(
+            "pro",
+            "https://app.example.com/thanks",
+            cancel_url="https://app.example.com/pricing",
+            tenant_id="00000000-0000-0000-0000-000000000001",
+        )
+    sent = _json.loads(route.calls[0].request.content)
+    assert sent == {
+        "plan_id": "pro",
+        "success_url": "https://app.example.com/thanks",
+        "cancel_url": "https://app.example.com/pricing",
+        "tenant_id": "00000000-0000-0000-0000-000000000001",
+    }
+
+
+async def test_checkout_stub_mode_applies_directly() -> None:
+    # Stub/dev runtime: plan applied immediately, no redirect URL.
+    body = {"url": "", "applied_directly": True}
+    with respx.mock(assert_all_called=True) as router:
+        router.post(f"{BASE}/billing/checkout").mock(return_value=httpx.Response(200, json=body))
+        result = await billing.checkout("pro", "https://app.example.com/thanks")
+    assert result.applied_directly is True
+    assert result.url == ""
+
+
+async def test_checkout_rejects_empty_inputs() -> None:
+    # Bad inputs raise before any HTTP call.
+    with pytest.raises(ValueError):
+        await billing.checkout("", "https://app.example.com/thanks")
+    with pytest.raises(ValueError):
+        await billing.checkout("pro", "")
+
+
+async def test_entitlements_omits_tenant_param_when_not_given() -> None:
+    body = {
+        "tenant_id": "00000000-0000-0000-0000-000000000001",
+        "plan": _plan_row(),
+        "entitlements": {"max_agents": 10, "priority_support": True},
+        "usage": {"sandbox_seconds": 1234.0, "llm_tokens": 4321.0},
+    }
+    with respx.mock(assert_all_called=True) as router:
+        route = router.get(f"{BASE}/billing/entitlements").mock(
+            return_value=httpx.Response(200, json=body)
+        )
+        result = await billing.entitlements()
+    assert "tenant" not in route.calls.last.request.url.params
+    assert result.tenant_id == "00000000-0000-0000-0000-000000000001"
+    assert result.plan.id == "pro"
+    assert result.entitlements == {"max_agents": 10, "priority_support": True}
+    assert result.usage == {"sandbox_seconds": 1234.0, "llm_tokens": 4321.0}
+
+
+async def test_entitlements_sends_tenant_param() -> None:
+    body = {
+        "tenant_id": "00000000-0000-0000-0000-000000000002",
+        "plan": _plan_row(id="free", name="Free", is_default=True),
+        "entitlements": {},
+        "usage": {},
+    }
+    with respx.mock(assert_all_called=True) as router:
+        route = router.get(f"{BASE}/billing/entitlements").mock(
+            return_value=httpx.Response(200, json=body)
+        )
+        result = await billing.entitlements(tenant="00000000-0000-0000-0000-000000000002")
+    params = route.calls.last.request.url.params
+    assert params["tenant"] == "00000000-0000-0000-0000-000000000002"
+    assert result.usage == {}
+    assert result.entitlements == {}
+
+
 async def test_suite_billing_namespace() -> None:
     assert suite.billing is billing
     assert suite.billing.customers is billing.customers
     assert suite.billing.portal_link is billing.portal_link
+    assert suite.billing.plans is billing.plans
+    assert suite.billing.checkout is billing.checkout
+    assert suite.billing.entitlements is billing.entitlements

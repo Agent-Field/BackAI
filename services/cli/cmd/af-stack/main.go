@@ -53,11 +53,13 @@ import (
 	"time"
 
 	"github.com/Agent-Field/backai/services/cli/internal/admincmd"
+	"github.com/Agent-Field/backai/services/cli/internal/billingcmd"
 	"github.com/Agent-Field/backai/services/cli/internal/client"
 	"github.com/Agent-Field/backai/services/cli/internal/initcmd"
 	"github.com/Agent-Field/backai/services/cli/internal/mcp"
 	"github.com/Agent-Field/backai/services/cli/internal/project"
 	"github.com/Agent-Field/backai/services/cli/internal/telemetry"
+	"github.com/Agent-Field/backai/services/cli/internal/upgradecmd"
 )
 
 // version is overridden at build time via -ldflags "-X main.version=..."
@@ -125,6 +127,8 @@ func run(args []string) error {
 		return nil
 	case "init":
 		return initcmd.Run(rest, os.Stdin, os.Stdout, os.Stderr)
+	case "upgrade":
+		return upgradecmd.Run(rest, os.Stdin, os.Stdout, os.Stderr)
 	case "dev":
 		ctx, cancel := signal.NotifyContext(
 			context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -154,6 +158,12 @@ func run(args []string) error {
 		defer cancel()
 		c := client.New()
 		return mcp.Run(ctx, c, rest, os.Stdout, os.Stderr)
+	case "billing":
+		ctx, cancel := signal.NotifyContext(
+			context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		c := client.New()
+		return billingcmd.Run(ctx, c, rest, os.Stdout, os.Stderr)
 	case "keys", "agents", "reasoners", "logs", "errors", "audit",
 		"sessions", "runs", "tenants", "activity":
 		// Operator REST surface. Requires AF_STACK_API_KEY set to an
@@ -199,6 +209,7 @@ Usage:
 
 Commands:
   init       Scaffold a new app (af-stack init <name>); flags-only re-themes this fork
+  upgrade    Pull the latest upstream AF Stack into this fork (--check for a dry run)
   dev        Start docker compose for local development
   agent      Agent scaffold commands
   module     Workload module scaffold commands
@@ -207,6 +218,7 @@ Commands:
   deploy     Deploy wrappers for helm/fly/railway/render
   operator   Operator bootstrap commands (create, key)
   mcp        Model Context Protocol server + tool management
+  billing    Set up Stripe billing: plans + pricing (agent-first)
   version    Print the CLI version
 
 Operator commands (need AF_STACK_API_KEY = operator key; mint one with
@@ -226,6 +238,8 @@ Examples:
   af-stack init my-app                              # scaffold a new project that consumes the stack
   af-stack init --template coding-agent             # in-checkout: rebrand + scaffold the hero coding agent
   af-stack init --name "DocuChat" --color "#0A66C2" # in-checkout: re-theme this fork
+  af-stack upgrade --check                          # what would an upgrade bring? (commits, migrations, conflicts)
+  af-stack upgrade                                  # backup DB, merge upstream, print rebuild steps
   af-stack dev --detach
   af-stack agent new researcher
   af-stack adapter list

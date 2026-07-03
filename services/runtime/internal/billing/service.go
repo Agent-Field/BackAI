@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -79,7 +80,10 @@ func (r *MeterRegistry) Register(name string, priceUSD MeterPrice) {
 
 // Service is the public billing API.
 type Service struct {
-	store  *Store
+	store *Store
+	// mu guards client, which the operator panel can hot-swap at
+	// runtime (SwapClient) when Stripe keys are saved from the UI.
+	mu     sync.RWMutex
 	client Client
 	meters *MeterRegistry
 	log    *slog.Logger
@@ -87,6 +91,28 @@ type Service struct {
 	// Used by HasBudget. Overridable via RegisterPlanBudget; defaults
 	// come from defaultPlanBudgets() below.
 	planBudgets map[string]float64
+	// onPlanApplied, when set (SetOnPlanApplied), runs after a plan is
+	// applied to a tenant — by a subscription webhook or a stub-mode
+	// checkout. The server wires this to push the plan's enforced LLM
+	// budget (cost.Budgets) so plan changes take effect immediately.
+	onPlanApplied func(ctx context.Context, tenantID string, plan Plan)
+}
+
+// SetOnPlanApplied registers the plan-application hook. Call before
+// serving traffic (not synchronized with firePlanApplied).
+func (s *Service) SetOnPlanApplied(fn func(ctx context.Context, tenantID string, plan Plan)) {
+	if s == nil {
+		return
+	}
+	s.onPlanApplied = fn
+}
+
+// firePlanApplied invokes the hook when registered.
+func (s *Service) firePlanApplied(ctx context.Context, tenantID string, plan Plan) {
+	if s == nil || s.onPlanApplied == nil {
+		return
+	}
+	s.onPlanApplied(ctx, tenantID, plan)
 }
 
 // NewService constructs a Service.
@@ -234,10 +260,11 @@ func (s *Service) HasBudget(ctx context.Context, tenantID string, additionalUSD 
 
 // AdapterName returns the configured external billing adapter.
 func (s *Service) AdapterName() string {
-	if s == nil || s.client == nil {
+	c := s.Client()
+	if c == nil {
 		return "none"
 	}
-	return s.client.AdapterName()
+	return c.AdapterName()
 }
 
 // PortalLink mints a billing-provider customer portal URL for tenantID.
@@ -249,7 +276,8 @@ func (s *Service) AdapterName() string {
 // In stub mode, the URL is deterministic and points at example.com so
 // the dashboard can still render the button.
 func (s *Service) PortalLink(ctx context.Context, tenantID, returnURL string) (PortalLink, error) {
-	if s == nil || s.client == nil {
+	client := s.Client()
+	if client == nil {
 		return PortalLink{}, fmt.Errorf("%w: billing adapter not configured", ErrBillingUnavailable)
 	}
 	tenantID = strings.TrimSpace(tenantID)
@@ -272,7 +300,7 @@ func (s *Service) PortalLink(ctx context.Context, tenantID, returnURL string) (P
 	}
 
 	if externalCustomerID == "" {
-		newID, err := s.client.CreateCustomer(ctx, tenantID, email)
+		newID, err := client.CreateCustomer(ctx, tenantID, email)
 		if err != nil {
 			return PortalLink{}, err
 		}
@@ -295,7 +323,7 @@ func (s *Service) PortalLink(ctx context.Context, tenantID, returnURL string) (P
 		}
 	}
 
-	return s.client.CreatePortalLink(ctx, externalCustomerID, returnURL)
+	return client.CreatePortalLink(ctx, externalCustomerID, returnURL)
 }
 
 // Client returns the underlying billing adapter. Exposed so the webhook
@@ -304,7 +332,22 @@ func (s *Service) Client() Client {
 	if s == nil {
 		return nil
 	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.client
+}
+
+// SwapClient atomically replaces the billing adapter. The operator
+// panel calls this (via the admin billing-settings endpoint) after
+// writing new Stripe keys to the secrets vault, so key changes take
+// effect without a restart.
+func (s *Service) SwapClient(c Client) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.client = c
+	s.mu.Unlock()
 }
 
 // Store returns the underlying Store. Exposed so the webhook handler
@@ -314,4 +357,201 @@ func (s *Service) Store() *Store {
 		return nil
 	}
 	return s.store
+}
+
+// ─── Plans catalog + checkout ─────────────────────────────────────────────
+
+// Plans returns the operator-editable pricing catalog.
+func (s *Service) Plans(ctx context.Context) ([]Plan, error) {
+	if s == nil || s.store == nil {
+		return []Plan{}, nil
+	}
+	return s.store.ListPlans(ctx)
+}
+
+// PlanFor resolves the plan a tenant is on: customers.plan -> catalog,
+// falling back to the default plan for unknown/absent rows.
+func (s *Service) PlanFor(ctx context.Context, tenantID string) (Plan, error) {
+	if s == nil || s.store == nil {
+		return Plan{}, ErrPlanNotFound
+	}
+	planID := ""
+	if cust, err := s.store.GetCustomer(ctx, tenantID); err == nil {
+		planID = cust.Plan
+	}
+	return s.store.GetPlan(ctx, planID)
+}
+
+// GetPlan resolves a plan id (default fallback semantics — see Store.GetPlan).
+func (s *Service) GetPlan(ctx context.Context, id string) (Plan, error) {
+	if s == nil || s.store == nil {
+		return Plan{}, ErrPlanNotFound
+	}
+	return s.store.GetPlan(ctx, id)
+}
+
+// PlanByStripePrice maps a Stripe Price id to a catalog plan.
+func (s *Service) PlanByStripePrice(ctx context.Context, priceID string) (Plan, error) {
+	if s == nil || s.store == nil {
+		return Plan{}, ErrPlanNotFound
+	}
+	return s.store.PlanByStripePrice(ctx, priceID)
+}
+
+// UpsertPlan writes a catalog row and keeps the in-process plan-budget
+// registry (HasBudget) in sync with it.
+func (s *Service) UpsertPlan(ctx context.Context, p Plan) (Plan, error) {
+	if s == nil || s.store == nil {
+		return Plan{}, fmt.Errorf("%w: no database", ErrBillingUnavailable)
+	}
+	// Agent-first: when Stripe is live and this is a paid plan with no
+	// Price yet, provision the Stripe Product + Price automatically so
+	// nobody has to touch the Stripe dashboard. Stub mode skips this —
+	// its checkout applies plans directly.
+	if p.PriceUSDMonth > 0 && (p.StripePriceID == nil || strings.TrimSpace(*p.StripePriceID) == "") {
+		client := s.Client()
+		if client != nil && !client.IsStub() {
+			name := strings.TrimSpace(p.Name)
+			if name == "" {
+				name = p.ID
+			}
+			cents := int64(p.PriceUSDMonth*100 + 0.5)
+			priceID, perr := client.EnsurePrice(ctx, p.ID, name, cents, "usd")
+			if perr != nil {
+				return Plan{}, fmt.Errorf("provision stripe price for plan %q: %w", p.ID, perr)
+			}
+			p.StripePriceID = &priceID
+		}
+	}
+	out, err := s.store.UpsertPlan(ctx, p)
+	if err != nil {
+		return Plan{}, err
+	}
+	if out.LLMBudgetUSD != nil {
+		s.RegisterPlanBudget(out.ID, *out.LLMBudgetUSD)
+	}
+	return out, nil
+}
+
+// DeletePlan removes a catalog row (the default plan is protected).
+func (s *Service) DeletePlan(ctx context.Context, id string) error {
+	if s == nil || s.store == nil {
+		return fmt.Errorf("%w: no database", ErrBillingUnavailable)
+	}
+	return s.store.DeletePlan(ctx, id)
+}
+
+// SyncPlanBudgets loads the catalog and registers each plan's LLM budget
+// with the in-process HasBudget registry. Called at boot and after
+// catalog edits so meter-based caps track the operator's catalog.
+func (s *Service) SyncPlanBudgets(ctx context.Context) {
+	if s == nil || s.store == nil {
+		return
+	}
+	plans, err := s.store.ListPlans(ctx)
+	if err != nil {
+		s.log.Warn("billing: plan budget sync failed", "error", err)
+		return
+	}
+	for _, p := range plans {
+		if p.LLMBudgetUSD != nil {
+			s.RegisterPlanBudget(p.ID, *p.LLMBudgetUSD)
+		}
+	}
+}
+
+// ensureExternalCustomer returns the tenant's provider customer id,
+// provisioning one (and caching it on the Customer row) when absent.
+func (s *Service) ensureExternalCustomer(ctx context.Context, client Client, tenantID string) (string, error) {
+	var externalID, email string
+	if s.store != nil && s.store.HasPool() {
+		if cust, err := s.store.GetCustomer(ctx, tenantID); err == nil {
+			if cust.StripeCustomerID != nil {
+				externalID = *cust.StripeCustomerID
+			}
+			if cust.Email != nil {
+				email = *cust.Email
+			}
+		}
+	}
+	if externalID != "" {
+		return externalID, nil
+	}
+	newID, err := client.CreateCustomer(ctx, tenantID, email)
+	if err != nil {
+		return "", err
+	}
+	if s.store != nil && s.store.HasPool() {
+		c := Customer{TenantID: tenantID, StripeCustomerID: &newID, Plan: "free"}
+		if email != "" {
+			c.Email = &email
+		}
+		if _, err := s.store.UpsertCustomer(ctx, c); err != nil {
+			s.log.Warn("billing: upsert after external customer provision failed",
+				"tenant", tenantID, "error", err)
+		}
+	}
+	return newID, nil
+}
+
+// CheckoutResult is what Checkout returns to the REST layer.
+type CheckoutResult struct {
+	// URL is the hosted checkout page (empty when AppliedDirectly).
+	URL string `json:"url"`
+	// AppliedDirectly is true in stub mode: there is no provider to
+	// check out against, so the plan was applied immediately ("dev
+	// checkout") and the caller should treat the purchase as complete.
+	AppliedDirectly bool `json:"applied_directly"`
+}
+
+// Checkout starts a subscription purchase of plan for tenantID.
+//
+// Real adapter: mints a hosted checkout session (tenant_id rides on the
+// subscription metadata; the webhook handler applies the plan when the
+// subscription event lands) and returns its URL.
+//
+// Stub adapter (no keys configured): applies the plan to the Customer
+// row immediately and reports AppliedDirectly — the caller is expected
+// to run its plan-application hook (budgets etc.) and finish the flow.
+func (s *Service) Checkout(ctx context.Context, tenantID, planID, successURL, cancelURL string) (CheckoutResult, error) {
+	client := s.Client()
+	if client == nil {
+		return CheckoutResult{}, fmt.Errorf("%w: billing adapter not configured", ErrBillingUnavailable)
+	}
+	tenantID = strings.TrimSpace(tenantID)
+	if tenantID == "" {
+		return CheckoutResult{}, fmt.Errorf("%w: tenant_id is required", ErrInvalidInput)
+	}
+	plan, err := s.GetPlan(ctx, planID)
+	if err != nil {
+		return CheckoutResult{}, err
+	}
+
+	if client.IsStub() {
+		if s.store != nil && s.store.HasPool() {
+			cust := Customer{TenantID: tenantID, Plan: plan.ID}
+			if existing, gerr := s.store.GetCustomer(ctx, tenantID); gerr == nil {
+				existing.Plan = plan.ID
+				cust = existing
+			}
+			if _, uerr := s.store.UpsertCustomer(ctx, cust); uerr != nil {
+				return CheckoutResult{}, uerr
+			}
+		}
+		s.firePlanApplied(ctx, tenantID, plan)
+		return CheckoutResult{AppliedDirectly: true}, nil
+	}
+
+	if plan.StripePriceID == nil || strings.TrimSpace(*plan.StripePriceID) == "" {
+		return CheckoutResult{}, fmt.Errorf("%w: plan %q has no stripe_price_id", ErrInvalidInput, plan.ID)
+	}
+	customerID, err := s.ensureExternalCustomer(ctx, client, tenantID)
+	if err != nil {
+		return CheckoutResult{}, err
+	}
+	url, err := client.CreateCheckoutSession(ctx, customerID, *plan.StripePriceID, successURL, cancelURL, tenantID)
+	if err != nil {
+		return CheckoutResult{}, err
+	}
+	return CheckoutResult{URL: url}, nil
 }

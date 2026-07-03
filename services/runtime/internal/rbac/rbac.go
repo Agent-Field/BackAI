@@ -26,6 +26,7 @@ const (
 	ResourceAdminMemberships = "admin:memberships"
 	ResourceAdminKeys        = "admin:keys"
 	ResourceAdminBudgets     = "admin:budgets"
+	ResourceAdminBilling     = "admin:billing"
 	ResourceAdminAudit       = "admin:audit"
 	ResourceAdminPrivacy     = "admin:privacy"
 	// ResourceAdminDB guards the DB-studio surface (/api/v1/db/*), which can
@@ -104,6 +105,7 @@ func NewDefault() *Enforcer {
 	add(RoleAdmin, ResourceAdminMemberships, "write")
 	add(RoleAdmin, ResourceAdminKeys, "write")
 	add(RoleAdmin, ResourceAdminBudgets, "write")
+	add(RoleAdmin, ResourceAdminBilling, "write")
 	add(RoleAdmin, ResourceAdminPrivacy, "read")
 
 	for _, role := range []string{RoleOwner, RoleAdmin} {

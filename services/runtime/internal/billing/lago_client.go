@@ -124,6 +124,16 @@ func (c *realLagoClient) GetCustomer(ctx context.Context, id string) (Customer, 
 	return cust, nil
 }
 
+func (c *realLagoClient) EnsurePrice(_ context.Context, _, _ string, _ int64, _ string) (string, error) {
+	return "", fmt.Errorf("%w: lago does not provision stripe prices", ErrBillingUnavailable)
+}
+
+func (c *realLagoClient) CreateCheckoutSession(_ context.Context, _, _, _, _, _ string) (string, error) {
+	// Lago has no hosted checkout equivalent; operators drive plan
+	// changes via the portal / API.
+	return "", fmt.Errorf("%w: lago does not support hosted checkout", ErrBillingUnavailable)
+}
+
 func (c *realLagoClient) CreatePortalLink(ctx context.Context, customerID, _ string) (PortalLink, error) {
 	customerID = strings.TrimSpace(customerID)
 	if customerID == "" {
@@ -247,6 +257,14 @@ func (c *stubLagoClient) GetCustomer(_ context.Context, id string) (Customer, er
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}, nil
+}
+
+func (c *stubLagoClient) EnsurePrice(_ context.Context, _, _ string, _ int64, _ string) (string, error) {
+	return "", fmt.Errorf("%w: lago does not provision stripe prices", ErrBillingUnavailable)
+}
+
+func (c *stubLagoClient) CreateCheckoutSession(_ context.Context, _, _, _, _, _ string) (string, error) {
+	return "", fmt.Errorf("%w: lago does not support hosted checkout", ErrBillingUnavailable)
 }
 
 func (c *stubLagoClient) CreatePortalLink(_ context.Context, customerID, returnURL string) (PortalLink, error) {

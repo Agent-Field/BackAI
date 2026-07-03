@@ -57,7 +57,59 @@ export const PortalLinkSchema = z.object({
 })
 export type PortalLink = z.infer<typeof PortalLinkSchema>
 
+export const BillingPlanSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  stripePriceId: z.string().nullable(),
+  priceUsdMonth: z.number(),
+  llmBudgetUsd: z.number().nullable(),
+  entitlements: z.record(z.string(), z.unknown()),
+  isDefault: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+})
+export type BillingPlan = z.infer<typeof BillingPlanSchema>
+
+export const BillingPlanListSchema = z.object({
+  plans: z.array(BillingPlanSchema),
+})
+export type BillingPlanList = z.infer<typeof BillingPlanListSchema>
+
+export const CheckoutResultSchema = z.object({
+  /** Hosted checkout page URL (empty when `appliedDirectly`). */
+  url: z.string(),
+  appliedDirectly: z.boolean(),
+})
+export type CheckoutResult = z.infer<typeof CheckoutResultSchema>
+
+export const TenantEntitlementsSchema = z.object({
+  tenantId: z.string(),
+  plan: BillingPlanSchema,
+  entitlements: z.record(z.string(), z.unknown()),
+  /** Current-period usage: meter name → summed quantity. */
+  usage: z.record(z.string(), z.number()),
+})
+export type TenantEntitlements = z.infer<typeof TenantEntitlementsSchema>
+
 export type Bucket = "month" | "day"
+
+// `entitlements` and `usage` carry caller-defined keys (e.g. `max_agents`,
+// `sandbox_seconds`) that must survive verbatim — a blanket `toCamel` over
+// the body would mangle them, so plans are camelized field-by-field.
+function camelizePlan(raw: unknown): Record<string, unknown> {
+  const src = (raw ?? {}) as Record<string, unknown>
+  return {
+    id: src.id,
+    name: src.name,
+    stripePriceId: src.stripe_price_id ?? null,
+    priceUsdMonth: src.price_usd_month,
+    llmBudgetUsd: src.llm_budget_usd ?? null,
+    entitlements: src.entitlements ?? {},
+    isDefault: src.is_default ?? false,
+    createdAt: src.created_at,
+    updatedAt: src.updated_at,
+  }
+}
 
 // ---------- public API ----------
 
@@ -113,6 +165,44 @@ export async function meters(
   return UsageMeterListSchema.parse(toCamel(raw))
 }
 
+/** List the plans catalog (default plan first, then by price). */
+export async function plans(opts: HttpOptions = {}): Promise<BillingPlanList> {
+  const raw = await request<unknown>("GET", "/billing/plans", null, opts)
+  const src = (raw ?? {}) as { plans?: unknown[] }
+  return BillingPlanListSchema.parse({
+    plans: (src.plans ?? []).map(camelizePlan),
+  })
+}
+
+export interface EntitlementsOptions extends HttpOptions {
+  /** Optional when the credential is tenant-scoped — the runtime
+   * resolves the tenant from the request context. */
+  tenant?: string
+}
+
+/** Fetch a tenant's plan, entitlements, and current-period usage. */
+export async function entitlements(
+  opts: EntitlementsOptions = {},
+): Promise<TenantEntitlements> {
+  const { tenant, ...http } = opts
+  const qs = new URLSearchParams()
+  if (tenant !== undefined && tenant !== "") qs.set("tenant", tenant)
+  const q = qs.toString()
+  const raw = await request<unknown>(
+    "GET",
+    q ? `/billing/entitlements?${q}` : "/billing/entitlements",
+    null,
+    http,
+  )
+  const src = (raw ?? {}) as Record<string, unknown>
+  return TenantEntitlementsSchema.parse({
+    tenantId: src.tenant_id,
+    plan: camelizePlan(src.plan),
+    entitlements: src.entitlements ?? {},
+    usage: src.usage ?? {},
+  })
+}
+
 export interface PortalLinkOptions extends HttpOptions {
   /** URL the customer is sent back to after closing the portal. */
   returnUrl?: string
@@ -140,6 +230,44 @@ export async function portalLink(
     http,
   )
   return PortalLinkSchema.parse(toCamel(raw))
+}
+
+export interface CheckoutOptions extends HttpOptions {
+  /** URL the customer is sent back to when abandoning checkout. */
+  cancelUrl?: string
+  /** Attribute the purchase to a specific tenant (multi-tenant app
+   * backends); when omitted the runtime uses the tenant resolved from
+   * the credential. */
+  tenantId?: string
+}
+
+/** Start a hosted checkout for `planId`.
+ *
+ * Real mode returns the hosted checkout page URL to redirect the
+ * customer to. In stub/dev mode (no payment keys on the runtime) the
+ * plan is applied immediately and `appliedDirectly` is true — no
+ * redirect needed.
+ */
+export async function checkout(
+  planId: string,
+  successUrl: string,
+  opts: CheckoutOptions = {},
+): Promise<CheckoutResult> {
+  if (typeof planId !== "string" || planId.length === 0) {
+    throw new Error("planId must be a non-empty string")
+  }
+  if (typeof successUrl !== "string" || successUrl.length === 0) {
+    throw new Error("successUrl must be a non-empty string")
+  }
+  const { cancelUrl, tenantId, ...http } = opts
+  const body: Record<string, unknown> = {
+    plan_id: planId,
+    success_url: successUrl,
+  }
+  if (cancelUrl !== undefined && cancelUrl !== "") body.cancel_url = cancelUrl
+  if (tenantId !== undefined && tenantId !== "") body.tenant_id = tenantId
+  const raw = await request<unknown>("POST", "/billing/checkout", body, http)
+  return CheckoutResultSchema.parse(toCamel(raw))
 }
 
 // ---------- in-process verbs (parity with the Python SDK) ----------
@@ -217,4 +345,7 @@ export const billing = {
   portalLink,
   meter,
   hasBudget,
+  plans,
+  checkout,
+  entitlements,
 } as const

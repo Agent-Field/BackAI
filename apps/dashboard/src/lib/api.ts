@@ -1001,6 +1001,72 @@ export const PortalLinkSchema = z.object({
 })
 export type PortalLink = z.infer<typeof PortalLinkSchema>
 
+// ─── Turnkey billing (plans catalog + operator Stripe settings) ──────────
+//
+// Operator-panel surface for Clerk-Billing-style setup: paste Stripe keys
+// (stored KMS-encrypted, hot-swapped into the live client — no restart)
+// and manage the plans catalog that checkout + entitlements run on.
+
+export const BillingSettingsStatusSchema = z.object({
+  // Active billing adapter ("stripe", "none", …).
+  adapter: z.string(),
+  // "real" when a live Stripe client is configured; "stub" means checkout
+  // applies plans directly in dev mode without charging anything.
+  mode: z.enum(["real", "stub"]),
+  // Where the effective secret key came from. "vault" = DB+KMS settings
+  // store, "env" = process env fallback, "none" = no key anywhere.
+  source: z.enum(["vault", "env", "none"]),
+  secret_key_set: z.boolean(),
+  // Last 4 chars of the secret key for a masked "•••• abcd" display.
+  secret_key_last4: z.string(),
+  webhook_secret_set: z.boolean(),
+  // Path the runtime listens on for Stripe webhooks (compose with the
+  // runtime's public URL for the copyable endpoint hint).
+  webhook_path: z.string(),
+  // false when the DB+KMS settings store is unavailable — keys can then
+  // only be supplied via env vars.
+  settings_writable: z.boolean(),
+})
+export type BillingSettingsStatus = z.infer<typeof BillingSettingsStatusSchema>
+
+// Field absent = leave unchanged; empty string = clear the stored value.
+export interface UpdateBillingSettingsInput {
+  stripe_secret_key?: string
+  stripe_webhook_secret?: string
+}
+
+export const BillingPlanSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  // Stripe Price id this plan is bound to; null in stub/dev mode.
+  stripe_price_id: z.string().nullable(),
+  price_usd_month: z.number(),
+  // Enforced monthly LLM budget applied to the tenant when the plan
+  // lands. null = unlimited.
+  llm_budget_usd: z.number().nullable(),
+  // Freeform entitlements object surfaced via /billing/entitlements.
+  entitlements: z.record(z.string(), z.unknown()),
+  is_default: z.boolean(),
+  created_at: z.string(),
+  updated_at: z.string(),
+})
+export type BillingPlan = z.infer<typeof BillingPlanSchema>
+
+export const BillingPlanListSchema = z.object({
+  plans: z.array(BillingPlanSchema),
+})
+export type BillingPlanList = z.infer<typeof BillingPlanListSchema>
+
+export interface UpsertBillingPlanInput {
+  id: string
+  name: string
+  stripe_price_id?: string | null
+  price_usd_month?: number
+  llm_budget_usd?: number | null
+  entitlements?: Record<string, unknown>
+  is_default?: boolean
+}
+
 // ─── Built-in tool adapters (Phase 2 AI completeness) ─────────────────────
 //
 // These are AF Stack's built-in adapters: browser-use, SearXNG, fs, exec,
@@ -2790,6 +2856,10 @@ export const api = {
         { method: "POST" },
         PortalLinkSchema,
       ),
+    // Public plans catalog (pricing pages read it pre-auth; the operator
+    // panel reuses it as the source of truth for the Plans card).
+    plans: () =>
+      request("/api/v1/billing/plans", undefined, BillingPlanListSchema),
   },
 
   // ─── Built-in tool adapters (Phase 2 AI completeness) ───
@@ -3146,6 +3216,37 @@ export const api = {
     adapters: {
       list: () =>
         request("/api/v1/admin/adapters", undefined, AdapterRegistrySchema),
+    },
+    // Turnkey billing operator surface: Stripe key material (vault-backed,
+    // hot-swapped — saving takes effect without a restart) + the plans
+    // catalog upsert/delete. Reads of the catalog go through
+    // api.billing.plans().
+    billing: {
+      settings: () =>
+        request(
+          "/api/v1/admin/billing/settings",
+          undefined,
+          BillingSettingsStatusSchema,
+        ),
+      // Field absent = unchanged, empty string = clear.
+      updateSettings: (input: UpdateBillingSettingsInput) =>
+        request(
+          "/api/v1/admin/billing/settings",
+          { method: "PUT", json: input },
+          BillingSettingsStatusSchema,
+        ),
+      upsertPlan: (input: UpsertBillingPlanInput) =>
+        request(
+          "/api/v1/admin/billing/plans",
+          { method: "PUT", json: input },
+          BillingPlanSchema,
+        ),
+      deletePlan: (id: string) =>
+        request(
+          `/api/v1/admin/billing/plans/${encodeURIComponent(id)}`,
+          { method: "DELETE" },
+          z.object({ deleted: z.string() }),
+        ),
     },
     services: {
       list: () =>
