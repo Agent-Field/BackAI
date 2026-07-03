@@ -914,6 +914,7 @@ func main() {
 	// database or cipher setup is missing, /api/v1/secrets/* returns
 	// 503 with a SECRETS_NOT_CONFIGURED envelope.
 	var vault *secrets.Vault
+	var billingSettingsStore *billing.SettingsStore
 	if database != nil && database.Pool != nil {
 		cipher, kekErr := secrets.LoadCipher(ctx, log)
 		// KMS preflight: a cipher that parses but can't round-trip is as
@@ -941,6 +942,10 @@ func main() {
 				log.Error("secrets: vault init failed", "error", err)
 				vault = nil
 			} else {
+				// Operator-panel billing settings share the vault's
+				// KMS-backed cipher (separate table: global rows, no
+				// tenant FK).
+				billingSettingsStore = billing.NewSettingsStore(database.Pool, cipher)
 				log.Info("secrets vault ready",
 					"key_id", cipher.KeyID(),
 					"dev_mode", cipher.DevMode(),
@@ -1498,6 +1503,20 @@ func main() {
 		}
 		billingClient := billing.NewClientFromEnv(log)
 		billingSvc = billing.NewService(billingStore, billingClient, billing.NewMeterRegistry(), log)
+		// Operator-panel keys (vault) beat env vars when present, so
+		// menu-driven setup survives restarts.
+		if billingSettingsStore != nil {
+			sk, ws, fromVault, serr := billingSettingsStore.StripeKeys(ctx,
+				os.Getenv(billing.EnvSecretKey), os.Getenv(billing.EnvWebhookSecret))
+			if serr != nil {
+				log.Warn("billing: reading operator settings failed; using env keys", "error", serr)
+			} else if fromVault {
+				billingSvc.SwapClient(billing.NewStripeClientFromConfig(sk, ws, log))
+				log.Info("billing: stripe keys loaded from operator settings")
+			}
+		}
+		// Plan catalog -> in-process plan budget registry (HasBudget).
+		billingSvc.SyncPlanBudgets(ctx)
 	}
 
 	// Skills (Phase 11.3). The Store + Installer are independent: the
@@ -1651,6 +1670,7 @@ func main() {
 		Notifications:   notificationsSvc,
 		Webhooks:        webhooksSvc,
 		Billing:         billingSvc,
+		BillingSettings: billingSettingsStore,
 		Skills:          skillsStore,
 		SkillsInstaller: skillsInstaller,
 		Harnesses:       harnessesSvc,

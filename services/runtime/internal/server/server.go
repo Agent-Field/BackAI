@@ -136,6 +136,8 @@ type Server struct {
 	// 503 SANDBOX_NOT_CONFIGURED (mutating) or tolerant empty
 	// responses (reads).
 	sandbox *sandbox.Service
+	// billingSettings stores operator-panel Stripe keys (KMS-encrypted).
+	billingSettings *billing.SettingsStore
 	// billing powers /api/v1/billing/* + the /webhooks/in/stripe
 	// Stripe-webhook receiver. nil = the read endpoints serve empty
 	// pages and synthesised "free plan" rows; the mutating portal-link
@@ -307,6 +309,9 @@ type Deps struct {
 	// /api/v1/sandbox/* endpoints either 503 (mutating) or return
 	// tolerant empty responses (reads).
 	Sandbox *sandbox.Service
+	// BillingSettings stores operator-panel Stripe keys. nil = the
+	// admin billing-settings endpoints report settings_writable=false.
+	BillingSettings *billing.SettingsStore
 	// Billing is the Phase 10.4 Stripe billing service. nil = the
 	// /api/v1/billing/* read endpoints return empty / synthesised
 	// rows; portal-link mutations return 503 BILLING_NOT_CONFIGURED.
@@ -446,6 +451,7 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		rbac:            deps.RBAC,
 		sandbox:         deps.Sandbox,
 		billing:         deps.Billing,
+		billingSettings: deps.BillingSettings,
 		notifications:   deps.Notifications,
 		webhooks:        deps.Webhooks,
 		skills:          deps.Skills,
@@ -471,6 +477,12 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		metricsStore:    deps.MetricsStore,
 		errorsStore:     deps.ErrorsStore,
 		version:         deps.Version,
+	}
+	if s.billing != nil {
+		// Close the billing loop: plan applied (webhook or stub
+		// checkout) -> the plan's LLM budget becomes the tenant's
+		// enforced monthly cap.
+		s.billing.SetOnPlanApplied(s.applyPlanHook)
 	}
 	if s.rbac == nil {
 		s.rbac = rbac.NewDefault()
@@ -803,6 +815,7 @@ func (s *Server) registerRoutes() {
 	// receiver at /webhooks/in/stripe — see billing.go file-level
 	// comment for the Phase 10.2 coordination note.
 	s.registerBillingRoutes()
+	s.registerBillingPlanRoutes()
 	s.registerBillingOpenAPI()
 
 	// Auth identity introspection: GET /api/v1/auth/whoami returns the
