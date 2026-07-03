@@ -135,6 +135,22 @@ func NewStripeClientFromConfig(secretKey, webhookSecret string, log *slog.Logger
 	return &stubStripeClient{log: log}
 }
 
+// StripeKeyMode reports the mode a Stripe secret/restricted key operates in
+// — "test", "live", or "" when the key is empty or unrecognized. Derived
+// from the key prefix (no API call), so the operator panel and CLI can
+// surface the active mode and make live↔test mix-ups visible up front.
+func StripeKeyMode(key string) string {
+	key = strings.TrimSpace(key)
+	switch {
+	case strings.HasPrefix(key, "sk_live_"), strings.HasPrefix(key, "rk_live_"):
+		return "live"
+	case strings.HasPrefix(key, "sk_test_"), strings.HasPrefix(key, "rk_test_"):
+		return "test"
+	default:
+		return ""
+	}
+}
+
 // ─── Real client ──────────────────────────────────────────────────────────
 
 type realStripeClient struct {
@@ -230,9 +246,27 @@ func (c *realStripeClient) CreateCheckoutSession(_ context.Context, customerID, 
 	}
 	sess, err := stripecheckout.New(params)
 	if err != nil {
+		if isStripeResourceMissing(err) {
+			// The Price exists in a different account/mode than the active
+			// key — the classic symptom of a live↔test key swap. Surface a
+			// typed error instead of the raw Stripe blob; the REST layer
+			// appends the "re-provision it" guidance.
+			return "", fmt.Errorf("%w: price %q", ErrPriceStale, priceID)
+		}
 		return "", fmt.Errorf("%w: create checkout session: %v", ErrStripeUnavailable, err)
 	}
 	return sess.URL, nil
+}
+
+// isStripeResourceMissing reports whether err is a Stripe "resource_missing"
+// error — e.g. a checkout that references a Price which doesn't exist under
+// the active key (a Price provisioned by a since-swapped key).
+func isStripeResourceMissing(err error) bool {
+	var se *stripe.Error
+	if errors.As(err, &se) {
+		return se.Code == stripe.ErrorCodeResourceMissing
+	}
+	return false
 }
 
 func (c *realStripeClient) EnsurePrice(_ context.Context, planID, name string, amountCents int64, currency string) (string, error) {

@@ -52,6 +52,13 @@ var (
 	// ErrSignatureInvalid is returned by the webhook verifier when the
 	// Stripe-Signature header doesn't match the body.
 	ErrSignatureInvalid = errors.New("billing: invalid webhook signature")
+
+	// ErrPriceStale is returned when a checkout references a Stripe Price
+	// that doesn't exist under the currently-active key — typically after
+	// an operator swaps keys (e.g. live→test), which orphans every Price
+	// provisioned by the old key. The REST layer maps this to a 409 with
+	// guidance to re-provision the plan.
+	ErrPriceStale = errors.New("billing: plan price not found for the active Stripe key")
 )
 
 // Customer mirrors BillingCustomerSchema in apps/dashboard/src/lib/api.ts.
