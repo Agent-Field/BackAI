@@ -205,10 +205,16 @@ export function StripeConnectionCard({
         </code>
         <CopyButton value={webhookEndpoint} label="Copy webhook endpoint" />
         <span className="basis-full text-meta text-muted-foreground">
-          Point a Stripe webhook at this URL (events:{" "}
+          This is your <strong>runtime&apos;s</strong> URL — Stripe posts events
+          here, not to this dashboard. Point a Stripe webhook at it (events:{" "}
           <code className="font-mono">checkout.session.completed</code>,{" "}
           <code className="font-mono">customer.subscription.*</code>) and paste
-          its signing secret above.
+          its signing secret above. For local dev Stripe can&apos;t reach{" "}
+          <code className="font-mono">localhost</code> — forward with{" "}
+          <code className="font-mono">
+            stripe listen --forward-to {webhookEndpoint}
+          </code>
+          .
         </span>
       </div>
     </ZoneCard>
