@@ -229,6 +229,24 @@ func mustParseCIDRs(in []string) []*net.IPNet {
 	return out
 }
 
+// LoopbackAndPrivateCIDRs returns the loopback + RFC-1918 + CGNAT ranges
+// as an allowlist. Intended for dev / PoC deployments that legitimately
+// deliver to a service on the same host or private network (e.g. a
+// webhook subscriber running on localhost). Production callers should NOT
+// pass this — it re-permits the exact ranges the SSRF guard exists to
+// block. Link-local (169.254/16, fe80::/10) is deliberately excluded so
+// cloud-metadata endpoints stay blocked even in dev.
+func LoopbackAndPrivateCIDRs() []*net.IPNet {
+	return mustParseCIDRs([]string{
+		"127.0.0.0/8",
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"::1/128",
+		"fc00::/7",
+	})
+}
+
 // IsBlocked reports whether err is one of the safehttp sentinel errors.
 // Callers translating a transport error to a user-facing message can
 // use this to distinguish "we refused to dial" from "the remote went

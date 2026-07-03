@@ -19,19 +19,87 @@ package webhooks
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 )
 
 // Service is the dashboard-facing facade. It composes the per-surface
 // services so the HTTP layer routes every webhook verb through one
 // dependency.
 type Service struct {
-	store     *DeliveryStore   // inbound rows
-	outbound  *OutboundService // Svix proxy
-	endpoints *EndpointStore
-	inbound   *InboundService
-	log       *slog.Logger
+	store         *DeliveryStore // inbound rows
+	outbound      Outbound       // native (default) or Svix proxy (opt-in)
+	endpoints     *EndpointStore
+	inbound       *InboundService
+	subscriptions *SubscriptionStore // tenant-owned outbound subscribers
+	log           *slog.Logger
+}
+
+// WithSubscriptions attaches the tenant subscription store. Kept as a
+// setter (rather than a NewService param) so existing callers/tests that
+// don't use the subscribe+emit surface compile unchanged.
+func (s *Service) WithSubscriptions(store *SubscriptionStore) *Service {
+	if s == nil {
+		return nil
+	}
+	s.subscriptions = store
+	return s
+}
+
+// Subscriptions exposes the subscription store (nil when not wired).
+func (s *Service) Subscriptions() *SubscriptionStore {
+	if s == nil {
+		return nil
+	}
+	return s.subscriptions
+}
+
+// Emit fans out an event to the caller tenant's active subscriptions as
+// native, per-subscription-signed deliveries. Returns the number enqueued
+// and their delivery ids. Zero subscribers is not an error (returns 0).
+// The caller must pass the resolved tenant id (used to stamp deliveries);
+// the subscription lookup itself is RLS-scoped by ctx.
+func (s *Service) Emit(ctx context.Context, tenantID, eventType string, body []byte) (int, []string, error) {
+	if s == nil || s.subscriptions == nil || !s.subscriptions.HasPool() {
+		return 0, nil, ErrNotConfigured
+	}
+	if s.outbound == nil || !s.outbound.Configured() {
+		return 0, nil, ErrNotConfigured
+	}
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" {
+		return 0, nil, fmt.Errorf("%w: event_type is required", ErrInvalidInput)
+	}
+	if len(body) == 0 {
+		body = []byte("null")
+	}
+	subs, err := s.subscriptions.ActiveForEvent(ctx, eventType)
+	if err != nil {
+		return 0, nil, err
+	}
+	ids := make([]string, 0, len(subs))
+	for _, sub := range subs {
+		headers := map[string]string{
+			HeaderSignature: "sha256=" + SignBody(sub.Secret, body),
+		}
+		d, err := s.outbound.Enqueue(ctx, SendInput{
+			URL:       sub.URL,
+			EventType: eventType,
+			Body:      body,
+			Headers:   headers,
+			TenantID:  tenantID,
+		})
+		if err != nil {
+			// One bad subscriber shouldn't sink the whole emit; log + skip.
+			s.log.Warn("webhooks: emit enqueue failed for subscriber",
+				"subscription_id", sub.ID, "error", err)
+			continue
+		}
+		ids = append(ids, d.ID)
+	}
+	return len(ids), ids, nil
 }
 
 // NewService composes the facade. Every argument may be nil — a nil
@@ -41,7 +109,7 @@ type Service struct {
 // inbound deliveries list empty.
 func NewService(
 	store *DeliveryStore,
-	outbound *OutboundService,
+	outbound Outbound,
 	endpoints *EndpointStore,
 	inbound *InboundService,
 	log *slog.Logger,
@@ -65,9 +133,9 @@ func (s *Service) Configured() bool {
 	return s != nil && s.outbound != nil && s.outbound.Configured()
 }
 
-// Outbound exposes the OutboundService. Useful for tests; the HTTP
-// layer goes through Service.Enqueue / Service.Retry / Service.List.
-func (s *Service) Outbound() *OutboundService {
+// Outbound exposes the outbound delivery backend. Useful for tests; the
+// HTTP layer goes through Service.Enqueue / Service.Retry / Service.List.
+func (s *Service) Outbound() Outbound {
 	if s == nil {
 		return nil
 	}

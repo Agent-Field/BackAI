@@ -139,6 +139,17 @@ var publicPrefixes = []string{
 }
 
 func isPublicPath(p string) bool {
+	// Tenant-scoped webhook routes must go THROUGH the resolver even though
+	// the rest of /api/v1/webhooks is operator-gated + public-prefixed. A
+	// tenant registers its own subscribers and emits its own events; RLS +
+	// the emit fan-out scope both to the bound tenant. Without this the
+	// prefix match below would bypass resolution and leave app.tenant_id
+	// unbound, breaking the RLS-scoped subscription writes.
+	if p == "/api/v1/webhooks/emit" ||
+		p == "/api/v1/webhooks/subscriptions" ||
+		strings.HasPrefix(p, "/api/v1/webhooks/subscriptions/") {
+		return false
+	}
 	if _, ok := publicPaths[p]; ok {
 		return true
 	}

@@ -158,6 +158,10 @@ type SendInput struct {
 	// TenantID is filled in from the request context by the HTTP
 	// handler; the SDK doesn't surface it.
 	TenantID string
+
+	// EndpointID links the delivery to the subscriber endpoint it was
+	// fanned out to (set by the emit path); nil for ad-hoc /send.
+	EndpointID *string
 }
 
 // ListFilters mirrors the query params on GET /api/v1/webhooks/deliveries.

@@ -169,6 +169,16 @@ func TestResolverIsPublicPath(t *testing.T) {
 		{"/api/v1/config/flags", true},
 		{"/api/v1/storage", false},
 		{"/api/v1/jobs", false},
+		// Operator-gated webhook surface stays public (self-enforces
+		// operator auth) ...
+		{"/api/v1/webhooks/endpoints", true},
+		{"/api/v1/webhooks/deliveries", true},
+		{"/api/v1/webhooks/send", true},
+		// ... but the tenant-scoped subscribe/emit routes must go THROUGH
+		// the resolver so app.tenant_id binds for RLS + scoped fan-out.
+		{"/api/v1/webhooks/emit", false},
+		{"/api/v1/webhooks/subscriptions", false},
+		{"/api/v1/webhooks/subscriptions/abc-123", false},
 		{"/randompath", false},
 	}
 	for _, c := range cases {
