@@ -423,10 +423,13 @@ func (m *Manager) List(ctx context.Context, f ListFilters) (ListResult, error) {
 		params = params.States(state)
 	}
 	if f.TenantID != "" {
-		// Tenant filter relies on the JSON-encoded args field, since
-		// River doesn't have a first-class tenant column.
+		// Tenant filter relies on the JSON args column, since River
+		// doesn't have a first-class tenant column. The column is `args`
+		// (jsonb) on river_job — NOT `encoded_args` (that was a wrong
+		// reference that only surfaced once tenant-scoped jobs actually
+		// carried a tenant_id and this filter began to fire).
 		params = params.Where(
-			"encoded_args->>'tenant_id' = @tenant_id",
+			"args->>'tenant_id' = @tenant_id",
 			river.NamedArgs{"tenant_id": f.TenantID},
 		)
 	}
