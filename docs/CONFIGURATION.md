@@ -10,6 +10,59 @@ backai config validate
 
 Start from `backai.config.yaml.example`.
 
+## Deployment mode: SaaS vs Personal
+
+BackAI ships with auth (multi-tenant login) and billing (Stripe + budget
+paywall). Not every fork wants those. `AF_STACK_MODE` is a single master
+switch that turns both families on or off:
+
+| Mode | Auth | Billing | Use it when |
+|---|---|---|---|
+| `saas` (default) | governed by `AF_STACK_MODULE_MULTI_TENANCY` | governed by `AF_STACK_MODULE_BILLING` | You're running BackAI as a product with real, isolated customers. |
+| `personal` | **forced off** | **forced off** | You're running BackAI just for yourself — no login on either frontend, no paywall, no Stripe, no budget `402`s. |
+
+In personal mode:
+
+- The runtime skips all auth: every request runs under the built-in
+  default tenant (`00000000-0000-0000-0000-000000000000`). The operator
+  RBAC guard on the dashboard is bypassed too.
+- The budget gate is disabled, so LLM calls are never blocked by a
+  `402` — but spend is **still metered**, so `Cost` still shows usage.
+- No Stripe client is constructed; the billing surface is hidden in both
+  the dashboard and the customer app.
+- Both frontends skip their login/sign-in redirect and boot straight
+  into the product as a single implicit user.
+
+### Flipping it
+
+One value, then restart. Either edit `.env`:
+
+```bash
+AF_STACK_MODE=personal   # or: saas
+docker compose up -d      # restart to apply
+```
+
+…or use the CLI, which upserts the same var in `.env`:
+
+```bash
+af-stack mode            # print the current mode
+af-stack mode personal   # single-user app: auth + billing off
+af-stack mode saas       # back to multi-tenant SaaS
+af-stack dev             # restart to apply
+```
+
+The switch is fully reversible; flip it as often as you like.
+
+> **Data caveat.** Data written while in personal mode is owned by the
+> default tenant. When you switch back to `saas` with multi-tenancy on,
+> that data stays under the default tenant and won't appear under a new
+> per-customer tenant. This matters only if you build real data in
+> personal mode and later expect it to belong to a specific customer.
+
+`AF_STACK_MODE=personal` overrides the individual module flags below —
+setting `AF_STACK_MODULE_MULTI_TENANCY=true` while in personal mode has no
+effect. Switch to `saas` to let the module flags take over again.
+
 ## Presets
 
 | Preset | Meaning |
