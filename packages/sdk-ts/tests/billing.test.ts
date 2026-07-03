@@ -187,10 +187,19 @@ describe("billing.meter", () => {
   it("validates inputs", async () => {
     await expect(billingMeter("", 1)).rejects.toThrow(/non-empty/)
     await expect(billingMeter("sandbox_seconds", -1)).rejects.toThrow(/qty/)
-    // Valid call is a no-op.
-    await expect(
-      billingMeter("sandbox_seconds", 1, { tenantId: "t1" }),
-    ).resolves.toBeUndefined()
+  })
+
+  it("POSTs the increment to /billing/meter", async () => {
+    enqueue(new Response(null, { status: 204 }))
+    await billingMeter("sandbox_seconds", 1.5, { tenantId: "t1" })
+    const call = nthCall(0)
+    expect(call.url).toContain("/billing/meter")
+    expect(call.init.method).toBe("POST")
+    expect(JSON.parse(String(call.init.body))).toEqual({
+      name: "sandbox_seconds",
+      qty: 1.5,
+      tenant_id: "t1",
+    })
   })
 })
 

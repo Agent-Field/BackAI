@@ -12,18 +12,15 @@ SDK call                            Endpoint
 :func:`customer`                    ``GET    /api/v1/billing/customers/{tenantId}``
 :func:`meters`                      ``GET    /api/v1/billing/meters``
 :func:`portal_link`                 ``POST   /api/v1/billing/customers/{tenantId}/portal``
-:func:`meter`                       (in-process — increments the runtime's meter table)
+:func:`meter`                       ``POST   /api/v1/billing/meter``
 :func:`has_budget`                  (in-process — checks the tenant's plan cap)
 ==================================  =======================================================
 
 The Pydantic models mirror the zod schemas in ``lib/api.ts`` exactly —
 keep them in sync when the contract changes.
 
-``meter`` and ``has_budget`` deliberately do NOT have dedicated REST
-endpoints (yet). They're called from app code on the runtime side via the
-embedded billing service; the SDK forwards them through the
-``/api/v1/billing/customers/{tenantId}`` endpoint as a heartbeat for now,
-which lets the SDK shape stay stable when Phase 10.5 adds explicit verbs.
+``has_budget`` has no dedicated endpoint: it's composed client-side from the
+customer + usage-meter read endpoints against the configured plan cap.
 """
 
 from __future__ import annotations
@@ -184,24 +181,19 @@ async def meter(
 ) -> None:
     """Record ``qty`` units of ``name`` for the tenant's current period.
 
-    The SDK exposes this as a no-op when called without a tenant id
-    (matching the runtime's behaviour). The runtime owns the cost
-    computation — the SDK just forwards the increment.
-
-    For now the SDK doesn't have a dedicated endpoint for meter
-    increments. ``meter`` is a placeholder so app code can be written
-    against the final API today; Phase 10.5 will add an explicit
-    ``POST /api/v1/billing/meter`` endpoint that this method calls.
+    The runtime owns the cost computation — the SDK forwards the increment
+    to ``POST /api/v1/billing/meter``. Pass ``tenant_id`` to attribute usage
+    to a specific tenant; when omitted the runtime meters under its default
+    tenant (the normal single-tenant path).
     """
     if not name:
         raise ValueError("meter name must be a non-empty string")
     if qty < 0:
         raise ValueError("qty must be non-negative")
-    # Placeholder: no-op until Phase 10.5 lands the explicit endpoint.
-    # The runtime ALREADY accumulates meters from in-process call sites
-    # (sandbox cpu-seconds, LLM tokens) — this SDK method is reserved
-    # for app-level custom meters.
-    _ = (name, qty, tenant_id)
+    payload: dict[str, object] = {"name": name, "qty": qty}
+    if tenant_id:
+        payload["tenant_id"] = tenant_id
+    await _http.request_json("POST", "/billing/meter", json=payload)
 
 
 async def has_budget(tenant_id: str, additional_usd: float) -> bool:

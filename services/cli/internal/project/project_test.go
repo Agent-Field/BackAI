@@ -40,6 +40,56 @@ func TestScaffoldCommands(t *testing.T) {
 	}
 }
 
+func TestAdapterNewScaffoldsSidecar(t *testing.T) {
+	root := t.TempDir()
+	restore := chdir(t, root)
+	defer restore()
+
+	var stdout bytes.Buffer
+	if err := RunAdapter([]string{"new", "billing", "my-stripe"}, &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatalf("RunAdapter new returned error: %v", err)
+	}
+	for _, rel := range []string{"main.py", "requirements.txt", "README.md", "Dockerfile", ".gitignore"} {
+		if !exists(filepath.Join(root, "my-stripe", rel)) {
+			t.Fatalf("adapter scaffold missing %s", rel)
+		}
+	}
+	// The skeleton must wire the chosen slot through to the contract + docs.
+	main := read(t, root, "my-stripe/main.py")
+	for _, want := range []string{`"slot": "billing"`, "/v1/capabilities", "/healthz", "protocols/billing-v1.md"} {
+		if !strings.Contains(main, want) {
+			t.Fatalf("main.py missing %q:\n%s", want, main)
+		}
+	}
+	// Next steps must show the conformance command + the swap env var.
+	out := stdout.String()
+	for _, want := range []string{"backai-adapter-conformance --slot billing", "AF_STACK_BILLING_ADAPTER=remote"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("adapter new output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestAdapterNewDefaultsNameAndRejectsUnknownSlot(t *testing.T) {
+	root := t.TempDir()
+	restore := chdir(t, root)
+	defer restore()
+
+	// Unknown slot is rejected clearly.
+	err := RunAdapter([]string{"new", "rocketship"}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "unknown slot") {
+		t.Fatalf("expected unknown-slot error, got %v", err)
+	}
+
+	// With no name, the directory defaults to <slot>-adapter.
+	if err := RunAdapter([]string{"new", "storage"}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("RunAdapter new returned error: %v", err)
+	}
+	if !exists(filepath.Join(root, "storage-adapter", "main.py")) {
+		t.Fatal("expected storage-adapter/main.py with defaulted name")
+	}
+}
+
 func TestAdapterListUsesEnvOverride(t *testing.T) {
 	t.Setenv("AF_STACK_SANDBOX_ADAPTER", "gvisor")
 	var stdout bytes.Buffer

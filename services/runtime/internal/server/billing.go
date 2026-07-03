@@ -43,6 +43,7 @@ import (
 
 	"github.com/Agent-Field/backai/services/runtime/internal/billing"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
+	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 )
 
 // ─── Wire shapes ──────────────────────────────────────────────────────────
@@ -66,6 +67,18 @@ type portalLinkRequest struct {
 	ReturnURL string `json:"return_url,omitempty"`
 }
 
+// meterRequest is the body for POST /billing/meter. tenant_id is optional —
+// pass it to attribute usage to a specific tenant (the multi-tenant app-code
+// path). When omitted, the runtime's default tenant is used, which is the
+// normal single-tenant path. /api/v1/billing is a dashboard-auth surface and
+// does not resolve the API key to a tenant in v1, so multi-tenant callers
+// must pass tenant_id explicitly.
+type meterRequest struct {
+	Name     string  `json:"name"`
+	Qty      float64 `json:"qty"`
+	TenantID string  `json:"tenant_id,omitempty"`
+}
+
 // ─── Registration ────────────────────────────────────────────────────────
 
 // registerBillingRoutes wires the /api/v1/billing/* + Stripe webhook
@@ -74,6 +87,7 @@ func (s *Server) registerBillingRoutes() {
 	s.mux.HandleFunc("GET /api/v1/billing/customers", s.handleBillingListCustomers)
 	s.mux.HandleFunc("GET /api/v1/billing/customers/{tenantId}", s.handleBillingGetCustomer)
 	s.mux.HandleFunc("GET /api/v1/billing/meters", s.handleBillingListMeters)
+	s.mux.HandleFunc("POST /api/v1/billing/meter", s.handleBillingMeter)
 	s.mux.HandleFunc("POST /api/v1/billing/customers/{tenantId}/portal", s.handleBillingPortalLink)
 	// Direct Stripe webhook — see file-level comment for the coordination
 	// note with Phase 10.2's /webhooks/in/{slug} catch-all.
@@ -108,6 +122,10 @@ func (s *Server) registerBillingOpenAPI() {
 				Description: "month | day",
 				Schema:      map[string]any{"type": "string"}},
 		},
+	})
+	b.Register("POST", "/api/v1/billing/meter", openapi.RouteMeta{
+		Summary: "Record a usage-meter increment for the current period",
+		Tags:    []string{"billing"},
 	})
 	b.Register("POST", "/api/v1/billing/customers/{tenantId}/portal", openapi.RouteMeta{
 		Summary: "Mint a short-lived billing customer portal link",
@@ -270,6 +288,64 @@ func (s *Server) handleBillingListMeters(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ─── POST /api/v1/billing/meter ───────────────────────────────────────────
+
+// handleBillingMeter records a usage-meter increment. App code calls this via
+// suite.billing.meter(name, qty); the runtime owns the cost computation. The
+// tenant is taken from the request body when present, otherwise from the
+// authenticated caller's API key.
+func (s *Server) handleBillingMeter(w http.ResponseWriter, r *http.Request) {
+	ctx, span := s.dashTracer().Start(r.Context(), "dashboard.billing.meter")
+	defer span.End()
+	if s.billingUnavailable(w) {
+		return
+	}
+
+	var in meterRequest
+	if r.ContentLength != 0 {
+		body, err := io.ReadAll(io.LimitReader(r.Body, 32<<10))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "could not read body", nil)
+			return
+		}
+		if len(body) > 0 {
+			if err := json.Unmarshal(body, &in); err != nil {
+				writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "body must be valid JSON", nil)
+				return
+			}
+		}
+	}
+
+	in.Name = strings.TrimSpace(in.Name)
+	if in.Name == "" {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "name is required", nil)
+		return
+	}
+	if in.Qty < 0 {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "qty must be non-negative", nil)
+		return
+	}
+
+	// Tenant precedence: explicit body tenant_id (multi-tenant app code) >
+	// resolved context tenant (if this route ever runs behind tenant auth) >
+	// the runtime's default tenant. Billing is a public/dashboard-auth prefix
+	// so the API key is not resolved here; single-tenant deployments meter
+	// under the default tenant, matching notifications/send.
+	tenantID := strings.TrimSpace(in.TenantID)
+	if tenantID == "" {
+		tenantID = tenantctx.TenantID(ctx)
+	}
+	if tenantID == "" {
+		tenantID = s.defaultTenant(r)
+	}
+
+	if err := s.billing.Meter(ctx, in.Name, in.Qty, tenantID); err != nil {
+		writeBillingError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ─── POST /api/v1/billing/customers/{tenantId}/portal ─────────────────────

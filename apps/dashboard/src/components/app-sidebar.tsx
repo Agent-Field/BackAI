@@ -155,7 +155,7 @@ const GROUPS: NavGroup[] = [
     id: "platform",
     label: "Platform",
     items: [
-      { id: "adapters", label: "Adapters", href: "/platform/adapters", icon: Server, comingSoon: true },
+      { id: "adapters", label: "Adapters", href: "/platform/adapters", icon: Server },
       { id: "secrets", label: "Secrets", href: "/platform/secrets", icon: KeyRound, comingSoon: true },
       { id: "features", label: "Features", href: "/platform/features", icon: Globe2, comingSoon: true },
       { id: "settings", label: "Settings", href: "/platform/settings", icon: Settings, comingSoon: true },
@@ -240,26 +240,42 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 }
 
 function NavLink({ item, active }: { item: NavItem; active: boolean }) {
-  // D1 — the original sidebar badged ~16 items as "v0.2" even though
-  // most of their backend endpoints have shipped, which read as
-  // "feature not ready". We keep the comingSoon flag so the row is
-  // visibly dimmed and the link routes to Home (no broken pages), but
-  // no chip is rendered. Operators see surface area without a
-  // misleading "thin v1 / rich v0.2" signal.
   const Icon = item.icon
-  const target = item.comingSoon ? "/" : item.href
+
+  // D1 — coming-soon items keep their place so operators can see the
+  // shape of the platform (per journeys-v1.md §IA), but they are NOT
+  // links. Routing every stub to Home meant clicking "Agents" silently
+  // dumped you on the dashboard — which reads as broken, not roadmap.
+  // Render them as inert dimmed rows with a quiet "soon" tag instead:
+  // nothing clickable misleads, nothing navigates nowhere.
+  if (item.comingSoon) {
+    return (
+      <SidebarMenuItem>
+        <SidebarMenuButton
+          size="sm"
+          disabled
+          aria-disabled
+          className="gap-inline opacity-50"
+          title={`${item.label} — ${item.comingSoonNote ?? "coming soon"}`}
+        >
+          <Icon className="size-icon-inline" aria-hidden />
+          <span className="flex-1 truncate">{item.label}</span>
+          <span className="text-meta text-muted-foreground tabular-nums">
+            soon
+          </span>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    )
+  }
+
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
-        render={<Link href={target} />}
+        render={<Link href={item.href} />}
         isActive={active}
         size="sm"
-        className={`gap-inline ${item.comingSoon ? "opacity-60" : ""}`}
-        title={
-          item.comingSoon
-            ? `${item.label} — ${item.comingSoonNote ?? "page coming soon; backend ready"}`
-            : item.label
-        }
+        className="gap-inline"
+        title={item.label}
       >
         <Icon className="size-icon-inline" aria-hidden />
         <span className="flex-1 truncate">{item.label}</span>

@@ -805,6 +805,13 @@ func (s *Server) registerRoutes() {
 	s.registerBillingRoutes()
 	s.registerBillingOpenAPI()
 
+	// Auth identity introspection: GET /api/v1/auth/whoami returns the
+	// tenant/user/key the current credential resolves to. Auth lifecycle
+	// (sign-up / sign-in) stays with the app-layer (better-auth); this is
+	// the read-only "who am I" primitive that belongs in the SDK.
+	s.registerAuthRoutes()
+	s.registerAuthOpenAPI()
+
 	// Skills (Phase 11.3). Mutating endpoints (install / uninstall /
 	// attach) return 503 when no store is wired; the list endpoint
 	// degrades to an empty page so the dashboard renders.
