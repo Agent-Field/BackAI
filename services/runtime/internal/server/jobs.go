@@ -120,6 +120,15 @@ func (s *Server) handleEnqueueJob(w http.ResponseWriter, r *http.Request) {
 	span.SetAttributes(attribute.String("job.name", input.Name))
 
 	opts := jobs.EnqueueOpts{}
+	// Stamp the caller's tenant onto the job so the tenant can see it in
+	// its own GET /api/v1/jobs list + single-get. Without this the row's
+	// args envelope has an empty tenant_id and the enqueuing tenant is
+	// blind to the job it just created (handleListJobs pins non-operators
+	// to their tenant, and jobHiddenFromCaller 404s a tenant-less row).
+	// The cron enqueue path already stamps tenant this way.
+	if s.multiTenancyEnabled() {
+		opts.TenantID = tenantctx.TenantID(ctx)
+	}
 	if input.ScheduledAt != nil && *input.ScheduledAt != "" {
 		t, err := time.Parse(time.RFC3339, *input.ScheduledAt)
 		if err != nil {

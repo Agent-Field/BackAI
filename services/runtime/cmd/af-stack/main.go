@@ -97,6 +97,15 @@ type webhookAgentInvoker struct {
 	c *agentfield.Client
 }
 
+// webhookAllowPrivate reports whether native outbound webhook delivery may
+// target loopback / RFC-1918 destinations. Off unless AF_STACK_WEBHOOK_
+// ALLOW_PRIVATE is truthy — a dev/PoC escape hatch so a subscriber on
+// localhost is reachable. Cloud-metadata (link-local) stays blocked.
+func webhookAllowPrivate() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("AF_STACK_WEBHOOK_ALLOW_PRIVATE")))
+	return v == "1" || v == "true" || v == "yes"
+}
+
 // cronJobEnqueuer bridges the crons.JobEnqueuer contract to the
 // runtime's jobs.Manager. Lives in main so the crons package doesn't
 // take an import dependency on jobs.
@@ -1437,18 +1446,36 @@ func main() {
 			log.Info("webhooks: no database; /webhooks/in/* + endpoint CRUD will return 503")
 		}
 
-		// Outbound: thin Svix proxy. Config is read from env; if
-		// AF_STACK_SVIX_URL is unset the service stays unconfigured and
-		// /api/v1/webhooks/send returns 503.
-		outboundSvc := webhooks.NewOutboundService(deliveryStore, log)
-		if outboundSvc.Configured() {
-			log.Info("webhooks: outbound proxy wired to svix",
+		// Outbound delivery backend. Native (in-process) delivery is the
+		// zero-config default: it uses the suite_webhook_deliveries outbox
+		// as a durable queue and delivers signed, SSRF-guarded POSTs with
+		// retries — no external sidecar. Svix remains available as an
+		// opt-in for deployments that set AF_STACK_SVIX_URL.
+		var outbound webhooks.Outbound
+		if strings.TrimSpace(os.Getenv("AF_STACK_SVIX_URL")) != "" {
+			svc := webhooks.NewOutboundService(deliveryStore, log)
+			outbound = svc
+			log.Info("webhooks: outbound proxy wired to svix (opt-in)",
 				"svix_url", os.Getenv("AF_STACK_SVIX_URL"))
 		} else {
-			log.Info("webhooks: AF_STACK_SVIX_URL unset; /api/v1/webhooks/send will return 503")
+			native := webhooks.NewNativeOutbound(deliveryStore, webhooks.NativeConfig{
+				SigningSecret:        strings.TrimSpace(os.Getenv("AF_STACK_WEBHOOK_SECRET")),
+				AllowPrivateNetworks: webhookAllowPrivate(),
+			}, log)
+			native.Start(ctx) // drain loop; stops when rootCtx is cancelled
+			outbound = native
+			if native.Configured() {
+				log.Info("webhooks: native in-process outbound delivery enabled (no svix)")
+			} else {
+				log.Info("webhooks: no database; /api/v1/webhooks/send will return 503")
+			}
 		}
 
-		webhooksSvc = webhooks.NewService(deliveryStore, outboundSvc, endpointStore, inboundSvc, log)
+		webhooksSvc = webhooks.NewService(deliveryStore, outbound, endpointStore, inboundSvc, log)
+		// Tenant-owned outbound subscriptions (subscribe + emit + fan-out).
+		if database != nil && database.Pool != nil {
+			webhooksSvc.WithSubscriptions(webhooks.NewSubscriptionStore(database.Pool, log))
+		}
 	}
 
 	// Billing (Phase 10.4). Composes:

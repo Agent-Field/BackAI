@@ -249,9 +249,25 @@ func (s *DeliveryStore) List(ctx context.Context, f ListFilters) (*ListResult, e
 		whereClause = "where " + strings.Join(where, " and ")
 	}
 
+	// The deliveries list is served only through the operator-gated
+	// handler (the /api/v1/webhooks surface bypasses the tenant resolver,
+	// so no app.tenant_id is bound). Read cross-tenant via bypass_rls so
+	// the operator console sees every tenant's deliveries — outbound rows
+	// are stamped with the emitting tenant and would otherwise be filtered
+	// out by RLS. Callers narrow to one tenant with the explicit `tenant`
+	// filter (f.TenantID), which is applied in the WHERE clause above.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("webhooks: list begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return nil, fmt.Errorf("webhooks: list set bypass: %w", err)
+	}
+
 	countQ := "select count(*) from suite_webhook_deliveries " + whereClause
 	var total int
-	if err := s.pool.QueryRow(ctx, countQ, args...).Scan(&total); err != nil {
+	if err := tx.QueryRow(ctx, countQ, args...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("webhooks: list count: %w", err)
 	}
 
@@ -282,22 +298,25 @@ func (s *DeliveryStore) List(ctx context.Context, f ListFilters) (*ListResult, e
     `, whereClause, len(args)+1, len(args)+2)
 	args = append(args, f.Limit, f.Offset)
 
-	rows, err := s.pool.Query(ctx, listQ, args...)
+	rows, err := tx.Query(ctx, listQ, args...)
 	if err != nil {
 		return nil, fmt.Errorf("webhooks: list query: %w", err)
 	}
-	defer rows.Close()
-
 	out := make([]Delivery, 0, f.Limit)
 	for rows.Next() {
 		d, err := scanDelivery(rows)
 		if err != nil {
+			rows.Close()
 			return nil, fmt.Errorf("webhooks: list scan: %w", err)
 		}
 		out = append(out, *d)
 	}
+	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("webhooks: list rows: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("webhooks: list commit: %w", err)
 	}
 
 	return &ListResult{
@@ -368,6 +387,90 @@ func (s *DeliveryStore) UpdateStatus(ctx context.Context, id string, p UpdatePar
 		return fmt.Errorf("webhooks: commit update status: %w", err)
 	}
 	return nil
+}
+
+// ClaimOutboundDue atomically claims up to `limit` outbound delivery rows
+// that are ready to be (re)delivered — status in (queued, failed), not yet
+// at maxAttempts, and past their scheduled_at backoff — flipping each to
+// 'delivering' so a concurrent worker (or a second runtime instance) can't
+// pick up the same row. Rows are locked with FOR UPDATE SKIP LOCKED.
+//
+// The worker has no ambient tenant (outbound rows span every tenant), so
+// the claim runs inside a bypass_rls tx like UpdateStatus does. The
+// returned Delivery carries Body + Headers so the caller can POST without a
+// second read.
+func (s *DeliveryStore) ClaimOutboundDue(ctx context.Context, limit, maxAttempts int) ([]Delivery, error) {
+	if !s.HasPool() {
+		return nil, ErrNotConfigured
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	if maxAttempts <= 0 {
+		maxAttempts = 5
+	}
+	const q = `
+        update suite_webhook_deliveries d
+        set status = 'delivering'
+        where d.id in (
+            select id from suite_webhook_deliveries
+            where direction = 'outbound'
+              and status in ('queued', 'failed')
+              and attempts < $2
+              and scheduled_at <= now()
+            order by scheduled_at asc
+            for update skip locked
+            limit $1
+        )
+        returning
+            d.id,
+            d.endpoint_id,
+            d.tenant_id,
+            d.direction,
+            d.destination,
+            d.event_type,
+            d.status,
+            d.attempts,
+            d.response_status,
+            d.response_ms,
+            d.body,
+            d.body_preview,
+            d.body_storage_url,
+            d.last_error,
+            d.headers,
+            d.scheduled_at::text,
+            d.delivered_at::text,
+            d.created_at::text
+    `
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("webhooks: claim begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return nil, fmt.Errorf("webhooks: claim set bypass: %w", err)
+	}
+	rows, err := tx.Query(ctx, q, limit, maxAttempts)
+	if err != nil {
+		return nil, fmt.Errorf("webhooks: claim query: %w", err)
+	}
+	out := make([]Delivery, 0, limit)
+	for rows.Next() {
+		d, err := scanDelivery(rows)
+		if err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("webhooks: claim scan: %w", err)
+		}
+		out = append(out, *d)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("webhooks: claim rows: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("webhooks: claim commit: %w", err)
+	}
+	return out, nil
 }
 
 // ResetForRetry zeroes attempts + clears last_error and re-queues the
