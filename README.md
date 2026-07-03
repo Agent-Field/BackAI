@@ -52,8 +52,11 @@ as a first-class primitive. Run a backend locally with `af-stack dev`.
 **Fork and edit** remains fully supported as the power-user / self-host
 path — the repo is the product, closer to Cal.com or Plane than a hosted
 BaaS. Inside a checkout, `af-stack init` (flags only, no project name)
-re-themes the fork, and `af-stack init --template coding-agent` scaffolds
-the hero coding-agent app:
+re-themes the fork, `af-stack init --template coding-agent` scaffolds
+the hero coding-agent app, and `af-stack upgrade` pulls the latest
+platform into your fork — dry-run with `--check` to see incoming
+commits, DB migrations, and predicted conflicts (split into your files
+vs platform files) before anything changes:
 
 ```bash
 git clone https://github.com/Agent-Field/backai supportdesk-ai
