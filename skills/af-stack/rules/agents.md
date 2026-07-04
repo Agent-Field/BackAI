@@ -246,7 +246,8 @@ CMD ["python", "main.py"]
 
 ## When in doubt
 
-Read `/Users/santoshkumarradha/Documents/agentfield/code/CLAUDE.md` —
-the canonical multi-reasoner architecture guide. Or follow the
+Read the AgentField multi-reasoner guidance in `docs/agentfield-integration.md`
+and the [`agentfield-multi-reasoner-builder` skill](https://github.com/Agent-Field/agentfield)
+for the canonical multi-reasoner architecture. Or follow the
 "map the human process" approach: write down how a human expert would
 do this task, then map each step to a reasoner.

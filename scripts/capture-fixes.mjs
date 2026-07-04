@@ -1,7 +1,7 @@
 import { chromium } from "playwright"
 import { resolve } from "node:path"
 
-const OUT = "/Users/santoshkumarradha/Documents/agentfield/code/platform/af-stack/docs/assets/dashboard-screenshots"
+const OUT = "docs/assets/dashboard-screenshots"
 const URL = "http://localhost:33000"
 
 const browser = await chromium.launch()

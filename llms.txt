@@ -1,0 +1,53 @@
+# BackAI
+
+> Open-source, fork-friendly AI-backend template. One clone gives a product
+> a customer app, an operator dashboard, a Go API runtime, auth,
+> multi-tenancy, API keys, an OpenAI-compatible LLM gateway with cost
+> tracking and budgets, storage, jobs, crons, webhooks, a secrets vault,
+> billing, and AgentField-backed agents — all behind one base URL. Brand:
+> BackAI. CLI: af-stack. Default app: SupportDesk AI. The repo is the
+> product; most work is editing the checkout, not calling a hosted API.
+
+## Start here
+- [README](README.md): product positioning, quickstart, and the full feature tour
+- [AGENTS.md](AGENTS.md): agent orientation — first 60 seconds, the four edit surfaces, invariants
+- [Repo map](docs/repo-map.md): who owns each directory after a fork
+- [af-stack Skill](skills/af-stack/SKILL.md): primitives table, boundaries, canonical build workflow
+- [Configuration](docs/CONFIGURATION.md): env surface, personal vs saas mode
+- [Install the CLI](docs/cli-distribution.md): how to get the `af-stack` binary
+
+## Architecture
+- [Stack](docs/stack.md): the 8-band layered architecture
+- [Product](docs/product.md): what's real vs needs-a-key vs not-in-v1
+- [Architecture](docs/architecture.md): extension points and adapter contracts
+- [Attach an existing app](docs/attach-existing-app.md): put BackAI behind a product you already have
+- [SDK strategy](docs/sdk-strategy.md): the app.* / suite.* boundary and language SDKs
+
+## Building
+- [Agents](skills/af-stack/rules/agents.md): writing AgentField agents (.ai vs .harness, reasoners)
+- [Workload modules](docs/workload-modules.md): domain routes, migrations, jobs, crons
+- [Dashboard plugins](docs/dashboard-plugins.md): operator-console tabs
+- [Multi-tenancy](docs/multi-tenancy.md): RLS, tenant context, API keys
+- [Adapters](skills/af-stack/rules/adapters.md): swapping storage/sandbox/notifications/billing by env
+- [af-stack admin CLI](docs/cli-admin.md): the operator command surface (keys, runs, logs, errors, audit)
+
+## Platform features
+- [Auth](docs/auth.md) and [OAuth](docs/oauth.md): identity, sessions, API keys
+- [Billing](docs/billing.md): plans catalog, Stripe auto-provision, checkout, entitlements, budget enforcement
+- [Demo mode](docs/demo-mode.md): running with no provider key
+- [Guardrails](docs/guardrails.md): PII detection and policy
+- [Realtime](docs/realtime.md): run subscriptions and live activity
+- [Search](docs/search.md), [Embeddings](docs/embeddings.md), [Multimodal](docs/multimodal.md)
+- [Tool adapters](docs/tool-adapters.md), [Sandbox adapters](docs/sandbox-adapters.md)
+- [Feature flags](docs/feature-flags.md)
+- [AgentField integration](docs/agentfield-integration.md): the AI runtime BackAI ships
+- [Telemetry](TELEMETRY.md): anonymous, opt-out CLI usage metrics
+
+## Deploy
+- [Deploy](docs/deploy.md): Docker Compose, Helm, Fly, Railway, Render
+- [Releasing](docs/releasing.md): how versions and images are cut
+
+## Optional
+- [Starter example](examples/starter/README.md): the smallest neutral fork
+- [OSS audit](docs/oss-audit.md): open-source readiness notes
+- docs/archive/: historical v0 planning material (not current product docs)

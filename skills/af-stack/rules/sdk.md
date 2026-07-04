@@ -116,7 +116,7 @@ Same surface, Go-idiomatic. Used by:
 ## AgentField SDK — `from agentfield import Agent, AIConfig`
 
 Used **only inside an agent** (`apps/backend/agents/<name>/main.py`).
-Source: `/Users/santoshkumarradha/Documents/agentfield/code/platform/agentfield/sdk/python/agentfield/`
+Source: the AgentField Python SDK (the `agentfield` package — `import agentfield`).
 
 | Call | What |
 |---|---|

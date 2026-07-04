@@ -1,23 +1,38 @@
 ---
 title: Module — Billing
-description: Stripe customers + per-tenant usage meters. Deterministic stub when no Stripe key is set.
+description: Turnkey plans, Stripe auto-provisioning, hosted checkout, entitlements, usage meters, and budget enforcement. Deterministic stub when no Stripe key is set.
 sidebar:
   order: 8
 ---
 
-Stripe integration + per-tenant usage meter aggregation behind a single `billing.Service`.
+A complete pricing engine behind a single `billing.Service`: a plan
+catalog, Stripe Product/Price **auto-provisioning**, hosted checkout,
+per-plan **entitlements**, per-tenant usage meters, and budget enforcement
+wired to the LLM gateway.
+
+For the end-to-end setup guide — the agent-first `af-stack billing` flow and
+the three app-side calls — see `docs/billing.md` in the repo.
 
 ## What it does
 
-Three layers:
+Layers:
 
+- **Plans** — a catalog of `{id, name, price, budget, entitlements, default}`.
+  Defining a paid plan **auto-provisions** the Stripe Product + Price (or
+  binds an existing `stripe_price_id`). The "free" plan is implicit.
+- **Entitlements** — typed per-plan limits (`simulations=500`, `seats=5`)
+  that app code reads via `GET /api/v1/billing/entitlements` to gate features.
+- **Checkout** — `POST /api/v1/billing/checkout` returns a hosted Stripe
+  checkout URL; in stub mode the plan applies instantly.
 - **Store** — direct SQL against `suite_billing_customers` + `suite_usage_meters`.
 - **Client** — thin wrapper around `stripe-go` with a deterministic stub mode for dev (no `STRIPE_SECRET_KEY`).
-- **Service** — composes Store + Client, gates budgets, produces dashboard wire shapes.
+- **Service** — composes the above, gates budgets, produces dashboard wire shapes.
 
-Wire shapes mirror the zod schemas in `apps/dashboard/src/lib/api.ts` "Billing (Phase 10.4)" section. Nullable fields use pointer types so JSON emits `null`. The "free" plan is implicit and never has a `stripe_customer_id`.
+Wire shapes mirror the zod schemas in `apps/dashboard/src/lib/api.ts` "Billing" section. Nullable fields use pointer types so JSON emits `null`. The "free" plan is implicit and never has a `stripe_customer_id`.
 
-When no service is wired, reads serve empty / synthesised rows; the portal-link mutation returns `503 BILLING_NOT_CONFIGURED`.
+Budgets flow to the LLM gateway: a tenant over its plan's monthly budget gets `402 BUDGET_EXCEEDED` on gateway calls. When no service is wired, reads serve empty / synthesised rows; mutations like the portal link return `503 BILLING_NOT_CONFIGURED`.
+
+Live vs test Stripe keys are tracked: swapping keys reconciles plan prices to the new mode, and `af-stack billing status` surfaces the active key mode so a swap doesn't silently 404 checkout.
 
 ## Configuration
 
@@ -41,11 +56,22 @@ Registered in `services/runtime/internal/server/billing.go`:
 
 | Method | Path | Description |
 |---|---|---|
+| `GET` | `/api/v1/billing/plans` | Public plan catalog. |
+| `GET` | `/api/v1/billing/entitlements` | Current plan + entitlements + usage (one read to gate features). |
+| `POST` | `/api/v1/billing/checkout` | Hosted Stripe checkout URL (instant apply in stub mode). |
+| `POST` | `/api/v1/billing/meter` | Record a usage event. |
 | `GET` | `/api/v1/billing/customers` | List billing customers. |
 | `GET` | `/api/v1/billing/customers/{tenantId}` | Get a single customer. |
 | `GET` | `/api/v1/billing/meters` | List per-tenant usage meters. |
 | `POST` | `/api/v1/billing/customers/{tenantId}/portal` | Generate a Stripe billing-portal link. |
+| `PUT` | `/api/v1/admin/billing/plans` | Create/update a plan (auto-provisions Stripe Product + Price). |
+| `DELETE` | `/api/v1/admin/billing/plans/{id}` | Delete a plan. |
+| `GET` · `PUT` | `/api/v1/admin/billing/settings` | Read/store the Stripe key + mode. |
 | `POST` | `/webhooks/in/stripe` | Stripe webhook receiver (signature verified). |
+
+Registered across `server/billing.go` and `server/billing_plans.go`. The
+`admin/billing/*` routes are what the `af-stack billing` CLI and the
+dashboard **Platform → Billing** page drive.
 
 ## Database tables
 

@@ -1,18 +1,42 @@
-# CLI Distribution Strategy
+# CLI Distribution
 
-## Decision
+## Install (available now)
 
-**Single Go binary, installed via curl script. Match AgentField's pattern.**
+The `af-stack` CLI is a single static Go binary. Three ways to get it —
+all pull straight from this GitHub repo's Releases:
+
+**1. Install script** (Linux / macOS) — downloads the latest release binary,
+verifies its checksum, and puts it on your PATH:
 
 ```bash
-curl -fsSL https://backai.dev/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Agent-Field/backai/main/scripts/install.sh | bash
 ```
 
-Same install shape as AgentField (`curl -fsSL https://agentfield.ai/install.sh | bash`).
-Devs who use one already know the other.
+Pin a version or install dir with env: `AF_STACK_VERSION=v0.6.0`,
+`AF_STACK_INSTALL_DIR="$HOME/.local/bin"`. Source:
+[`scripts/install.sh`](../scripts/install.sh).
 
-**No npm wrapper. No bunx. No pipx.** Single distribution path keeps the
-install story consistent across the AF ecosystem.
+**2. `go install`** (any platform with Go ≥ 1.25):
+
+```bash
+go install github.com/Agent-Field/backai/services/cli/cmd/af-stack@latest
+```
+
+On older Go toolchains, set `GOTOOLCHAIN=auto` so Go fetches the pinned
+version. Note: `go install` does not stamp the release version into
+`af-stack version` (only the release binaries do).
+
+**3. Direct download** from the
+[Releases page](https://github.com/Agent-Field/backai/releases) — each
+release attaches `af-stack_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows)
+plus `checksums.txt` for `{linux,darwin,windows} × {amd64,arm64}`. Extract
+and move `af-stack` onto your PATH.
+
+## Strategy
+
+**Single Go binary. No npm wrapper, no bunx, no pipx** — one distribution
+path keeps the install story consistent across the AF ecosystem, matching
+AgentField's `curl … | bash` shape.
 
 ## Goal
 
@@ -41,17 +65,22 @@ curl -fsSL https://backai.dev/install.sh | bash
 
 One line. Same as AF. Sets up `af-stack` on PATH.
 
-## Distribution channels (v1)
+## Distribution channels
 
-Same Go binary distributed multiple ways, pick whichever:
+Same Go binary, multiple channels. Status reflects what is wired today.
 
-| Channel                      | Install                                            | Build                          |
-| ---------------------------- | -------------------------------------------------- | ------------------------------ |
-| **Install script** (primary) | `curl -fsSL https://backai.dev/install.sh \| bash` | Hosted script + GH releases    |
-| Homebrew (macOS)             | `brew install agent-field/tap/af-stack`            | goreleaser auto-updates tap    |
-| Scoop (Windows)              | `scoop install af-stack`                           | goreleaser auto-updates bucket |
-| Direct binary                | GitHub Releases                                    | goreleaser cross-compile       |
-| Docker image                 | `docker run afstack/cli:latest`                    | goreleaser                     |
+| Channel                      | Install                                                                              | Status                                   |
+| ---------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------- |
+| **Install script** (primary) | `curl -fsSL https://raw.githubusercontent.com/Agent-Field/backai/main/scripts/install.sh \| bash` | **Available** ([`scripts/install.sh`](../scripts/install.sh)) |
+| `go install`                 | `go install github.com/Agent-Field/backai/services/cli/cmd/af-stack@latest`         | **Available**                            |
+| Direct binary                | [GitHub Releases](https://github.com/Agent-Field/backai/releases)                   | **Available** (goreleaser cross-compile) |
+| Homebrew (macOS)             | `brew install agent-field/tap/af-stack`                                              | Planned — needs the `agent-field/homebrew-tap` repo |
+| Scoop (Windows)              | `scoop install af-stack`                                                             | Planned — needs the Scoop bucket repo    |
+
+> A vanity `https://backai.dev/install.sh` redirect to the raw GitHub script
+> can be added later; the raw URL above works today without any extra hosting.
+> No CLI Docker image is published — the runtime/dashboard/customer-app
+> images live at `ghcr.io/agent-field/af-stack-*`, not the CLI.
 
 ## Why this is strategic
 
