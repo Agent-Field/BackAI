@@ -205,7 +205,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: GoReleaser — GitHub Release + CLI binaries
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
           args: release --clean
