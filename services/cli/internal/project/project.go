@@ -21,9 +21,10 @@ import (
 	"text/tabwriter"
 	"unicode"
 
-	"github.com/Agent-Field/backai/services/cli/internal/client"
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/Agent-Field/backai/services/cli/internal/client"
 )
 
 type commandRunner func(ctx context.Context, dir string, name string, args []string, stdout, stderr io.Writer) error
