@@ -51,12 +51,17 @@ import (
 	faladapter "github.com/Agent-Field/backai/services/runtime/internal/llmgateway/adapters/fal"
 	fluxadapter "github.com/Agent-Field/backai/services/runtime/internal/llmgateway/adapters/flux"
 	litellmadapter "github.com/Agent-Field/backai/services/runtime/internal/llmgateway/adapters/litellm"
+	llmremote "github.com/Agent-Field/backai/services/runtime/internal/llmgateway/providers/remote"
 	"github.com/Agent-Field/backai/services/runtime/internal/logger"
 	"github.com/Agent-Field/backai/services/runtime/internal/mcp"
 	"github.com/Agent-Field/backai/services/runtime/internal/memory"
 	"github.com/Agent-Field/backai/services/runtime/internal/notifications"
 	notificationslog "github.com/Agent-Field/backai/services/runtime/internal/notifications/adapters/log"
+	notificationspush "github.com/Agent-Field/backai/services/runtime/internal/notifications/adapters/push"
+	notificationsremote "github.com/Agent-Field/backai/services/runtime/internal/notifications/adapters/remote"
 	notificationsresend "github.com/Agent-Field/backai/services/runtime/internal/notifications/adapters/resend"
+	notificationsslack "github.com/Agent-Field/backai/services/runtime/internal/notifications/adapters/slack"
+	notificationssms "github.com/Agent-Field/backai/services/runtime/internal/notifications/adapters/sms"
 	"github.com/Agent-Field/backai/services/runtime/internal/oauth"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
 	obserrors "github.com/Agent-Field/backai/services/runtime/internal/observability/errors"
@@ -77,11 +82,13 @@ import (
 	remotesandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/remote"
 	"github.com/Agent-Field/backai/services/runtime/internal/search"
 	"github.com/Agent-Field/backai/services/runtime/internal/secrets"
+	secretsremote "github.com/Agent-Field/backai/services/runtime/internal/secrets/adapters/remote"
 	"github.com/Agent-Field/backai/services/runtime/internal/server"
 	"github.com/Agent-Field/backai/services/runtime/internal/shipwright"
 	"github.com/Agent-Field/backai/services/runtime/internal/skills"
 	"github.com/Agent-Field/backai/services/runtime/internal/storage"
 	minioadapter "github.com/Agent-Field/backai/services/runtime/internal/storage/adapters/minio"
+	storageremote "github.com/Agent-Field/backai/services/runtime/internal/storage/adapters/remote"
 	s3adapter "github.com/Agent-Field/backai/services/runtime/internal/storage/adapters/s3"
 	"github.com/Agent-Field/backai/services/runtime/internal/tenancy"
 	"github.com/Agent-Field/backai/services/runtime/internal/tooladapters"
@@ -194,6 +201,7 @@ func buildAdapterRegistry(
 	afClient *agentfield.Client,
 	store storage.Storage,
 	vault *secrets.Vault,
+	secretsRemoteName string,
 	jobsManager *jobs.Manager,
 	llmGW *llmgateway.Gateway,
 	litellmAdmin *llmgateway.LiteLLMAdmin,
@@ -211,9 +219,12 @@ func buildAdapterRegistry(
 	storageName := defaulted(cfg.Storage.Adapter, "minio")
 	storageStatus := adapterregistry.StatusUnhealthy
 	storageKind := adapterregistry.KindNone
-	storageCaps := map[string]any{"contract_pending": true}
+	storageCaps := map[string]any{}
 	if store != nil {
 		storageKind = adapterregistry.KindBuiltin
+		if cfg.Storage.Adapter == "remote" {
+			storageKind = adapterregistry.KindRemote
+		}
 		storageStatus = adapterregistry.StatusHealthy
 		c := store.Capabilities()
 		storageCaps = map[string]any{
@@ -231,7 +242,7 @@ func buildAdapterRegistry(
 		Kind:             storageKind,
 		Name:             storageName,
 		Capabilities:     caps(storageCaps),
-		AvailableBuiltin: []string{"minio", "s3"},
+		AvailableBuiltin: []string{"minio", "s3", "remote"},
 		SwapMethod:       "env_var",
 		SwapEnv:          "AF_STACK_S3_ADAPTER",
 		AdminUI:          os.Getenv("AF_STACK_MINIO_CONSOLE_URL"),
@@ -285,35 +296,42 @@ func buildAdapterRegistry(
 		"virtual_keys_active":  virtualKeysActive,
 		"key_management_mode":  string(keyMgmtMode),
 		"spend_tracking_exact": virtualKeysActive,
-		"contract_pending":     true,
 	}
 	if keyMgmtErr != "" {
 		llmCaps["key_management_error"] = keyMgmtErr
 	}
+	llmKind := adapterregistry.KindBuiltin
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("AF_STACK_LLM_GATEWAY_ADAPTER")), "remote") {
+		llmKind = adapterregistry.KindRemote
+	}
 	r.Register(adapterregistry.Slot{
-		ID:           "llm-chat",
-		Tier:         adapterregistry.Tier1,
-		Kind:         adapterregistry.KindBuiltin,
-		Name:         llmName,
-		SwapMethod:   "env_var",
-		SwapEnv:      "AF_STACK_LLM_GATEWAY_ADAPTER",
-		AdminUI:      os.Getenv("AF_STACK_LITELLM_URL"),
-		Capabilities: caps(llmCaps),
-		Probe:        staticStatus(llmStatus),
+		ID:               "llm-chat",
+		Tier:             adapterregistry.Tier1,
+		Kind:             llmKind,
+		Name:             llmName,
+		AvailableBuiltin: []string{"demo", "litellm", "remote"},
+		SwapMethod:       "env_var",
+		SwapEnv:          "AF_STACK_LLM_GATEWAY_ADAPTER",
+		AdminUI:          os.Getenv("AF_STACK_LITELLM_URL"),
+		Capabilities:     caps(llmCaps),
+		Probe:            staticStatus(llmStatus),
 	})
 
+	// Multimodal has a single composition today (first-party provider
+	// adapters keyed off their own provider env vars, with a LiteLLM
+	// fallback); there is no single AF_STACK_MULTIMODAL_ADAPTER selector that
+	// swaps the slot. Advertise SwapMethod "none" rather than a SwapEnv that
+	// nothing reads.
 	r.Register(adapterregistry.Slot{
 		ID:         "multimodal",
 		Tier:       adapterregistry.Tier1,
 		Kind:       adapterregistry.KindBuiltin,
 		Name:       "first-party + litellm",
-		SwapMethod: "env_var",
-		SwapEnv:    "AF_STACK_MULTIMODAL_ADAPTER",
+		SwapMethod: "none",
 		Capabilities: caps(map[string]any{
 			"supports_tts":              true,
 			"supports_stt":              true,
 			"supports_image_generation": true,
-			"contract_pending":          true,
 		}),
 		Probe: staticStatus(llmStatus),
 	})
@@ -458,12 +476,23 @@ func buildAdapterRegistry(
 	if notificationsSvc != nil && notificationsSvc.AdapterAvailable() {
 		notificationName = notificationsSvc.AdapterName()
 		notificationKind = adapterregistry.KindBuiltin
+		// The remote sidecar reports its own upstream name via
+		// /v1/capabilities, so key the Kind off the selection env, not Name.
+		if strings.EqualFold(strings.TrimSpace(os.Getenv("AF_STACK_NOTIFICATIONS_ADAPTER")), "remote") {
+			notificationKind = adapterregistry.KindRemote
+		}
 		notificationStatus = adapterregistry.StatusHealthy
 		switch notificationName {
 		case "resend":
 			channels = []string{"email"}
 		case "log":
 			channels = []string{"log"}
+		case "slack":
+			channels = []string{"chat"}
+		case "twilio":
+			channels = []string{"sms"}
+		case "fcm":
+			channels = []string{"push"}
 		default:
 			channels = []string{notificationName}
 		}
@@ -473,7 +502,7 @@ func buildAdapterRegistry(
 		Tier:             adapterregistry.Tier1,
 		Kind:             notificationKind,
 		Name:             notificationName,
-		AvailableBuiltin: []string{"log", "resend"},
+		AvailableBuiltin: []string{"log", "resend", "slack", "sms", "twilio", "push", "fcm", "remote"},
 		SwapMethod:       "env_var",
 		SwapEnv:          "AF_STACK_NOTIFICATIONS_ADAPTER",
 		Capabilities: caps(map[string]any{
@@ -484,7 +513,6 @@ func buildAdapterRegistry(
 			"tracks_delivery_status":        false,
 			"supports_retry":                false,
 			"supports_metadata_passthrough": true,
-			"contract_pending":              true,
 		}),
 		Probe: staticStatus(notificationStatus),
 	})
@@ -515,35 +543,47 @@ func buildAdapterRegistry(
 
 	secretsStatus := adapterregistry.StatusUnhealthy
 	secretsKind := adapterregistry.KindNone
+	secretsName := "envelope-local"
+	secretsRemote := secretsRemoteName != ""
 	if vault != nil {
 		secretsStatus = adapterregistry.StatusHealthy
 		secretsKind = adapterregistry.KindBuiltin
+	} else if secretsRemote {
+		secretsStatus = adapterregistry.StatusHealthy
+		secretsKind = adapterregistry.KindRemote
+		secretsName = secretsRemoteName
 	}
 	r.Register(adapterregistry.Slot{
-		ID:         "secrets",
-		Tier:       adapterregistry.Tier1,
-		Kind:       secretsKind,
-		Name:       "envelope-local",
-		SwapMethod: "env_var",
-		SwapEnv:    "AF_STACK_SECRETS_ADAPTER",
+		ID:               "secrets",
+		Tier:             adapterregistry.Tier1,
+		Kind:             secretsKind,
+		Name:             secretsName,
+		AvailableBuiltin: []string{"vault", "remote"},
+		SwapMethod:       "env_var",
+		SwapEnv:          "AF_STACK_SECRETS_ADAPTER",
 		Capabilities: caps(map[string]any{
 			"supports_rotation":  vault != nil,
 			"supports_reveal":    vault != nil,
 			"supports_metadata":  vault != nil,
 			"audit_log_revealed": true,
 			"kms_backend":        defaulted(os.Getenv("AF_STACK_KMS_PROVIDER"), "local"),
-			"contract_pending":   true,
 		}),
 		Probe: staticStatus(secretsStatus),
 	})
 
+	// Auth has a single real implementation (better-auth). Rather than
+	// advertise a SwapEnv that nothing reads, list the one supported value in
+	// AvailableBuiltin so ValidateSelections fail-fasts on any other
+	// AF_STACK_AUTH_ADAPTER value — the env is now honestly validated, and the
+	// dashboard/CLI cannot present a swap that does nothing.
 	r.Register(adapterregistry.Slot{
-		ID:         "auth",
-		Tier:       adapterregistry.Tier1,
-		Kind:       adapterregistry.KindBuiltin,
-		Name:       "better-auth",
-		SwapMethod: "env_var",
-		SwapEnv:    "AF_STACK_AUTH_ADAPTER",
+		ID:               "auth",
+		Tier:             adapterregistry.Tier1,
+		Kind:             adapterregistry.KindBuiltin,
+		Name:             "better-auth",
+		AvailableBuiltin: []string{"better-auth"},
+		SwapMethod:       "env_var",
+		SwapEnv:          "AF_STACK_AUTH_ADAPTER",
 		Capabilities: caps(map[string]any{
 			"supports_oauth_providers":     []string{"google", "github", "microsoft"},
 			"supports_magic_links":         true,
@@ -552,7 +592,6 @@ func buildAdapterRegistry(
 			"supports_sso":                 false,
 			"supports_token_introspection": true,
 			"supports_session_enumeration": false,
-			"contract_pending":             true,
 		}),
 		Probe: staticStatus(adapterregistry.StatusHealthy),
 	})
@@ -847,12 +886,109 @@ func main() {
 	// Hook engine. Always constructed; modules register against it.
 	hookEngine := hooks.NewEngine(log)
 
+	// Secrets backend selection (AF_STACK_SECRETS_ADAPTER). Built BEFORE the
+	// storage / LLM / notifications factories so those can consult the vault
+	// for operator-managed integration credentials.
+	//
+	//   - "vault" (default) — the in-tree envelope vault: PG-backed
+	//     suite_secrets rows encrypted with a KMS-loaded cipher.
+	//   - "remote"          — an out-of-process secrets sidecar (HashiCorp
+	//     Vault, Doppler, AWS Secrets Manager, …) over the secrets-v1
+	//     protocol. Its URL/token come from ENV ONLY: the vault is exactly
+	//     what a remote backend replaces, so its creds can't be self-hosted
+	//     inside it.
+	//
+	// The envelope vault additionally backs the KMS-cipher consumers
+	// (operator billing settings, the tenancy secret sink) and the concrete
+	// *secrets.Vault the server currently binds; those remain on the
+	// envelope vault regardless of selection.
+	var vault *secrets.Vault
+	var billingSettingsStore *billing.SettingsStore
+	secretsRemoteName := ""
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("AF_STACK_SECRETS_ADAPTER"))) {
+	case "remote":
+		// ENV-ONLY creds for this slot (never vault-resolved).
+		remoteURL := strings.TrimSpace(os.Getenv("AF_STACK_SECRETS_REMOTE_URL"))
+		remoteToken := strings.TrimSpace(os.Getenv("AF_STACK_SECRETS_REMOTE_TOKEN"))
+		if remoteURL == "" {
+			log.Error("refusing to start: AF_STACK_SECRETS_ADAPTER=remote needs AF_STACK_SECRETS_REMOTE_URL")
+			if database != nil {
+				database.Close()
+			}
+			os.Exit(1)
+		}
+		remoteSecrets, rErr := secretsremote.New(ctx, secretsremote.Config{BaseURL: remoteURL, Token: remoteToken})
+		if rErr != nil {
+			log.Error("refusing to start: remote secrets adapter failed its boot capability probe",
+				"error", rErr, "url", remoteURL)
+			if database != nil {
+				database.Close()
+			}
+			os.Exit(1)
+		}
+		secretsRemoteName = remoteSecrets.Name()
+		log.Warn("secrets: adapter=remote booted and probed; note the runtime's secret consumers (the /api/v1/secrets endpoints, operator billing settings, and the tenancy secret sink) still bind the in-tree envelope *secrets.Vault — wiring the remote store end-to-end needs the server secrets seam (server.Deps.Secrets) generalized from *secrets.Vault to secrets.Store",
+			"backend", secretsRemoteName)
+	case "", "vault":
+		// Secrets vault. Requires PG (for the suite_secrets table) and a
+		// cipher loaded from AF_STACK_KMS_PROVIDER. The default provider is
+		// env, which preserves the AF_STACK_KMS_KEY path; cloud providers
+		// unwrap a data key through AWS/GCP/Azure KMS at boot. When either
+		// database or cipher setup is missing, /api/v1/secrets/* returns
+		// 503 with a SECRETS_NOT_CONFIGURED envelope.
+		if database != nil && database.Pool != nil {
+			cipher, kekErr := secrets.LoadCipher(ctx, log)
+			// KMS preflight: a cipher that parses but can't round-trip is as
+			// broken as one that failed to load — fold a preflight failure
+			// into kekErr so the boot decision treats both the same.
+			if kekErr == nil {
+				if pfErr := cipher.Preflight(); pfErr != nil {
+					kekErr = pfErr
+				}
+			}
+			switch kmsBootDecision(kekErr, secrets.KMSConfigured()) {
+			case kmsFatal:
+				log.Error("refusing to start: KMS is configured but the key could not be loaded — secrets, OAuth tokens, and webhook verification would be silently unavailable",
+					"error", kekErr,
+					"fix", "set AF_STACK_KMS_KEY to 32 random bytes hex-encoded (or fix AF_STACK_KMS_PROVIDER + the cloud data key), or unset them to boot with the dev key")
+				database.Close()
+				os.Exit(1)
+			case kmsDegrade:
+				log.Error("secrets: KMS load failed; secrets vault disabled (no KMS explicitly configured)",
+					"error", kekErr,
+				)
+			case kmsServe:
+				vault, err = secrets.New(database.Pool, cipher, log)
+				if err != nil {
+					log.Error("secrets: vault init failed", "error", err)
+					vault = nil
+				} else {
+					// Operator-panel billing settings share the vault's
+					// KMS-backed cipher (separate table: global rows, no
+					// tenant FK).
+					billingSettingsStore = billing.NewSettingsStore(database.Pool, cipher)
+					log.Info("secrets vault ready",
+						"key_id", cipher.KeyID(),
+						"dev_mode", cipher.DevMode(),
+					)
+				}
+			}
+		} else {
+			log.Info("secrets vault not configured (no database); /api/v1/secrets/* will return 503")
+		}
+	}
+	// A bogus AF_STACK_SECRETS_ADAPTER value leaves vault nil here; the
+	// adapter registry's ValidateSelections below fails the boot with a clear
+	// "not an implemented adapter" error before the server ever listens.
+
 	// Optional: object storage. When AF_STACK_S3_ENDPOINT is empty the
 	// adapter is skipped — /api/v1/storage/* will return 503 with a
 	// STORAGE_NOT_CONFIGURED envelope rather than crashing the runtime.
+	// The "remote" adapter is URL-driven (no S3 endpoint), so it wires
+	// whenever selected even with AF_STACK_S3_ENDPOINT unset.
 	var store storage.Storage
-	if cfg.Storage.Endpoint != "" {
-		store, err = newStorage(cfg.Storage)
+	if cfg.Storage.Endpoint != "" || cfg.Storage.Adapter == "remote" {
+		store, err = newStorage(ctx, cfg.Storage, vault)
 		if err != nil {
 			log.Error("storage adapter init failed; continuing without storage",
 				"adapter", cfg.Storage.Adapter,
@@ -916,55 +1052,6 @@ func main() {
 			"supports_gpu", caps.SupportsGPU,
 			"cold_start_ms", caps.ColdStartMS,
 		)
-	}
-
-	// Secrets vault. Requires PG (for the suite_secrets table) and a
-	// cipher loaded from AF_STACK_KMS_PROVIDER. The default provider is
-	// env, which preserves the AF_STACK_KMS_KEY path; cloud providers
-	// unwrap a data key through AWS/GCP/Azure KMS at boot. When either
-	// database or cipher setup is missing, /api/v1/secrets/* returns
-	// 503 with a SECRETS_NOT_CONFIGURED envelope.
-	var vault *secrets.Vault
-	var billingSettingsStore *billing.SettingsStore
-	if database != nil && database.Pool != nil {
-		cipher, kekErr := secrets.LoadCipher(ctx, log)
-		// KMS preflight: a cipher that parses but can't round-trip is as
-		// broken as one that failed to load — fold a preflight failure
-		// into kekErr so the boot decision treats both the same.
-		if kekErr == nil {
-			if pfErr := cipher.Preflight(); pfErr != nil {
-				kekErr = pfErr
-			}
-		}
-		switch kmsBootDecision(kekErr, secrets.KMSConfigured()) {
-		case kmsFatal:
-			log.Error("refusing to start: KMS is configured but the key could not be loaded — secrets, OAuth tokens, and webhook verification would be silently unavailable",
-				"error", kekErr,
-				"fix", "set AF_STACK_KMS_KEY to 32 random bytes hex-encoded (or fix AF_STACK_KMS_PROVIDER + the cloud data key), or unset them to boot with the dev key")
-			database.Close()
-			os.Exit(1)
-		case kmsDegrade:
-			log.Error("secrets: KMS load failed; secrets vault disabled (no KMS explicitly configured)",
-				"error", kekErr,
-			)
-		case kmsServe:
-			vault, err = secrets.New(database.Pool, cipher, log)
-			if err != nil {
-				log.Error("secrets: vault init failed", "error", err)
-				vault = nil
-			} else {
-				// Operator-panel billing settings share the vault's
-				// KMS-backed cipher (separate table: global rows, no
-				// tenant FK).
-				billingSettingsStore = billing.NewSettingsStore(database.Pool, cipher)
-				log.Info("secrets vault ready",
-					"key_id", cipher.KeyID(),
-					"dev_mode", cipher.DevMode(),
-				)
-			}
-		}
-	} else {
-		log.Info("secrets vault not configured (no database); /api/v1/secrets/* will return 503")
 	}
 
 	// Jobs (River-backed PG queue). Requires DB; when absent the endpoints
@@ -1126,7 +1213,7 @@ func main() {
 	// out to 100+ providers based on apps/backend/litellm-config.yaml.
 	// AF Stack keeps tenant resolution, cost ledger, budgets, cache,
 	// and pre/post-call hooks on this side.
-	llmGW := buildLLMGateway(log, afClient)
+	llmGW := buildLLMGateway(ctx, log, afClient, vault)
 
 	// Gateway guardrails (Phase 2 completeness). This runs at the AF
 	// Stack LLM gateway boundary only: request/response text can be
@@ -1397,7 +1484,7 @@ func main() {
 	// "log" in the dashboard and can flip the env var to switch.
 	var notificationsSvc *notifications.Service
 	{
-		adapter := buildNotificationsAdapter(log)
+		adapter := buildNotificationsAdapter(ctx, log, vault)
 		if database != nil && database.Pool != nil {
 			notificationsSvc = notifications.NewService(database.Pool, adapter, log)
 		} else {
@@ -1633,6 +1720,7 @@ func main() {
 		afClient,
 		store,
 		vault,
+		secretsRemoteName,
 		jobsManager,
 		llmGW,
 		litellmAdmin,
@@ -1849,7 +1937,7 @@ func main() {
 // minio-go speaks vanilla S3, so both "minio" and "s3" share one client.
 // The only difference is the TLS default: minio = off (local docker),
 // s3 = on (AWS endpoint).
-func newStorage(cfg config.StorageConfig) (storage.Storage, error) {
+func newStorage(ctx context.Context, cfg config.StorageConfig, vault *secrets.Vault) (storage.Storage, error) {
 	switch cfg.Adapter {
 	case "", "minio":
 		return minioadapter.New(minioadapter.Config{
@@ -1867,8 +1955,24 @@ func newStorage(cfg config.StorageConfig) (storage.Storage, error) {
 			SecretKey: cfg.SecretKey,
 			Region:    cfg.Region,
 		})
+	case "remote":
+		// Out-of-process storage sidecar over the storage-v1 protocol.
+		// Creds: AF_STACK_STORAGE_REMOTE_URL/_TOKEN, falling back to the
+		// operator-managed integration credentials in the vault. remote.New
+		// synchronously probes GET /v1/capabilities so a misconfigured URL
+		// fails here (the caller degrades to no storage) rather than on the
+		// first user request.
+		baseURL := resolveCred(vault, "storage", "remote_url", cfg.RemoteURL)
+		if strings.TrimSpace(baseURL) == "" {
+			return nil, fmt.Errorf("storage: adapter=remote needs AF_STACK_STORAGE_REMOTE_URL (or the storage/remote_url integration credential)")
+		}
+		token := resolveCred(vault, "storage", "remote_token", cfg.RemoteToken)
+		return storageremote.New(ctx, storageremote.Config{
+			BaseURL: baseURL,
+			Token:   token,
+		})
 	default:
-		return nil, fmt.Errorf("storage: unknown adapter %q", cfg.Adapter)
+		return nil, fmt.Errorf("storage: unknown adapter %q (want minio|s3|remote)", cfg.Adapter)
 	}
 }
 
@@ -1927,16 +2031,17 @@ func newSandbox(cfg config.SandboxConfig, store storage.Storage, log *slog.Logge
 // constructed (e.g. resend with no key), we log a warning and fall
 // back to the log adapter — better to keep the dashboard's tab live
 // than crash the runtime.
-func buildNotificationsAdapter(log *slog.Logger) notifications.Adapter {
+func buildNotificationsAdapter(ctx context.Context, log *slog.Logger, vault *secrets.Vault) notifications.Adapter {
 	choice := strings.ToLower(strings.TrimSpace(os.Getenv("AF_STACK_NOTIFICATIONS_ADAPTER")))
 	switch choice {
 	case "", "log":
-		log.Info("notifications: adapter=log (dev default; set AF_STACK_NOTIFICATIONS_ADAPTER=resend to switch)")
+		log.Info("notifications: adapter=log (dev default; set AF_STACK_NOTIFICATIONS_ADAPTER=resend|slack|sms|push|remote to switch)")
 		return notificationslog.New(log)
 	case "resend":
-		key := strings.TrimSpace(os.Getenv("RESEND_API_KEY"))
+		// RESEND_API_KEY, else the operator-managed integration credential.
+		key := resolveCred(vault, "notifications", "resend_api_key", os.Getenv("RESEND_API_KEY"))
 		if key == "" {
-			log.Warn("notifications: adapter=resend selected but RESEND_API_KEY empty; falling back to log adapter")
+			log.Warn("notifications: adapter=resend selected but no RESEND_API_KEY (env or integration credential); falling back to log adapter")
 			return notificationslog.New(log)
 		}
 		adapter, err := notificationsresend.New(notificationsresend.Config{
@@ -1948,6 +2053,75 @@ func buildNotificationsAdapter(log *slog.Logger) notifications.Adapter {
 			return notificationslog.New(log)
 		}
 		log.Info("notifications: adapter=resend")
+		return adapter
+	case "slack":
+		webhook := resolveCred(vault, "notifications", "slack_webhook_url", os.Getenv("AF_STACK_SLACK_WEBHOOK_URL"))
+		if webhook == "" {
+			log.Warn("notifications: adapter=slack selected but no Slack webhook (AF_STACK_SLACK_WEBHOOK_URL or integration credential); falling back to log adapter")
+			return notificationslog.New(log)
+		}
+		adapter, err := notificationsslack.New(ctx, notificationsslack.Config{WebhookURL: webhook})
+		if err != nil {
+			log.Warn("notifications: adapter=slack init failed; falling back to log adapter", "error", err)
+			return notificationslog.New(log)
+		}
+		log.Info("notifications: adapter=slack")
+		return adapter
+	case "sms", "twilio":
+		sid := resolveCred(vault, "notifications", "twilio_account_sid", os.Getenv("AF_STACK_TWILIO_ACCOUNT_SID"))
+		token := resolveCred(vault, "notifications", "twilio_auth_token", os.Getenv("AF_STACK_TWILIO_AUTH_TOKEN"))
+		from := resolveCred(vault, "notifications", "twilio_from_number", os.Getenv("AF_STACK_TWILIO_FROM_NUMBER"))
+		if sid == "" || token == "" || from == "" {
+			log.Warn("notifications: adapter=sms selected but Twilio creds incomplete (AF_STACK_TWILIO_ACCOUNT_SID/_AUTH_TOKEN/_FROM_NUMBER or integration credentials); falling back to log adapter")
+			return notificationslog.New(log)
+		}
+		adapter, err := notificationssms.New(ctx, notificationssms.Config{
+			AccountSID: sid,
+			AuthToken:  token,
+			FromNumber: from,
+			BaseURL:    strings.TrimSpace(os.Getenv("AF_STACK_TWILIO_BASE_URL")),
+		})
+		if err != nil {
+			log.Warn("notifications: adapter=sms init failed; falling back to log adapter", "error", err)
+			return notificationslog.New(log)
+		}
+		log.Info("notifications: adapter=sms (twilio)")
+		return adapter
+	case "push", "fcm":
+		projectID := resolveCred(vault, "notifications", "fcm_project_id", os.Getenv("AF_STACK_FCM_PROJECT_ID"))
+		accessToken := resolveCred(vault, "notifications", "fcm_access_token", os.Getenv("AF_STACK_FCM_ACCESS_TOKEN"))
+		if projectID == "" || accessToken == "" {
+			log.Warn("notifications: adapter=push selected but FCM creds incomplete (AF_STACK_FCM_PROJECT_ID/_ACCESS_TOKEN or integration credentials); falling back to log adapter")
+			return notificationslog.New(log)
+		}
+		adapter, err := notificationspush.New(ctx, notificationspush.Config{
+			ProjectID:   projectID,
+			AccessToken: accessToken,
+			BaseURL:     strings.TrimSpace(os.Getenv("AF_STACK_FCM_BASE_URL")),
+		})
+		if err != nil {
+			log.Warn("notifications: adapter=push init failed; falling back to log adapter", "error", err)
+			return notificationslog.New(log)
+		}
+		log.Info("notifications: adapter=push (fcm)")
+		return adapter
+	case "remote":
+		// Out-of-process notifications sidecar. Creds are ENV-ONLY (the
+		// notifications integration slot exposes no remote_* fields).
+		baseURL := strings.TrimSpace(os.Getenv("AF_STACK_NOTIFICATIONS_ADAPTER_URL"))
+		if baseURL == "" {
+			log.Warn("notifications: adapter=remote selected but AF_STACK_NOTIFICATIONS_ADAPTER_URL empty; falling back to log adapter")
+			return notificationslog.New(log)
+		}
+		adapter, err := notificationsremote.New(ctx, notificationsremote.Config{
+			BaseURL: baseURL,
+			Token:   strings.TrimSpace(os.Getenv("AF_STACK_NOTIFICATIONS_ADAPTER_TOKEN")),
+		})
+		if err != nil {
+			log.Warn("notifications: adapter=remote init failed; falling back to log adapter", "error", err)
+			return notificationslog.New(log)
+		}
+		log.Info("notifications: adapter=remote", "url", baseURL)
 		return adapter
 	default:
 		log.Warn("notifications: unknown adapter; falling back to log",
@@ -2113,15 +2287,52 @@ func splitEnvList(raw string) []string {
 //
 // afClient is kept in the signature for forward-compat (future
 // AF-native fallback) but is no longer used by the gateway itself.
-func buildLLMGateway(log *slog.Logger, afClient *agentfield.Client) *llmgateway.Gateway {
+func buildLLMGateway(ctx context.Context, log *slog.Logger, afClient *agentfield.Client, vault *secrets.Vault) *llmgateway.Gateway {
 	_ = afClient // reserved for forward-compat
 
-	demoMode := strings.ToLower(strings.TrimSpace(os.Getenv("AF_STACK_DEMO_MODE")))
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("AF_STACK_LLM_PROVIDER")), "demo") ||
-		demoMode == "true" ||
-		(demoMode == "auto" && !hasLLMProviderKey()) {
-		log.Info("llm gateway: demo provider enabled")
+	// AF_STACK_LLM_GATEWAY_ADAPTER is the explicit selector:
+	//   - "demo"    — the in-process demo provider (no upstream calls).
+	//   - "litellm" — the LiteLLM Proxy sidecar (the default fan-out path).
+	//   - "remote"  — an OpenAI-compatible sidecar (Helicone, Portkey, vLLM,
+	//     direct OpenAI, …) over the llm-chat-v1 protocol.
+	//
+	// When unset we preserve the legacy behaviour: demo is auto-selected via
+	// AF_STACK_LLM_PROVIDER=demo / AF_STACK_DEMO_MODE, otherwise LiteLLM.
+	choice := strings.ToLower(strings.TrimSpace(os.Getenv("AF_STACK_LLM_GATEWAY_ADAPTER")))
+	switch choice {
+	case "remote":
+		baseURL := resolveCred(vault, "llm", "remote_url", os.Getenv("AF_STACK_LLM_REMOTE_URL"))
+		if strings.TrimSpace(baseURL) == "" {
+			log.Error("refusing to start: AF_STACK_LLM_GATEWAY_ADAPTER=remote needs AF_STACK_LLM_REMOTE_URL (or the llm/remote_url integration credential)")
+			os.Exit(1)
+		}
+		token := resolveCred(vault, "llm", "remote_token", os.Getenv("AF_STACK_LLM_REMOTE_TOKEN"))
+		adapter, err := llmremote.New(ctx, llmremote.Config{BaseURL: baseURL, Token: token})
+		if err != nil {
+			log.Error("refusing to start: remote llm-gateway adapter failed its boot capability probe",
+				"error", err, "url", baseURL)
+			os.Exit(1)
+		}
+		log.Info("llm gateway: remote adapter", "url", baseURL)
+		return llmgateway.New(chatOnlyProviderClient{Provider: adapter})
+	case "demo":
+		log.Info("llm gateway: demo provider enabled (AF_STACK_LLM_GATEWAY_ADAPTER=demo)")
 		return llmgateway.New(llmgateway.NewDemoProvider())
+	case "", "litellm":
+		// fall through to the litellm path below (with legacy demo-auto only
+		// when no explicit adapter was named).
+	}
+
+	// Legacy demo auto-selection applies only when no explicit adapter was
+	// named — an explicit AF_STACK_LLM_GATEWAY_ADAPTER=litellm forces LiteLLM.
+	if choice == "" {
+		demoMode := strings.ToLower(strings.TrimSpace(os.Getenv("AF_STACK_DEMO_MODE")))
+		if strings.EqualFold(strings.TrimSpace(os.Getenv("AF_STACK_LLM_PROVIDER")), "demo") ||
+			demoMode == "true" ||
+			(demoMode == "auto" && !hasLLMProviderKey()) {
+			log.Info("llm gateway: demo provider enabled")
+			return llmgateway.New(llmgateway.NewDemoProvider())
+		}
 	}
 
 	url, masterKey := litellmEnv()
