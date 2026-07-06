@@ -52,7 +52,7 @@ talk to upstream OSS directly — always through the runtime.
      │            │                │                   │
 ┌────▼────┐  ┌────▼─────┐  ┌───────▼─────┐  ┌──────────▼────────────┐
 │ ④ REASON│  │ ⑤ EXEC   │  │ ⑥ DELIVERY  │  │ ⑦ OBSERVABILITY       │
-│ -ING    │  │ Sandboxes│  │ Svix        │  │ OpenTelemetry         │
+│ -ING    │  │ Sandboxes│  │ Webhooks    │  │ OpenTelemetry         │
 │ agent-  │  │  ·docker │  │ Resend      │  │ Prometheus            │
 │  field  │  │  ·gvisor │  │ Stripe/Lago │  │ slog                  │
 │ LLM     │  │  ·e2b    │  │             │  │                       │
@@ -68,7 +68,6 @@ talk to upstream OSS directly — always through the runtime.
 │ ⑧ DATA                                                              │
 │   Postgres 16 + pgvector  (relational · vector · queue · FTS · RLS) │
 │   MinIO / S3              (object storage)                          │
-│   Redis 7                 (Svix-private cache only)                 │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -425,8 +424,7 @@ end-to-end.
 
 ```
 postgres        litellm        agentfield      runtime
-minio           svix-server    svix-postgres   svix-redis
-dashboard       customer-app   supportdesk-agent
+minio           dashboard      customer-app    supportdesk-agent
 ```
 
 Remote-adapter sidecars (operator-supplied) extend compose via

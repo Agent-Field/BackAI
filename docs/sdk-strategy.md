@@ -2,10 +2,11 @@
 
 ## The invariant
 
-**All model calls go through AgentField.** No direct provider calls. No
-`suite.llm.chat()` that bypasses AF. The OpenAI-compatible endpoint at
-`/api/v1/llm/*` exists for ecosystem compatibility, but underneath it routes
-through AF so identity, traces, cost, policy, and audit are preserved.
+**All model calls go through AgentField.** No direct provider calls, no back
+door around AF. Both entry points — the `suite.llm.chat()` SDK method and the
+OpenAI-compatible endpoint at `/api/v1/llm/*` — route through the gateway
+(`suite.llm.chat()` is just the ergonomic wrapper that POSTs to that
+endpoint), so identity, traces, cost, policy, and audit are preserved.
 
 Every LLM call = an AF execution. Single source of truth.
 
@@ -200,8 +201,12 @@ Internally these route through AF. They are NOT a back-door that bypasses AF.
 They exist so existing tooling (Vercel AI SDK, LangChain, openai-python,
 Cursor) just works. Cost, traces, identity, policy still apply.
 
-There is no `suite.llm.chat()` SDK method. If you want OpenAI-format from
-suite code, write a small AF reasoner or use the harness primitive.
+`suite.llm.chat()` — plus `suite.llm.embed()` and `suite.llm.models()` — is
+the ergonomic SDK wrapper around this endpoint. It POSTs to
+`/api/v1/llm/chat/completions`, so it routes through the gateway exactly like
+a raw OpenAI client would; it is **not** a bypass. Shipped in both the Python
+and TypeScript SDKs. (Writing a small AF reasoner or using the harness
+primitive remains an option when you want more control.)
 
 ## Three access tiers
 
@@ -216,9 +221,9 @@ All three target the same backend. SDKs are convenience.
 ## What the Suite SDK does NOT do
 
 - **No direct provider calls.** Everything routes through AF.
-- **No `suite.llm.*` standalone path.** OpenAI-compatible endpoint is the
-  external-facing shim; internal code calls AF reasoners or
-  `suite.harness.run()`.
+- **No provider bypass.** `suite.llm.*` (`chat` / `embed` / `models`) is the
+  OpenAI-format path from suite code, but it is a wrapper over `/api/v1/llm/*`
+  and routes through the gateway — never a direct provider call.
 - **No mock or stub mode.** Tests hit a real backend (compose) or mock at HTTP.
 - **No client-side state.** No caches, no session managers. Tenant context
   comes from `ctx`, set by middleware.
@@ -245,7 +250,9 @@ All three target the same backend. SDKs are convenience.
 **Admin SDK after** (ship the 30 admin methods as a separate package once
 main SDK has shipped and we have v1 users).
 
-Python first. TypeScript parity. Go after.
+Python first. TypeScript parity. Go is planned but **not yet implemented** —
+`packages/sdk-go` is an empty stub today (only `doc.go` + a version
+constant), not a shipped SDK.
 
 Every method maps to a documented REST endpoint. OpenAPI spec auto-generated.
 

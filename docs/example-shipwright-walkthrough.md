@@ -36,7 +36,7 @@ Users sign up with GitHub, point at a repo, give a goal, get a PR opened.
 | storage | on | MinIO (dev) → S3 (prod) |
 | secrets-vault | on | PG + KMS, rotation enabled |
 | notifications | on | log-stub → Postmark |
-| webhooks-in | on | Svix (GitHub events) |
+| webhooks-in | on | native inbound receiver (GitHub events) |
 | billing | on | Stripe + Lago metering |
 | dashboard | on, customized | shadcn |
 | **sandbox** | **on, critical** | Firecracker via Flintlock (prod) OR e2b (early days) |
@@ -101,7 +101,8 @@ shipwright/
 16. **notifications** sends "PR opened" via Postmark
 17. **billing.metering** rolls up LLM tokens + sandbox_seconds → Lago events
     → Stripe invoices
-18. GitHub PR comment arrives → **Svix** verifies HMAC → triggers
+18. GitHub PR comment arrives → **inbound webhook receiver**
+    (`POST /webhooks/in/{slug}`) verifies HMAC + dedups → triggers
     `swe-planner.address_feedback` → loop
 
 Single build touches: identity → MT → gateway → AF (heavy) → llm-gateway →
@@ -171,7 +172,7 @@ result = await app.sandbox.run(
 - Sandbox infrastructure (the actual Firecracker pool)
 - LLM cost tracking + per-tenant attribution
 - Stripe + Lago integration
-- Webhook handling for GitHub (HMAC, replay, dedup via Svix)
+- Webhook handling for GitHub (HMAC, replay, dedup via the native inbound receiver)
 - Per-tenant isolation (RLS handled it)
 - AF DAG visualization (suite dashboard embeds AF)
 - Auto-scaling sandbox workers (sandbox-host pool)
@@ -191,8 +192,8 @@ promise made concrete.
 
 1. Firecracker needs KVM, doesn't run on Mac. Dev uses Docker adapter
    locally, Firecracker in prod. Document the swap.
-2. GitHub webhook dedup when GH retries — Svix handles HMAC; dev still needs
-   idempotency in handler. Document the pattern.
+2. GitHub webhook dedup when GH retries — the inbound receiver verifies HMAC
+   and dedups; dev still needs idempotency in the handler. Document the pattern.
 3. BYO LLM keys UI is custom. Document "BYO key" pattern.
 4. Build progress streaming — AF has SSE; suite needs to expose through
    gateway with tenant scoping. Document.

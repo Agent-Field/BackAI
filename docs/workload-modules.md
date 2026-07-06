@@ -3,14 +3,34 @@
 Workload modules are the way BackAI pulls in domain-specific features
 (notes, podcast jobs, reactive enrichments, etc.) without forking the
 runtime. Each module is a directory you drop under
-`workload-modules/<id>/`; the runtime scans `config.yaml` at boot,
-loads each enabled module, registers its routes + migrations + crons,
-and exposes them through the same auth + tenancy chain as the built-in
-modules.
+`workload-modules/<id>/`; the design is for the runtime to scan
+`config.yaml` at boot, load each enabled module, register its routes +
+migrations + crons, and expose them through the same auth + tenancy
+chain as the built-in modules.
 
 The pattern was extracted from Example 01 (Notable) and Example 04
 (Podcast). The examples that ship in the repo are the canonical
 reference for how a real workload module looks.
+
+> **Status (what's wired today).** This document describes the **intended
+> design**. `af-stack module new <id>` scaffolds the directory layout, but
+> the **runtime-side loader is not yet wired**:
+>
+> - The runtime only reads a `workload_modules:` list of ids from
+>   `config.yaml` (`services/runtime/internal/config/config.go`) and
+>   surfaces it on `GET /api/v1/modules`. There is no
+>   `services/runtime/internal/workload/` loader package yet, so no
+>   module's routes, migrations, or crons are auto-loaded at boot.
+> - The **Go in-runtime handler** is the intended primary path, but the
+>   scaffold emits a disabled `handlers/routes.go.example` placeholder
+>   ("rename to `routes.go` when the workload handler package is enabled in
+>   your fork") — the `workload.Request` / `workload.Response` contract
+>   shown below does not exist in the tree yet.
+> - The **Python-sidecar handler** and **per-module cron seeding** are
+>   design sketches, not shipped behavior.
+>
+> Custom backend routes today go through the core runtime or an AF agent.
+> Treat every section below as the target design.
 
 ## Directory layout
 
@@ -69,10 +89,12 @@ meters:
     description: One per POST /workload/notes.
 ```
 
-## How the runtime loads it
+## How the runtime loads it (intended design — not yet wired)
 
-At boot, `services/runtime/internal/workload/loader.go` reads
-`config.yaml`:
+The flow below is the design a future `services/runtime/internal/workload/`
+loader will implement. Today the runtime only reads the `workload_modules:`
+id list from `config.yaml`; none of the mount / migrate / seed steps below
+run yet. At boot the loader will read `config.yaml`:
 
 ```yaml
 workload_modules:
@@ -165,8 +187,11 @@ async def create_note(payload: dict[str, any]) -> dict[str, any]:
     return {"id": new_id}
 ```
 
-The runtime proxies HTTP requests at `/workload/notes-py/notes` to the
-reasoner. The tenant id is injected as `_tenant_id` in the payload.
+In the intended design the runtime proxies HTTP requests at
+`/workload/notes-py/notes` to the reasoner, injecting the tenant id as
+`_tenant_id` in the payload. This proxy path is **not wired yet** — a
+Python workload today runs as a normal AF agent that you invoke through
+`app.*` / `suite.agents.*`, not via a `/workload/...` route.
 
 ## Calling agents from a workload handler
 
@@ -185,7 +210,12 @@ to the calling tenant.
 
 ## Crons
 
-`crons/seed.yaml` is upserted into `suite_crons` at boot:
+Crons are rows in the `suite_crons` table. The runtime's cron scheduler
+(`services/runtime/internal/crons`, robfig/cron v3, 60s tick, multi-replica
+safe) dispatches due rows via the jobs manager — that part is real, and you
+create crons through the API / `suite.crons.*` SDK. In the intended design a
+module ships a `crons/seed.yaml` that the loader upserts into `suite_crons`
+at boot:
 
 ```yaml
 - name: notes-daily-digest
@@ -195,7 +225,8 @@ to the calling tenant.
     template: daily-digest
 ```
 
-The runtime's existing cron scheduler handles dispatch.
+The per-module `crons/seed.yaml` boot-upsert is part of the loader that is
+**not yet wired** — until then, seed crons via the API / SDK.
 
 ## Removing a module
 

@@ -39,7 +39,7 @@ Source: `packages/sdk-py/af_stack/`
 | `suite.sandbox.get(run_id)` | Get a run's status + output | `GET /api/v1/sandbox/runs/{id}` |
 | `suite.sandbox.stop(run_id)` | Stop a running sandbox | `DELETE /api/v1/sandbox/runs/{id}` |
 | `suite.sandbox.pool()` | Pool stats (warm / active / queued) | `GET /api/v1/sandbox/pool` |
-| `suite.jobs.enqueue(name, args, opts)` | Enqueue a background job | `POST /api/v1/jobs` |
+| `suite.jobs.enqueue(name, args, opts)` | Enqueue a background job (Go in-process handlers only — Python/TS remote-language jobs are rejected with `ErrRemoteJobsNotSupported`) | `POST /api/v1/jobs` |
 | `suite.jobs.get(job_id)` | Job status | `GET /api/v1/jobs/{id}` |
 | `suite.jobs.retry(job_id)` | Retry a failed job | `POST /api/v1/jobs/{id}/retry` |
 | `suite.jobs.list(opts)` | List jobs | `GET /api/v1/jobs` |
@@ -55,7 +55,7 @@ Source: `packages/sdk-py/af_stack/`
 | `suite.secrets.list()` | List secret keys (values masked) | `GET /api/v1/secrets` |
 | `suite.secrets.reveal(key)` | One-shot audited reveal of a secret value | `POST /api/v1/secrets/{key}/reveal` |
 | `suite.secrets.rotate(key, new_value)` | Rotate a secret's value in place | `POST /api/v1/secrets/{key}/rotate` |
-| `suite.webhooks.send(event_type, payload, opts)` | Send via Svix | `POST /api/v1/webhooks/send` |
+| `suite.webhooks.send(event_type, payload, opts)` | Send via the native in-process outbox (PG-backed, HMAC-signed, retried with backoff) | `POST /api/v1/webhooks/send` |
 | `suite.webhooks.deliveries(opts)` | List recent outbound deliveries | `GET /api/v1/webhooks/deliveries` |
 | `suite.notifications.send(channel, recipient, template, data)` | Send via configured adapter | `POST /api/v1/notifications` |
 | `suite.billing.upsert_customer(tenant)` | Sync customer with Stripe/Lago | `POST /api/v1/billing/customers` |

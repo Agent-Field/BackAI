@@ -20,7 +20,6 @@ holes are listed below in priority order.
 |---|---|---|
 | Auth | **better-auth** | Modern Node auth with OAuth providers built in |
 | LLM provider routing | **LiteLLM** (sidecar) | 100+ upstream providers, OpenAI-compat surface |
-| Outbound webhooks | **Svix** (sidecar) | Delivery queue, retries, signing, replay protection, message log |
 | Job queue | **River** | PG-backed, multi-replica, no Redis |
 | Cron parsing | **robfig/cron/v3** | Industry standard |
 | Vector store | **pgvector** | Avoids Pinecone op cost |
@@ -180,7 +179,7 @@ script. **Verdict: keep.**
    and rerun-from-step without duplicating AgentField state.
 5. **Approvals primitive** — general human decision point for any flow.
 
-Completed swaps: LiteLLM, Svix, `uvx` in agent containers, and harnesses
+Completed swaps: LiteLLM, `uvx` in agent containers, and harnesses
 in agent containers.
 
 ## What we KEEP hand-rolled (and why)

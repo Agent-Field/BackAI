@@ -12,6 +12,12 @@ This document covers:
 4. The runtime endpoint contract.
 5. Limitations of the v1 design.
 
+> **v1 is build-time discovery only.** Plugins are TypeScript files bundled
+> into the dashboard at build time by the prebuild scanner (§2); there is
+> **no dynamic or runtime plugin loading**. The runtime's
+> `GET /api/v1/plugins` (§4) intentionally returns an empty list — the
+> dashboard merges its own build-time manifest client-side.
+
 ---
 
 ## 1. Plugin schema

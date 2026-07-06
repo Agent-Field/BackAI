@@ -95,7 +95,7 @@ These behave consistently across every page. Designer should treat them as the c
   - Jump to: any page, tenant, agent, run, key
   - Actions: common mutations (issue key, set budget, test agent, etc.)
   - Docs: search the docs site
-  - External: link out to adapter admin UIs (LiteLLM admin, MinIO console, Svix dashboard, etc.)
+  - External: link out to adapter admin UIs (LiteLLM admin, MinIO console, etc.)
 
 ### Mutation pattern
 - Create/edit flows open as right-side drawers, not modals (preserves list context behind)
@@ -272,7 +272,7 @@ For each page below: **purpose** (why it exists), **data displayed** (what to sh
   - Each entry has: timestamp, event type icon, summary text, optional drill link
   - Event types include: run completed / failed, deploy, tenant created, budget threshold crossed, configuration changed, error
 - **Stack status row**
-  - Health pill per backing service (postgres, litellm, agentfield, river, svix, minio, etc.)
+  - Health pill per backing service (postgres, litellm, agentfield, river, minio, etc.)
   - Each pill shows: name, version, status dot, last-checked timestamp
 
 #### Quick actions row (always visible)
@@ -452,11 +452,11 @@ For each page below: **purpose** (why it exists), **data displayed** (what to sh
   - Retry schedule (next attempt + remaining)
 
 **Actions**:
-- Manually replay a delivery
+- Manually replay a delivery (`POST /api/v1/webhooks/deliveries/{id}/retry`)
 - Filter, search
-- Adapter pill links to Svix dashboard for replay archive
 
 **Notes**:
+- The delivery archive and replay history are served directly by the runtime's native outbox (`GET /api/v1/webhooks/deliveries`, `GET /api/v1/webhooks/deliveries/{id}`) — there is no external webhook dashboard to link out to.
 - Subscriber configuration lives in Setup → Webhook subscribers, **not** here. This page is purely observability.
 
 ---
@@ -946,7 +946,7 @@ That's the full set of fields the runtime returns today. Render them in a sortab
 - Add subscriber
 - Rotate signing key
 - Pause / resume
-- Open Svix dashboard for delivery archive
+- View the delivery archive in Observability → Webhook deliveries (the runtime's native delivery ledger)
 
 ---
 
@@ -1135,7 +1135,7 @@ The pages below were missed in the first pass. They cover backend subsystems tha
 
 **Backing service status grid**
 - Row per backing service: name, status dot (green/yellow/red), version, last-checked timestamp, link to native admin UI
-- Services to include: postgres, litellm, agentfield, river (via runtime healthcheck), svix, minio, redis (svix-private)
+- Services to include: postgres, litellm, agentfield, river (via runtime healthcheck), minio
 - Runtime self-status: own `/health`, `/ready`, current uptime, build version
 
 **LLM provider availability** (via LiteLLM `GET /health` — link out if unhealthy)
@@ -1419,7 +1419,6 @@ Conventions:
 - "Runtime" = our Go runtime at `:8080`, paths under `/api/v1/*`
 - "LiteLLM" = sidecar at `:4000`, admin auth via `LITELLM_MASTER_KEY` header
 - "AgentField" = control plane at `:8081` (mostly proxied through the runtime's `internal/agentfield` client)
-- "Svix" = sidecar at `:8071`
 - "Postgres" = direct queries to `pg_stat_*` views and our `suite_*` tables
 - "MinIO" = admin at `:9000`, console at `:9001`
 - "River" = job queue, queried via the `river-pkg` Go library (no HTTP)
@@ -1442,7 +1441,7 @@ Conventions:
 | Queue | Runtime `GET /api/v1/queues/summary`, `GET /api/v1/jobs`, `GET /api/v1/jobs/{id}` | River library queries server-side | — |
 | Cache | Runtime `GET /api/v1/llm/cache/stats` | — | Savings forecast |
 | Sandbox runs | Runtime `GET /api/v1/sandbox/runs`, `GET /api/v1/sandbox/runs/{id}`, `GET /api/v1/sandbox/runs/{id}/logs`, `DELETE /api/v1/sandbox/runs/{id}` | — | — |
-| Webhook deliveries (outbound) | Runtime `GET /api/v1/webhooks/deliveries`, `GET /api/v1/webhooks/deliveries/{id}`, `POST /api/v1/webhooks/deliveries/{id}/retry` | Svix dashboard at `:8071` (link out) for delivery archive, replay, signing key history | — |
+| Webhook deliveries (outbound) | Runtime `GET /api/v1/webhooks/deliveries`, `GET /api/v1/webhooks/deliveries/{id}`, `POST /api/v1/webhooks/deliveries/{id}/retry` | None — the native outbox serves the full delivery archive, replay history, and signing-key metadata from these same runtime endpoints | — |
 | Notifications | Runtime `GET /api/v1/notifications`, `GET /api/v1/notifications/{id}`, `GET /api/v1/notifications/stats`, `POST /api/v1/notifications` (resend) | — | — |
 | Approvals | Runtime `GET /api/v1/approvals`, `GET /api/v1/approvals/{id}`, `POST /api/v1/approvals/{id}/decide` | — | Average decision time |
 | Activity (customer) | Runtime `GET /api/v1/activity` (filters) | — | — |
@@ -1495,7 +1494,7 @@ Conventions:
 | Auth providers | Better-auth config via dashboard (no runtime endpoint) | — | — |
 | LLM providers | Runtime `GET /api/v1/llm/models` — returns id, display_name, provider, cost in/out, supports_streaming, supports_tools. That's the v1 surface. | LiteLLM admin at `:4000/ui` (link out) for context window, capabilities matrix, fallback chains, TTFT, provider health, virtual key admin, spend logs. | — |
 | Sandbox adapter | Runtime `GET /api/v1/sandbox/pool` for current adapter status; config via env (no PUT endpoint v1) | — | — |
-| Webhook subscribers (outbound config) | Runtime `GET /api/v1/webhooks/endpoints`, `POST /api/v1/webhooks/endpoints`, `DELETE /api/v1/webhooks/endpoints/{id}`, `POST /api/v1/webhooks/send` | Svix `GET /api/v1/app/{app_id}/endpoint/`, `POST /api/v1/app/{app_id}/endpoint/`, `GET /api/v1/event-type/` for event types catalog | — |
+| Webhook subscribers (outbound config) | Runtime `GET /api/v1/webhooks/endpoints`, `POST /api/v1/webhooks/endpoints`, `DELETE /api/v1/webhooks/endpoints/{id}`, `POST /api/v1/webhooks/send` | None — endpoints, event-type catalog, and signing keys are all owned by the runtime's native outbox | — |
 | Notifications (channels) | Read-only display from env config in v1; full config UI requires `GET/POST/PUT /api/v1/admin/notifications/channels` later. Delivery side at `/api/v1/notifications` is fully wired. | — | — |
 | Secrets | Runtime `GET /api/v1/secrets`, `GET /api/v1/secrets/{key}`, `PUT /api/v1/secrets/{key}`, `DELETE /api/v1/secrets/{key}`, `POST /api/v1/secrets/{key}/reveal`, `POST /api/v1/secrets/{key}/rotate` | — | — |
 | Observability | Config-only (env vars); no runtime endpoint v1 | Prometheus scrape at `/metrics`; OTel exporter target via env | — |
@@ -1531,7 +1530,6 @@ For reference, the dashboard talks to these OSS services directly (not just thro
 | Service | Base URL (default) | Auth | Endpoints we use |
 |---|---|---|---|
 | LiteLLM | `http://litellm:4000` | Header `Authorization: Bearer ${LITELLM_MASTER_KEY}` | `/spend/keys`, `/spend/tags`, `/spend/logs`, `/global/spend`, `/key/info`, `/key/generate`, `/model/info`, `/model_group/info`, `/health`, `/health/readiness`, `/budget/info` |
-| Svix | `http://svix-server:8071` | Header `Authorization: Bearer ${SVIX_AUTH_TOKEN}` | `/api/v1/app/{app_id}/endpoint/`, `/api/v1/app/{app_id}/msg/`, `/api/v1/app/{app_id}/msg/{msg_id}/attempt/`, `/api/v1/app/{app_id}/msg/{msg_id}/replay`, `/api/v1/event-type/`, `/api/v1/app/{app_id}/stats/` |
 | MinIO | `http://minio:9000` (admin), `:9001` (console) | S3 SigV4 with `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | `/minio/v2/metrics/cluster`, S3 admin API for bucket-level ops |
 | Postgres | `postgresql://postgres:5432/afstack` | DB credentials | `pg_stat_statements`, `pg_stat_user_tables`, `pg_stat_database`, `pg_stat_activity`, `pg_size_pretty(pg_total_relation_size(...))`, `pg_locks`, `pg_indexes`. Note: `pg_stat_statements` requires the extension to be enabled (`CREATE EXTENSION pg_stat_statements`). |
 | AgentField | `http://agentfield:8081` | DID-based auth via runtime's AgentField client | `/v1/capabilities`, `/v1/executions/{id}`, `/v1/runs/{id}` |

@@ -22,7 +22,7 @@ search across pages.
 | storage | on | MinIO (dev) → S3 (prod) |
 | secrets-vault | on | PG + KMS |
 | notifications | on | log-stub (dev) → Resend (prod) |
-| webhooks-in | on | Svix |
+| webhooks-in | on | native inbound receiver |
 | billing | on | Stripe direct |
 | search | on | Postgres FTS |
 | dashboard | on, customized | shadcn + Tremor |

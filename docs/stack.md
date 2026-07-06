@@ -19,7 +19,7 @@ source pieces, alongside LiteLLM and the MCP spec. No special framing.
 │                                                                     │
 │  Operator Dashboard · Customer App · Docs Site · SDKs · CLI         │
 │  (Next.js · React · shadcn/ui · Scalar · Astro Starlight ·          │
-│   Python · TypeScript · Go)                                         │
+│   Python · TypeScript · Go — planned)                               │
 │                                                                     │
 └─────────────────────────────────┬───────────────────────────────────┘
                                   │  HTTPS
@@ -50,9 +50,9 @@ source pieces, alongside LiteLLM and the MCP spec. No special framing.
 │ INTELLI │    │ EXECUTION  │    │ DELIVERY    │   │ OBSERVABILITY │
 │ -GENCE  │    │            │    │             │   │               │
 │         │    │            │    │             │   │               │
-│ Agent-  │    │ Sandboxes  │    │ Svix        │   │ OpenTelemetry │
-│ Field   │    │  Docker    │    │ (outbound   │   │ (traces)      │
-│         │    │  gVisor    │    │  webhooks)  │   │               │
+│ Agent-  │    │ Sandboxes  │    │ Webhooks    │   │ OpenTelemetry │
+│ Field   │    │  Docker    │    │ (native     │   │ (traces)      │
+│         │    │  gVisor    │    │  outbox)    │   │               │
 │ LiteLLM │    │  Firecrkr  │    │             │   │ Prometheus    │
 │         │    │  e2b       │    │ Resend      │   │ (metrics)     │
 │ MCP     │    │            │    │ (email)     │   │               │
@@ -74,7 +74,6 @@ source pieces, alongside LiteLLM and the MCP spec. No special framing.
 │                                                                     │
 │  Postgres 16 + pgvector  (relational · vector · queue · FTS)        │
 │  MinIO / S3              (object storage)                           │
-│  Redis                   (Svix-private cache)                       │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -94,7 +93,7 @@ Everything a human or another program talks to.
 | Operator console | Next.js, React, shadcn/ui, base-ui, Scalar (API browser) |
 | Customer-facing app | Same stack — forkable, separate brand |
 | Docs site | Astro Starlight |
-| SDKs | Hand-rolled Python, TypeScript, Go |
+| SDKs | Hand-rolled Python, TypeScript (Go planned — stub today) |
 | CLI | Hand-rolled Go |
 
 ### ② Edge
@@ -147,7 +146,7 @@ Outbound to the world.
 
 | What | OSS we use |
 |---|---|
-| Outbound webhooks | **Svix** |
+| Outbound webhooks | Hand-rolled (native in-process outbox: PG-backed queue, HMAC signing, retries with exponential backoff, delivery ledger) |
 | Notifications (email / SMS / push) | Adapter pattern: log → **Resend** |
 | Billing | Adapter pattern: **Stripe** → **Lago** |
 
@@ -163,13 +162,12 @@ What's actually happening inside the runtime.
 
 ### ⑧ Data
 
-Persistence. Three stores; we lean on Postgres heavily.
+Persistence. Two stores; we lean on Postgres heavily.
 
 | What | OSS we use |
 |---|---|
 | Relational + vector + queue + FTS | **Postgres 16 + pgvector** (one database, four jobs) |
 | Object storage | **MinIO** (dev) → **AWS S3 / R2 / GCS / Azure Blob** (prod) |
-| Cache | **Redis 7** (Svix-private only) |
 
 ---
 
@@ -203,7 +201,7 @@ Client ──▶ ① POST /shipwright/tasks
                        ──▶ ④ LiteLLM calls
                        ──▶ ④ AgentField records every span + tool call
                        ──▶ ⑧ Postgres + MinIO reads/writes
-        ──▶ ⑥ Svix delivers a "task completed" webhook
+        ──▶ ⑥ Native outbox delivers a "task completed" webhook
 ```
 
 The pattern: **gateway routes, services specialize, data persists**.
@@ -253,7 +251,7 @@ Supabase-style stack diagram with logos in their natural bands.
 >
 > **Band ① — CLIENT (full width)**
 > Logos: Next.js, React, shadcn/ui, Scalar, Astro Starlight, Python,
-> TypeScript, Go
+> TypeScript, Go (Go SDK is planned — a stub today)
 >
 > **Band ② — EDGE (full width)**
 > Logos: Caddy
@@ -275,7 +273,8 @@ Supabase-style stack diagram with logos in their natural bands.
 > labeled "robfig/cron"
 >
 > **Band ⑥ — DELIVERY**
-> Logos: Svix, Resend, Stripe, Lago
+> Logos: a small outbound-arrow/webhook icon labeled "Webhooks", Resend,
+> Stripe, Lago
 >
 > **Band ⑦ — OBSERVABILITY**
 > Logos: OpenTelemetry, Prometheus, a small terminal-prompt icon labeled
@@ -283,7 +282,7 @@ Supabase-style stack diagram with logos in their natural bands.
 >
 > **Band ⑧ — DATA (full width, foundational)**
 > Logos: PostgreSQL (large, prominent — this is the foundation), pgvector
-> wordmark, MinIO, AWS S3, Redis
+> wordmark, MinIO, AWS S3
 >
 > At the very top, title bar in a single soft-blue rectangle: **"BackAI"**
 > (bold, white on blue) with a subtitle "The open backend for AI
