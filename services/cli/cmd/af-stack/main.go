@@ -144,7 +144,11 @@ func run(args []string) error {
 	case "plugin":
 		return project.RunPlugin(rest, os.Stdout, os.Stderr)
 	case "adapter":
-		return project.RunAdapter(rest, os.Stdout, os.Stderr)
+		ctx, cancel := signal.NotifyContext(
+			context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		c := client.New()
+		return project.RunAdapter(ctx, c, rest, os.Stdout, os.Stderr)
 	case "deploy":
 		ctx, cancel := signal.NotifyContext(
 			context.Background(), os.Interrupt, syscall.SIGTERM)

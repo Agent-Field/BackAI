@@ -157,6 +157,13 @@ type StorageConfig struct {
 	AccessKey string `yaml:"access_key"`
 	SecretKey string `yaml:"secret_key"`
 	Region    string `yaml:"region"`
+	// RemoteURL / RemoteToken are only consumed when Adapter="remote": the
+	// out-of-process storage sidecar's base URL + bearer token. They fall
+	// back to the operator-managed integration credentials (vault keys
+	// integration/storage/remote_url|remote_token) when the env vars are
+	// unset — see main.newStorage.
+	RemoteURL   string `yaml:"remote_url"`
+	RemoteToken string `yaml:"remote_token"`
 	// TenantPrefix is prepended to every object key. Phase 5 default is
 	// "" — multi-tenancy module not enabled. When enabled, set to
 	// "tenants/<id>" per-request (server.Deps will be tenant-scoped).
@@ -406,6 +413,15 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("AF_STACK_S3_TENANT_PREFIX"); v != "" {
 		cfg.Storage.TenantPrefix = v
+	}
+	// Remote storage sidecar (Adapter="remote"): base URL + optional bearer
+	// token. main.newStorage falls back to the vault integration credentials
+	// when these are unset.
+	if v := os.Getenv("AF_STACK_STORAGE_REMOTE_URL"); v != "" {
+		cfg.Storage.RemoteURL = v
+	}
+	if v := os.Getenv("AF_STACK_STORAGE_REMOTE_TOKEN"); v != "" {
+		cfg.Storage.RemoteToken = v
 	}
 
 	// Sandbox adapter selection + e2b credentials.

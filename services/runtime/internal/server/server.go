@@ -761,6 +761,8 @@ func (s *Server) registerRoutes() {
 	s.registerAdminOpenAPI()
 	s.registerAdminAdapterRoutes()
 	s.registerAdminAdapterOpenAPI()
+	s.registerAdminIntegrationRoutes()
+	s.registerAdminIntegrationOpenAPI()
 	s.registerAdminServicesRoutes()
 	s.registerAdminServicesOpenAPI()
 	s.registerAdminEventsRoutes()

@@ -78,28 +78,28 @@ how you call it from a workload module / runtime handler (`suite.*`).
 | Band | Primitive | `app.*` (agent) | `suite.*` (runtime) | Adapter env var | Status |
 |---|---|---|---|---|---|
 | ④ Intelligence | AgentField run data in dashboard | — (AgentField owns the deep view) | dashboard inlines summary card via `GET /api/v1/runs/{id}/agentfield`; controls via `POST /api/v1/runs/{id}/(cancel\|pause\|resume\|request-approval)`; "View in AgentField" link-out for DAG / step inspector | `AF_STACK_AGENTFIELD_PUBLIC_URL` (customer-facing AgentField URL) | ✅ |
-| ④ Intelligence | LLM call | `app.ai(...)` | `suite.llm.chat(...)` | LiteLLM (model per call) | ✅ |
+| ④ Intelligence | LLM call | `app.ai(...)` | `suite.llm.chat(...)` | `AF_STACK_LLM_GATEWAY_ADAPTER=demo\|litellm\|remote` (validated; litellm picks model per call) | ✅ |
 | ④ Intelligence | Embeddings | — | `suite.llm.embed(model, input)` | LiteLLM-routed (OpenAI-compatible) | ✅ |
 | ④ Intelligence | Multimodal — TTS, STT, image gen/edit/variations | — | `suite.audio.speech/transcribe/translate(...)`, `suite.images.generate/edit/variations(...)` | LiteLLM for OpenAI catalog (tts-1, whisper-1, dall-e-{2,3}, gpt-image-1); first-party adapters for `elevenlabs/*`, `cartesia/*`, `flux/*`, `fal/*` (env-keyed). See `docs/multimodal.md`. | ✅ (#14) |
 | ④ Intelligence | Memory (4 scopes: Global/Session/Actor/Workflow) | `app.memory.set/get/exists/delete/list/similarity_search(...)` | `suite.memory.put/get/list/search/delete(...)` | AgentField + pgvector | ✅ |
 | ④ Intelligence | Harness (claude-code / codex / gemini / opencode) | `app.harness(provider="claude-code").run(...)` | — | installed in agent container | ✅ |
 | ④ Intelligence | MCP tool | `app.mcp.call(...)` / declared in `__capabilities__` | `suite.tools.*` | MCP host (stdio + SSE) | ✅ |
 | ④ Intelligence | Agent tool adapters (browser / search / fs / exec / http / sql) | `app.mcp.call("native:<tool>", "<verb>", {...})` | `suite.tools.invoke_native(tool, verb, args)` | `AF_STACK_TOOL_BROWSER`, `AF_STACK_TOOL_SEARCH`, `BROWSER_USE_URL`, `SEARXNG_URL`, etc. | ✅ |
-| ⑤ Execution | Sandbox | — | `suite.sandbox.run(...)` | `AF_STACK_SANDBOX_ADAPTER=docker\|gvisor\|firecracker\|e2b` | ✅ |
+| ⑤ Execution | Sandbox | — | `suite.sandbox.run(...)` | `AF_STACK_SANDBOX_ADAPTER=docker\|gvisor\|firecracker\|e2b\|remote` | ✅ |
 | ⑤ Execution | Job (fire-and-forget) | — | `suite.jobs.enqueue(...)` | River (PG-backed). **Go in-process handlers only** — enqueuing a Python/TS (remote-language) job fails fast with `ErrRemoteJobsNotSupported`; cross-language dispatch is roadmap. | ✅ (Go) |
 | ⑤ Execution | Cron | — | `suite.crons.list/create/get/set_active/delete(...)` | robfig/cron v3 | ✅ |
 | ⑤ Execution | Webhook in (HMAC + dedup) | — | declare endpoint route + handler | (built-in) | ✅ |
 | ⑤ Execution | Realtime | — | `suite.realtime.subscribe(table, rt_filter)` | PG LISTEN/NOTIFY → WebSocket at `GET /api/v1/realtime` | ✅ (Python lazy-loads optional `websockets` pkg) |
 | ④ Intelligence | Realtime run subscriptions | — | `suite.runs.subscribe({tenant_id, user_id, agent, run_id, execution_id})` | AgentField SSE → WebSocket at `GET /api/v1/realtime/runs` | ✅ (#15; see `docs/realtime-runs.md`) |
 | ⑥ Delivery | Webhook out | — | `suite.webhooks.send(...)` | native in-process outbox (PG-backed, HMAC signing, retry + exponential backoff, delivery ledger) | ✅ |
-| ⑥ Delivery | Notification | — | `suite.notifications.send(...)` | `AF_STACK_NOTIFICATIONS_ADAPTER=log\|resend` | ✅ |
+| ⑥ Delivery | Notification | — | `suite.notifications.send(...)` | `AF_STACK_NOTIFICATIONS_ADAPTER=log\|resend\|slack\|sms(twilio)\|push(fcm)\|remote` | ✅ |
 | ⑥ Delivery | Billing | — | `suite.billing.*` | `AF_STACK_BILLING_ADAPTER=stripe\|lago\|none` (Lago adapter not yet) | ✅ (Stripe), 🚧 (Lago) |
 | ⑧ Data | Postgres (RLS auto-bound) | — | direct via your handler's PG pool | (built-in) | ✅ |
 | ⑧ Data | pgvector | — | via `suite.memory.search(...)` | (built-in) | ✅ |
-| ⑧ Data | Storage (object) | — | `suite.storage.upload/download/signed_url/delete/list(...)` | `AF_STACK_S3_ADAPTER=minio\|s3` | ✅ |
+| ⑧ Data | Storage (object) | — | `suite.storage.upload/download/signed_url/delete/list(...)` | `AF_STACK_S3_ADAPTER=minio\|s3\|remote` | ✅ |
 | ⑧ Data | Search (FTS + vector hybrid) | — | `suite.search(query, mode)` | PG FTS + pgvector; mode = `"fts"\|"vector"\|"hybrid"` | ✅ |
-| ③ API Gateway | Tenant context | — | `tenantctx.TenantID(ctx)` (Go) / `ctx.tenant_id` (Py/TS) | better-auth + RLS | ✅ |
-| ③ API Gateway | Secrets | — | `suite.secrets.get/put/delete/list/reveal/rotate(...)` | AES-256-GCM envelope | ✅ |
+| ③ API Gateway | Tenant context | — | `tenantctx.TenantID(ctx)` (Go) / `ctx.tenant_id` (Py/TS) | `AF_STACK_AUTH_ADAPTER=better-auth` (only impl; validated, not silently ignored) + RLS | ✅ |
+| ③ API Gateway | Secrets | — | `suite.secrets.get/put/delete/list/reveal/rotate(...)` | `AF_STACK_SECRETS_ADAPTER=vault\|remote` (AES-256-GCM envelope; `remote` is roadmap — server still binds the vault type) | ✅ (`vault`), 🚧 (`remote`) |
 | ③ API Gateway | OAuth-on-behalf-of-user | — | `suite.oauth.authorize_url(provider, scopes, return_to)`, `suite.oauth.connected()`, `suite.oauth.token(provider, user_id)`, `suite.oauth.disconnect(provider)` | `OAUTH_<NAME>_CLIENT_ID` / `_SECRET` per provider | ✅ (GitHub + Google shipped; Notion / Slack / Linear stubbed — see `docs/oauth.md`) |
 | ③ API Gateway | Audit | — | auto on admin mutations | (built-in) | ✅ |
 | ③ API Gateway | Cost ledger | — | auto on every LLM call. Source of truth: LiteLLM `/spend/keys` per AF Stack api key (item #22). `suite_cost_events` is write-through audit. | (built-in) | ✅ |

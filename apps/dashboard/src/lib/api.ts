@@ -2270,6 +2270,30 @@ export const AdapterRegistrySchema = z.object({
 })
 export type AdapterRegistry = z.infer<typeof AdapterRegistrySchema>
 
+// Integrations (admin) — operator-entered adapter credentials. Reads
+// return a masked fingerprint (`hint`) + a `set` boolean per field; raw
+// secrets are never echoed back. Writes take a `credentials` map: an
+// empty-string value clears a stored credential, an omitted field leaves
+// it unchanged.
+export const IntegrationFieldSchema = z.object({
+  name: z.string(),
+  set: z.boolean(),
+  hint: z.string().optional().default(""),
+})
+export type IntegrationField = z.infer<typeof IntegrationFieldSchema>
+
+export const IntegrationSlotSchema = z.object({
+  slot: z.string(),
+  activeAdapter: z.string(),
+  fields: z.array(IntegrationFieldSchema),
+})
+export type IntegrationSlot = z.infer<typeof IntegrationSlotSchema>
+
+export const IntegrationsStatusSchema = z.object({
+  integrations: z.array(IntegrationSlotSchema),
+})
+export type IntegrationsStatus = z.infer<typeof IntegrationsStatusSchema>
+
 export const AdminServiceSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -3220,6 +3244,26 @@ export const api = {
     adapters: {
       list: () =>
         request("/api/v1/admin/adapters", undefined, AdapterRegistrySchema),
+    },
+    // Integrations — operator-entered adapter credentials (email/Resend,
+    // Slack, Twilio, FCM, remote storage/secrets/LLM URLs + tokens).
+    // list() returns masked status per slot; update() sends a credentials
+    // map ("" clears a field, absent leaves it unchanged) and returns the
+    // single updated slot. Callers should re-list() after a write rather
+    // than trust the bare PUT body.
+    integrations: {
+      list: () =>
+        request(
+          "/api/v1/admin/integrations",
+          undefined,
+          IntegrationsStatusSchema,
+        ),
+      update: (slot: string, input: { credentials: Record<string, string> }) =>
+        request(
+          `/api/v1/admin/integrations/${encodeURIComponent(slot)}`,
+          { method: "PUT", json: input },
+          IntegrationSlotSchema,
+        ),
     },
     // Turnkey billing operator surface: Stripe key material (vault-backed,
     // hot-swapped — saving takes effect without a restart) + the plans

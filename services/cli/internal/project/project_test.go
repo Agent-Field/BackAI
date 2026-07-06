@@ -6,10 +6,14 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Agent-Field/backai/services/cli/internal/client"
 )
 
 func TestScaffoldCommands(t *testing.T) {
@@ -46,7 +50,7 @@ func TestAdapterNewScaffoldsSidecar(t *testing.T) {
 	defer restore()
 
 	var stdout bytes.Buffer
-	if err := RunAdapter([]string{"new", "billing", "my-stripe"}, &stdout, &bytes.Buffer{}); err != nil {
+	if err := RunAdapter(context.Background(), nil, []string{"new", "billing", "my-stripe"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatalf("RunAdapter new returned error: %v", err)
 	}
 	for _, rel := range []string{"main.py", "requirements.txt", "README.md", "Dockerfile", ".gitignore"} {
@@ -76,13 +80,13 @@ func TestAdapterNewDefaultsNameAndRejectsUnknownSlot(t *testing.T) {
 	defer restore()
 
 	// Unknown slot is rejected clearly.
-	err := RunAdapter([]string{"new", "rocketship"}, &bytes.Buffer{}, &bytes.Buffer{})
+	err := RunAdapter(context.Background(), nil, []string{"new", "rocketship"}, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "unknown slot") {
 		t.Fatalf("expected unknown-slot error, got %v", err)
 	}
 
 	// With no name, the directory defaults to <slot>-adapter.
-	if err := RunAdapter([]string{"new", "storage"}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+	if err := RunAdapter(context.Background(), nil, []string{"new", "storage"}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
 		t.Fatalf("RunAdapter new returned error: %v", err)
 	}
 	if !exists(filepath.Join(root, "storage-adapter", "main.py")) {
@@ -90,38 +94,121 @@ func TestAdapterNewDefaultsNameAndRejectsUnknownSlot(t *testing.T) {
 	}
 }
 
-func TestAdapterListUsesEnvOverride(t *testing.T) {
-	t.Setenv("AF_STACK_SANDBOX_ADAPTER", "gvisor")
+// adapterRegistryJSON is a representative GET /api/v1/admin/adapters payload:
+// a healthy storage slot and a sandbox slot whose active adapter is a stub
+// that errors on every call (the old static table lied and called this
+// "READY"). It exercises the truth contract end-to-end.
+const adapterRegistryJSON = `{
+  "slots": [
+    {
+      "slot": "storage",
+      "tier": 1,
+      "available_builtin": ["minio", "s3"],
+      "swap_method": "env_var",
+      "swap_env": "AF_STACK_S3_ADAPTER",
+      "active": {"name": "minio", "status": "healthy", "kind": "builtin"}
+    },
+    {
+      "slot": "sandbox",
+      "tier": 2,
+      "available_builtin": ["docker", "firecracker"],
+      "swap_method": "env_var",
+      "swap_env": "AF_STACK_SANDBOX_ADAPTER",
+      "active": {"name": "firecracker", "status": "unhealthy", "kind": "builtin", "last_error": "firecracker adapter is a stub"}
+    }
+  ]
+}`
+
+func adapterTestServer(t *testing.T, status int, body string) *client.Client {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/admin/adapters" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("content-type", "application/json")
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, body)
+	}))
+	t.Cleanup(srv.Close)
+	return &client.Client{BaseURL: srv.URL, HTTP: srv.Client()}
+}
+
+// Contract: `adapter list` renders one row per live slot with the active
+// adapter, its real status, available builtins, swap env, and method —
+// sourced from the runtime registry, never a static table. A stub adapter
+// must surface as unhealthy, not as "READY".
+func TestAdapterListRendersLiveRegistry(t *testing.T) {
+	c := adapterTestServer(t, http.StatusOK, adapterRegistryJSON)
 	var stdout bytes.Buffer
-	if err := RunAdapter([]string{"list"}, &stdout, &bytes.Buffer{}); err != nil {
-		t.Fatalf("RunAdapter returned error: %v", err)
+	if err := RunAdapter(context.Background(), c, []string{"list"}, &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatalf("RunAdapter list returned error: %v", err)
 	}
 	out := stdout.String()
-	for _, want := range []string{"Storage", "minio", "Sandbox", "gvisor", "Billing"} {
+	for _, want := range []string{
+		"AREA", "ACTIVE", "STATUS", "AVAILABLE", "SWAP ENV", "METHOD",
+		"storage", "minio", "healthy", "AF_STACK_S3_ADAPTER",
+		"sandbox", "firecracker", "unhealthy", "AF_STACK_SANDBOX_ADAPTER",
+	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("adapter list missing %q:\n%s", want, out)
 		}
 	}
-	// Truth contract: the table must distinguish adapters the runtime actually
-	// constructs from ones the docs mark as planned. "remote" is a real sandbox
-	// adapter (main.go newSandbox) and must be listed; planned entries must
-	// appear under a PLANNED column, never presented as ready-to-use choices.
-	if !strings.Contains(out, "PLANNED") {
-		t.Fatalf("adapter list missing PLANNED column:\n%s", out)
+	// Truth contract: the failing stub's error must be surfaced, and the
+	// firecracker adapter must never be presented as ready/healthy.
+	if !strings.Contains(out, "firecracker adapter is a stub") {
+		t.Fatalf("adapter list hides the stub's last_error:\n%s", out)
 	}
-	if !strings.Contains(out, "remote") {
-		t.Fatalf("adapter list omits the real 'remote' sandbox adapter:\n%s", out)
+	if strings.Contains(out, "PLANNED") {
+		t.Fatalf("adapter list still renders the retired static PLANNED table:\n%s", out)
 	}
-	readyLine := ""
-	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, "Storage") {
-			readyLine = line
+}
+
+// Contract: `--json` emits the runtime registry verbatim for agents.
+func TestAdapterListJSONPassthrough(t *testing.T) {
+	c := adapterTestServer(t, http.StatusOK, adapterRegistryJSON)
+	var stdout bytes.Buffer
+	if err := RunAdapter(context.Background(), c, []string{"list", "--json"}, &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatalf("RunAdapter list --json returned error: %v", err)
+	}
+	out := stdout.String()
+	for _, want := range []string{`"slot"`, `"firecracker"`, `"last_error"`, `"swap_env"`} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("adapter list --json missing %q:\n%s", want, out)
 		}
 	}
-	// r2/gcs/azure-blob are planned; they must sit in the PLANNED column, to the
-	// right of the READY column — never adjacent to the ready "minio, s3" set.
-	if strings.Contains(readyLine, "minio, s3, r2") {
-		t.Fatalf("planned storage adapters leaked into the READY column:\n%s", readyLine)
+}
+
+// Contract: when the runtime/operator API is unreachable or rejects auth,
+// the command must NOT fabricate a table — it returns actionable guidance.
+func TestAdapterListDegradesGracefully(t *testing.T) {
+	// 401 from a reachable server.
+	c := adapterTestServer(t, http.StatusUnauthorized,
+		`{"error":{"code":"UNAUTHORIZED","message":"operator key required"}}`)
+	var stdout bytes.Buffer
+	err := RunAdapter(context.Background(), c, []string{"list"}, &stdout, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected an error when the adapters endpoint rejects the request")
+	}
+	for _, want := range []string{"AF_STACK_URL", "AF_STACK_API_KEY", "operator key"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("degradation message missing %q: %v", want, err)
+		}
+	}
+	if strings.Contains(stdout.String(), "firecracker") || strings.Contains(stdout.String(), "AREA") {
+		t.Fatalf("adapter list fabricated a table on failure:\n%s", stdout.String())
+	}
+
+	// Connection refused (no runtime) must degrade the same way. Spin up a
+	// server just to claim a port, then close it so the dial is refused
+	// immediately (no timeout wait).
+	closed := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	unreachableURL := closed.URL
+	closed.Close()
+	unreachable := &client.Client{BaseURL: unreachableURL, HTTP: closed.Client()}
+	err = RunAdapter(context.Background(), unreachable, []string{"list"}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "AF_STACK_URL") {
+		t.Fatalf("expected connection-refused to yield guidance, got %v", err)
 	}
 }
 

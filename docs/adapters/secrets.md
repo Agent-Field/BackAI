@@ -1,4 +1,45 @@
-# Secrets KMS Adapters
+# Secrets Adapters
+
+Two orthogonal selectors govern secrets:
+
+- **`AF_STACK_SECRETS_ADAPTER`** — WHERE secret values are stored (the
+  store backend). Covered directly below.
+- **`AF_STACK_KMS_PROVIDER`** — HOW the encryption data key is wrapped
+  (env value vs cloud KMS). Covered under [KMS provider](#provider-selector).
+
+## Store adapter (`AF_STACK_SECRETS_ADAPTER`)
+
+```bash
+AF_STACK_SECRETS_ADAPTER=vault # vault | remote
+```
+
+| Adapter | Use |
+|---|---|
+| `vault` | (default) built-in Postgres-backed AES-256-GCM vault |
+| `remote` | An out-of-process secrets backend speaking the [remote protocol](PROTOCOL.md) |
+
+The selector is validated at boot — an unsupported value fails fast rather
+than being silently ignored (which is what it used to do).
+
+```bash
+AF_STACK_SECRETS_ADAPTER=remote
+AF_STACK_SECRETS_REMOTE_URL=https://secrets-adapter.example.com
+AF_STACK_SECRETS_REMOTE_TOKEN=<bearer-token>
+```
+
+Remote secrets credentials are **env-only** — the vault can't be used to
+configure its own backend (chicken-and-egg), so these are read from env at
+boot, not from the Integrations UI.
+
+> **Known limitation (roadmap).** The `remote` secrets adapter is
+> selectable, validated, and capability-probed, but the server currently
+> binds the concrete vault type, so a remote backend cannot yet fully back
+> `/api/v1/secrets` end-to-end. Generalizing the server's secrets
+> dependency to the `Store` interface is a follow-up. Until then, treat
+> `remote` secrets as partial: selectable and health-checked, but not a
+> finished replacement for the built-in vault.
+
+# KMS provider
 
 AF Stack stores secret values in `suite_secrets` with AES-256-GCM. The
 runtime data key can come from a local env value or from a cloud KMS

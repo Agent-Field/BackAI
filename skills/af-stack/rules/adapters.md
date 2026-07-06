@@ -8,11 +8,39 @@ var. We ship multiple in-tree; the user can add more.
 
 | Primitive | Adapters | Env var | Default |
 |---|---|---|---|
-| **Storage** | `minio`, `s3` (covers AWS S3 / R2 / GCS / Azure Blob via S3 API) | `AF_STACK_S3_ADAPTER` | `minio` (dev) |
-| **Sandbox** | `docker`, `gvisor`, `firecracker`, `e2b` | `AF_STACK_SANDBOX_ADAPTER` | `docker` (dev) |
-| **Notifications email** | `log`, `resend` | `AF_STACK_NOTIFICATIONS_ADAPTER` | `log` |
+| **Storage** | `minio`, `s3` (covers AWS S3 / R2 / GCS / Azure Blob via S3 API), `remote` | `AF_STACK_S3_ADAPTER` | `minio` (dev) |
+| **Sandbox** | `docker`, `gvisor`, `firecracker`, `e2b`, `remote` | `AF_STACK_SANDBOX_ADAPTER` | `docker` (dev) |
+| **Notifications** | `log`, `resend` (email), `slack`, `sms`/`twilio`, `push`/`fcm`, `remote` | `AF_STACK_NOTIFICATIONS_ADAPTER` | `log` |
 | **Billing** | `stripe`, `lago`, `none` | `AF_STACK_BILLING_ADAPTER` | `stripe` |
-| **LLM provider routing** | LiteLLM internal — picks model based on call | (in `litellm-config.yaml`) | (always on) |
+| **LLM gateway** | `demo`, `litellm`, `remote` | `AF_STACK_LLM_GATEWAY_ADAPTER` | auto (demo↔litellm via `AF_STACK_DEMO_MODE`) |
+| **Secrets store** | `vault`, `remote` (remote is roadmap — see below) | `AF_STACK_SECRETS_ADAPTER` | `vault` |
+| **Auth** | `better-auth` (only impl today; now validated, not silently ignored) | `AF_STACK_AUTH_ADAPTER` | `better-auth` |
+
+Notes on the newer slots:
+
+- **LLM gateway** is a real selector now (it used to be "always LiteLLM").
+  `litellm` still owns per-call model routing via `litellm-config.yaml`;
+  the env picks demo vs litellm vs a remote gateway. Provider *keys* stay
+  in `.env`.
+- **Secrets store `remote`** is selectable + validated + capability-probed,
+  but the server still binds the concrete vault type, so a remote backend
+  cannot yet fully back `/api/v1/secrets` end-to-end. **Roadmap**, not a
+  finished capability — treat `vault` as the only production store today.
+- **Auth** has exactly one implementation. The env exists so an unsupported
+  value fails fast; it does **not** imply a second auth backend ships.
+- **Multimodal is NOT env-swappable** — it's a single composition
+  (LiteLLM for the OpenAI catalog + first-party `elevenlabs`/`cartesia`/
+  `flux`/`fal` adapters keyed by provider env). There is no
+  `AF_STACK_MULTIMODAL_ADAPTER`.
+- **Jobs/queue is NOT swappable** — River-backed, single impl by design.
+- Every selector value is validated at boot; an unsupported
+  `AF_STACK_<SLOT>_ADAPTER` fails fast instead of silently defaulting.
+- Each swappable slot also accepts `remote` (an out-of-process adapter over
+  the remote protocol; see `docs/adapters/PROTOCOL.md`).
+
+Adapter **credentials** can come from env or the dashboard → Platform →
+Integrations page (`PUT /api/v1/admin/integrations/{slot}`, stored in the
+secrets vault). Env wins; UI changes apply on the next runtime restart.
 
 ## The adapter pattern
 
@@ -116,10 +144,18 @@ If your case fits a hook, use that. If it needs a different backend
 
 ## Dashboard surfacing
 
-The dashboard's `Build → Modules` tab shows the live adapter choices.
-will eventually add a dedicated `Infrastructure → Adapters` page (per
-`development/positioning.md` Part 3 B2) that lists every primitive + every
-available adapter + the active one + a link to docs.
+Two surfaces:
 
-That page is **read-only** — config still happens in env. The dashboard
-is the observation surface; the config is in your fork's `.env`.
+- **Which adapter is active** is observation-only in the dashboard, backed
+  by the live registry at `GET /api/v1/admin/adapters` (also what
+  `af-stack adapter list` reads). Selecting an adapter still happens via the
+  `AF_STACK_<SLOT>_ADAPTER` env var — swaps are explicit, in your fork's
+  `.env`.
+- **Adapter credentials** *can* be set from the dashboard → `Platform →
+  Integrations` page (`GET`/`PUT /api/v1/admin/integrations/{slot}`), which
+  stores them in the secrets vault under `integration/{slot}/{field}`. The
+  API returns masked status only (never raw values), env wins over UI
+  values, and UI changes apply on the **next runtime restart** (not
+  hot-reload). This covers notification channels + the `storage`/`llm`
+  remote URL/token; remote `secrets` and `notifications` URLs stay
+  env-only.
