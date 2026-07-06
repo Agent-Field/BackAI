@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base32"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"text/tabwriter"
 	"unicode"
 
+	"github.com/Agent-Field/backai/services/cli/internal/client"
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -161,13 +163,13 @@ func RunPlugin(args []string, stdout, stderr io.Writer) error {
 	}
 }
 
-func RunAdapter(args []string, stdout, stderr io.Writer) error {
+func RunAdapter(ctx context.Context, c *client.Client, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		return errors.New("adapter: missing subcommand")
 	}
 	switch args[0] {
 	case "list", "ls":
-		return runAdapterList(args[1:], stdout, stderr)
+		return runAdapterList(ctx, c, args[1:], stdout, stderr)
 	case "new":
 		return runAdapterNew(args[1:], stdout, stderr)
 	default:
@@ -441,40 +443,112 @@ func runOperatorCreate(ctx context.Context, args []string, stdout, stderr io.Wri
 	return nil
 }
 
-func runAdapterList(_ []string, stdout, _ io.Writer) error {
-	// READY lists only the adapters the runtime actually constructs today (see
-	// services/runtime/cmd/af-stack/main.go: newStorage/newSandbox/
-	// buildNotificationsAdapter and internal/billing NewClientFromEnv). PLANNED
-	// mirrors the "Planned" tables in the docs/adapters/*.md pages — selecting
-	// one of those falls back to the default with a warning, so the CLI must
-	// not present them as working choices.
-	rows := []struct {
-		Area    string
-		Env     string
-		Default string
-		Ready   string
-		Planned string
-		Docs    string
-	}{
-		{"Storage", "AF_STACK_S3_ADAPTER", "minio", "minio, s3", "r2, gcs, azure-blob", "docs/adapters/storage.md"},
-		{"Sandbox", "AF_STACK_SANDBOX_ADAPTER", "docker", "docker, gvisor, firecracker, e2b, remote", "", "docs/adapters/sandbox.md"},
-		{"Notifications", "AF_STACK_NOTIFICATIONS_ADAPTER", "log", "log, resend", "postmark, sendgrid, ses, mailgun", "docs/adapters/notifications.md"},
-		{"Billing", "AF_STACK_BILLING_ADAPTER", "stripe", "stripe, lago, none", "", "docs/adapters/billing.md"},
+// adapterSlotWire mirrors one entry of GET /api/v1/admin/adapters
+// (registry.SlotView). The CLI decodes the live runtime registry rather
+// than a hand-maintained table, so `adapter list` can never drift from
+// what the runtime actually constructs — a stub that errors on every call
+// shows up as unhealthy instead of being advertised as ready.
+type adapterSlotWire struct {
+	Slot             string   `json:"slot"`
+	Tier             int      `json:"tier"`
+	AvailableBuiltin []string `json:"available_builtin"`
+	SwapMethod       string   `json:"swap_method"`
+	SwapEnv          string   `json:"swap_env"`
+	AdminUI          string   `json:"admin_ui"`
+	Active           struct {
+		Name      string `json:"name"`
+		Version   string `json:"version"`
+		Status    string `json:"status"`
+		Kind      string `json:"kind"`
+		LastError string `json:"last_error"`
+	} `json:"active"`
+}
+
+type adaptersResponseWire struct {
+	Slots []adapterSlotWire `json:"slots"`
+}
+
+func runAdapterList(ctx context.Context, c *client.Client, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("af-stack adapter list", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "emit the raw runtime adapter registry as JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
 	}
+
+	// --json returns the runtime's registry verbatim — the machine-readable
+	// truth for agents, no reshaping.
+	if *asJSON {
+		var raw json.RawMessage
+		if err := c.Do(ctx, "GET", "/admin/adapters", nil, &raw); err != nil {
+			return adapterListUnavailable(err)
+		}
+		var pretty bytes.Buffer
+		if err := json.Indent(&pretty, raw, "", "  "); err != nil {
+			_, werr := fmt.Fprintln(stdout, string(raw))
+			return werr
+		}
+		_, err := fmt.Fprintln(stdout, pretty.String())
+		return err
+	}
+
+	var out adaptersResponseWire
+	if err := c.Do(ctx, "GET", "/admin/adapters", nil, &out); err != nil {
+		return adapterListUnavailable(err)
+	}
+
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "AREA\tACTIVE\tENV\tREADY\tPLANNED\tDOCS")
-	for _, row := range rows {
-		active := strings.TrimSpace(os.Getenv(row.Env))
-		if active == "" {
-			active = row.Default
+	fmt.Fprintln(tw, "AREA\tACTIVE\tSTATUS\tAVAILABLE\tSWAP ENV\tMETHOD")
+	for _, s := range out.Slots {
+		available := strings.Join(s.AvailableBuiltin, ", ")
+		if available == "" {
+			available = "-"
 		}
-		planned := row.Planned
-		if planned == "" {
-			planned = "-"
+		swapEnv := s.SwapEnv
+		if swapEnv == "" {
+			swapEnv = "-"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", row.Area, active, row.Env, row.Ready, planned, row.Docs)
+		method := s.SwapMethod
+		if method == "" {
+			method = "-"
+		}
+		status := s.Active.Status
+		if status == "" {
+			status = "unknown"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			s.Slot, s.Active.Name, status, available, swapEnv, method)
 	}
-	return tw.Flush()
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+
+	if len(out.Slots) == 0 {
+		fmt.Fprintln(stdout, "no adapter slots reported by the runtime")
+		return nil
+	}
+
+	// Surface any adapter that constructed but reports an error (e.g. a stub
+	// that fails on every call) so the list tells the truth about health.
+	for _, s := range out.Slots {
+		if e := strings.TrimSpace(s.Active.LastError); e != "" {
+			fmt.Fprintf(stdout, "  ! %s/%s: %s\n", s.Slot, s.Active.Name, e)
+		}
+	}
+	return nil
+}
+
+// adapterListUnavailable turns a transport/auth failure into actionable
+// guidance. It flattens the cause with %v (not %w) on purpose: the top-level
+// CLI prints *client.APIError specially, and here we want our guidance shown
+// instead of a bare "[FORBIDDEN] ..." line. We never fall back to a fabricated
+// static table — a clear error beats a lie.
+func adapterListUnavailable(cause error) error {
+	return fmt.Errorf("adapter list needs the runtime operator API — set "+
+		"AF_STACK_URL (default http://localhost:8080) and AF_STACK_API_KEY to an "+
+		"operator key (mint one with `af-stack operator key`), and make sure the "+
+		"runtime is running (`af-stack dev`). This list reflects the live runtime, "+
+		"not a static table. underlying error: %v", cause)
 }
 
 func deployCommand(target string) (string, []string, error) {
