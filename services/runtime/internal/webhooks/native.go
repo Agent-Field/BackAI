@@ -2,16 +2,12 @@
 
 // native.go — in-process outbound webhook delivery.
 //
-// Background. OSS-AUDIT item #2 swapped the hand-rolled outbox worker for
-// an external Svix sidecar (see outbound.go). That made outbound webhooks
-// depend on a separate Docker container: with no sidecar configured the
-// /send + /emit endpoints simply 503. But delivering a webhook is a
-// signed HTTP POST with retries — and this runtime already persists an
-// outbox (suite_webhook_deliveries, direction='outbound', with a
-// (direction,status,scheduled_at) index built for exactly this) and knows
-// how to retry work. So NativeOutbound reconnects the outbox: it is the
-// zero-config default, and Svix stays available as an opt-in
-// (AF_STACK_SVIX_URL) for deployments that want it.
+// Delivering a webhook is a signed HTTP POST with retries. This runtime
+// persists an outbox (suite_webhook_deliveries, direction='outbound', with
+// a (direction,status,scheduled_at) index built for exactly this) and knows
+// how to retry work, so NativeOutbound drains that outbox in-process: it is
+// the sole outbound-delivery implementation — zero-config, no external
+// sidecar.
 //
 // Delivery lifecycle for one row:
 //
@@ -38,6 +34,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,9 +44,9 @@ import (
 )
 
 // Outbound is the surface the webhook Service facade routes outbound verbs
-// through. Both NativeOutbound (default) and OutboundService (Svix proxy,
-// opt-in) satisfy it, so the facade and HTTP handlers stay unchanged
-// regardless of which delivery backend is wired.
+// through. NativeOutbound is its sole implementation; the interface stays a
+// seam so the facade and HTTP handlers depend on behavior, not the concrete
+// type (and tests can substitute a fake).
 type Outbound interface {
 	Enqueue(ctx context.Context, in SendInput) (*Delivery, error)
 	Retry(ctx context.Context, deliveryID string) (*Delivery, error)
@@ -169,9 +166,9 @@ func NewNativeOutbound(store *DeliveryStore, cfg NativeConfig, log *slog.Logger)
 	}
 }
 
-// Configured reports whether the native path can accept a send. Unlike the
-// Svix proxy (which needs an external URL), native delivery is available
-// whenever the outbox DB is wired — so /send no longer 503s by default.
+// Configured reports whether the outbound path can accept a send. Native
+// delivery is available whenever the outbox DB is wired — /send only 503s
+// when there's no database.
 func (n *NativeOutbound) Configured() bool {
 	return n != nil && n.store.HasPool()
 }
@@ -429,4 +426,34 @@ func signBody(secret string, body []byte) string {
 // HMAC-SHA256 — pair it with the "sha256=" prefix in the signature header.
 func SignBody(secret string, body []byte) string {
 	return signBody(secret, body)
+}
+
+// validateSendInput enforces the bare minimum: a parseable absolute URL
+// with http/https scheme and a non-empty event type. The HTTP layer
+// already validates the JSON shape; this is the last line.
+func validateSendInput(in *SendInput) error {
+	if in == nil {
+		return fmt.Errorf("%w: nil input", ErrInvalidInput)
+	}
+	in.URL = strings.TrimSpace(in.URL)
+	in.EventType = strings.TrimSpace(in.EventType)
+	if in.URL == "" {
+		return fmt.Errorf("%w: url is required", ErrInvalidInput)
+	}
+	if in.EventType == "" {
+		return fmt.Errorf("%w: event_type is required", ErrInvalidInput)
+	}
+	u, err := url.Parse(in.URL)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return fmt.Errorf("%w: url must be absolute http(s)", ErrInvalidInput)
+	}
+	switch u.Scheme {
+	case "http", "https":
+	default:
+		return fmt.Errorf("%w: url scheme must be http or https", ErrInvalidInput)
+	}
+	if in.Body == nil {
+		in.Body = []byte("null")
+	}
+	return nil
 }

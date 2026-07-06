@@ -11,9 +11,8 @@
 //     dedup.go.
 //
 //   - OUTBOUND — `webhooks.send()` enqueues a delivery row in the PG
-//     outbox; a background worker drains the queue with retries and
-//     records the upstream response. Phase 10.3 owns outbound.go /
-//     worker.go.
+//     outbox; an in-process worker drains the queue with retries and
+//     records the upstream response. native.go owns this surface.
 //
 // Contract notes
 //
@@ -143,7 +142,7 @@ type Delivery struct {
 	Body    []byte            `json:"-"`
 }
 
-// SendInput is the public input shape for OutboundService.Enqueue.
+// SendInput is the public input shape for Outbound.Enqueue.
 // Mirrors SendWebhookInputSchema in api.ts (sans the JSON-encoded body
 // payload, which we accept as []byte at the Go layer for flexibility).
 type SendInput struct {
@@ -181,17 +180,13 @@ type ListResult struct {
 	HasMore    bool
 }
 
-// Defaults shared by the inbound pipeline + the Svix outbound proxy.
-//
-// Outbound retry / backoff knobs USED to live here for our hand-rolled
-// worker. After OSS-AUDIT item #2 Svix owns those concerns; the
-// sidecar's environment variables (SVIX_RETRY_*) configure them. The
-// constants below are the AF Stack values that survive the migration.
+// Defaults shared by the inbound + outbound pipelines. Outbound retry /
+// backoff knobs live on NativeConfig (native.go); the constant below is
+// the shared body-preview cap.
 const (
 	// BodyPreviewBytes is the cap on body_preview (truncated UTF-8
-	// safe; the full body lives in Body / object storage). Used by
-	// inbound persistence + by the outbound proxy when it translates a
-	// Svix message into a Delivery.
+	// safe; the full body lives in Body / object storage). Used by both
+	// inbound persistence and outbound delivery rows.
 	BodyPreviewBytes = 4096
 )
 
