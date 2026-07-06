@@ -15,6 +15,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -144,6 +145,13 @@ func (s *Server) handleEnqueueJob(w http.ResponseWriter, r *http.Request) {
 	row, err := s.jobs.Enqueue(ctx, input.Name, input.Args, opts)
 	if err != nil {
 		span.RecordError(err)
+		// Remote-language (python/typescript) definitions have no
+		// in-process handler; accepting one would silently drop the job.
+		// Surface that as 501 so the caller sees an honest "not supported".
+		if errors.Is(err, jobs.ErrRemoteJobsNotSupported) {
+			writeJSON(w, http.StatusNotImplemented, errEnvelope("REMOTE_JOBS_NOT_SUPPORTED", err.Error()))
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, errEnvelope("ENQUEUE_FAILED", err.Error()))
 		return
 	}

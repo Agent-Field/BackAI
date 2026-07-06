@@ -60,6 +60,13 @@ func registeredAliases() []string {
 	return out
 }
 
+// ErrRemoteJobsNotSupported is returned by Enqueue when a job's definition is
+// a remote language (python/typescript). This runtime has no cross-language
+// dispatcher, so persisting such a row would produce a job that never runs.
+// Rather than silently accept and drop it, Enqueue fails fast with this
+// sentinel. Track cross-language job dispatch on the roadmap.
+var ErrRemoteJobsNotSupported = errors.New("jobs: remote-language jobs are not supported by this runtime")
+
 // Manager is the public handle for the jobs module.
 type Manager struct {
 	log      *slog.Logger
@@ -337,14 +344,22 @@ type EnqueueOpts struct {
 
 // Enqueue inserts a new job of the given name with the given args.
 func (m *Manager) Enqueue(ctx context.Context, name string, args json.RawMessage, opts EnqueueOpts) (*rivertype.JobRow, error) {
-	if m.client == nil {
-		return nil, errors.New("jobs.Enqueue: manager not started")
-	}
 	if name == "" {
 		return nil, errors.New("jobs.Enqueue: name required")
 	}
-	if m.registry.Get(name) == nil {
+	def := m.registry.Get(name)
+	if def == nil {
 		return nil, fmt.Errorf("jobs.Enqueue: unknown kind %q", name)
+	}
+	// Remote (python/typescript) definitions have no in-process handler:
+	// enqueuing one would persist a River row this runtime can never execute.
+	// Reject it up front so callers get an explicit failure instead of a
+	// job that vanishes into a "pending dispatch" log line.
+	if !def.HasLiveHandler() {
+		return nil, fmt.Errorf("%w (kind %q, language %q); track cross-language job dispatch on the roadmap", ErrRemoteJobsNotSupported, name, def.Language)
+	}
+	if m.client == nil {
+		return nil, errors.New("jobs.Enqueue: manager not started")
 	}
 	if len(args) == 0 {
 		args = json.RawMessage("null")
