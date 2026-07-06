@@ -20,8 +20,14 @@ Organized by the 8 bands of `docs/stack.md`.
   `POST /api/v1/llm/embeddings`. OpenAI-compatible; same gateway / cost
   ledger / tenant scoping as `chat`. `input` accepts a single string or
   a batch.
-- **Adapter**: LiteLLM sidecar. 100+ providers. Configure providers in
-  `apps/backend/litellm-config.yaml`; pick model per call.
+- **Adapter** (`AF_STACK_LLM_GATEWAY_ADAPTER=demo|litellm|remote`): picks
+  which backend answers `/api/v1/llm/*`. `litellm` is the sidecar (100+
+  providers; configure in `apps/backend/litellm-config.yaml`, pick model per
+  call); `demo` is the deterministic no-key provider; `remote` fronts an
+  out-of-process gateway (`AF_STACK_LLM_REMOTE_URL`/`_TOKEN`). Left unset,
+  the runtime auto-selects demo vs litellm from `AF_STACK_DEMO_MODE`. The
+  value is validated at boot (unsupported → fail fast; it used to be
+  silently ignored).
 - **What's free**: per-tenant cost in `suite_cost_events`, optional
   caching, budget enforcement (planned to move upstream via LiteLLM virtual
   keys).
@@ -95,6 +101,7 @@ execution.
 - `gvisor` — production single-host, userspace kernel for isolation
 - `firecracker` — hard multi-tenant via Flintlock, micro-VMs
 - `e2b` — managed remote sandboxes (needs `E2B_API_KEY`)
+- `remote` — an out-of-process sandbox adapter over the remote protocol
 
 Stream stdout/stderr via the streaming endpoint. Capture artifacts via
 `suite.storage`. Every run is cost-tracked.
@@ -149,7 +156,15 @@ and a persisted delivery ledger.
 `suite.notifications.send({channel, recipient, template, data})`.
 Adapter (`AF_STACK_NOTIFICATIONS_ADAPTER`):
 - `log` — default, prints to logs (dev)
-- `resend` — set `RESEND_API_KEY`
+- `resend` — email; set `RESEND_API_KEY`
+- `slack` — set `AF_STACK_SLACK_WEBHOOK_URL`
+- `sms` (alias `twilio`) — set `AF_STACK_TWILIO_ACCOUNT_SID` / `_AUTH_TOKEN` / `_FROM_NUMBER`
+- `push` (alias `fcm`) — set `AF_STACK_FCM_PROJECT_ID` / `_ACCESS_TOKEN`
+  (the access token is a short-lived OAuth token minted at your ops layer)
+- `remote` — out-of-process adapter (`AF_STACK_NOTIFICATIONS_ADAPTER_URL`/`_TOKEN`, env-only)
+
+Channel creds (resend/slack/twilio/fcm) can also be set from the dashboard
+→ Platform → Integrations page; env wins, UI applies on next restart.
 
 ### Billing
 
@@ -183,7 +198,9 @@ See `rules/multi-tenancy.md` for the full pattern.
 
 Adapter (`AF_STACK_S3_ADAPTER`):
 - `minio` — default dev (S3-compatible)
-- `s3` — AWS S3 / R2 / GCS (all S3-compatible)
+- `s3` — AWS S3 / R2 / GCS / Azure Blob (all via the S3 API)
+- `remote` — out-of-process storage adapter (`AF_STACK_STORAGE_REMOTE_URL`/`_TOKEN`,
+  also settable via the Integrations UI)
 
 Objects are per-tenant scoped (key prefix). File transforms (thumbnail,
 resize) are planned.
@@ -202,6 +219,20 @@ the tenant. From Python / TS workload modules, the runtime forwards
 `suite.secrets.put(key, value)`, `suite.secrets.get(key)`,
 `suite.secrets.delete(key)`. AES-256-GCM envelope encryption; the KEK is
 `AF_STACK_KMS_KEY` (32-byte hex).
+
+Store adapter (`AF_STACK_SECRETS_ADAPTER=vault|remote`, validated at boot —
+was previously silently ignored):
+- `vault` — default; the built-in Postgres-backed AES-256-GCM vault.
+- `remote` — **roadmap.** Selectable, validated, and capability-probed, but
+  the server still binds the concrete vault type, so a remote backend
+  cannot yet fully back `/api/v1/secrets` end-to-end (generalizing the
+  server's secrets dependency to the `Store` interface is a follow-up).
+  Remote creds (`AF_STACK_SECRETS_REMOTE_URL`/`_TOKEN`) are env-only — the
+  vault can't configure its own backend. Treat `vault` as the only
+  production store today.
+
+`AF_STACK_KMS_PROVIDER` (env/aws/gcp/azure) is a separate axis — it governs
+how the data key is wrapped, not where secrets are stored.
 
 Per-tenant scoped. Use for: GitHub OAuth tokens, OpenAI keys (per
 tenant if you allow BYOK), MCP server credentials (`secret:<key>`

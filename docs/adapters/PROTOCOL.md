@@ -251,6 +251,18 @@ At runtime start the BackAI runtime:
 If the adapter is unreachable at boot, the runtime starts in a degraded
 state for that slot and surfaces it on `GET /api/v1/admin/adapters`.
 
+**Selector validation.** The `AF_STACK_<SLOT>_ADAPTER` value is validated
+against the slot's known adapters at boot. An unsupported value fails fast
+(rather than being silently ignored and falling back to a default).
+
+**Credentials via the admin UI.** For slots that opt in, the URL + token
+(and provider keys) need not be env vars — operators can set them from the
+dashboard → Platform → Integrations page (`PUT /api/v1/admin/integrations/{slot}`),
+which stores them in the secrets vault under `integration/{slot}/{field}`.
+The factories resolve env first, then the vault credential. UI changes take
+effect on the next runtime restart; the API never returns raw secret values
+(masked status only). See [`README.md`](README.md#configuring-adapter-credentials-env-or-admin-ui).
+
 ## 11. Operator-visible introspection
 
 The runtime exposes `GET /api/v1/admin/adapters` to the dashboard:

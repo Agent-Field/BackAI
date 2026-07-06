@@ -53,6 +53,7 @@ Full breakdown in [sdk.md](sdk.md).
 | [run.md](run.md) | Local run, ports, `.env`, personal vs saas mode, seeded operator |
 | [jobs.md](jobs.md) | River-backed jobs + crons (and the Go-only-handler limitation) |
 | [webhooks.md](webhooks.md) | Inbound receiver, outbound outbox, tenant pub-sub — no Svix |
+| [adapters.md](adapters.md) | Swapping backends (storage/secrets/llm/notifications/…) + the admin-UI Integrations credentials flow |
 | [sdk.md](sdk.md) | `suite.*` namespace reference + language parity |
 
 ## Deeper reference (existing docs)

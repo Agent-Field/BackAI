@@ -23,9 +23,9 @@ The HTTP contract every remote adapter speaks, per slot.
 | **notifications** — email/sms/slack | [`protocols/notifications-v1.md`](protocols/notifications-v1.md) | [`notifications.md`](notifications.md) |
 | **secrets** — encrypted vault | [`protocols/secrets-v1.md`](protocols/secrets-v1.md) | [`secrets.md`](secrets.md) |
 | **billing** — stripe/lago | [`protocols/billing-v1.md`](protocols/billing-v1.md) | [`billing.md`](billing.md) |
-| **multimodal** — TTS/STT/image | [`protocols/multimodal-v1.md`](protocols/multimodal-v1.md) | *(operator config in main env)* |
-| **llm-chat** — OpenAI-compat chat + embeddings | [`protocols/llm-chat-v1.md`](protocols/llm-chat-v1.md) | *(via Setup → LLM providers)* |
-| **auth** — session verification + OAuth | [`protocols/auth-v1.md`](protocols/auth-v1.md) | *(via Setup → Auth providers)* |
+| **multimodal** — TTS/STT/image | [`protocols/multimodal-v1.md`](protocols/multimodal-v1.md) | *(single composition — no swap env; provider keys in main env)* |
+| **llm-chat** — OpenAI-compat chat + embeddings | [`protocols/llm-chat-v1.md`](protocols/llm-chat-v1.md) | `AF_STACK_LLM_GATEWAY_ADAPTER` (`demo\|litellm\|remote`) |
+| **auth** — session verification + OAuth | [`protocols/auth-v1.md`](protocols/auth-v1.md) | `AF_STACK_AUTH_ADAPTER` (`better-auth` only today; validated) |
 | **logs** — log query + tail | [`protocols/logs-v1.md`](protocols/logs-v1.md) | `AF_STACK_LOGS_ADAPTER` |
 | **traces** — trace search + detail | [`protocols/traces-v1.md`](protocols/traces-v1.md) | `AF_STACK_TRACES_ADAPTER` |
 | **metrics** — PromQL query + range | [`protocols/metrics-v1.md`](protocols/metrics-v1.md) | `AF_STACK_METRICS_ADAPTER` |
@@ -75,4 +75,30 @@ capability caching, and SSE parsing.
   active adapter supports.
 
 The runtime exposes `GET /api/v1/admin/adapters` so the dashboard can
-show what's plugged in per slot.
+show what's plugged in per slot. `af-stack adapter list` reads this same
+live registry (no more hand-maintained table).
+
+## Configuring adapter credentials (env or admin UI)
+
+Two things pick an adapter's behavior:
+
+1. **The selector env var** (`AF_STACK_<SLOT>_ADAPTER`) chooses *which*
+   adapter is active. This is always env — swaps are explicit.
+2. **The credentials** for that adapter can come from **env** *or* from the
+   dashboard → **Platform → Integrations** page, which calls
+   `GET`/`PUT /api/v1/admin/integrations/{slot}`. UI-entered credentials are
+   stored in the secrets vault under `integration/{slot}/{field}` and
+   resolved by the runtime factories at boot.
+
+Honest caveats:
+
+- **Not hot-reload.** Changing credentials in the UI takes effect on the
+  **next runtime restart**.
+- **Never returns raw secrets.** The API reports masked status only (set /
+  not-set + a short fingerprint).
+- **UI-backed slots today:** notification channels (`resend`, `slack`,
+  `twilio`, `fcm`), plus the `storage` and `llm` remote-adapter URL/token.
+  Remote **secrets** and **notifications** URLs are **env-only** (the
+  secrets vault can't configure its own backend; notifications remote reads
+  env at boot).
+- When both env and a UI credential are set, **env wins**.
