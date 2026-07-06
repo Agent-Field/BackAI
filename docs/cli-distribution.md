@@ -96,12 +96,17 @@ Same Go binary, multiple channels. Status reflects what is wired today.
 
 ## What the CLI does
 
-```bash
-# Fork bootstrap
-af-stack init --name "DocuChat" --color "#0A66C2" --logo ./logo.png
+### Shipped today
 
-# Dev loop
+Every command below exists in the current binary (see
+[`services/cli/cmd/af-stack/main.go`](../services/cli/cmd/af-stack/main.go)).
+
+```bash
+# Fork bootstrap + dev loop
+af-stack init --name "DocuChat" --color "#0A66C2" --logo ./logo.png
 af-stack dev --detach
+af-stack mode personal|saas                  # auth+billing off ⇄ multi-tenant SaaS
+af-stack upgrade [--check]                   # pull latest upstream into this fork
 
 # Scaffolds
 af-stack agent new <name>
@@ -109,19 +114,20 @@ af-stack module new <id>
 af-stack plugin new <id>
 
 # Tools
-af-stack mcp add/list/remove <url>
+af-stack mcp list/add/remove/call <name>
 af-stack adapter list
 
-# Identity + multi-tenancy (shipped: operator/keys/tenants/sessions)
-af-stack operator create --email <email>    # allow a dashboard operator
-af-stack operator key [--owner]             # mint an operator API key (needs DATABASE_URL)
+# Identity + multi-tenancy (operator/keys/tenants/sessions)
+af-stack operator create --email <email>     # allow a dashboard operator
+af-stack operator key [--owner]              # mint an operator API key (needs DATABASE_URL)
 af-stack keys list/issue/rotate/revoke/spend
 af-stack tenants list
 af-stack sessions list/revoke
-af-stack user create/list/disable           # planned
-af-stack secrets set/get/list/delete/rotate # planned
 
-# Observability (shipped — all take AF_STACK_API_KEY = operator key)
+# Billing
+af-stack billing ...                         # set up Stripe plans + pricing (agent-first)
+
+# Observability (all take AF_STACK_API_KEY = operator key)
 af-stack logs --level error --limit 100
 af-stack errors list/resolve/mute/reopen
 af-stack audit --tenant <id>
@@ -130,19 +136,25 @@ af-stack agents list
 af-stack reasoners
 af-stack activity --tenant <id>
 
-# Database
-af-stack db migrate / rollback / status     # planned
-
 # Deploy
-af-stack deploy --target=fly|railway|render|helm
-
-# Misc
-af-stack import-module <github-url>
-af-stack self-update
+af-stack deploy helm|fly|railway|render
 ```
 
-Every CLI command maps to a documented REST endpoint or admin SDK call.
-Operators can script via CLI; programmers can script via SDK.
+Every *shipped* CLI command maps to a documented REST endpoint or admin
+SDK call. Operators can script via CLI; programmers can script via SDK.
+
+### Planned / not yet shipped
+
+These are **not runnable against a current binary** — they are on the
+roadmap. Don't assume they exist.
+
+```bash
+af-stack user create/list/disable            # planned
+af-stack secrets set/get/list/delete/rotate  # planned — secrets are managed via API / dashboard today
+af-stack db migrate/rollback/status          # planned — migrations run automatically at runtime boot
+af-stack import-module <github-url>          # planned
+af-stack self-update                         # planned — use `af-stack upgrade` to pull upstream into a fork
+```
 
 ## Build system
 
@@ -163,7 +175,9 @@ Trigger on git tag push.
 - CLI and suite runtime share a version (same monorepo, same release)
 - CLI v1.x talks to suite runtime v1.x (semver)
 - CLI checks server version on first connect, warns on mismatch
-- No silent self-update; `af-stack self-update` is explicit
+- No silent self-update. Binary self-update (`af-stack self-update`) is
+  planned; today `af-stack upgrade` pulls the latest upstream stack into
+  your fork.
 
 ## What we explicitly don't do
 

@@ -50,7 +50,7 @@ another provider key when you want live model calls through LiteLLM:
 | **Operator dashboard**       | Cost charts, run inspector, sandbox activity, memory browser, audit log, tenant drilldown, plugin system, theming via CSS variables.                                                                                                                                    |
 | **Customer-facing app**      | Sign-up → help center → Support Chat → request history → billing/account pages. Runtime credentials stay internal to the app. Separate brand, same auth DB.                                                                                                             |
 | **OpenAPI 3.1**              | Auto-generated at `/openapi.json` with 86+ routes, 21 routes with curl+Python+TS code samples.                                                                                                                                                                          |
-| **Python + TypeScript SDKs** | `suite.notifications.*`, `suite.webhooks.*`, `suite.billing.*`, `suite.sandbox.*`, `suite.memory.*`, `suite.tools.*` (MCP), `suite.admin.skills.*`, `suite.harnesses.*`. Pydantic + zod parity.                                                                         |
+| **Python + TypeScript SDKs** | `suite.notifications.*`, `suite.webhooks.*`, `suite.billing.*`, `suite.sandbox.*`, `suite.memory.*`, `suite.tools.*` (MCP), `suite.admin.skills.*`, `suite.harnesses.*`. Pydantic + zod, close-but-not-identical parity: Python also ships `suite.crons.*`; TypeScript also ships `suite.activity.*` + `suite.flags.*`. The Go SDK is an empty stub (planned, not shipped).                                                                         |
 | **CLI**                      | `af-stack mcp list/add/remove/call`, `af-stack harness list/install`.                                                                                                                                                                                                   |
 | **Helm chart**               | Production-ready with HPA, NetworkPolicy, PDB, ServiceMonitor. Both `values-dev.yaml` (in-chart PG+MinIO) and `values-prod.yaml` (external everything). Helm lint passes both.                                                                                          |
 | **PaaS configs**             | Fly.io (2 apps via flycast), Railway template, Render Blueprint, `docker-compose.prod.yml`, Caddy with auto-TLS.                                                                                                                                                        |
@@ -78,7 +78,7 @@ We deferred these because they need community pull or domain commitment:
 - **Additional LLM providers** beyond the catalog — Mistral, DeepSeek, xAI. The provider abstraction handles them; we haven't shipped the configs.
 - **Websocket MCP transport** — only stdio + SSE today.
 - **Workload modules for Examples 02 / 04 / 05** — Shipwright (SWE-AF SaaS), Podcast (multimodal), Reactive Enrichment (PG/Mongo change streams). The pattern is documented in `docs/workload-modules.md`; the modules themselves are post-launch.
-- **TypeScript webhook handlers** in workload modules — Go + Python handler shapes work; TS handler scaffolding hasn't shipped.
+- **TypeScript handlers** in workload modules — the Go in-runtime handler contract and the Python-sidecar shape are defined; a TypeScript handler shape hasn't been designed.
 - **Hosted SaaS version** — there isn't one. The self-host story has to work first.
 - **Native mobile SDKs** — REST + the OpenAI SDK shape work from anything that speaks HTTP.
 
@@ -160,9 +160,10 @@ meters:
 ```
 
 Go handler at `workload-modules/notes/handlers/notes.go`, migration at
-`workload-modules/notes/migrations/00001_init.sql`. The loader picks
-it up at boot, mounts routes at `/workload/notes/...`, applies
-migrations under its own schema_migrations table.
+`workload-modules/notes/migrations/00001_init.sql`. `af-stack module new`
+scaffolds this layout today; the runtime-side dynamic loader that mounts
+routes at `/workload/notes/...` and applies per-module migrations is still
+being wired — see `docs/workload-modules.md` for the current status.
 
 ### Swapping a default
 
@@ -272,8 +273,11 @@ Honest list. These are the rough edges in v1.
   boot before serving traffic. Online schema changes (à la
   pg_repack) aren't shipped; you'd take a brief downtime to deploy
   a schema migration on a multi-replica cluster.
-- **Workload modules** — the pattern is documented but the loader
-  doesn't hot-reload. Adding a workload module = runtime restart.
+- **Workload modules** — the directory layout + Go handler contract are
+  documented and the CLI scaffolds them, but the runtime-side dynamic
+  loader (mount routes / apply migrations / seed crons from a module dir
+  at boot) isn't wired yet. Custom backend routes today go through the
+  core runtime or an AF agent; see `docs/workload-modules.md`.
 - **No streaming yet for sandbox stdout** — completed runs return
   full stdout/stderr; you can't tail an in-progress sandbox. The
   Stream method on the adapter interface exists but is a v1.1 wire.
@@ -294,7 +298,6 @@ Honest list. These are the rough edges in v1.
 | **e2b / Modal**                     | Sandbox-as-a-service            | Everything else                                                               | We use them as one sandbox adapter among four.                               |
 | **Dify / Langflow**                 | Visual agent builder            | Backend you can self-host with multi-tenancy + billing + custom dashboards    | Different shape — we're for teams building products, not workflows-in-the-UI |
 | **Inngest / Hatchet / Trigger.dev** | Background jobs                 | LLM gateway, sandboxes, billing, dashboards                                   | River-based jobs are one of our modules                                      |
-| **Svix**                            | Webhook delivery                | Everything else                                                               | Webhook delivery is one of our modules                                       |
 
 ## The 60-second promise
 

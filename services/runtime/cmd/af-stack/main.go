@@ -618,10 +618,8 @@ func buildAdapterRegistry(
 		ID:         "webhooks",
 		Tier:       adapterregistry.Tier3,
 		Kind:       adapterregistry.KindBuiltin,
-		Name:       "svix",
-		SwapMethod: "env_var",
-		SwapEnv:    "AF_STACK_SVIX_URL",
-		AdminUI:    os.Getenv("AF_STACK_SVIX_URL"),
+		Name:       "native",
+		SwapMethod: "none",
 		Capabilities: caps(map[string]any{
 			"supports_outbound": webhooksSvc != nil && webhooksSvc.Configured(),
 			"supports_inbound":  webhooksSvc != nil,
@@ -1417,22 +1415,21 @@ func main() {
 		go worker.Run(ctx)
 	}
 
-	// Webhooks (Phase 10.2 inbound + Svix-backed outbound). The facade
-	// composes:
-	//   - DeliveryStore  : INBOUND deliveries only. The legacy outbound
-	//                      rows were dropped in migration 00015 when we
-	//                      moved outbound to Svix.
-	//   - EndpointStore  : Phase 10.2 inbound endpoint CRUD.
+	// Webhooks (inbound endpoints + native in-process outbound). The
+	// facade composes:
+	//   - DeliveryStore  : both inbound and outbound delivery rows,
+	//                      distinguished by the `direction` column.
+	//   - EndpointStore  : inbound endpoint CRUD.
 	//   - InboundService : verifies HMAC, dedups, forwards to the
 	//                      endpoint's forward_to target (http(s)://... or
 	//                      af://agents/<name>).
-	//   - OutboundService: thin proxy to the Svix sidecar. Talks to
-	//                      AF_STACK_SVIX_URL. Returns 503 when the URL
-	//                      is unset.
+	//   - NativeOutbound : drains the suite_webhook_deliveries outbox
+	//                      in-process, delivering signed, SSRF-guarded
+	//                      POSTs with retries — no external sidecar.
 	//
-	// A nil DB pool leaves every inbound store at HasPool()==false; the
-	// server surfaces 503 / empty pages accordingly. The outbound side
-	// is independent of the DB — it only needs the Svix URL.
+	// A nil DB pool leaves every store at HasPool()==false; the server
+	// surfaces 503 / empty pages accordingly (outbound included, since
+	// native delivery uses the DB as its durable queue).
 	var webhooksSvc *webhooks.Service
 	{
 		var (
@@ -1470,32 +1467,21 @@ func main() {
 			log.Info("webhooks: no database; /webhooks/in/* + endpoint CRUD will return 503")
 		}
 
-		// Outbound delivery backend. Native (in-process) delivery is the
-		// zero-config default: it uses the suite_webhook_deliveries outbox
-		// as a durable queue and delivers signed, SSRF-guarded POSTs with
-		// retries — no external sidecar. Svix remains available as an
-		// opt-in for deployments that set AF_STACK_SVIX_URL.
-		var outbound webhooks.Outbound
-		if strings.TrimSpace(os.Getenv("AF_STACK_SVIX_URL")) != "" {
-			svc := webhooks.NewOutboundService(deliveryStore, log)
-			outbound = svc
-			log.Info("webhooks: outbound proxy wired to svix (opt-in)",
-				"svix_url", os.Getenv("AF_STACK_SVIX_URL"))
+		// Outbound delivery backend. Native (in-process) delivery uses the
+		// suite_webhook_deliveries outbox as a durable queue and delivers
+		// signed, SSRF-guarded POSTs with retries — no external sidecar.
+		native := webhooks.NewNativeOutbound(deliveryStore, webhooks.NativeConfig{
+			SigningSecret:        strings.TrimSpace(os.Getenv("AF_STACK_WEBHOOK_SECRET")),
+			AllowPrivateNetworks: webhookAllowPrivate(),
+		}, log)
+		native.Start(ctx) // drain loop; stops when rootCtx is cancelled
+		if native.Configured() {
+			log.Info("webhooks: native in-process outbound delivery enabled")
 		} else {
-			native := webhooks.NewNativeOutbound(deliveryStore, webhooks.NativeConfig{
-				SigningSecret:        strings.TrimSpace(os.Getenv("AF_STACK_WEBHOOK_SECRET")),
-				AllowPrivateNetworks: webhookAllowPrivate(),
-			}, log)
-			native.Start(ctx) // drain loop; stops when rootCtx is cancelled
-			outbound = native
-			if native.Configured() {
-				log.Info("webhooks: native in-process outbound delivery enabled (no svix)")
-			} else {
-				log.Info("webhooks: no database; /api/v1/webhooks/send will return 503")
-			}
+			log.Info("webhooks: no database; /api/v1/webhooks/send will return 503")
 		}
 
-		webhooksSvc = webhooks.NewService(deliveryStore, outbound, endpointStore, inboundSvc, log)
+		webhooksSvc = webhooks.NewService(deliveryStore, native, endpointStore, inboundSvc, log)
 		// Tenant-owned outbound subscriptions (subscribe + emit + fan-out).
 		if database != nil && database.Pool != nil {
 			webhooksSvc.WithSubscriptions(webhooks.NewSubscriptionStore(database.Pool, log))
@@ -1735,9 +1721,9 @@ func main() {
 	//   2. httpServer.Shutdown(ctx) — stop accepting new connections,
 	//      close idle ones, wait for active conns to finish.
 	//   3. Cancel workersCtx — every background worker (notifications,
-	//      crons scheduler, MCP refresh, llmcache eviction) returns from
-	//      its select-on-ctx.Done() loop. Outbound webhook delivery is
-	//      owned by the Svix sidecar (OSS-AUDIT #2).
+	//      crons scheduler, MCP refresh, llmcache eviction, native
+	//      outbound webhook drain) returns from its select-on-ctx.Done()
+	//      loop.
 	//   4. mcpPool.Shutdown() — close every external MCP adapter
 	//      connection (stdio child processes, SSE clients).
 	//   5. jobs manager Stop() / DB Close / storage.Close — handled by
@@ -1827,9 +1813,8 @@ func main() {
 		// promptly (notifications: next tick; crons: next minute;
 		// MCP refresh: next tick; llmcache eviction: next 5min tick
 		// — but the goroutine itself returns from ctx.Done
-		// immediately). Outbound webhook delivery is owned by the Svix
-		// sidecar (OSS-AUDIT #2), so there's no AF Stack worker to
-		// drain on the outbound path.
+		// immediately). The native outbound webhook drain loop returns
+		// from ctx.Done on the same cancel.
 		log.Info("stopping background workers")
 		workersCancel()
 

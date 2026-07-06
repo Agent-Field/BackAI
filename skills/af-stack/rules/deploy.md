@@ -21,7 +21,6 @@ A single deploy includes:
 - AF Stack runtime (Go binary)
 - AgentField control plane (container)
 - LiteLLM sidecar
-- Svix server + its private Postgres + Redis
 - Postgres + pgvector (or external if `AF_STACK_DATABASE_URL` points outside)
 - MinIO (or external if `AF_STACK_S3_ADAPTER=s3`)
 - Dashboard (Next.js)
@@ -128,7 +127,7 @@ need to do anything special.
 |---|---|
 | Job queue | River + PG `FOR UPDATE SKIP LOCKED` — multi-replica safe |
 | Cron | Same — multi-replica safe |
-| Webhook delivery | Svix (separate stateful service) |
+| Webhook delivery | Native in-process outbox — PG-backed queue + tick worker, multi-replica safe |
 | Tenant resolver | Stateless |
 | Cost ledger | PG-backed, no in-memory state |
 | LiteLLM rate limit | eventually upstream LiteLLM virtual keys (not yet) |
@@ -176,7 +175,6 @@ create tenant → issue API key → set budget → open customer app.
   Firecracker for sandboxes.
 - **`AF_STACK_KMS_KEY=dev-secret-change-me-in-prod`** — replace with a
   real 32-byte hex value.
-- **`SVIX_JWT_SECRET=svix-dev-secret-...`** — same.
 - **Default better-auth signing key** — `AF_STACK_AUTH_SECRET` must be a
   real random value.
 

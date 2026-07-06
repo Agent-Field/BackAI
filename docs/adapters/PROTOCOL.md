@@ -332,6 +332,9 @@ This protocol is the v1 contract. The slots that ship with it:
 - **Errors** (`docs/adapters/protocols/errors-v1.md`)
 
 Job queue, outbound webhooks, and the reasoning layer are not covered
-by this protocol in v1 — they remain hardcoded to their respective
-OSS (River, Svix, AgentField). They will be added as adapter slots in
-later versions once the Go interfaces are extracted.
+by this protocol in v1. The job queue and reasoning layer remain
+hardcoded to their respective OSS (River, AgentField); outbound
+webhooks are handled by the runtime's own native outbox (PG queue +
+tick worker, HMAC signing, retry with backoff, delivery ledger). They
+will be added as adapter slots in later versions once the Go interfaces
+are extracted.

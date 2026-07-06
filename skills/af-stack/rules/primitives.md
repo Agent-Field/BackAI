@@ -139,9 +139,10 @@ your workload module endpoint or an agent call.
 
 ### Webhook out
 
-`suite.webhooks.send({event_type, payload, tenant_id})` → proxies to
-Svix. Svix handles delivery, retries, signing, replay protection, the
-message log.
+`suite.webhooks.send({event_type, payload, tenant_id})` → enqueues onto
+the native in-process outbox. The runtime handles delivery: a PG-backed
+queue + tick worker with HMAC signing, retries with exponential backoff,
+and a persisted delivery ledger.
 
 ### Notification
 

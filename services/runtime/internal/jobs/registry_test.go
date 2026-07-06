@@ -240,3 +240,38 @@ func TestRecentStatsForPropagatesError(t *testing.T) {
 func nowRecent() (t time.Time) {
 	return time.Now().Add(-1 * time.Hour)
 }
+
+// TestEnqueueRejectsRemoteLanguageJobs asserts the enqueue path fails fast
+// with ErrRemoteJobsNotSupported for a python/typescript definition (which
+// has no in-process handler) instead of silently accepting and dropping the
+// job, while a Go definition passes the language gate. Uses a bare Manager
+// with no started River client so it needs no Postgres.
+func TestEnqueueRejectsRemoteLanguageJobs(t *testing.T) {
+	mgr := &Manager{registry: NewRegistry(nil)}
+	if err := mgr.registry.RegisterGo(Definition{
+		Name:        "go-job",
+		MaxAttempts: 1,
+	}, func(_ context.Context, _ []byte) error { return nil }); err != nil {
+		t.Fatalf("register go: %v", err)
+	}
+	if err := mgr.registry.RegisterRemote(Definition{
+		Name:     "py-job",
+		Language: LanguagePython,
+	}); err != nil {
+		t.Fatalf("register remote: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// Remote-language enqueue → typed rejection.
+	if _, err := mgr.Enqueue(ctx, "py-job", json.RawMessage(`{}`), EnqueueOpts{}); !errors.Is(err, ErrRemoteJobsNotSupported) {
+		t.Fatalf("remote enqueue error = %v, want ErrRemoteJobsNotSupported", err)
+	}
+
+	// A Go definition must pass the language gate. This bare Manager has no
+	// started River client, so it fails later with "manager not started" —
+	// but it must NOT be rejected as a remote job.
+	if _, err := mgr.Enqueue(ctx, "go-job", json.RawMessage(`{}`), EnqueueOpts{}); errors.Is(err, ErrRemoteJobsNotSupported) {
+		t.Fatalf("go-job was wrongly rejected as remote: %v", err)
+	}
+}

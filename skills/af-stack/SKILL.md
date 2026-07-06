@@ -56,7 +56,7 @@ Every other directory is platform code you don't edit.
 |---|---|---|---|
 | **Customer App** | `apps/customer-app/src/app/(app)/...` | TypeScript / React | Branded SaaS pages the customer sees (sign-up, dashboard, billing, app-specific UI) |
 | **Agent** | `apps/backend/agents/<name>/` | Python | AgentField agent definition + reasoners + harness use + MCP server registration |
-| **Workload Module** | `workload-modules/<id>/` (scaffold with `af-stack module new <id>`) | Python (sidecar) or Go (in-runtime) | Backend HTTP routes + DB migrations + jobs + crons that aren't core platform |
+| **Workload Module** | `workload-modules/<id>/` (scaffold with `af-stack module new <id>`) | Go in-runtime handler is the intended path, but the runtime loader isn't wired yet — a Python workload runs as an AF agent today | Backend HTTP routes + DB migrations + jobs + crons that aren't core platform |
 | **Dashboard Plugin** | `apps/dashboard/plugins/<id>/` | TypeScript / React | Operator-console read-only tabs (charts, lists, status) |
 
 Plus:
@@ -86,12 +86,12 @@ how you call it from a workload module / runtime handler (`suite.*`).
 | ④ Intelligence | MCP tool | `app.mcp.call(...)` / declared in `__capabilities__` | `suite.tools.*` | MCP host (stdio + SSE) | ✅ |
 | ④ Intelligence | Agent tool adapters (browser / search / fs / exec / http / sql) | `app.mcp.call("native:<tool>", "<verb>", {...})` | `suite.tools.invoke_native(tool, verb, args)` | `AF_STACK_TOOL_BROWSER`, `AF_STACK_TOOL_SEARCH`, `BROWSER_USE_URL`, `SEARXNG_URL`, etc. | ✅ |
 | ⑤ Execution | Sandbox | — | `suite.sandbox.run(...)` | `AF_STACK_SANDBOX_ADAPTER=docker\|gvisor\|firecracker\|e2b` | ✅ |
-| ⑤ Execution | Job (fire-and-forget) | — | `suite.jobs.enqueue(...)` | River (PG-backed) | ✅ |
+| ⑤ Execution | Job (fire-and-forget) | — | `suite.jobs.enqueue(...)` | River (PG-backed). **Go in-process handlers only** — enqueuing a Python/TS (remote-language) job fails fast with `ErrRemoteJobsNotSupported`; cross-language dispatch is roadmap. | ✅ (Go) |
 | ⑤ Execution | Cron | — | `suite.crons.list/create/get/set_active/delete(...)` | robfig/cron v3 | ✅ |
 | ⑤ Execution | Webhook in (HMAC + dedup) | — | declare endpoint route + handler | (built-in) | ✅ |
 | ⑤ Execution | Realtime | — | `suite.realtime.subscribe(table, rt_filter)` | PG LISTEN/NOTIFY → WebSocket at `GET /api/v1/realtime` | ✅ (Python lazy-loads optional `websockets` pkg) |
 | ④ Intelligence | Realtime run subscriptions | — | `suite.runs.subscribe({tenant_id, user_id, agent, run_id, execution_id})` | AgentField SSE → WebSocket at `GET /api/v1/realtime/runs` | ✅ (#15; see `docs/realtime-runs.md`) |
-| ⑥ Delivery | Webhook out | — | `suite.webhooks.send(...)` | Svix sidecar | ✅ |
+| ⑥ Delivery | Webhook out | — | `suite.webhooks.send(...)` | native in-process outbox (PG-backed, HMAC signing, retry + exponential backoff, delivery ledger) | ✅ |
 | ⑥ Delivery | Notification | — | `suite.notifications.send(...)` | `AF_STACK_NOTIFICATIONS_ADAPTER=log\|resend` | ✅ |
 | ⑥ Delivery | Billing | — | `suite.billing.*` | `AF_STACK_BILLING_ADAPTER=stripe\|lago\|none` (Lago adapter not yet) | ✅ (Stripe), 🚧 (Lago) |
 | ⑧ Data | Postgres (RLS auto-bound) | — | direct via your handler's PG pool | (built-in) | ✅ |
@@ -153,9 +153,9 @@ See `docs/stack.md` for the diagram. Quick summary:
 ③ API Gateway    af-stack Go runtime (routing, auth, tenancy, audit, secrets)
 ④ Intelligence   AgentField · LiteLLM · MCP · Harnesses
 ⑤ Execution      Sandboxes · Jobs (River) · Crons · Webhooks IN
-⑥ Delivery       Svix (webhooks OUT) · Notifications · Billing
+⑥ Delivery       Webhooks OUT (native outbox) · Notifications · Billing
 ⑦ Observability  OpenTelemetry · Prometheus · slog
-⑧ Data           Postgres + pgvector · MinIO/S3 · Redis (Svix-private)
+⑧ Data           Postgres + pgvector · MinIO/S3
 ```
 
 ## Critical rules
@@ -246,7 +246,8 @@ Session-scope memory; see `rules/boundaries.md`."
   Postgres LISTEN/NOTIFY → WebSocket). Python `realtime.subscribe`
   lazy-imports the optional `websockets` package.
 - **TypeScript**: `packages/sdk-ts/src/` — same shape.
-- **Go**: `packages/sdk-go/suite/` — used by Go workload modules.
+- **Go**: `packages/sdk-go/suite/` — empty stub today (`doc.go` + version
+  only); the Go SDK is planned, not yet implemented.
 - **AgentField (inside agents)**: `from agentfield import Agent, AIConfig`
   + `app.ai(...)`, `app.memory.*`, `app.harness(...)`, `@app.reasoner(...)`.
 - **OpenAPI (machine-readable)**: `GET /openapi.json` on a running

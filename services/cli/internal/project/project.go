@@ -63,9 +63,25 @@ func RunDev(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	if *detach {
 		composeArgs = append(composeArgs, "-d")
 	}
+
+	// Resolve the host ports the compose stack actually binds so we print
+	// (and open) URLs that work. Defaults mirror .env.example; an env var or
+	// a value written into .env (e.g. by the port preflight) wins via
+	// readEnvValue. The customer app is the "open this first" surface.
+	apiPort := readEnvValue(root, "AF_STACK_PORT", "8080")
+	dashPort := readEnvValue(root, "AF_STACK_DASHBOARD_PORT", "33000")
+	appPort := readEnvValue(root, "AF_STACK_CUSTOMER_APP_PORT", "34000")
+	customerURL := "http://localhost:" + appPort
+
+	fmt.Fprintln(stdout, "Local URLs:")
+	fmt.Fprintf(stdout, "  Customer app  %s  (open this first)\n", customerURL)
+	fmt.Fprintf(stdout, "  Dashboard     http://localhost:%s\n", dashPort)
+	fmt.Fprintf(stdout, "  API           http://localhost:%s\n", apiPort)
+
+	// Only auto-open in detached mode; in the foreground `docker compose up`
+	// holds the terminal and the URLs above are already printed.
 	if *detach && !*noOpen {
-		dashPort := readEnvValue(root, "AF_STACK_DASHBOARD_PORT", "33000")
-		defer openURL(ctx, "http://localhost:"+dashPort, stderr)
+		defer openURL(ctx, customerURL, stderr)
 	}
 	fmt.Fprintln(stdout, "Starting AF Stack with docker compose...")
 	return runCommand(ctx, root, "docker", composeArgs, stdout, stderr)

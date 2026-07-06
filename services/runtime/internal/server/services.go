@@ -115,7 +115,7 @@ func serviceFromSlot(slot adapterregistry.SlotView, checked string) (adminServic
 		"llm-chat":      "LiteLLM",
 		"storage":       "Object storage",
 		"reasoning":     "AgentField",
-		"webhooks":      "Svix",
+		"webhooks":      "Native",
 		"notifications": "Notifications",
 		"billing":       "Billing",
 		"job-queue":     "River",

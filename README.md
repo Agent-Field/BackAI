@@ -64,12 +64,9 @@ as a first-class primitive. Run a backend locally with `af-stack dev`.
 
 **Fork and edit** remains fully supported as the power-user / self-host
 path — the repo is the product, closer to Cal.com or Plane than a hosted
-BaaS. Inside a checkout, `af-stack init` (flags only, no project name)
-re-themes the fork, `af-stack init --template coding-agent` scaffolds
-the hero coding-agent app, and `af-stack upgrade` pulls the latest
-platform into your fork — dry-run with `--check` to see incoming
-commits, DB migrations, and predicted conflicts (split into your files
-vs platform files) before anything changes:
+BaaS. Inside a checkout, `af-stack init` re-themes the fork and `af-stack
+upgrade --check` dry-runs a platform upgrade (incoming commits, DB
+migrations, predicted conflicts) before anything changes:
 
 ```bash
 git clone https://github.com/Agent-Field/backai supportdesk-ai
@@ -83,6 +80,21 @@ opt-out** usage telemetry (off unless a collection endpoint is
 configured) so adoption is visible without tracking who you are — see
 [`TELEMETRY.md`](TELEMETRY.md).
 
+## Developer Experience
+
+Everything about building on BackAI — the four edit surfaces, running
+locally, jobs & crons, webhooks, and the SDK — lives in one hub:
+
+**→ [`docs/dx/`](docs/dx/README.md) — the Developer Experience hub.**
+
+| Page | Covers |
+| --- | --- |
+| [build-app.md](docs/dx/build-app.md) | The four edit surfaces + attaching an existing app |
+| [run.md](docs/dx/run.md) | Run locally, ports, `.env`, personal vs saas mode |
+| [jobs.md](docs/dx/jobs.md) | Jobs + crons (and the Go-only-handler limitation) |
+| [webhooks.md](docs/dx/webhooks.md) | Inbound receiver, outbound outbox, tenant pub-sub |
+| [sdk.md](docs/dx/sdk.md) | `app.*` vs `suite.*`, namespace reference, language parity |
+
 ## What You Edit
 
 | Surface           | Path                           | What belongs there                                                  |
@@ -91,6 +103,12 @@ configured) so adoption is visible without tracking who you are — see
 | Agents            | `apps/backend/agents/<name>/`  | Python AgentField agents, reasoners, MCP config, and harness setup. |
 | Workload modules  | `workload-modules/<id>/`       | Domain backend routes, migrations, jobs, and crons.                 |
 | Dashboard plugins | `apps/dashboard/plugins/<id>/` | Operator-console tabs for your domain metrics and controls.         |
+
+Agents, the customer app, and dashboard plugins are live surfaces today.
+Workload modules scaffold with `af-stack module new <id>`, but runtime
+auto-mounting of their routes is still on the roadmap — treat the module
+loader as design-stage. Full authoring detail for all four surfaces is in
+[`docs/dx/build-app.md`](docs/dx/build-app.md).
 
 Start with the bundled SupportDesk AI customer app when you want a
 polished product-shaped baseline. Use [`examples/starter/`](examples/starter/)
@@ -112,7 +130,7 @@ is historical design material. See [`docs/repo-map.md`](docs/repo-map.md).
 | Identity    | better-auth, seeded default operator          | OAuth providers, trusted origins, default operator credentials.  |
 | LLM routing | AgentField path + LiteLLM sidecar             | Provider keys, model map, budgets, virtual-key strategy.         |
 | Sandboxes   | Docker in dev, e2b/gVisor/Firecracker options | Adapter choice, limits, provider credentials.                    |
-| Delivery    | Native in-process outbound webhooks (Svix optional), log notifications | Resend/Postmark/etc. notifications, billing adapter.             |
+| Delivery    | Native in-process outbound outbox (HMAC signing, retry/backoff, delivery ledger), log notifications | Resend/Postmark/etc. notifications, billing adapter.             |
 | Deploy      | Docker Compose, Helm, Fly, Railway, Render    | Your domains, secrets, scaling, managed services.                |
 
 For the layered architecture and OSS placement, read
@@ -150,7 +168,11 @@ configured provider layer.
 | **AgentField** (`app.*`) | Agent processes                                           |
 | **Suite** (`suite.*`)    | App handlers, jobs, dashboard — anywhere outside an agent |
 
-Plus a REST + OpenAPI surface so any language works.
+Language parity, stated honestly: **Python** (`af-stack`) is the full,
+canonical surface; **TypeScript** (`@af-stack/sdk`) tracks it at parity;
+**Go** (`packages/sdk-go`) is **planned** — a version stub today, not a
+usable SDK. Plus a REST + OpenAPI surface so any language works. Namespace
+reference and cross-language asymmetries: [`docs/dx/sdk.md`](docs/dx/sdk.md).
 
 ## The operator console
 
@@ -248,41 +270,13 @@ operators another way, set `AF_STACK_DEFAULT_OPERATOR_DISABLED=true`.
 ### Ports & running multiple apps side by side
 
 Every BackAI app defaults to the same host ports (`33000` admin, `34000`
-customer app, `8080` API, …), so running two at once — e.g. two apps forked
-from the template, or one next to a CourtSim demo — collides.
-
-**`af-stack dev` handles this for you.** Before starting Docker it runs the
-preflight in auto-allocate mode: any port already in use is reassigned to the
-next free one and written to `.env` (stable across restarts), a unique
-`COMPOSE_PROJECT_NAME` is set from the folder name, and it prints a "what runs
-where" map so you (or an agent) know every service URL without guessing:
-
-```text
-$ af-stack dev
-BackAI preflight: allocated conflict-free ports (written to .env):
-  Admin dashboard: 33000 → 33001 (AF_STACK_DASHBOARD_PORT)
-  Customer app:    34000 → 34001 (AF_STACK_CUSTOMER_APP_PORT)
-  BackAI runtime:  8080  → 8083  (AF_STACK_PORT)
-  Compose project: COMPOSE_PROJECT_NAME=my-app
-
-BackAI stack "my-app" — what runs where (host ports):
-  Customer app    http://localhost:34001
-  Admin console   http://localhost:33001
-  API runtime     http://localhost:8083/api/v1
-  ...
-  Logs / control:  docker compose -p my-app logs -f
-```
-
-If you drive Docker directly instead of `af-stack dev`, run the allocator
-yourself first (or plain `node scripts/preflight.mjs` for a read-only conflict
-check that prints suggestions without editing `.env`):
-
-```bash
-node scripts/preflight.mjs --fix   # allocate free ports into .env, then:
-docker compose up
-```
-
-Pass `af-stack dev --no-preflight` to opt out and use the ports as configured.
+customer app, `8080` API, …), so running two at once collides. **`af-stack
+dev` handles this for you** — its preflight reassigns any busy port to the
+next free one, writes stable overrides to `.env`, sets a unique
+`COMPOSE_PROJECT_NAME`, and prints a "what runs where" map. Driving Docker
+directly? Run `node scripts/preflight.mjs --fix` first (or without `--fix`
+for a read-only conflict check). Opt out with `af-stack dev --no-preflight`.
+Full port/`.env` reference: [`docs/dx/run.md`](docs/dx/run.md).
 
 To enable multi-tenancy: set `modules.multi-tenancy.enabled: true` in
 `apps/backend/config.yaml`. See [`docs/multi-tenancy.md`](docs/multi-tenancy.md)
@@ -423,30 +417,16 @@ responses, plus access to the cost log and budgets:
 ```python
 from af_stack import suite
 
-# Chat — non-streaming
 response = await suite.llm.chat(
     model="qwen/qwen-2.5-72b-instruct",
     messages=[{"role": "user", "content": "Hello!"}],
 )
 print(response["choices"][0]["message"]["content"])
-
-# Chat — streaming
-async for chunk in await suite.llm.chat(
-    model="qwen/qwen-2.5-72b-instruct",
-    messages=[{"role": "user", "content": "Tell me a story."}],
-    stream=True,
-):
-    delta = chunk["choices"][0]["delta"].get("content", "")
-    print(delta, end="", flush=True)
-
-# Cost log + budgets
-events = await suite.cost.events(tenant="acme", limit=20)
-await suite.admin.budgets.set({
-    "tenant_id": "acme",
-    "monthly_usd": 500,
-    "alert_threshold_pct": 80,
-})
 ```
+
+Streaming, the cost log (`suite.cost.events`), and per-tenant budgets
+(`suite.admin.budgets.set`) round out the surface — the full `suite.*`
+namespace reference is in [`docs/dx/sdk.md`](docs/dx/sdk.md).
 
 Every call is recorded with tenant, agent, model, tokens, cost, and
 cache-hit flag. Budgets are per-tenant; when a tenant exceeds its
@@ -483,68 +463,32 @@ across runs, search semantically.
 <sub>Build → Database: tables sidebar, row browser, structure / policies / SQL / memory tabs</sub>
 </div>
 
-End-to-end tests:
-
-```bash
-# DB studio API: tables, table detail, SQL runner read-only guard
-./scripts/test-db-studio.sh
-
-# Memory API: put / get / search / rerank / delete
-./scripts/test-memory.sh
-```
-
 ## Sandboxes
 
 Every BackAI deployment ships a managed code-execution sandbox so
 agents and jobs can run arbitrary commands, build artifacts, or test
-generated code without the operator wiring docker into their app code.
-Pluggable adapters (`docker` for local dev, `gvisor` for a user-space
-kernel, `firecracker` for single-host microVM isolation, `e2b` for
-managed remote sandboxes, plus a `remote` adapter for any out-of-process
-sandbox sidecar) share one API; each tenant gets its own pool with isolated filesystems,
-egress controls, and timeout/CPU/memory caps. Every run is cost-tracked
-per-tenant alongside LLM spend so a tenant's monthly budget covers both
-inference and compute.
+generated code. Pluggable adapters (`docker` for local dev, `gvisor`,
+`firecracker`, `e2b`, plus a `remote` sidecar adapter) share one API;
+each tenant gets its own pool with isolated filesystems, egress controls,
+and CPU/memory/timeout caps. Every run is cost-tracked per-tenant
+alongside LLM spend, so one monthly budget covers both inference and
+compute. Call it with `suite.sandbox.run(...)` (Python + TypeScript) — see
+[`docs/dx/sdk.md`](docs/dx/sdk.md#suite-namespaces).
 
 <div align="center">
 <img src="docs/assets/dashboard-screenshots/sandbox-activity.png" alt="BackAI Sandbox Activity — recent runs, pool stats, cost today" width="900" />
 <sub>Operate → Sandbox Activity: recent runs · adapter pool (warm / active / queued) · CPU-seconds and cost today</sub>
 </div>
 
-**Python (Suite SDK):**
+## Jobs & background work
 
-```python
-from af_stack import suite
+Durable background jobs run on a River-backed Postgres queue (no Redis),
+enqueued with `suite.jobs.*` and scheduled with crons. One honest caveat:
+only **Go (in-process) job handlers execute today** — remote Python/TS job
+handlers return an explicit "not yet implemented" error and are on the
+roadmap. Details: [`docs/dx/jobs.md`](docs/dx/jobs.md).
 
-result = await suite.sandbox.run(
-    image="python:3.12-slim",
-    command=["python", "-c", "print(2 + 2)"],
-    timeout_s=30,
-)
-print(result.exit_code, result.duration_s, result.cost_usd)
-```
-
-**TypeScript (Suite SDK):**
-
-```ts
-import { suite } from "@af-stack/sdk"
-
-const result = await suite.sandbox.run({
-  image: "node:20-alpine",
-  command: ["node", "-e", "console.log(2 + 2)"],
-  timeout_s: 30,
-})
-console.log(result.exit_code, result.duration_s, result.cost_usd)
-```
-
-End-to-end test:
-
-```bash
-# Sandbox API: happy path, pool stats, run list, failing exit code, timeout
-./scripts/test-sandbox.sh
-```
-
-### Make it your own
+## Make it your own
 
 Replace the sample agent with your own at `apps/backend/agents/<name>/` —
 each subfolder is its own container that registers with AgentField on
@@ -566,6 +510,7 @@ For the full layered stack diagram, see [`docs/stack.md`](docs/stack.md).
 
 Architecture and product docs live in this repo:
 
+- [`docs/dx/`](docs/dx/README.md) — **Developer Experience hub**: build surfaces, run, jobs, webhooks, SDK
 - [`docs/stack.md`](docs/stack.md) — Layered architecture (Supabase-shaped, 8 bands)
 - [`docs/product.md`](docs/product.md) — What it is, what it isn't, the DX
 - [`docs/architecture.md`](docs/architecture.md) — Extension points + adapter contracts

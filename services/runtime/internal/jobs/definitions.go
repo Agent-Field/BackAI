@@ -14,11 +14,12 @@
 //
 //   - **Go (native)**: registered live with a River worker. The runtime
 //     itself executes the handler in-process.
-//   - **Remote (python/typescript)**: the runtime owns the queue row and
-//     scheduling, but the actual handler lives in another service. For
-//     Phase 5 we don't yet have the cross-language dispatcher — enqueueing
-//     a remote job currently produces a `RemoteWorker` execution that just
-//     records a "pending dispatch" log line and discards.
+//   - **Remote (python/typescript)**: the actual handler would live in
+//     another service. The cross-language dispatcher does not exist yet, so
+//     the runtime cannot execute these. A remote definition may still be
+//     *registered* (so the dashboard can enumerate it), but Manager.Enqueue
+//     rejects it up front with ErrRemoteJobsNotSupported rather than
+//     persisting a row that would silently never run.
 //     (TODO Phase 5+: implement webhook callback or river-jobs-listener
 //     sidecar so SDK-py / SDK-ts can subscribe and process.)
 package jobs
@@ -154,8 +155,9 @@ func (r *Registry) RegisterGo(def Definition, handler func(ctx context.Context, 
 }
 
 // RegisterRemote stores a definition that points at a non-Go handler. The
-// dashboard can list the definition; enqueueing it produces a job that gets
-// recorded but not yet truly dispatched (see TODO above).
+// dashboard can list the definition, but until a cross-language dispatcher
+// lands the runtime cannot run it — Manager.Enqueue rejects it with
+// ErrRemoteJobsNotSupported (see TODO above) instead of silently dropping it.
 func (r *Registry) RegisterRemote(def Definition) error {
 	if def.Name == "" {
 		return fmt.Errorf("jobs: definition name required")

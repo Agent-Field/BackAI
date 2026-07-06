@@ -151,10 +151,13 @@ func (w *dispatcherWorker) Work(ctx context.Context, job *river.Job[dispatchArgs
 		return err
 	}
 
-	// Remote jobs: we have no live handler. Phase 5 stub — log and cancel
-	// so River doesn't retry forever.
+	// Remote jobs: we have no live handler. Manager.Enqueue now rejects
+	// remote-language kinds up front (ErrRemoteJobsNotSupported), so this
+	// branch should be unreachable for freshly-enqueued work — it remains as
+	// defense-in-depth for any pre-existing row, cancelling instead of
+	// retrying forever.
 	if !def.HasLiveHandler() {
-		w.registry.log.Info("remote job dispatched (stub)",
+		w.registry.log.Info("remote job has no live handler; cancelling",
 			"kind", kind,
 			"language", def.Language,
 			"job_id", job.ID,

@@ -191,12 +191,6 @@ services:
       # requires /var/run/docker.sock mounted below. Set to "noop" or
       # leave the socket unmounted to disable sandbox in CI.
       AF_STACK_SANDBOX_ADAPTER: ${AF_STACK_SANDBOX_ADAPTER:-docker}
-      # Svix (outbound webhook fabric). The runtime's POST
-      # /api/v1/webhooks/send proxies to this. Empty -> the runtime
-      # surfaces 503 on /send and an empty page on /deliveries.
-      AF_STACK_SVIX_URL: ${AF_STACK_SVIX_URL:-http://svix-server:8071}
-      AF_STACK_SVIX_TOKEN: ${AF_STACK_SVIX_TOKEN:-}
-      AF_STACK_SVIX_JWT_SECRET: ${SVIX_JWT_SECRET:-svix-dev-secret-change-me-in-prod-32-bytes}
       # Optional: enable OTel by uncommenting after OTel collector lands.
       # OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
       # OTEL_SERVICE_NAME: af-stack
@@ -224,8 +218,6 @@ services:
       agentfield:
         condition: service_started
       litellm:
-        condition: service_started
-      svix-server:
         condition: service_started
     restart: unless-stopped
     # Note: distroless image has no shell, so we rely on Docker process
@@ -364,59 +356,9 @@ services:
   #     - "4317:4317"  # OTLP gRPC
   #     - "4318:4318"  # OTLP HTTP
 
-  # Svix — outbound webhook delivery (OSS audit item #2).
-  #
-  # BackAI uses Svix as a sidecar for outbound webhook delivery: the
-  # runtime's POST /api/v1/webhooks/send proxies to svix-server, which
-  # owns the delivery queue, retries, signing, replay protection, and the
-  # message log. We keep the inbound side (/webhooks/in/{slug}) ourselves
-  # because it's tied to our forward_to semantics.
-  #
-  # Svix needs its own Postgres + Redis (its data model is independent
-  # of ours; keeping it isolated lets us swap or upgrade Svix without
-  # touching the suite schema).
-  svix-server:
-    image: svix/svix-server:v1.40
-    environment:
-      WAIT_FOR: "true"
-      SVIX_REDIS_DSN: redis://svix-redis:6379
-      SVIX_DB_DSN: postgresql://svix:svix@svix-postgres:5432/svix
-      SVIX_JWT_SECRET: ${SVIX_JWT_SECRET:-svix-dev-secret-change-me-in-prod-32-bytes}
-      SVIX_LOG_LEVEL: info
-    ports:
-      - "${SVIX_PORT:-8071}:8071"
-    depends_on:
-      svix-postgres:
-        condition: service_healthy
-      svix-redis:
-        condition: service_started
-    restart: unless-stopped
-
-  svix-postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: svix
-      POSTGRES_PASSWORD: svix
-      POSTGRES_DB: svix
-    volumes:
-      - svix-pg-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U svix"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
-  svix-redis:
-    image: redis:7-alpine
-    command: redis-server --save "" --appendonly no
-    volumes:
-      - svix-redis-data:/data
-
   # Caddy reverse proxy + automatic TLS (production only).
   # See docker-compose.prod.yml.
 
 volumes:
   postgres-data:
   minio-data:
-  svix-pg-data:
-  svix-redis-data:
