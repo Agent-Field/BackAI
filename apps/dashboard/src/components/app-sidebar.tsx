@@ -158,6 +158,7 @@ const GROUPS: NavGroup[] = [
     label: "Platform",
     items: [
       { id: "adapters", label: "Adapters", href: "/platform/adapters", icon: Server },
+      { id: "integrations", label: "Integrations", href: "/platform/integrations", icon: Plug },
       { id: "billing", label: "Billing", href: "/platform/billing", icon: CreditCard },
       { id: "secrets", label: "Secrets", href: "/platform/secrets", icon: KeyRound, comingSoon: true },
       { id: "features", label: "Features", href: "/platform/features", icon: Globe2, comingSoon: true },
