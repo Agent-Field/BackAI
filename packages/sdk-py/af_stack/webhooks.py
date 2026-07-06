@@ -86,6 +86,38 @@ class WebhookDeliveryList(BaseModel):
     has_more: bool = False
 
 
+class WebhookSubscription(BaseModel):
+    """A tenant-owned outbound webhook subscriber.
+
+    Mirrors ``webhooks.Subscription`` in the runtime. ``secret`` (a
+    ``whsec_`` signing key) is populated only by :func:`subscribe` — it is
+    returned exactly once at creation and redacted (empty) in every
+    :func:`subscriptions` listing.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    url: str
+    events: list[str] = Field(default_factory=list)
+    secret: str = ""
+    is_active: bool = True
+    created_at: str
+
+
+class WebhookEmitResult(BaseModel):
+    """Result of fanning an event out to a tenant's active subscribers.
+
+    Mirrors the ``{emitted, delivery_ids}`` envelope from
+    ``POST /api/v1/webhooks/emit``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    emitted: int = 0
+    delivery_ids: list[str] = Field(default_factory=list)
+
+
 async def send(
     url: str,
     event_type: str,
@@ -181,13 +213,80 @@ async def retry(id: str) -> WebhookDelivery:
     return WebhookDelivery.model_validate(body or {})
 
 
+async def subscribe(
+    url: str,
+    *,
+    events: list[str] | None = None,
+) -> WebhookSubscription:
+    """Register an outbound webhook subscriber for the caller's tenant.
+
+    Maps to ``POST /api/v1/webhooks/subscriptions``. Returns the created
+    subscription including the one-time ``whsec_`` signing ``secret`` —
+    store it now, later listings redact it. ``events`` is an optional
+    allowlist of event types; omit it (or pass an empty list) to receive
+    every event the tenant emits.
+    """
+    if not url:
+        raise ValueError("webhook subscription url must be a non-empty string")
+    payload: dict[str, Any] = {"url": url}
+    if events is not None:
+        payload["events"] = list(events)
+    res = await _http.request_json("POST", "/webhooks/subscriptions", json=payload)
+    return WebhookSubscription.model_validate(res or {})
+
+
+async def subscriptions() -> list[WebhookSubscription]:
+    """List the caller tenant's webhook subscriptions.
+
+    Maps to ``GET /api/v1/webhooks/subscriptions``. Signing secrets are
+    redacted (empty) in the returned rows.
+    """
+    body = await _http.request_json("GET", "/webhooks/subscriptions")
+    rows = body.get("subscriptions", []) if isinstance(body, dict) else []
+    return [WebhookSubscription.model_validate(row) for row in rows]
+
+
+async def unsubscribe(id: str) -> bool:
+    """Delete a webhook subscription by id.
+
+    Maps to ``DELETE /api/v1/webhooks/subscriptions/{id}``. Returns ``True``
+    when the subscription was deleted.
+    """
+    if not id:
+        raise ValueError("webhook subscription id must be a non-empty string")
+    body = await _http.request_json("DELETE", f"/webhooks/subscriptions/{id}")
+    if isinstance(body, dict):
+        return bool(body.get("deleted", True))
+    return True
+
+
+async def emit(event_type: str, body: Any) -> WebhookEmitResult:
+    """Emit an event to the caller tenant's active subscribers.
+
+    Maps to ``POST /api/v1/webhooks/emit``. The runtime fans ``body`` out
+    as native, signed deliveries to every matching subscriber and returns
+    how many were enqueued plus their delivery ids.
+    """
+    if not event_type:
+        raise ValueError("webhook event_type must be a non-empty string")
+    payload: dict[str, Any] = {"event_type": event_type, "body": body}
+    res = await _http.request_json("POST", "/webhooks/emit", json=payload)
+    return WebhookEmitResult.model_validate(res or {})
+
+
 __all__ = [
     "WebhookDelivery",
     "WebhookDeliveryList",
     "WebhookDirection",
+    "WebhookEmitResult",
     "WebhookStatus",
+    "WebhookSubscription",
+    "emit",
     "get",
     "list",
     "retry",
     "send",
+    "subscribe",
+    "subscriptions",
+    "unsubscribe",
 ]
