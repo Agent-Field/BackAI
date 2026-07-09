@@ -149,7 +149,11 @@ export function NotificationsShell({ initialSnapshot }: NotificationsShellProps)
         onStatusChange={setStatus}
         onKindChange={setKind}
       />
-      <ChannelsCard channels={snapshot.channels} healthy={snapshot.healthy} />
+      <ChannelsCard
+        channels={snapshot.channels}
+        healthy={snapshot.healthy}
+        onChanged={() => refresh(status, kind, false)}
+      />
       <MutesCard
         mutes={snapshot.mutes}
         healthy={snapshot.healthy}
