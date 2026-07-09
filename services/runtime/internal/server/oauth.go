@@ -117,6 +117,37 @@ func writeOAuthError(w http.ResponseWriter, err error) {
 	}
 }
 
+// personalOAuthUserID is the stable synthetic single-user principal the
+// OAuth handlers act as in personal mode (AF_STACK_MODE=personal), where
+// auth is off and no browser session carries a user id. Both the browser
+// authorize flow and the agent/SDK token retrieval resolve to this id, so
+// tokens stored during a consent round-trip are readable back — the two
+// surfaces agree. The customer-app's synthetic session
+// (apps/customer-app/src/lib/session.ts — personalCustomerSession, id
+// "personal") is display-only and is never sent to the runtime, so the
+// two ids need not be string-equal; the runtime owns this identity.
+//
+// It is a fixed sentinel UUID rather than a mnemonic string because
+// suite_oauth_tokens.user_id is `uuid not null references suite_users(id)`
+// — a non-UUID like "personal" fails the column's uuid cast (SQLSTATE
+// 22P02) on connections/token/disconnect. The all-zeros-plus-one value is
+// a companion to the seeded default tenant
+// (tenancy.DefaultTenantID = 00000000-…-000000000000). It is also a valid
+// secrets-vault key segment for oauth_<provider>_<user_id>.
+const personalOAuthUserID = "00000000-0000-0000-0000-000000000001"
+
+// oauthUserFallback returns userID unchanged in saas mode. In personal
+// mode an empty userID (no session-carried principal) resolves to the
+// synthetic single-user principal so the per-user OAuth surface works
+// with auth off. saas behavior is byte-identical: empty stays empty and
+// the caller still emits USER_REQUIRED.
+func (s *Server) oauthUserFallback(userID string) string {
+	if userID == "" && s.personalMode() {
+		return personalOAuthUserID
+	}
+	return userID
+}
+
 func (s *Server) oauthUnavailable(w http.ResponseWriter) bool {
 	if s.oauthManager == nil || s.oauthFactory == nil {
 		writeError(w, http.StatusServiceUnavailable, "OAUTH_NOT_CONFIGURED",
@@ -147,7 +178,7 @@ func (s *Server) handleOAuthConnections(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	tenantID := tenantctx.TenantID(r.Context())
-	userID, ok := oauthTargetUserID(w, r)
+	userID, ok := s.oauthTargetUserID(w, r)
 	if !ok {
 		return
 	}
@@ -173,7 +204,7 @@ func (s *Server) handleOAuthAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tenantID := tenantctx.TenantID(r.Context())
-	userID := tenantctx.UserID(r.Context())
+	userID := s.oauthUserFallback(tenantctx.UserID(r.Context()))
 	if tenantID == "" {
 		writeOAuthError(w, oauth.ErrTenantRequired)
 		return
@@ -321,7 +352,7 @@ func (s *Server) handleOAuthDisconnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tenantID := tenantctx.TenantID(r.Context())
-	userID, ok := oauthTargetUserID(w, r)
+	userID, ok := s.oauthTargetUserID(w, r)
 	if !ok {
 		return
 	}
@@ -376,7 +407,7 @@ func (s *Server) handleOAuthToken(w http.ResponseWriter, r *http.Request) {
 	tenantID := tenantctx.TenantID(r.Context())
 	userID := strings.TrimSpace(in.UserID)
 	if userID == "" {
-		userID = tenantctx.UserID(r.Context())
+		userID = s.oauthUserFallback(tenantctx.UserID(r.Context()))
 	} else if tenantctx.APIKeyID(r.Context()) == "" && tenantctx.UserID(r.Context()) != userID {
 		writeError(w, http.StatusForbidden, "API_KEY_REQUIRED",
 			"targeting another user_id requires an API key", nil)
@@ -398,7 +429,7 @@ func (s *Server) handleOAuthToken(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func oauthTargetUserID(w http.ResponseWriter, r *http.Request) (string, bool) {
+func (s *Server) oauthTargetUserID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if raw := strings.TrimSpace(r.URL.Query().Get("user_id")); raw != "" {
 		if tenantctx.APIKeyID(r.Context()) == "" {
 			writeError(w, http.StatusForbidden, "API_KEY_REQUIRED",
@@ -407,7 +438,7 @@ func oauthTargetUserID(w http.ResponseWriter, r *http.Request) (string, bool) {
 		}
 		return raw, true
 	}
-	userID := tenantctx.UserID(r.Context())
+	userID := s.oauthUserFallback(tenantctx.UserID(r.Context()))
 	if userID == "" {
 		writeOAuthError(w, oauth.ErrUserRequired)
 		return "", false
