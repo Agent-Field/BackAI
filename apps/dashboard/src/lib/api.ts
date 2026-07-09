@@ -2207,12 +2207,26 @@ export const ApprovalListSchema = z.object({
 })
 export type ApprovalList = z.infer<typeof ApprovalListSchema>
 
-export const OAuthProviderSchema = z.object({
-  provider: z.string(),
-  configured: z.boolean().optional(),
-  scopes: z.array(z.string()).optional(),
-  auth_url: z.string().nullable().optional(),
-})
+// The runtime's provider list (GET /api/v1/oauth/providers) marshals
+// oauth.ProviderInfo, whose JSON keys are `name` / `default_scopes` — not
+// `provider` / `scopes`. Accept both spellings and normalise to the
+// `provider` / `scopes` shape the dashboard consumes, so the provider list
+// isn't silently dropped on a required-field mismatch.
+export const OAuthProviderSchema = z
+  .object({
+    provider: z.string().optional(),
+    name: z.string().optional(),
+    configured: z.boolean().optional(),
+    scopes: z.array(z.string()).optional(),
+    default_scopes: z.array(z.string()).optional(),
+    auth_url: z.string().nullable().optional(),
+  })
+  .transform((p) => ({
+    provider: p.provider ?? p.name ?? "",
+    configured: p.configured,
+    scopes: p.scopes ?? p.default_scopes,
+    auth_url: p.auth_url ?? null,
+  }))
 export type OAuthProvider = z.infer<typeof OAuthProviderSchema>
 
 export const OAuthProviderListSchema = z.object({
