@@ -126,12 +126,20 @@ func (s *Server) oauthUnavailable(w http.ResponseWriter) bool {
 	return false
 }
 
-func (s *Server) handleOAuthProviders(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleOAuthProviders(w http.ResponseWriter, r *http.Request) {
 	if s.oauthFactory == nil {
 		writeJSON(w, http.StatusOK, oauthProviderListResponse{Providers: []oauth.ProviderInfo{}})
 		return
 	}
-	writeJSON(w, http.StatusOK, oauthProviderListResponse{Providers: s.oauthFactory.List()})
+	// redirect_uri is request-scoped (it derives from AF_STACK_PUBLIC_URL or
+	// the forwarded host), so the oauth package leaves it blank and we fill
+	// it here. Operators need it to register the callback with the provider
+	// console — populate it for every provider, configured or not.
+	providers := s.oauthFactory.List()
+	for i := range providers {
+		providers[i].RedirectURI = oauthRedirectURI(r, providers[i].Name)
+	}
+	writeJSON(w, http.StatusOK, oauthProviderListResponse{Providers: providers})
 }
 
 func (s *Server) handleOAuthConnections(w http.ResponseWriter, r *http.Request) {

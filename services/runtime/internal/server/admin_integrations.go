@@ -28,7 +28,9 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strings"
 
+	"github.com/Agent-Field/backai/services/runtime/internal/oauth"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
 	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
 	"github.com/Agent-Field/backai/services/runtime/internal/secrets"
@@ -61,6 +63,55 @@ var integrationFields = map[string][]string{
 	"storage": {"remote_url", "remote_token"},
 	"secrets": {"remote_url", "remote_token"},
 	"llm":     {"remote_url", "remote_token"},
+	// OAuth-on-behalf-of-user provider slots are registered dynamically in
+	// init() from oauth.AllProviderNames so the slot set stays in lockstep
+	// with the shipped adapters. Each slot exposes client_id + client_secret.
+}
+
+// oauthIntegrationSlotPrefix namespaces the per-provider OAuth credential
+// slots ("oauth_google", "oauth_github", …) so they sit alongside the
+// adapter slots without colliding. The oauth.Factory resolver
+// (newOAuthCredentialResolver) maps a provider name back onto this slot.
+const oauthIntegrationSlotPrefix = "oauth_"
+
+// oauthIntegrationSlot returns the integration slot name for an OAuth
+// provider (e.g. "google" → "oauth_google").
+func oauthIntegrationSlot(provider string) string {
+	return oauthIntegrationSlotPrefix + provider
+}
+
+// oauthIntegrationFields are the credential inputs every OAuth provider
+// slot exposes to the operator dashboard.
+var oauthIntegrationFields = []string{"client_id", "client_secret"}
+
+func init() {
+	// Register one integration slot per known OAuth provider so operators
+	// can enter Google/GitHub (etc.) client id + secret from the dashboard.
+	for _, name := range oauth.AllProviderNames {
+		integrationFields[oauthIntegrationSlot(name)] = append([]string(nil), oauthIntegrationFields...)
+	}
+}
+
+// newOAuthCredentialResolver returns an oauth.CredentialResolver backed by
+// the integration vault slots for the default (single) operator tenant.
+// Resolution is vault-first; the env fallback (OAUTH_<NAME>_*) lives in the
+// oauth.Factory. Reading the store lazily on every call (rather than
+// capturing a snapshot) is what makes an operator-entered credential take
+// effect on the next OAuth request WITHOUT a runtime restart.
+func (s *Server) newOAuthCredentialResolver() oauth.CredentialResolver {
+	return func(provider, field string) (string, bool) {
+		store := s.integrationStore()
+		if store == nil {
+			return "", false
+		}
+		key := integrationVaultKey(oauthIntegrationSlot(provider), field)
+		v, err := store.Get(context.Background(), s.defaultTenant(nil), key)
+		if err != nil {
+			return "", false
+		}
+		val := strings.TrimSpace(string(v))
+		return val, val != ""
+	}
 }
 
 // integrationVaultKey builds the vault key for a (slot, field). See the

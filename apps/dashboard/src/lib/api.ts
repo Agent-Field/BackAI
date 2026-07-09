@@ -792,6 +792,19 @@ export const NotificationChannelListSchema = z.object({
 })
 export type NotificationChannelList = z.infer<typeof NotificationChannelListSchema>
 
+// Upsert body for POST/PATCH /api/v1/notifications/channels. `kind` is the
+// identity — the runtime upserts on conflict(kind), so `id` is not sent.
+// `config_json` is adapter-specific and may hold secret-by-reference values;
+// the UI renders only its keys and never echoes stored values back.
+export const UpsertNotificationChannelInputSchema = z.object({
+  kind: NotificationKindSchema,
+  config_json: z.record(z.string(), z.unknown()).optional(),
+  enabled: z.boolean().optional(),
+})
+export type UpsertNotificationChannelInput = z.infer<
+  typeof UpsertNotificationChannelInputSchema
+>
+
 export const CreateNotificationMuteInputSchema = z.object({
   tenant_id: z.string().optional(),
   pattern: NotificationMutePatternSchema,
@@ -1972,8 +1985,12 @@ export const CronSchema = z.object({
   // runtime stores in 5-field crontab format; "@daily" / "@hourly"
   // shortcuts expand server-side.
   schedule: z.string(),
-  // JSON args forwarded to the job on each tick.
-  args: z.record(z.string(), z.unknown()),
+  // JSON args forwarded to the job on each tick. Tolerate a null from the
+  // runtime so one odd row can't fail the whole list parse.
+  args: z
+    .record(z.string(), z.unknown())
+    .nullish()
+    .transform((v) => v ?? {}),
   is_active: z.boolean(),
   // Nullable when the cron has never fired.
   last_run_at: z.string().nullable(),
@@ -2207,12 +2224,34 @@ export const ApprovalListSchema = z.object({
 })
 export type ApprovalList = z.infer<typeof ApprovalListSchema>
 
-export const OAuthProviderSchema = z.object({
-  provider: z.string(),
-  configured: z.boolean().optional(),
-  scopes: z.array(z.string()).optional(),
-  auth_url: z.string().nullable().optional(),
-})
+// The runtime's provider list (GET /api/v1/oauth/providers) marshals
+// oauth.ProviderInfo, whose JSON keys are `name` / `default_scopes` — not
+// `provider` / `scopes`. Accept both spellings and normalise to the
+// `provider` / `scopes` shape the dashboard consumes, so the provider list
+// isn't silently dropped on a required-field mismatch.
+export const OAuthProviderSchema = z
+  .object({
+    provider: z.string().optional(),
+    name: z.string().optional(),
+    configured: z.boolean().optional(),
+    scopes: z.array(z.string()).optional(),
+    default_scopes: z.array(z.string()).optional(),
+    auth_url: z.string().nullable().optional(),
+    // Newer runtimes expose where the client credentials came from
+    // ("vault" = operator-entered, "env" = environment, "" = unconfigured)
+    // and the callback URL to register in the provider console. Optional so
+    // the page still parses against runtimes that predate these fields.
+    redirect_uri: z.string().nullable().optional(),
+    credentials_source: z.string().optional(),
+  })
+  .transform((p) => ({
+    provider: p.provider ?? p.name ?? "",
+    configured: p.configured,
+    scopes: p.scopes ?? p.default_scopes,
+    auth_url: p.auth_url ?? null,
+    redirect_uri: p.redirect_uri ?? null,
+    credentials_source: p.credentials_source ?? undefined,
+  }))
 export type OAuthProvider = z.infer<typeof OAuthProviderSchema>
 
 export const OAuthProviderListSchema = z.object({
@@ -2750,6 +2789,22 @@ export const api = {
           "/api/v1/notifications/channels",
           undefined,
           NotificationChannelListSchema,
+        ),
+      // Create or replace a channel. The runtime keys on `kind`, so calling
+      // this for an existing kind edits it in place.
+      upsert: (input: UpsertNotificationChannelInput) =>
+        request(
+          "/api/v1/notifications/channels",
+          { method: "POST", json: input },
+          NotificationChannelSchema,
+        ),
+      // Delete a channel by kind (the stable identity) — the endpoint takes
+      // no path param, so the target rides in the query string.
+      remove: (kind: NotificationKind) =>
+        request(
+          `/api/v1/notifications/channels?kind=${encodeURIComponent(kind)}`,
+          { method: "DELETE" },
+          z.object({ ok: z.boolean() }),
         ),
     },
   },

@@ -11,8 +11,14 @@ dist
 build
 out
 *.log
+# Bare names only match at the context root; nested installs (e.g.
+# apps/dashboard/node_modules, full of pnpm symlinks into the excluded
+# root store) must be excluded too or COPY clobbers the in-image install
+# with broken links.
 node_modules
+**/node_modules
 .next
+**/.next
 .venv
 .venv-*
 __pycache__

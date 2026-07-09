@@ -241,7 +241,11 @@ func (s *Server) eventsFromActivity(ctx context.Context, limit int) []adminEvent
 	if s.activity == nil {
 		return nil
 	}
-	page, err := s.activity.List(ctx, activity.ListFilter{Limit: limit, Offset: 0})
+	// ListAll, not List: this feed is the operator's cross-tenant view and
+	// the request context carries no tenant — List rejects that with
+	// ErrTenantRequired on every poll. The route is operator-guarded,
+	// which is ListAll's contract.
+	page, err := s.activity.ListAll(ctx, "", activity.ListFilter{Limit: limit, Offset: 0})
 	if err != nil {
 		s.log.Warn("admin events: activity source failed", "error", err)
 		return nil
