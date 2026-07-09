@@ -19,7 +19,11 @@ async function proxy(req: NextRequest, { params }: { params: Promise<{ path: str
   const { path } = await params
   const runtime = process.env.RUNTIME_URL ?? RUNTIME_DEFAULT
   const search = req.nextUrl.search
-  const target = `${runtime}/api/v1/${path.join("/")}${search}`
+  // Next decodes catch-all segments, so a %2F inside one segment (e.g. a
+  // vault key like "integration/oauth_github/client_id") would otherwise
+  // be re-joined as a raw slash and change the upstream route shape.
+  // Re-encode per segment to preserve the caller's addressing.
+  const target = `${runtime}/api/v1/${path.map(encodeURIComponent).join("/")}${search}`
 
   const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer()
 
