@@ -493,6 +493,15 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 	} else {
 		s.audit = audit.New(nil, log)
 	}
+	// OAuth provider credentials resolve vault-first (operator-entered
+	// integration slots) with an env fallback owned by the factory. Wiring
+	// the resolver here — rather than at factory construction in main — is
+	// what lets a credential saved via /admin/integrations take effect on
+	// the next OAuth request without a runtime restart. The resolver reads
+	// s.integrationStore() lazily, so it also honours the test store hook.
+	if s.oauthFactory != nil {
+		s.oauthFactory.SetCredentialResolver(s.newOAuthCredentialResolver())
+	}
 	s.registerRoutes()
 
 	// Wrap mux with OTel tracing first, then structured logging on the outside

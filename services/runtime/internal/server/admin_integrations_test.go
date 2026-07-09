@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
+	"github.com/Agent-Field/backai/services/runtime/internal/oauth"
 	"github.com/Agent-Field/backai/services/runtime/internal/secrets"
 )
 
@@ -297,6 +298,78 @@ func TestAdminIntegrationsPutUnknownField(t *testing.T) {
 		t.Fatalf("status = %d, want 400; body = %s", rec.Code, rec.Body.String())
 	}
 	assertErrorEnvelope(t, rec.Body.Bytes(), "INTEGRATION_FIELD_UNKNOWN")
+}
+
+// TestAdminIntegrationsOAuthSlotRoundTrip verifies each OAuth provider is
+// registered as an integration slot (oauth_<provider>) with client_id +
+// client_secret, that a PUT persists both under the integration/{slot}/{field}
+// convention, and that the response is masked and lists the slot on GET.
+func TestAdminIntegrationsOAuthSlotRoundTrip(t *testing.T) {
+	s, store := newIntegrationsTestServer(t)
+
+	// Registry parity: every oauth.AllProviderNames provider has a slot.
+	for _, provider := range oauth.AllProviderNames {
+		slot := "oauth_" + provider
+		fields, ok := integrationFields[slot]
+		if !ok {
+			t.Fatalf("missing integration slot for oauth provider %q", provider)
+		}
+		if len(fields) != 2 || fields[0] != "client_id" || fields[1] != "client_secret" {
+			t.Fatalf("slot %q fields = %v, want [client_id client_secret]", slot, fields)
+		}
+	}
+
+	const cid, csec = "cid-123456789", "csec-abcdefghij"
+	body := `{"credentials":{"client_id":"` + cid + `","client_secret":"` + csec + `"}}`
+	rec := doJSON(t, s, http.MethodPut, "/api/v1/admin/integrations/oauth_google", body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// Stored under integration/oauth_google/<field>.
+	for field, want := range map[string]string{"client_id": cid, "client_secret": csec} {
+		key := "integration/oauth_google/" + field
+		got, err := store.Get(context.Background(), s.defaultTenant(nil), key)
+		if err != nil {
+			t.Fatalf("%s not stored: %v", key, err)
+		}
+		if string(got) != want {
+			t.Fatalf("%s = %q, want %q", key, got, want)
+		}
+	}
+
+	// Response is masked and both fields are marked set.
+	if strings.Contains(rec.Body.String(), csec) {
+		t.Fatalf("PUT leaked raw client secret: %s", rec.Body.String())
+	}
+	st := decodeSlot(t, rec)
+	if st.Slot != "oauth_google" || len(st.Fields) != 2 {
+		t.Fatalf("unexpected oauth_google status: %+v", st)
+	}
+	for _, f := range st.Fields {
+		if !f.Set {
+			t.Errorf("field %q not set after PUT", f.Name)
+		}
+	}
+
+	// GET lists oauth_google alongside the adapter slots.
+	getRec := doJSON(t, s, http.MethodGet, "/api/v1/admin/integrations", "")
+	if strings.Contains(getRec.Body.String(), csec) {
+		t.Fatalf("GET leaked raw client secret: %s", getRec.Body.String())
+	}
+	var out integrationsListResponse
+	if err := json.Unmarshal(getRec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, slot := range out.Integrations {
+		if slot.Slot == "oauth_google" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("oauth_google slot missing from GET response")
+	}
 }
 
 // TestAdminIntegrationsNoVaultReturns503 verifies the degrade path.
