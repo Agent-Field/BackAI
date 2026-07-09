@@ -150,15 +150,38 @@ func (r *Recorder) ListMutes(ctx context.Context, tenantID string) (*MuteListRes
 	if !r.HasPool() {
 		return &MuteListResult{Mutes: []Mute{}}, nil
 	}
-	// Bind the requested tenant so RLS on suite_notification_mutes passes.
-	ctx = tenantctx.WithTenant(ctx, tenantID, "")
 	args := []any{}
 	where := ""
 	if tenantID != "" {
 		args = append(args, tenantID)
 		where = " where tenant_id = $1 or tenant_id is null"
 	}
-	rows, err := r.pool.Query(ctx, `
+
+	// When a tenant filter is present, bind it so RLS scopes the read to
+	// that tenant (plus NULL-tenant global mutes). When it is absent this is
+	// a cross-tenant operator listing with no single tenant to bind, so run
+	// under a bypass-RLS tx (read-only; the defer'd rollback closes it).
+	// Without the bypass the FORCE-RLS policy on suite_notification_mutes
+	// hides every concrete-tenant row — including mutes CreateMute stores
+	// under the default tenant — so the admin list would come back empty.
+	var q interface {
+		Query(context.Context, string, ...any) (pgx.Rows, error)
+	} = r.pool
+	if tenantID != "" {
+		ctx = tenantctx.WithTenant(ctx, tenantID, "")
+	} else {
+		tx, err := r.pool.Begin(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("notifications: list mutes begin: %w", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+			return nil, fmt.Errorf("notifications: list mutes bypass: %w", err)
+		}
+		q = tx
+	}
+
+	rows, err := q.Query(ctx, `
 		select id, tenant_id, kind, recipient, template, category,
 		       reason, expires_at, created_by, created_at
 		  from suite_notification_mutes`+where+`
