@@ -56,28 +56,6 @@ export function NotificationsShell({ initialSnapshot }: NotificationsShellProps)
     [searchParams],
   )
 
-  const setStatus = useCallback(
-    (next: NotificationStatusFilter) => {
-      const params = new URLSearchParams(searchParams.toString())
-      if (next === DEFAULT_STATUS_FILTER) params.delete("status")
-      else params.set("status", next)
-      const qs = params.toString()
-      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
-    },
-    [pathname, router, searchParams],
-  )
-
-  const setKind = useCallback(
-    (next: NotificationKindFilter) => {
-      const params = new URLSearchParams(searchParams.toString())
-      if (next === DEFAULT_KIND_FILTER) params.delete("kind")
-      else params.set("kind", next)
-      const qs = params.toString()
-      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
-    },
-    [pathname, router, searchParams],
-  )
-
   const refresh = useCallback(
     async (
       statusFilter: NotificationStatusFilter,
@@ -113,9 +91,33 @@ export function NotificationsShell({ initialSnapshot }: NotificationsShellProps)
     [],
   )
 
-  useEffect(() => {
-    void refresh(status, kind)
-  }, [status, kind, refresh])
+  // Filter changes drive the refetch from the change handler (not a
+  // reactive effect): update the URL, then pull the newly-filtered slice.
+  // The server-rendered initialSnapshot already matches the URL filter on
+  // first paint, so no mount refetch is needed.
+  const setStatus = useCallback(
+    (next: NotificationStatusFilter) => {
+      const params = new URLSearchParams(searchParams.toString())
+      if (next === DEFAULT_STATUS_FILTER) params.delete("status")
+      else params.set("status", next)
+      const qs = params.toString()
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+      void refresh(next, kind)
+    },
+    [pathname, router, searchParams, kind, refresh],
+  )
+
+  const setKind = useCallback(
+    (next: NotificationKindFilter) => {
+      const params = new URLSearchParams(searchParams.toString())
+      if (next === DEFAULT_KIND_FILTER) params.delete("kind")
+      else params.set("kind", next)
+      const qs = params.toString()
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+      void refresh(status, next)
+    },
+    [pathname, router, searchParams, status, refresh],
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -173,8 +175,16 @@ function Header({
   onRefresh: () => void
   onSendTest: () => void
 }) {
-  const ageSec = Math.max(0, Math.round((Date.now() - Date.parse(fetchedAt)) / 1000))
-  const ageLabel = ageSec < 5 ? "now" : `${ageSec}s ago`
+  // Tick the "updated Xs ago" label off a 1s interval rather than reading
+  // the clock during render — keeps the component render-pure.
+  const [ageLabel, setAgeLabel] = useState("now")
+  useEffect(() => {
+    const id = setInterval(() => {
+      const ageSec = Math.max(0, Math.round((Date.now() - Date.parse(fetchedAt)) / 1000))
+      setAgeLabel(ageSec < 5 ? "now" : `${ageSec}s ago`)
+    }, 1000)
+    return () => clearInterval(id)
+  }, [fetchedAt])
   return (
     <header className="flex items-baseline justify-between">
       <div className="flex flex-col gap-tile-tight">
