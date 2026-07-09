@@ -18,6 +18,8 @@ persisted:
 - `verbose-run-logs`
 
 Changing a flag writes an override row to `suite_feature_flags`.
+Operators toggle flags from the dashboard **Build → Flags** page, which
+shows whether each value is a built-in default or a persisted override.
 
 ## TypeScript
 

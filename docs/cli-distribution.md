@@ -143,6 +143,13 @@ af-stack deploy helm|fly|railway|render
 Every *shipped* CLI command maps to a documented REST endpoint or admin
 SDK call. Operators can script via CLI; programmers can script via SDK.
 
+> **Fork upgrade gotcha.** The compiled `bin/af-stack` committed in an
+> older fork predates newer subcommands. Rebuild the CLI before running
+> `af-stack upgrade` — `make build-cli` (which runs
+> `go build -o bin/af-stack ./services/cli/cmd/af-stack`) — then rebuild
+> the images afterwards (`docker compose build`) so the runtime and
+> frontends match the upgraded source.
+
 ### Planned / not yet shipped
 
 These are **not runnable against a current binary** — they are on the

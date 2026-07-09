@@ -165,6 +165,11 @@ Adapter (`AF_STACK_NOTIFICATIONS_ADAPTER`):
 
 Channel creds (resend/slack/twilio/fcm) can also be set from the dashboard
 → Platform → Integrations page; env wins, UI applies on next restart.
+Channels are also managed via `GET|POST|PATCH|DELETE
+/api/v1/notifications/channels` (upsert keyed on `kind`) and the
+**Activity → Notifications** page. Note: the outbox is workspace-level —
+`POST /api/v1/notifications` resolves the default tenant, not the caller's
+(per-customer-tenant inboxes are roadmap). See `docs/adapters/notifications.md`.
 
 ### Billing
 
@@ -261,7 +266,6 @@ needs them today, propose a workaround or wait.
 | Multimodal (TTS/STT/image) | 🚧 | Call provider via LiteLLM's audio/image endpoints; we have models in litellm-config.yaml |
 | Tool adapters | 🚧 | Use MCP servers from agent container (uvx / npx); declare in `__capabilities__` |
 | PII redaction | 🚧 | Add to your agent reasoner before sending to LLM |
-| OAuth-on-behalf | 🚧 | Store user tokens in secrets vault; pass to agent reasoner |
 
 ## Common composition patterns
 
