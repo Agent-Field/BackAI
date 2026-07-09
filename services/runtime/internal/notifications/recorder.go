@@ -738,8 +738,6 @@ func (r *Recorder) Stats(ctx context.Context, tenantID string) (*Stats, error) {
 	if !r.HasPool() {
 		return stats, nil
 	}
-	// Bind the requested tenant so RLS on suite_notifications passes.
-	ctx = tenantctx.WithTenant(ctx, tenantID, "")
 	// Build a parameterised tenant predicate that composes cleanly with
 	// the time-window predicate below. tenantClause is "" or " and
 	// tenant_id = $1", whichever the caller asked for.
@@ -750,6 +748,30 @@ func (r *Recorder) Stats(ctx context.Context, tenantID string) (*Stats, error) {
 		tenantClause = " and tenant_id = $1"
 	}
 
+	// Same split as ListNotifications/ListMutes: a tenant-scoped read binds
+	// the tenant so RLS enforces isolation; the no-tenant operator aggregate
+	// has no single tenant to bind, so it runs under a bypass-RLS tx
+	// (read-only; the defer'd rollback closes it). Without the bypass the
+	// FORCE-RLS policy hides every concrete-tenant row and the KPI strip
+	// reads zero despite sent rows.
+	var q interface {
+		Query(context.Context, string, ...any) (pgx.Rows, error)
+		QueryRow(context.Context, string, ...any) pgx.Row
+	} = r.pool
+	if tenantID != "" {
+		ctx = tenantctx.WithTenant(ctx, tenantID, "")
+	} else {
+		tx, err := r.pool.Begin(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("notifications: stats begin: %w", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+			return nil, fmt.Errorf("notifications: stats bypass: %w", err)
+		}
+		q = tx
+	}
+
 	// Per-status counts (last 24h gives the "active range" the dashboard
 	// expects — anything older is historical noise for the KPI strip).
 	statusQ := `
@@ -757,7 +779,7 @@ func (r *Recorder) Stats(ctx context.Context, tenantID string) (*Stats, error) {
 		  from suite_notifications
 		 where created_at >= now() - interval '24 hours'` + tenantClause + `
 		 group by status`
-	statusRows, err := r.pool.Query(ctx, statusQ, args...)
+	statusRows, err := q.Query(ctx, statusQ, args...)
 	if err != nil {
 		return nil, fmt.Errorf("notifications: stats by_status: %w", err)
 	}
@@ -782,7 +804,7 @@ func (r *Recorder) Stats(ctx context.Context, tenantID string) (*Stats, error) {
 		 where created_at >= now() - interval '24 hours'` + tenantClause + `
 		 group by adapter
 		 order by count(*) desc`
-	adapterRows, err := r.pool.Query(ctx, adapterQ, args...)
+	adapterRows, err := q.Query(ctx, adapterQ, args...)
 	if err != nil {
 		return nil, fmt.Errorf("notifications: stats by_adapter: %w", err)
 	}
@@ -810,7 +832,7 @@ func (r *Recorder) Stats(ctx context.Context, tenantID string) (*Stats, error) {
 		todayArgs = append(todayArgs, tenantID)
 		todayTenantClause = " and tenant_id = $2"
 	}
-	if err := r.pool.QueryRow(ctx,
+	if err := q.QueryRow(ctx,
 		`select
 		  coalesce(sum(case when status = 'sent'   then 1 else 0 end), 0)::int,
 		  coalesce(sum(case when status = 'failed' then 1 else 0 end), 0)::int

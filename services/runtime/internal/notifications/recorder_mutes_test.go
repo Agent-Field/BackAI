@@ -133,6 +133,40 @@ func mutesTestSetup(t *testing.T) (*Recorder, func()) {
 		   or tenant_id is null
 		   or tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
 		 )`,
+		// Mirrors migration 00009_notifications.sql — needed by the Stats
+		// regression test, under the same FORCE-RLS policy.
+		`create table suite_notifications (
+			id uuid primary key default gen_random_uuid(),
+			tenant_id uuid references suite_tenants(id) on delete set null,
+			kind text not null check (kind in ('email','sms','push','log')),
+			adapter text,
+			template text not null,
+			"to" text not null,
+			"from" text,
+			subject text,
+			data jsonb not null default '{}'::jsonb,
+			status text not null default 'queued'
+				check (status in ('queued','sending','sent','failed','skipped')),
+			provider_message_id text,
+			attempts int not null default 0,
+			last_error text,
+			scheduled_at timestamptz not null default now(),
+			sent_at timestamptz,
+			created_at timestamptz not null default now()
+		)`,
+		`alter table suite_notifications enable row level security`,
+		`alter table suite_notifications force row level security`,
+		`create policy tenant_isolation on suite_notifications
+		 using (
+		   current_setting('app.bypass_rls', true) = 'on'
+		   or tenant_id is null
+		   or tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
+		 )
+		 with check (
+		   current_setting('app.bypass_rls', true) = 'on'
+		   or tenant_id is null
+		   or tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
+		 )`,
 		fmt.Sprintf(`grant select, insert, update, delete on all tables in schema %q to %q`, schema, role),
 	}
 	for _, stmt := range ddl {
@@ -275,5 +309,80 @@ func TestListMutesAdminBypassAndTenantIsolation(t *testing.T) {
 	}
 	if len(otherList.Mutes) != 0 {
 		t.Fatalf("other-tenant list returned %d mutes, want 0 (isolation breach)", len(otherList.Mutes))
+	}
+}
+
+// TestStatsAdminBypassAndTenantIsolation is the regression test for the
+// no-tenant admin aggregate bug: rows inserted under the concrete default
+// tenant must be counted by the admin (no-tenant) Stats call, while a
+// tenant-scoped Stats stays RLS-isolated.
+func TestStatsAdminBypassAndTenantIsolation(t *testing.T) {
+	rec, cleanup := mutesTestSetup(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	otherTenant := "22222222-2222-2222-2222-222222222222"
+	seedCtx := tenantctx.WithTenant(ctx, defaultTenantID, "")
+	if _, err := rec.pool.Exec(seedCtx,
+		`insert into suite_tenants (id, slug, name) values ($1, 'stats-other', 'StatsOther')`,
+		otherTenant); err != nil {
+		t.Fatalf("seed other tenant: %v", err)
+	}
+
+	// Two rows under the concrete default tenant — exactly what Insert
+	// stores when the handler resolves s.defaultTenant. Mark one sent so
+	// the sent_today counter has something to count.
+	n1, err := rec.Insert(ctx, SendInput{
+		TenantID: defaultTenantID, Kind: "log", Template: "generic",
+		To: "stats-e2e@example.test",
+	})
+	if err != nil {
+		t.Fatalf("insert n1: %v", err)
+	}
+	sentCtx := tenantctx.WithTenant(ctx, defaultTenantID, "")
+	if _, err := rec.pool.Exec(sentCtx,
+		`update suite_notifications set status = 'sent', sent_at = now() where id = $1`,
+		n1.ID); err != nil {
+		t.Fatalf("mark sent: %v", err)
+	}
+	if _, err := rec.Insert(ctx, SendInput{
+		TenantID: defaultTenantID, Kind: "log", Template: "generic",
+		To: "stats-e2e-2@example.test",
+	}); err != nil {
+		t.Fatalf("insert n2: %v", err)
+	}
+
+	// Admin (no-tenant) aggregate MUST count the default-tenant rows.
+	// Before the fix the FORCE-RLS policy hid them and everything read 0.
+	admin, err := rec.Stats(ctx, "")
+	if err != nil {
+		t.Fatalf("admin stats: %v", err)
+	}
+	if admin.ByStatus[StatusSent] != 1 || admin.ByStatus[StatusQueued] != 1 {
+		t.Fatalf("admin by_status = %v, want sent:1 queued:1 (RLS hid default-tenant rows)", admin.ByStatus)
+	}
+	if admin.SentToday != 1 {
+		t.Fatalf("admin sent_today = %d, want 1", admin.SentToday)
+	}
+	if len(admin.ByAdapter) == 0 {
+		t.Fatalf("admin by_adapter empty, want unassigned bucket")
+	}
+
+	// Owning tenant still sees its own aggregate.
+	owner, err := rec.Stats(ctx, defaultTenantID)
+	if err != nil {
+		t.Fatalf("owner stats: %v", err)
+	}
+	if owner.ByStatus[StatusSent] != 1 || owner.SentToday != 1 {
+		t.Fatalf("owner stats = %v sent_today=%d, want sent:1 today:1", owner.ByStatus, owner.SentToday)
+	}
+
+	// A different tenant must see nothing — isolation preserved.
+	other, err := rec.Stats(ctx, otherTenant)
+	if err != nil {
+		t.Fatalf("other stats: %v", err)
+	}
+	if len(other.ByStatus) != 0 || other.SentToday != 0 {
+		t.Fatalf("other-tenant stats = %v sent_today=%d, want empty (isolation breach)", other.ByStatus, other.SentToday)
 	}
 }
