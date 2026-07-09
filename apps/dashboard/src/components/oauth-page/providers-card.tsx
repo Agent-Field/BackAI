@@ -2,7 +2,7 @@
 
 "use client"
 
-import { ExternalLink, Link2, Unlink } from "lucide-react"
+import { ExternalLink, Link2, Settings2, Unlink } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 
@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button"
 import { ZoneCard, ZoneCardHeader } from "@/components/ui/zone-card"
 
 import { api } from "@/lib/api"
-import type { OAuthConnection, OAuthProvider } from "@/lib/api"
+import type { IntegrationSlot, OAuthConnection, OAuthProvider } from "@/lib/api"
 import {
   connectionForProvider,
   extractAuthorizeUrl,
@@ -29,6 +29,8 @@ import {
   isProviderConnected,
   providerLabel,
 } from "@/lib/oauth-page/derive"
+
+import { ProviderSetupDialog } from "./provider-setup-dialog"
 
 // Providers zone — one tile per provider the runtime knows about, each
 // showing whether it's configured (has client credentials) and whether a
@@ -45,9 +47,30 @@ interface ProvidersCardProps {
 
 export function ProvidersCard({ providers, connections, healthy, onMutated }: ProvidersCardProps) {
   const [disconnecting, setDisconnecting] = useState<OAuthProvider | null>(null)
+  const [configuring, setConfiguring] = useState<OAuthProvider | null>(null)
+  // Masked set-state for the provider's oauth_<name> integration slot,
+  // fetched best-effort when the dialog opens. The write API can't echo
+  // secrets, so this is the only signal for whether creds are already set.
+  const [configuringSlot, setConfiguringSlot] = useState<IntegrationSlot | null>(null)
   const connectedCount = providers.filter((p) =>
     isProviderConnected(p.provider, connections),
   ).length
+
+  // Open the setup dialog and pull the masked slot status in the same
+  // handler (no reactive effect). The dialog shows immediately; the masked
+  // status fills in when the list resolves.
+  const openConfigure = (provider: OAuthProvider) => {
+    setConfiguring(provider)
+    setConfiguringSlot(null)
+    void api.admin.integrations
+      .list()
+      .then((res) => {
+        setConfiguringSlot(
+          res.integrations.find((s) => s.slot === `oauth_${provider.provider}`) ?? null,
+        )
+      })
+      .catch(() => setConfiguringSlot(null))
+  }
 
   return (
     <ZoneCard aria-labelledby="oauth-providers">
@@ -77,6 +100,7 @@ export function ProvidersCard({ providers, connections, healthy, onMutated }: Pr
                 provider={provider}
                 connection={connectionForProvider(provider.provider, connections)}
                 onDisconnect={() => setDisconnecting(provider)}
+                onConfigure={() => openConfigure(provider)}
               />
             </li>
           ))}
@@ -87,6 +111,15 @@ export function ProvidersCard({ providers, connections, healthy, onMutated }: Pr
         onClose={() => setDisconnecting(null)}
         onDisconnected={onMutated}
       />
+      <ProviderSetupDialog
+        provider={configuring}
+        slot={configuringSlot}
+        onClose={() => {
+          setConfiguring(null)
+          setConfiguringSlot(null)
+        }}
+        onSaved={onMutated}
+      />
     </ZoneCard>
   )
 }
@@ -95,10 +128,12 @@ function ProviderTile({
   provider,
   connection,
   onDisconnect,
+  onConfigure,
 }: {
   provider: OAuthProvider
   connection: OAuthConnection | undefined
   onDisconnect: () => void
+  onConfigure: () => void
 }) {
   const [connecting, setConnecting] = useState(false)
   const connected = connection !== undefined
@@ -106,6 +141,11 @@ function ProviderTile({
   // Connect disabled so the operator isn't sent to a dead handshake.
   const configured = provider.configured !== false
   const scopes = provider.scopes ?? []
+  // Where the client credentials came from, when the runtime reports it.
+  // "vault" = operator-entered here, "env" = from the environment. Absent on
+  // older runtimes (degrade: no source badge, generic Configure label).
+  const source = provider.credentials_source
+  const vaultConfigured = source === "vault"
 
   const connect = async () => {
     if (connecting) return
@@ -142,13 +182,20 @@ function ProviderTile({
             {provider.provider}
           </code>
         </div>
-        {connected ? (
-          <Badge variant="secondary">connected</Badge>
-        ) : configured ? (
-          <Badge variant="outline">available</Badge>
-        ) : (
-          <Badge variant="outline">not configured</Badge>
-        )}
+        <div className="flex shrink-0 flex-col items-end gap-tile-tight">
+          {connected ? (
+            <Badge variant="secondary">connected</Badge>
+          ) : configured ? (
+            <Badge variant="outline">available</Badge>
+          ) : (
+            <Badge variant="outline">not configured</Badge>
+          )}
+          {source === "vault" || source === "env" ? (
+            <Badge variant="outline" className="font-mono text-eyebrow lowercase">
+              {source}
+            </Badge>
+          ) : null}
+        </div>
       </div>
 
       {scopes.length > 0 ? (
@@ -170,6 +217,16 @@ function ProviderTile({
       ) : null}
 
       <div className="mt-auto flex items-center justify-end gap-inline pt-tile-tight">
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-7 gap-inline text-meta text-muted-foreground"
+          onClick={onConfigure}
+        >
+          <Settings2 className="size-3.5" aria-hidden />
+          {vaultConfigured ? "Update credentials" : "Configure"}
+        </Button>
         {connected ? (
           <Button
             type="button"

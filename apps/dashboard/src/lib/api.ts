@@ -2220,12 +2220,20 @@ export const OAuthProviderSchema = z
     scopes: z.array(z.string()).optional(),
     default_scopes: z.array(z.string()).optional(),
     auth_url: z.string().nullable().optional(),
+    // Newer runtimes expose where the client credentials came from
+    // ("vault" = operator-entered, "env" = environment, "" = unconfigured)
+    // and the callback URL to register in the provider console. Optional so
+    // the page still parses against runtimes that predate these fields.
+    redirect_uri: z.string().nullable().optional(),
+    credentials_source: z.string().optional(),
   })
   .transform((p) => ({
     provider: p.provider ?? p.name ?? "",
     configured: p.configured,
     scopes: p.scopes ?? p.default_scopes,
     auth_url: p.auth_url ?? null,
+    redirect_uri: p.redirect_uri ?? null,
+    credentials_source: p.credentials_source ?? undefined,
   }))
 export type OAuthProvider = z.infer<typeof OAuthProviderSchema>
 
