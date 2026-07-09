@@ -64,6 +64,25 @@ AF_STACK_FCM_BASE_URL=         # optional; override the FCM API base URL
 > token, not a service-account JSON. Minting that token from the service
 > account is expected to happen at your boot/ops layer.
 
+## Channels (UI / API)
+
+Operators manage delivery channels from the dashboard **Activity →
+Notifications** page (outbox feed, send-test, mutes, and channel CRUD),
+or over the API. Channels are keyed on `kind` (`email` | `sms` | `push` |
+`log`) and upserted:
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/v1/notifications/channels` | List channels |
+| POST / PATCH | `/api/v1/notifications/channels` | Upsert (keyed on `kind`) |
+| DELETE | `/api/v1/notifications/channels?kind=<kind>` | Remove a channel |
+
+Field shapes: `GET /api/v1/openapi.json`.
+
+> **Known limitation.** The outbox is workspace-level:
+> `POST /api/v1/notifications` resolves the default tenant, not the
+> caller's tenant. Per-customer-tenant inboxes are future work.
+
 ## Remote adapter
 
 ```bash

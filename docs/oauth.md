@@ -53,7 +53,20 @@ serve different purposes.
 
 ## Configuring a provider
 
-A provider is "configured" when both env vars are set:
+Two ways to set a provider's client id + secret. The vault wins when both
+are present.
+
+**UI-first (recommended, no restart).** Operators open the dashboard
+**People → OAuth** page, click **Set up** on a provider, and paste the
+client id/secret. These are stored in the secrets vault via the
+integration slots `oauth_google` / `oauth_github`
+(`PUT /api/v1/admin/integrations/oauth_<provider>`) and picked up on the
+next request — no runtime restart. `GET /api/v1/oauth/providers` reports
+each provider's `credentials_source` (`vault` | `env` | unset) and the
+`redirect_uri` to register in the provider console (see below).
+
+**Env fallback.** A provider is also "configured" when both env vars are
+set:
 
 ```bash
 OAUTH_GITHUB_CLIENT_ID=Iv1.abc123
@@ -61,8 +74,13 @@ OAUTH_GITHUB_CLIENT_SECRET=ghs_xyz...
 ```
 
 Repeat per shipped provider (`GITHUB`, `GOOGLE`). Restart the runtime;
-the integrations page/API provider list now reports the provider as
-configured.
+the OAuth page / API provider list now reports the provider as
+configured. Vault-entered credentials override the env vars for the same
+provider.
+
+Whichever path you use, register the callback URL in the provider's OAuth
+app: `<AF_STACK_PUBLIC_URL>/oauth/callback/<provider>` (exactly the
+`redirect_uri` returned by `GET /api/v1/oauth/providers`).
 
 The runtime also needs:
 

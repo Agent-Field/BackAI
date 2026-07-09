@@ -21,6 +21,9 @@ AF_STACK_SECRETS_ADAPTER=vault # vault | remote
 The selector is validated at boot — an unsupported value fails fast rather
 than being silently ignored (which is what it used to do).
 
+Operators manage vault secrets from the dashboard **Platform → Secrets**
+page: create/update, one-time reveal, rotate, and set rotation deadlines.
+
 ```bash
 AF_STACK_SECRETS_ADAPTER=remote
 AF_STACK_SECRETS_REMOTE_URL=https://secrets-adapter.example.com

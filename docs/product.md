@@ -47,7 +47,7 @@ another provider key when you want live model calls through LiteLLM:
 | **MCP host**                 | stdio + SSE adapters with JSON-RPC framing, 5-minute tool catalogue refresh, per-tenant scoping, env from secrets vault via `secret:<key>` prefix.                                                                                                                      |
 | **Skills**                   | Install bundles, attach to agents, query installed list.                                                                                                                                                                                                                |
 | **Harnesses**                | Probe-only — detects whether claude-code/codex/gemini/opencode is available in the agent container and what auth it needs.                                                                                                                                              |
-| **Operator dashboard**       | Cost charts, run inspector, sandbox activity, memory browser, audit log, tenant drilldown, plugin system, theming via CSS variables.                                                                                                                                    |
+| **Operator dashboard**       | Cost charts, run inspector, sandbox activity, memory browser, audit log, tenant drilldown, plugin system, theming via CSS variables. Plus operator pages for Secrets (vault CRUD + reveal/rotate), Crons (roster + trigger/pause), Flags, Cache (gateway hit rate + flush), Notifications (outbox + channels), and OAuth connections.                                                                                                                                    |
 | **Customer-facing app**      | Sign-up → help center → Support Chat → request history → billing/account pages. Runtime credentials stay internal to the app. Separate brand, same auth DB.                                                                                                             |
 | **OpenAPI 3.1**              | Auto-generated at `/openapi.json` with 86+ routes, 21 routes with curl+Python+TS code samples.                                                                                                                                                                          |
 | **Python + TypeScript SDKs** | `suite.notifications.*`, `suite.webhooks.*`, `suite.billing.*`, `suite.sandbox.*`, `suite.memory.*`, `suite.tools.*` (MCP), `suite.admin.skills.*`, `suite.harnesses.*`. Pydantic + zod, close-but-not-identical parity: Python also ships `suite.crons.*`; TypeScript also ships `suite.activity.*` + `suite.flags.*`. The Go SDK is an empty stub (planned, not shipped).                                                                         |
@@ -176,8 +176,8 @@ AF_STACK_NOTIFICATIONS_ADAPTER=resend    # log → resend
 AF_STACK_MODULE_BILLING=false            # disable a whole module
 ```
 
-Restart. No config file fork. The dashboard's `/build/modules` tab
-reflects the live state.
+Restart. No config file fork. The runtime and operator dashboard reflect
+the live adapter selection.
 
 ### Theming
 
