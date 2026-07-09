@@ -4,6 +4,7 @@ package server
 
 import (
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
 	"github.com/Agent-Field/backai/services/runtime/internal/oauth"
 	"github.com/Agent-Field/backai/services/runtime/internal/secrets"
+	"github.com/Agent-Field/backai/services/runtime/internal/tenancy"
 	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 )
 
@@ -279,5 +281,177 @@ func TestOAuthCallbackRejectsProviderDenied(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "OAUTH_PROVIDER_DENIED") {
 		t.Errorf("expected OAUTH_PROVIDER_DENIED, body=%s", rec.Body.String())
+	}
+}
+
+// newOAuthModeServer builds a fully-wired Server in the given deployment
+// mode with an env-configured factory and a sentinel manager. Mirrors
+// TestOAuthVaultCredsTakeEffectWithoutRestart's setup; the sentinel
+// manager is never dialled because the exercised paths (authorize, the
+// user-resolver) don't reach Token/Store/List.
+func newOAuthModeServer(t *testing.T, mode string) *Server {
+	t.Helper()
+	cfg := config.Default()
+	cfg.Mode = mode
+	s := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Deps{OAuthFactory: oauth.NewFactoryFromEnv()})
+	s.oauthManager = &oauth.Manager{} // sentinel; authorize never dials it
+	return s
+}
+
+// resolverCtx reproduces what the tenant resolver leaves on the request
+// context AFTER personal/saas resolution: a bound tenant (the seeded
+// default tenant, as personal mode forces multi-tenancy off) and NO user
+// id — the exact state in which the OAuth handlers historically 401'd.
+func resolverCtx(r *http.Request) *http.Request {
+	return r.WithContext(
+		tenantctx.WithTenantAndUser(r.Context(), tenancy.DefaultTenantID, "", ""))
+}
+
+// Contract: personal mode, zero auth (tenant bound, no user) — authorize
+// on a configured provider returns 200 with an authorization_url. The
+// handler falls back to the synthetic single-user principal instead of
+// 401 USER_REQUIRED.
+func TestOAuthAuthorizePersonalModeSyntheticUser(t *testing.T) {
+	t.Setenv("OAUTH_GITHUB_CLIENT_ID", "gh-id")
+	t.Setenv("OAUTH_GITHUB_CLIENT_SECRET", "gh-secret")
+	t.Setenv("OAUTH_GOOGLE_CLIENT_ID", "")
+	t.Setenv("OAUTH_GOOGLE_CLIENT_SECRET", "")
+	t.Setenv("AF_STACK_AUTH_SECRET", "test-secret")
+	t.Setenv("AF_STACK_PUBLIC_URL", "https://api.example.test")
+
+	s := newOAuthModeServer(t, config.ModePersonal)
+
+	req := resolverCtx(httptest.NewRequest(
+		"POST", "/api/v1/oauth/github/authorize", strings.NewReader(`{}`)))
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("authorize status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var res struct {
+		AuthorizationURL string `json:"authorization_url"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(res.AuthorizationURL, "https://github.com/login/oauth/authorize") {
+		t.Fatalf("authorization_url = %q, want github consent URL", res.AuthorizationURL)
+	}
+	if !strings.Contains(res.AuthorizationURL, "client_id=gh-id") {
+		t.Fatalf("authorization_url missing client id: %q", res.AuthorizationURL)
+	}
+}
+
+// Contract: personal mode must NOT mask an unconfigured provider — the
+// synthetic-user fallback is orthogonal to provider configuration, which
+// is checked before user resolution. Authorize on an unconfigured
+// provider returns the same not-configured error as saas.
+func TestOAuthAuthorizePersonalModeUnconfiguredProviderStillErrors(t *testing.T) {
+	t.Setenv("OAUTH_GITHUB_CLIENT_ID", "")
+	t.Setenv("OAUTH_GITHUB_CLIENT_SECRET", "")
+	t.Setenv("OAUTH_GOOGLE_CLIENT_ID", "")
+	t.Setenv("OAUTH_GOOGLE_CLIENT_SECRET", "")
+	t.Setenv("AF_STACK_AUTH_SECRET", "test-secret")
+
+	s := newOAuthModeServer(t, config.ModePersonal)
+
+	req := resolverCtx(httptest.NewRequest(
+		"POST", "/api/v1/oauth/github/authorize", strings.NewReader(`{}`)))
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 for unconfigured provider; body=%s",
+			rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "OAUTH_PROVIDER_NOT_CONFIGURED") {
+		t.Fatalf("expected OAUTH_PROVIDER_NOT_CONFIGURED, body=%s", rec.Body.String())
+	}
+}
+
+// Contract: saas mode, no principal (tenant bound, no user) — authorize
+// still returns 401 USER_REQUIRED. The fallback must be personal-mode
+// only; saas behavior is byte-identical to before.
+func TestOAuthAuthorizeSaaSNoUserStill401(t *testing.T) {
+	t.Setenv("OAUTH_GITHUB_CLIENT_ID", "gh-id")
+	t.Setenv("OAUTH_GITHUB_CLIENT_SECRET", "gh-secret")
+	t.Setenv("AF_STACK_AUTH_SECRET", "test-secret")
+
+	s := newOAuthModeServer(t, config.ModeSaaS)
+
+	req := resolverCtx(httptest.NewRequest(
+		"POST", "/api/v1/oauth/github/authorize", strings.NewReader(`{}`)))
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "USER_REQUIRED") {
+		t.Fatalf("expected USER_REQUIRED, body=%s", rec.Body.String())
+	}
+}
+
+// Contract: the shared user resolver (connections list + disconnect)
+// yields the synthetic single-user principal in personal mode when no
+// user is on the context, and still 401s in saas. Tested directly since
+// the connections/disconnect DB paths need a live pool.
+func TestOAuthTargetUserIDModeBehaviour(t *testing.T) {
+	// Personal mode: anonymous request resolves to the synthetic user.
+	sPersonal := newOAuthModeServer(t, config.ModePersonal)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/v1/oauth/connections", nil)
+	uid, ok := sPersonal.oauthTargetUserID(rec, req)
+	if !ok {
+		t.Fatalf("personal mode: resolver failed, body=%s", rec.Body.String())
+	}
+	if uid != personalOAuthUserID {
+		t.Fatalf("personal mode: user id = %q, want %q", uid, personalOAuthUserID)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("personal mode: wrote status %d, want none", rec.Code)
+	}
+
+	// SaaS mode: anonymous request is rejected with USER_REQUIRED.
+	sSaaS := newOAuthModeServer(t, config.ModeSaaS)
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/api/v1/oauth/connections", nil)
+	if _, ok := sSaaS.oauthTargetUserID(rec, req); ok {
+		t.Fatal("saas mode: resolver succeeded without a user, want failure")
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("saas mode: status = %d, want 401", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "USER_REQUIRED") {
+		t.Fatalf("saas mode: expected USER_REQUIRED, body=%s", rec.Body.String())
+	}
+}
+
+// oauthUserFallback is the single decision point: personal mode fills an
+// empty principal with the synthetic user; every other case passes the
+// input through untouched.
+func TestOAuthUserFallback(t *testing.T) {
+	personal := newOAuthModeServer(t, config.ModePersonal)
+	saas := newOAuthModeServer(t, config.ModeSaaS)
+
+	cases := []struct {
+		name string
+		s    *Server
+		in   string
+		want string
+	}{
+		{"personal empty -> synthetic", personal, "", personalOAuthUserID},
+		{"personal explicit unchanged", personal, "alice", "alice"},
+		{"saas empty stays empty", saas, "", ""},
+		{"saas explicit unchanged", saas, "alice", "alice"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.s.oauthUserFallback(c.in); got != c.want {
+				t.Fatalf("oauthUserFallback(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
 	}
 }
