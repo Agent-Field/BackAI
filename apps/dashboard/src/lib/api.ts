@@ -1985,8 +1985,12 @@ export const CronSchema = z.object({
   // runtime stores in 5-field crontab format; "@daily" / "@hourly"
   // shortcuts expand server-side.
   schedule: z.string(),
-  // JSON args forwarded to the job on each tick.
-  args: z.record(z.string(), z.unknown()),
+  // JSON args forwarded to the job on each tick. Tolerate a null from the
+  // runtime so one odd row can't fail the whole list parse.
+  args: z
+    .record(z.string(), z.unknown())
+    .nullish()
+    .transform((v) => v ?? {}),
   is_active: z.boolean(),
   // Nullable when the cron has never fired.
   last_run_at: z.string().nullable(),

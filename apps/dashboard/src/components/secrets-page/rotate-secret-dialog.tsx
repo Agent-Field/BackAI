@@ -20,8 +20,9 @@ import { api } from "@/lib/api"
 import type { SecretMetadata } from "@/lib/api"
 
 // Rotate dialog. A value-only form on a fixed key — the runtime's rotate
-// endpoint swaps the stored value and clears the rotation deadline in one
-// step, keeping the audit trail distinct from a plain edit. Parent owns
+// endpoint swaps the stored value (the rotation deadline is left as-is;
+// edit the secret to move it), keeping the audit trail distinct from a
+// plain edit. Parent owns
 // open state via `secret`; onRotated fires after success so the shell can
 // refresh the list.
 
@@ -81,7 +82,7 @@ function RotateSecretForm({
       <DialogHeader>
         <DialogTitle>Rotate secret</DialogTitle>
         <DialogDescription>
-          {`Swaps the stored value for “${secret.key}” and clears its rotation deadline.`}
+          {`Swaps the stored value for “${secret.key}”. The rotation deadline stays as-is — edit the secret to move it.`}
         </DialogDescription>
       </DialogHeader>
 
