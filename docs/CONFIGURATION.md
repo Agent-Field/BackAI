@@ -25,7 +25,9 @@ In personal mode:
 
 - The runtime skips all auth: every request runs under the built-in
   default tenant (`00000000-0000-0000-0000-000000000000`). The operator
-  RBAC guard on the dashboard is bypassed too.
+  RBAC guard on the dashboard is bypassed too — every operator page
+  (including Secrets, Crons, Flags, Cache, Notifications, and OAuth) works
+  unauthenticated.
 - The budget gate is disabled, so LLM calls are never blocked by a
   `402` — but spend is **still metered**, so `Cost` still shows usage.
 - No Stripe client is constructed; the billing surface is hidden in both
@@ -52,6 +54,11 @@ af-stack dev             # restart to apply
 ```
 
 The switch is fully reversible; flip it as often as you like.
+
+> **Gotcha.** The frontends enforce the mode in middleware baked into
+> their images. If flipping the mode still redirects you to a login page,
+> your frontend images predate the mode middleware — rebuild them from
+> source (`docker compose build`) and restart.
 
 > **Data caveat.** Data written while in personal mode is owned by the
 > default tenant. When you switch back to `saas` with multi-tenancy on,
