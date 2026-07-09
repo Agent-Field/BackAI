@@ -792,6 +792,19 @@ export const NotificationChannelListSchema = z.object({
 })
 export type NotificationChannelList = z.infer<typeof NotificationChannelListSchema>
 
+// Upsert body for POST/PATCH /api/v1/notifications/channels. `kind` is the
+// identity — the runtime upserts on conflict(kind), so `id` is not sent.
+// `config_json` is adapter-specific and may hold secret-by-reference values;
+// the UI renders only its keys and never echoes stored values back.
+export const UpsertNotificationChannelInputSchema = z.object({
+  kind: NotificationKindSchema,
+  config_json: z.record(z.string(), z.unknown()).optional(),
+  enabled: z.boolean().optional(),
+})
+export type UpsertNotificationChannelInput = z.infer<
+  typeof UpsertNotificationChannelInputSchema
+>
+
 export const CreateNotificationMuteInputSchema = z.object({
   tenant_id: z.string().optional(),
   pattern: NotificationMutePatternSchema,
@@ -2750,6 +2763,22 @@ export const api = {
           "/api/v1/notifications/channels",
           undefined,
           NotificationChannelListSchema,
+        ),
+      // Create or replace a channel. The runtime keys on `kind`, so calling
+      // this for an existing kind edits it in place.
+      upsert: (input: UpsertNotificationChannelInput) =>
+        request(
+          "/api/v1/notifications/channels",
+          { method: "POST", json: input },
+          NotificationChannelSchema,
+        ),
+      // Delete a channel by kind (the stable identity) — the endpoint takes
+      // no path param, so the target rides in the query string.
+      remove: (kind: NotificationKind) =>
+        request(
+          `/api/v1/notifications/channels?kind=${encodeURIComponent(kind)}`,
+          { method: "DELETE" },
+          z.object({ ok: z.boolean() }),
         ),
     },
   },
