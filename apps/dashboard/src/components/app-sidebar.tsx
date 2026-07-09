@@ -148,7 +148,9 @@ const BILLING_ITEM_IDS = new Set(["billing", "budgets"])
 // In personal mode there are no tenants, logins, or API keys to manage, so
 // these are hidden — leaving a clean panel for monitoring and verifying
 // (Home, Cost, Health, Runs, Errors, Logs, Audit, Activity, Build surfaces).
-const AUTH_ITEM_IDS = new Set(["tenants", "users", "keys", "sessions", "oauth"])
+// OAuth connections stay: they link the (single) user's external accounts,
+// which is a legitimate personal-mode action, not tenancy management.
+const AUTH_ITEM_IDS = new Set(["tenants", "users", "keys", "sessions"])
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const pathname = usePathname()
