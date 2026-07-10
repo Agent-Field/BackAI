@@ -9,7 +9,7 @@ BackAI ships a tenant-scoped catalogue of built-in tool adapters:
 | `exec` | Sandbox service | Configured when a sandbox adapter is available. |
 | `fs` | Sandbox service | Configured when a sandbox adapter is available; operates on ephemeral sandbox files, not the host filesystem. |
 | `searxng` | SearXNG HTTP endpoint | Set `AF_STACK_SEARXNG_URL`. |
-| `browser-use` | browser-use worker HTTP endpoint | Set `AF_STACK_BROWSER_USE_URL`. |
+| `browser-use` | browser sidecar HTTP endpoint | Set `BROWSER_USE_URL`. Reference sidecar: `examples/adapters/browser-use-sidecar` (compose profile `browser`). Add `AF_STACK_BROWSER_ALLOW_PRIVATE=true` when the sidecar lives on a loopback/private address (e.g. a compose service). |
 
 The runtime owns only tenant enablement/config and a small call audit row.
 AgentField still owns agent runs, tool-call spans, traces, memory, and
