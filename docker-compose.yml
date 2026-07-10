@@ -191,6 +191,14 @@ services:
       # requires /var/run/docker.sock mounted below. Set to "noop" or
       # leave the socket unmounted to disable sandbox in CI.
       AF_STACK_SANDBOX_ADAPTER: ${AF_STACK_SANDBOX_ADAPTER:-docker}
+      # Native browser tool. Point BROWSER_USE_URL at a sidecar speaking
+      # the browser-use contract (reference impl behind the opt-in
+      # `browser` profile below: docker compose --profile browser up).
+      # ALLOW_PRIVATE is needed when the sidecar lives on the compose
+      # network — the SSRF guard blocks private addresses by default.
+      AF_STACK_TOOL_BROWSER: ${AF_STACK_TOOL_BROWSER:-browser-use}
+      BROWSER_USE_URL: ${BROWSER_USE_URL:-}
+      AF_STACK_BROWSER_ALLOW_PRIVATE: ${AF_STACK_BROWSER_ALLOW_PRIVATE:-}
       # Optional: enable OTel by uncommenting after OTel collector lands.
       # OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
       # OTEL_SERVICE_NAME: af-stack
@@ -223,6 +231,14 @@ services:
     # Note: distroless image has no shell, so we rely on Docker process
     # health rather than an exec healthcheck. Compose will treat the
     # container as healthy once it stays up.
+
+  # Reference browser sidecar for the native `browser` tool (headless
+  # Chromium via Playwright — see examples/adapters/browser-use-sidecar).
+  # Opt-in because the image is heavy: docker compose --profile browser up
+  browser-sidecar:
+    build: ./examples/adapters/browser-use-sidecar
+    profiles: ["browser"]
+    restart: unless-stopped
 
   # Next.js operator console. Reaches the runtime over docker DNS;
   # browser hits localhost. Auth (better-auth) shares the same Postgres.
