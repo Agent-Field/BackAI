@@ -36,6 +36,7 @@ import (
 
 	"github.com/Agent-Field/backai/services/runtime/internal/sandbox"
 	"github.com/Agent-Field/backai/services/runtime/internal/tools/adapters/browser"
+	"github.com/Agent-Field/backai/services/runtime/internal/tools/adapters/browser/browserbase"
 	"github.com/Agent-Field/backai/services/runtime/internal/tools/adapters/browser/browseruse"
 	"github.com/Agent-Field/backai/services/runtime/internal/tools/adapters/browser/playwright"
 	"github.com/Agent-Field/backai/services/runtime/internal/tools/adapters/browser/steel"
@@ -186,19 +187,25 @@ func pickBrowserAdapter(choice string, creds BrowserCreds) (browser.Adapter, err
 	case "browser-use", "browseruse", "":
 		return browseruse.New(creds.BrowserUseURL, creds.AllowPrivate), nil
 	case "steel":
-		ad := steel.New(creds.SteelAPIKey)
+		ad := steel.New(creds.SteelAPIKey, strings.TrimSpace(os.Getenv("STEEL_BASE_URL")), creds.AllowPrivate)
 		if creds.SteelAPIKey == "" {
 			return ad, fmt.Errorf("tools: AF_STACK_TOOL_BROWSER=steel but no Steel API key (STEEL_API_KEY or Integrations → browser)")
 		}
 		return ad, nil
+	case "browserbase":
+		ad := browserbase.New(creds.BrowserbaseAPIKey, creds.BrowserbaseProjectID, creds.AllowPrivate)
+		if creds.BrowserbaseAPIKey == "" || creds.BrowserbaseProjectID == "" {
+			return ad, fmt.Errorf("tools: AF_STACK_TOOL_BROWSER=browserbase but no API key / project id (BROWSERBASE_* or Integrations → browser)")
+		}
+		return ad, nil
 	case "playwright":
-		ad := playwright.New(creds.PlaywrightEndpoint)
+		ad := playwright.New(creds.PlaywrightEndpoint, creds.AllowPrivate)
 		if creds.PlaywrightEndpoint == "" {
 			return ad, fmt.Errorf("tools: AF_STACK_TOOL_BROWSER=playwright but no endpoint (PLAYWRIGHT_ENDPOINT or Integrations → browser)")
 		}
 		return ad, nil
 	default:
-		return nil, fmt.Errorf("tools: unknown browser adapter %q", choice)
+		return nil, fmt.Errorf("tools: unknown browser adapter %q (want browser-use|steel|browserbase|playwright)", choice)
 	}
 }
 
