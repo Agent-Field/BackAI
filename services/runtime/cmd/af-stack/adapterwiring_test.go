@@ -88,3 +88,23 @@ func TestResolveCred_VaultMissOrError(t *testing.T) {
 		t.Fatalf("vault error should yield empty, got %q", got)
 	}
 }
+
+// TestResolveCred_SandboxBrowserSlots pins the vault keys the sandbox and
+// browser factories consume, so a rename in either factory or the
+// integrationFields map breaks loudly here.
+func TestResolveCred_SandboxBrowserSlots(t *testing.T) {
+	g := &fakeCredGetter{values: map[string][]byte{
+		"integration/sandbox/e2b_api_key":     []byte("e2b_from_vault"),
+		"integration/browser/browser_use_url": []byte("http://sidecar:8000"),
+	}}
+	if got := resolveCredFrom(g, "sandbox", "e2b_api_key", ""); got != "e2b_from_vault" {
+		t.Fatalf("sandbox e2b_api_key vault fallback = %q", got)
+	}
+	// Env (cfg-merged) value still wins over the vault entry.
+	if got := resolveCredFrom(g, "sandbox", "e2b_api_key", "e2b_from_env"); got != "e2b_from_env" {
+		t.Fatalf("sandbox e2b_api_key env-wins = %q", got)
+	}
+	if got := resolveCredFrom(g, "browser", "browser_use_url", ""); got != "http://sidecar:8000" {
+		t.Fatalf("browser browser_use_url vault fallback = %q", got)
+	}
+}

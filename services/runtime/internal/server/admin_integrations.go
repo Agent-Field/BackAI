@@ -63,6 +63,23 @@ var integrationFields = map[string][]string{
 	"storage": {"remote_url", "remote_token"},
 	"secrets": {"remote_url", "remote_token"},
 	"llm":     {"remote_url", "remote_token"},
+	// Sandbox (code execution). Adapter selection stays env-based
+	// (AF_STACK_SANDBOX_ADAPTER); these are the credentials the e2b and
+	// remote adapters consume, resolved by newSandbox at boot.
+	"sandbox": {"e2b_api_key", "e2b_base_url", "remote_url", "remote_token"},
+	// Browser tool backends: self-hosted sidecar URL, hosted-provider
+	// API keys (Steel, Browserbase), or a raw CDP/playwright websocket
+	// endpoint (Browserless et al). allow_private ("true"/"false")
+	// re-permits loopback/RFC-1918 endpoints for compose-network
+	// sidecars. Adapter selection stays env-based (AF_STACK_TOOL_BROWSER).
+	"browser": {
+		"browser_use_url",
+		"steel_api_key",
+		"browserbase_api_key",
+		"browserbase_project_id",
+		"playwright_endpoint",
+		"allow_private",
+	},
 	// OAuth-on-behalf-of-user provider slots are registered dynamically in
 	// init() from oauth.AllProviderNames so the slot set stays in lockstep
 	// with the shipped adapters. Each slot exposes client_id + client_secret.
@@ -122,12 +139,27 @@ func integrationVaultKey(slot, field string) string {
 
 // ─── response shapes (downstream dashboard MUST match these) ──────────────
 
+// integrationFieldKinds marks fields that are NOT secrets (endpoints,
+// flags, plain identifiers) so the dashboard can render them as normal
+// text inputs instead of masked password fields. Absent = secret.
+// Keyed by field name; only list fields that are safe to display.
+var integrationFieldKinds = map[string]string{
+	"e2b_base_url":           "text",
+	"browser_use_url":        "text",
+	"playwright_endpoint":    "text",
+	"browserbase_project_id": "text",
+	"allow_private":          "text",
+}
+
 // integrationFieldStatus reports one credential field. It NEVER carries a
 // raw secret value — only whether it is set and an optional masked hint.
+// Kind is "text" for non-secret fields (rendered unmasked); empty means
+// secret.
 type integrationFieldStatus struct {
 	Name string `json:"name"`
 	Set  bool   `json:"set"`
 	Hint string `json:"hint"`
+	Kind string `json:"kind,omitempty"`
 }
 
 // integrationSlotStatus is the per-slot status object returned by GET
@@ -219,7 +251,7 @@ func (s *Server) buildSlotStatus(ctx context.Context, tenantID, slot string, sto
 	}
 	for _, f := range fields {
 		key := integrationVaultKey(slot, f)
-		fs := integrationFieldStatus{Name: f}
+		fs := integrationFieldStatus{Name: f, Kind: integrationFieldKinds[f]}
 		if _, err := store.GetMetadata(ctx, tenantID, key); err != nil {
 			if errors.Is(err, secrets.ErrSecretNotFound) {
 				out.Fields = append(out.Fields, fs)

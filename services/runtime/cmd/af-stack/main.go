@@ -113,6 +113,18 @@ func webhookAllowPrivate() bool {
 	return v == "1" || v == "true" || v == "yes"
 }
 
+// browserAllowPrivateResolved reports whether the browser sidecar may live
+// on a loopback / RFC-1918 address. AF_STACK_BROWSER_ALLOW_PRIVATE wins
+// when set (including an explicit "false"); otherwise the operator-entered
+// Integrations value (vault key integration/browser/allow_private) applies.
+func browserAllowPrivateResolved(vault *secrets.Vault) bool {
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("AF_STACK_BROWSER_ALLOW_PRIVATE"))); v != "" {
+		return v == "1" || v == "true" || v == "yes"
+	}
+	v := strings.ToLower(strings.TrimSpace(resolveCred(vault, "browser", "allow_private", "")))
+	return v == "1" || v == "true" || v == "yes"
+}
+
 // cronJobEnqueuer bridges the crons.JobEnqueuer contract to the
 // runtime's jobs.Manager. Lives in main so the crons package doesn't
 // take an import dependency on jobs.
@@ -206,6 +218,7 @@ func buildAdapterRegistry(
 	llmGW *llmgateway.Gateway,
 	litellmAdmin *llmgateway.LiteLLMAdmin,
 	sandboxSvc *sandbox.Service,
+	toolsRegistry *tools.Registry,
 	notificationsSvc *notifications.Service,
 	webhooksSvc *webhooks.Service,
 	billingSvc *billing.Service,
@@ -274,7 +287,34 @@ func buildAdapterRegistry(
 		AvailableBuiltin: []string{"docker", "gvisor", "firecracker", "e2b", "remote"},
 		SwapMethod:       "env_var",
 		SwapEnv:          "AF_STACK_SANDBOX_ADAPTER",
+		AdminUI:          "/platform/integrations",
 		Probe:            staticStatus(sandboxStatus),
+	})
+
+	// Browser tool backend (the native `browser` tool). Not a platform
+	// pillar like storage, but operators need to see which backend is
+	// active, whether it is configured, and how to swap it — mirrors the
+	// sandbox row. Credentials are entered on /platform/integrations.
+	browserName := defaulted(strings.TrimSpace(os.Getenv("AF_STACK_TOOL_BROWSER")), "browser-use")
+	browserStatus := adapterregistry.StatusUnhealthy
+	browserKind := adapterregistry.KindNone
+	if toolsRegistry != nil {
+		if t, err := toolsRegistry.Tool(tools.ToolBrowser); err == nil && t.Configured() {
+			browserKind = adapterregistry.KindBuiltin
+			browserStatus = adapterregistry.StatusHealthy
+		}
+	}
+	r.Register(adapterregistry.Slot{
+		ID:               "browser",
+		Tier:             adapterregistry.Tier2,
+		Kind:             browserKind,
+		Name:             browserName,
+		Capabilities:     caps(map[string]any{"verbs": []string{"navigate", "extract_text", "screenshot", "click", "fill"}}),
+		AvailableBuiltin: []string{"browser-use", "steel", "browserbase", "playwright"},
+		SwapMethod:       "env_var",
+		SwapEnv:          "AF_STACK_TOOL_BROWSER",
+		AdminUI:          "/platform/integrations",
+		Probe:            staticStatus(browserStatus),
 	})
 
 	llmName := "unset"
@@ -1025,7 +1065,7 @@ func main() {
 	// machine without a reachable Docker socket leaves sb=nil so the
 	// dashboard renders "Sandbox module disabled" rather than failing
 	// every Run call at the first ContainerCreate.
-	sb, sbErr := newSandbox(cfg.Sandbox, store, log)
+	sb, sbErr := newSandbox(cfg.Sandbox, store, vault, log)
 	if sbErr != nil {
 		log.Error("sandbox adapter init failed; continuing without sandbox",
 			"adapter", cfg.Sandbox.Adapter,
@@ -1448,6 +1488,16 @@ func main() {
 			Pool:    pool,
 			Sandbox: sandboxSvc,
 			Logger:  log,
+			// Browser creds: env wins, dashboard Integrations vault slot
+			// fills gaps (same overlay as storage/llm/notifications).
+			Browser: tools.BrowserCreds{
+				BrowserUseURL:        resolveCred(vault, "browser", "browser_use_url", os.Getenv("BROWSER_USE_URL")),
+				SteelAPIKey:          resolveCred(vault, "browser", "steel_api_key", os.Getenv("STEEL_API_KEY")),
+				BrowserbaseAPIKey:    resolveCred(vault, "browser", "browserbase_api_key", os.Getenv("BROWSERBASE_API_KEY")),
+				BrowserbaseProjectID: resolveCred(vault, "browser", "browserbase_project_id", os.Getenv("BROWSERBASE_PROJECT_ID")),
+				PlaywrightEndpoint:   resolveCred(vault, "browser", "playwright_endpoint", os.Getenv("PLAYWRIGHT_ENDPOINT")),
+				AllowPrivate:         browserAllowPrivateResolved(vault),
+			},
 		})
 		if regErr != nil {
 			log.Error("native tools: registry build failed", "error", regErr)
@@ -1725,6 +1775,7 @@ func main() {
 		llmGW,
 		litellmAdmin,
 		sandboxSvc,
+		toolsRegistry,
 		notificationsSvc,
 		webhooksSvc,
 		billingSvc,
@@ -1984,7 +2035,14 @@ func newStorage(ctx context.Context, cfg config.StorageConfig, vault *secrets.Va
 // (unknown adapter name, etc.) is fatal at the caller's discretion.
 //
 // See docs/sandbox-adapters.md for the per-adapter trade-offs.
-func newSandbox(cfg config.SandboxConfig, store storage.Storage, log *slog.Logger) (sandbox.Sandbox, error) {
+func newSandbox(cfg config.SandboxConfig, store storage.Storage, vault *secrets.Vault, log *slog.Logger) (sandbox.Sandbox, error) {
+	// Overlay operator-entered credentials from the dashboard Integrations
+	// vault slot. Env (already merged into cfg) wins; the vault fills gaps.
+	cfg.E2BAPIKey = resolveCred(vault, "sandbox", "e2b_api_key", cfg.E2BAPIKey)
+	cfg.E2BBaseURL = resolveCred(vault, "sandbox", "e2b_base_url", cfg.E2BBaseURL)
+	cfg.RemoteURL = resolveCred(vault, "sandbox", "remote_url", cfg.RemoteURL)
+	cfg.RemoteToken = resolveCred(vault, "sandbox", "remote_token", cfg.RemoteToken)
+
 	switch cfg.Adapter {
 	case "", "docker":
 		return dockersandbox.New(dockersandbox.Config{

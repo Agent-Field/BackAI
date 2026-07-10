@@ -67,8 +67,42 @@ type FactoryDeps struct {
 	// Sandbox is the wrapper for the fs / exec tools. When nil, both
 	// fs and exec are unconfigured.
 	Sandbox SandboxRunner
+	// Browser carries browser-tool credentials already resolved by the
+	// caller (env overlaid with the dashboard Integrations vault slot).
+	// Empty fields fall back to the raw env vars so tests and callers
+	// without a vault keep working.
+	Browser BrowserCreds
 	// Logger for boot diagnostics.
 	Logger *slog.Logger
+}
+
+// BrowserCreds groups the credentials/endpoints the browser tool's
+// adapters consume. All fields optional; empty = not configured.
+type BrowserCreds struct {
+	BrowserUseURL        string // browser-use sidecar base URL
+	SteelAPIKey          string // Steel.dev API key
+	BrowserbaseAPIKey    string // Browserbase API key
+	BrowserbaseProjectID string // Browserbase project id
+	PlaywrightEndpoint   string // raw CDP / playwright websocket endpoint
+	AllowPrivate         bool   // permit loopback/RFC-1918 endpoints
+}
+
+// withEnvFallback returns creds with empty fields backfilled from the
+// process env, preserving the historical env-only construction path.
+func (c BrowserCreds) withEnvFallback() BrowserCreds {
+	fallback := func(v, env string) string {
+		if v != "" {
+			return v
+		}
+		return strings.TrimSpace(os.Getenv(env))
+	}
+	c.BrowserUseURL = fallback(c.BrowserUseURL, "BROWSER_USE_URL")
+	c.SteelAPIKey = fallback(c.SteelAPIKey, "STEEL_API_KEY")
+	c.BrowserbaseAPIKey = fallback(c.BrowserbaseAPIKey, "BROWSERBASE_API_KEY")
+	c.BrowserbaseProjectID = fallback(c.BrowserbaseProjectID, "BROWSERBASE_PROJECT_ID")
+	c.PlaywrightEndpoint = fallback(c.PlaywrightEndpoint, "PLAYWRIGHT_ENDPOINT")
+	c.AllowPrivate = c.AllowPrivate || browserAllowPrivate()
+	return c
 }
 
 // BuildRegistry constructs the runtime's tool Registry: reads env,
@@ -90,7 +124,7 @@ func BuildRegistry(deps FactoryDeps) (*Registry, error) {
 	if browserChoice == "" {
 		browserChoice = "browser-use"
 	}
-	browserAdapter, err := pickBrowserAdapter(browserChoice)
+	browserAdapter, err := pickBrowserAdapter(browserChoice, deps.Browser.withEnvFallback())
 	if err != nil {
 		return nil, err
 	}
@@ -142,27 +176,25 @@ func browserAllowPrivate() bool {
 	return v == "1" || v == "true" || v == "yes"
 }
 
-// pickBrowserAdapter returns the BrowserAdapter chosen via env. If the
-// operator explicitly named a non-default adapter (anything other than
-// browser-use) that has no env config, returns an error — we don't
+// pickBrowserAdapter returns the BrowserAdapter chosen via env, built
+// from the resolved creds (env overlaid with Integrations vault values).
+// If the operator explicitly named a non-default adapter (anything other
+// than browser-use) that has no credentials, returns an error — we don't
 // silently fall back.
-func pickBrowserAdapter(choice string) (browser.Adapter, error) {
+func pickBrowserAdapter(choice string, creds BrowserCreds) (browser.Adapter, error) {
 	switch choice {
 	case "browser-use", "browseruse", "":
-		url := strings.TrimSpace(os.Getenv("BROWSER_USE_URL"))
-		return browseruse.New(url, browserAllowPrivate()), nil
+		return browseruse.New(creds.BrowserUseURL, creds.AllowPrivate), nil
 	case "steel":
-		key := strings.TrimSpace(os.Getenv("STEEL_API_KEY"))
-		ad := steel.New(key)
-		if key == "" {
-			return ad, fmt.Errorf("tools: AF_STACK_TOOL_BROWSER=steel but STEEL_API_KEY is empty")
+		ad := steel.New(creds.SteelAPIKey)
+		if creds.SteelAPIKey == "" {
+			return ad, fmt.Errorf("tools: AF_STACK_TOOL_BROWSER=steel but no Steel API key (STEEL_API_KEY or Integrations → browser)")
 		}
 		return ad, nil
 	case "playwright":
-		endpoint := strings.TrimSpace(os.Getenv("PLAYWRIGHT_ENDPOINT"))
-		ad := playwright.New(endpoint)
-		if endpoint == "" {
-			return ad, fmt.Errorf("tools: AF_STACK_TOOL_BROWSER=playwright but PLAYWRIGHT_ENDPOINT is empty")
+		ad := playwright.New(creds.PlaywrightEndpoint)
+		if creds.PlaywrightEndpoint == "" {
+			return ad, fmt.Errorf("tools: AF_STACK_TOOL_BROWSER=playwright but no endpoint (PLAYWRIGHT_ENDPOINT or Integrations → browser)")
 		}
 		return ad, nil
 	default:

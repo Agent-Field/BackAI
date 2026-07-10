@@ -382,3 +382,68 @@ func TestAdminIntegrationsNoVaultReturns503(t *testing.T) {
 	}
 	assertErrorEnvelope(t, rec.Body.Bytes(), "SECRETS_NOT_CONFIGURED")
 }
+
+// TestAdminIntegrationsSandboxBrowserSlots pins the two capability slots the
+// dashboard uses for sandbox / browser credential entry: both must exist,
+// accept a round-trip, and mark non-secret fields with kind "text" so the
+// UI can render them unmasked.
+func TestAdminIntegrationsSandboxBrowserSlots(t *testing.T) {
+	s, _ := newIntegrationsTestServer(t)
+
+	rec := doJSON(t, s, http.MethodPut, "/api/v1/admin/integrations/sandbox",
+		`{"credentials":{"e2b_api_key":"e2b_test_1234567890"}}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT sandbox status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	rec = doJSON(t, s, http.MethodPut, "/api/v1/admin/integrations/browser",
+		`{"credentials":{"browser_use_url":"http://browser-sidecar:8000","allow_private":"true"}}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT browser status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	rec = doJSON(t, s, http.MethodGet, "/api/v1/admin/integrations", "")
+	var out integrationsListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]integrationSlotStatus{}
+	for _, sl := range out.Integrations {
+		byName[sl.Slot] = sl
+	}
+	sb, ok := byName["sandbox"]
+	if !ok {
+		t.Fatal("sandbox slot missing from GET")
+	}
+	br, ok := byName["browser"]
+	if !ok {
+		t.Fatal("browser slot missing from GET")
+	}
+
+	fields := func(sl integrationSlotStatus) map[string]integrationFieldStatus {
+		m := map[string]integrationFieldStatus{}
+		for _, f := range sl.Fields {
+			m[f.Name] = f
+		}
+		return m
+	}
+	sbf, brf := fields(sb), fields(br)
+
+	if !sbf["e2b_api_key"].Set {
+		t.Error("sandbox e2b_api_key should be set after PUT")
+	}
+	if sbf["e2b_api_key"].Kind != "" {
+		t.Errorf("e2b_api_key is a secret, kind = %q", sbf["e2b_api_key"].Kind)
+	}
+	if !brf["browser_use_url"].Set || !brf["allow_private"].Set {
+		t.Error("browser fields should be set after PUT")
+	}
+	for _, name := range []string{"browser_use_url", "playwright_endpoint", "allow_private", "browserbase_project_id"} {
+		if brf[name].Kind != "text" {
+			t.Errorf("browser field %q kind = %q, want text", name, brf[name].Kind)
+		}
+	}
+	if brf["steel_api_key"].Kind != "" || brf["browserbase_api_key"].Kind != "" {
+		t.Error("provider API keys must stay secret (empty kind)")
+	}
+}
