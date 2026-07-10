@@ -32,6 +32,14 @@ const FIELD_LABELS: Record<string, string> = {
   fcm_access_token: "FCM access token",
   remote_url: "Remote URL",
   remote_token: "Remote token",
+  e2b_api_key: "E2B API key",
+  e2b_base_url: "E2B base URL",
+  browser_use_url: "Browser sidecar URL",
+  steel_api_key: "Steel API key",
+  browserbase_api_key: "Browserbase API key",
+  browserbase_project_id: "Browserbase project ID",
+  playwright_endpoint: "CDP / Playwright endpoint",
+  allow_private: "Allow private addresses (true/false)",
 }
 
 const SLOT_LABELS: Record<string, string> = {
@@ -39,26 +47,17 @@ const SLOT_LABELS: Record<string, string> = {
   storage: "Storage",
   secrets: "Secrets",
   llm: "LLM",
+  sandbox: "Sandbox (code execution)",
+  browser: "Browser tool",
 }
 
-const ACRONYMS = new Set([
-  "api",
-  "url",
-  "sid",
-  "id",
-  "fcm",
-  "sms",
-  "llm",
-  "smtp",
-])
+const ACRONYMS = new Set(["api", "url", "sid", "id", "fcm", "sms", "llm", "smtp"])
 
 function humanize(name: string): string {
   return name
     .split("_")
     .map((word) =>
-      ACRONYMS.has(word)
-        ? word.toUpperCase()
-        : word.charAt(0).toUpperCase() + word.slice(1),
+      ACRONYMS.has(word) ? word.toUpperCase() : word.charAt(0).toUpperCase() + word.slice(1),
     )
     .join(" ")
 }
@@ -140,9 +139,7 @@ export function IntegrationSlotCard({ slot, onSaved }: IntegrationSlotCardProps)
         title={slotLabel(slot.slot)}
         subtitle={
           <span className="flex items-center gap-tile-tight">
-            <code className="font-mono text-meta text-foreground">
-              {slot.activeAdapter}
-            </code>
+            <code className="font-mono text-meta text-foreground">{slot.activeAdapter}</code>
             <span aria-hidden>·</span>
             <span>
               {configuredCount}/{slot.fields.length} set
@@ -166,7 +163,7 @@ export function IntegrationSlotCard({ slot, onSaved }: IntegrationSlotCardProps)
               busy={busy}
             >
               <Input
-                type="password"
+                type={field.kind === "text" ? "text" : "password"}
                 autoComplete="off"
                 value={drafts[field.name] ?? ""}
                 onChange={(e) => setDraft(field.name, e.target.value)}
@@ -202,9 +199,7 @@ function Field({
   return (
     <div className="flex flex-col gap-tile-tight">
       <div className="flex items-center justify-between">
-        <span className="text-eyebrow uppercase tracking-wide text-muted-foreground">
-          {label}
-        </span>
+        <span className="text-eyebrow uppercase tracking-wide text-muted-foreground">{label}</span>
         {onClear ? (
           <button
             type="button"
@@ -217,9 +212,7 @@ function Field({
         ) : null}
       </div>
       {children}
-      {hint ? (
-        <span className="text-meta text-muted-foreground">{hint}</span>
-      ) : null}
+      {hint ? <span className="text-meta text-muted-foreground">{hint}</span> : null}
     </div>
   )
 }

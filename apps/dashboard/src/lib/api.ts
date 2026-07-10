@@ -2318,6 +2318,8 @@ export const IntegrationFieldSchema = z.object({
   name: z.string(),
   set: z.boolean(),
   hint: z.string().optional().default(""),
+  // "text" = non-secret (endpoint/flag), rendered unmasked. Absent = secret.
+  kind: z.string().optional().default(""),
 })
 export type IntegrationField = z.infer<typeof IntegrationFieldSchema>
 
