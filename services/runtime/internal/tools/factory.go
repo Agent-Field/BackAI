@@ -133,6 +133,15 @@ func BuildRegistry(deps FactoryDeps) (*Registry, error) {
 	return r, nil
 }
 
+// browserAllowPrivate reports whether the browser-use sidecar may live
+// on a loopback / RFC-1918 address (docker-compose service name,
+// localhost). Off unless AF_STACK_BROWSER_ALLOW_PRIVATE is truthy,
+// mirroring AF_STACK_WEBHOOK_ALLOW_PRIVATE.
+func browserAllowPrivate() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("AF_STACK_BROWSER_ALLOW_PRIVATE")))
+	return v == "1" || v == "true" || v == "yes"
+}
+
 // pickBrowserAdapter returns the BrowserAdapter chosen via env. If the
 // operator explicitly named a non-default adapter (anything other than
 // browser-use) that has no env config, returns an error — we don't
@@ -141,7 +150,7 @@ func pickBrowserAdapter(choice string) (browser.Adapter, error) {
 	switch choice {
 	case "browser-use", "browseruse", "":
 		url := strings.TrimSpace(os.Getenv("BROWSER_USE_URL"))
-		return browseruse.New(url), nil
+		return browseruse.New(url, browserAllowPrivate()), nil
 	case "steel":
 		key := strings.TrimSpace(os.Getenv("STEEL_API_KEY"))
 		ad := steel.New(key)
