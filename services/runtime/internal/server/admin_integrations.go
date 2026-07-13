@@ -173,6 +173,15 @@ var integrationProviders = map[string][]integrationProvider{
 	},
 }
 
+// integrationFieldDefaults records the value a field falls back to when
+// left blank, so the dashboard can render it as explicitly optional
+// ("defaults to …") instead of an empty required-looking input. Keep in
+// sync with the consuming factory's actual fallback.
+var integrationFieldDefaults = map[string]string{
+	"e2b_base_url":  "https://api.e2b.dev", // e2b adapter default (sandbox/adapters/e2b)
+	"allow_private": "false",               // SSRF guard blocks private endpoints unless enabled
+}
+
 // integrationFieldKinds marks fields that are NOT secrets (endpoints,
 // flags, plain identifiers) so the dashboard can render them as normal
 // text inputs instead of masked password fields. Absent = secret.
@@ -188,12 +197,14 @@ var integrationFieldKinds = map[string]string{
 // integrationFieldStatus reports one credential field. It NEVER carries a
 // raw secret value — only whether it is set and an optional masked hint.
 // Kind is "text" for non-secret fields (rendered unmasked); empty means
-// secret.
+// secret. Default, when non-empty, is the value the runtime falls back
+// to for a blank field — the UI renders such fields as optional.
 type integrationFieldStatus struct {
-	Name string `json:"name"`
-	Set  bool   `json:"set"`
-	Hint string `json:"hint"`
-	Kind string `json:"kind,omitempty"`
+	Name    string `json:"name"`
+	Set     bool   `json:"set"`
+	Hint    string `json:"hint"`
+	Kind    string `json:"kind,omitempty"`
+	Default string `json:"default,omitempty"`
 }
 
 // integrationProviderStatus is one selectable backend inside a slot,
@@ -297,7 +308,11 @@ func (s *Server) buildSlotStatus(ctx context.Context, tenantID, slot string, sto
 	byName := make(map[string]integrationFieldStatus, len(fields))
 	for _, f := range fields {
 		key := integrationVaultKey(slot, f)
-		fs := integrationFieldStatus{Name: f, Kind: integrationFieldKinds[f]}
+		fs := integrationFieldStatus{
+			Name:    f,
+			Kind:    integrationFieldKinds[f],
+			Default: integrationFieldDefaults[f],
+		}
 		if _, err := store.GetMetadata(ctx, tenantID, key); err != nil {
 			if !errors.Is(err, secrets.ErrSecretNotFound) {
 				return integrationSlotStatus{}, err

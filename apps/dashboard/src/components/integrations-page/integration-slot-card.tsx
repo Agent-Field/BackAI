@@ -198,7 +198,9 @@ export function IntegrationSlotCard({ slot, onSaved }: IntegrationSlotCardProps)
           const label = fieldLabel(field.name)
           const hint = field.set
             ? `Currently set${field.hint ? ` (${field.hint})` : ""}. Leave blank to keep it.`
-            : "Not set."
+            : field.default
+              ? `Optional — defaults to ${field.default} when left blank.`
+              : "Not set."
           return (
             <Field
               key={field.name}
@@ -212,7 +214,7 @@ export function IntegrationSlotCard({ slot, onSaved }: IntegrationSlotCardProps)
                 autoComplete="off"
                 value={drafts[field.name] ?? ""}
                 onChange={(e) => setDraft(field.name, e.target.value)}
-                placeholder={field.set ? "unchanged" : ""}
+                placeholder={field.set ? "unchanged" : field.default}
                 className="font-mono"
               />
             </Field>

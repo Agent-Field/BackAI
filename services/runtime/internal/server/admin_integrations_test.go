@@ -446,6 +446,15 @@ func TestAdminIntegrationsSandboxBrowserSlots(t *testing.T) {
 	if brf["steel_api_key"].Kind != "" || brf["browserbase_api_key"].Kind != "" {
 		t.Error("provider API keys must stay secret (empty kind)")
 	}
+	if sbf["e2b_base_url"].Default != "https://api.e2b.dev" {
+		t.Errorf("e2b_base_url should advertise its default, got %q", sbf["e2b_base_url"].Default)
+	}
+	if brf["allow_private"].Default != "false" {
+		t.Errorf("allow_private should advertise its default, got %q", brf["allow_private"].Default)
+	}
+	if sbf["e2b_api_key"].Default != "" {
+		t.Error("e2b_api_key has no default and must not advertise one")
+	}
 }
 
 // TestAdminIntegrationsProvidersConsistent pins the provider-grouping
