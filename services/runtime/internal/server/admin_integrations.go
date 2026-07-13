@@ -182,6 +182,18 @@ var integrationFieldDefaults = map[string]string{
 	"allow_private": "false",               // SSRF guard blocks private endpoints unless enabled
 }
 
+// integrationFieldNotes carries free-text optionality guidance for fields
+// that are optional without a literal default value. Fields with neither
+// a default nor a note render as required. Every field's classification
+// must match what the consuming adapter actually enforces.
+var integrationFieldNotes = map[string]string{
+	// Browserbase infers the project from a single-project API key.
+	"browserbase_project_id": "Optional — inferred from the API key when left blank.",
+	// The remote-adapter sidecar protocol enforces bearer auth only when
+	// the sidecar itself is configured with a token.
+	"remote_token": "Optional — only needed when the remote adapter requires bearer auth.",
+}
+
 // integrationFieldKinds marks fields that are NOT secrets (endpoints,
 // flags, plain identifiers) so the dashboard can render them as normal
 // text inputs instead of masked password fields. Absent = secret.
@@ -205,6 +217,9 @@ type integrationFieldStatus struct {
 	Hint    string `json:"hint"`
 	Kind    string `json:"kind,omitempty"`
 	Default string `json:"default,omitempty"`
+	// Note is free-text optionality guidance for fields optional without
+	// a literal default. Empty Default + empty Note = required field.
+	Note string `json:"note,omitempty"`
 }
 
 // integrationProviderStatus is one selectable backend inside a slot,
@@ -312,6 +327,7 @@ func (s *Server) buildSlotStatus(ctx context.Context, tenantID, slot string, sto
 			Name:    f,
 			Kind:    integrationFieldKinds[f],
 			Default: integrationFieldDefaults[f],
+			Note:    integrationFieldNotes[f],
 		}
 		if _, err := store.GetMetadata(ctx, tenantID, key); err != nil {
 			if !errors.Is(err, secrets.ErrSecretNotFound) {

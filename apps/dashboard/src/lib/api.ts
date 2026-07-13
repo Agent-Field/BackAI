@@ -2322,6 +2322,9 @@ export const IntegrationFieldSchema = z.object({
   kind: z.string().optional().default(""),
   // Non-empty = the runtime's fallback for a blank field; render as optional.
   default: z.string().optional().default(""),
+  // Free-text optionality guidance (optional fields without a literal
+  // default). Empty default + empty note = required field.
+  note: z.string().optional().default(""),
 })
 export type IntegrationField = z.infer<typeof IntegrationFieldSchema>
 

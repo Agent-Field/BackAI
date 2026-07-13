@@ -198,9 +198,11 @@ export function IntegrationSlotCard({ slot, onSaved }: IntegrationSlotCardProps)
           const label = fieldLabel(field.name)
           const hint = field.set
             ? `Currently set${field.hint ? ` (${field.hint})` : ""}. Leave blank to keep it.`
-            : field.default
-              ? `Optional — defaults to ${field.default} when left blank.`
-              : "Not set."
+            : field.note
+              ? field.note
+              : field.default
+                ? `Optional — defaults to ${field.default} when left blank.`
+                : "Required — not set."
           return (
             <Field
               key={field.name}

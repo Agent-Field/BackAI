@@ -455,6 +455,15 @@ func TestAdminIntegrationsSandboxBrowserSlots(t *testing.T) {
 	if sbf["e2b_api_key"].Default != "" {
 		t.Error("e2b_api_key has no default and must not advertise one")
 	}
+	if brf["browserbase_project_id"].Note == "" {
+		t.Error("browserbase_project_id is optional (inferred from key) and must carry a note")
+	}
+	if sbf["remote_token"].Note == "" {
+		t.Error("remote_token is optional and must carry a note")
+	}
+	if brf["steel_api_key"].Note != "" || brf["steel_api_key"].Default != "" {
+		t.Error("steel_api_key is required — no note/default")
+	}
 }
 
 // TestAdminIntegrationsProvidersConsistent pins the provider-grouping
