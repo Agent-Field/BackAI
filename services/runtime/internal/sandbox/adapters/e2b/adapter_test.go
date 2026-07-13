@@ -12,8 +12,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/sandbox"
+	"github.com/Agent-Field/backai/services/runtime/internal/storage"
 )
 
 func TestNewRequiresAPIKey(t *testing.T) {
@@ -262,5 +264,52 @@ func TestCapabilities(t *testing.T) {
 	a, _ := New(Config{APIKey: "e2b_key"})
 	if c := a.Capabilities(); c.Adapter != "e2b" || c.MaxTimeoutS != 3600 {
 		t.Errorf("caps = %+v", c)
+	}
+}
+
+// fakeStore records Upload calls; other methods are inert stubs.
+type fakeStore struct{ uploaded []string }
+
+func (f *fakeStore) Upload(_ context.Context, key string, _ io.Reader, _ storage.UploadOpts) (*storage.Object, error) {
+	f.uploaded = append(f.uploaded, key)
+	return &storage.Object{Key: key}, nil
+}
+func (f *fakeStore) Download(context.Context, string) (io.ReadCloser, *storage.Object, error) {
+	return nil, nil, nil
+}
+func (f *fakeStore) SignedURL(context.Context, string, time.Duration) (string, error) {
+	return "", nil
+}
+func (f *fakeStore) Delete(context.Context, string) error { return nil }
+func (f *fakeStore) List(context.Context, string, string, int) (*storage.ListResult, error) {
+	return &storage.ListResult{}, nil
+}
+func (f *fakeStore) EnsureBucket(context.Context) error { return nil }
+func (f *fakeStore) Capabilities() storage.Capabilities { return storage.Capabilities{} }
+
+func TestRunPersistsLogsToStorage(t *testing.T) {
+	m := &e2bMock{apiKey: "e2b_key", token: "t", stdout: "out", stderr: "err", exitCode: 0}
+	srv := newMockServer(t, m)
+	defer srv.Close()
+	store := &fakeStore{}
+	a, err := New(Config{
+		APIKey: "e2b_key", BaseURL: srv.URL, EnvdBaseURL: srv.URL,
+		HTTPClient: srv.Client(), Storage: store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := a.Run(context.Background(), sandbox.RunSpec{
+		ID: "run-77", Image: "base", Command: []string{"echo", "hi"},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.StdoutURL != "sandbox/runs/run-77/stdout.log" || res.StderrURL != "sandbox/runs/run-77/stderr.log" {
+		t.Errorf("URLs = %q / %q", res.StdoutURL, res.StderrURL)
+	}
+	if len(store.uploaded) != 2 {
+		t.Errorf("uploaded %d objects, want 2", len(store.uploaded))
 	}
 }

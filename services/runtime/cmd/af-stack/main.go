@@ -2063,6 +2063,8 @@ func newSandbox(cfg config.SandboxConfig, store storage.Storage, vault *secrets.
 		return e2bsandbox.New(e2bsandbox.Config{
 			APIKey:  cfg.E2BAPIKey,
 			BaseURL: cfg.E2BBaseURL,
+			Storage: store,
+			Logger:  log,
 		})
 	case "remote":
 		// Out-of-process sidecar over the remote adapter protocol. remote.New

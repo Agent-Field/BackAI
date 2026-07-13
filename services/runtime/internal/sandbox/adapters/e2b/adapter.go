@@ -37,6 +37,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"mime/multipart"
 	"net/http"
@@ -45,6 +46,7 @@ import (
 	"time"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/sandbox"
+	"github.com/Agent-Field/backai/services/runtime/internal/storage"
 )
 
 const (
@@ -101,6 +103,15 @@ type Config struct {
 	// HTTPClient lets tests inject a mocked transport. nil -> real
 	// clients (a 60s control-plane client + an unbounded stream client).
 	HTTPClient *http.Client
+
+	// Storage persists stdout/stderr so the run's logs are retrievable
+	// via StdoutURL/StderrURL (same contract as the docker adapter).
+	// nil -> logs are only cached in-process for the Stream fallback.
+	Storage storage.Storage
+
+	// Logger for non-fatal diagnostics (log-upload failures). nil ->
+	// slog.Default().
+	Logger *slog.Logger
 }
 
 // Adapter implements sandbox.Sandbox via e2b's two-plane API.
@@ -114,6 +125,9 @@ type Adapter struct {
 	// streamClient has no timeout — the exec stream is bounded by the
 	// per-run context deadline instead.
 	streamClient *http.Client
+
+	store storage.Storage
+	log   *slog.Logger
 
 	// mu guards the last-run log cache used by the Stream fallback.
 	mu         sync.Mutex
@@ -148,12 +162,19 @@ func New(cfg Config) (*Adapter, error) {
 		streamClient = &http.Client{} // no timeout; ctx bounds the stream
 	}
 
+	log := cfg.Logger
+	if log == nil {
+		log = slog.Default()
+	}
+
 	return &Adapter{
 		apiKey:       cfg.APIKey,
 		apiBase:      apiBase,
 		envdBase:     envdBase,
 		client:       client,
 		streamClient: streamClient,
+		store:        cfg.Storage,
+		log:          log,
 	}, nil
 }
 
@@ -229,13 +250,46 @@ func (a *Adapter) Run(ctx context.Context, spec sandbox.RunSpec) (*sandbox.RunRe
 	}
 	a.cacheLogs(stdout, stderr)
 
-	return &sandbox.RunResult{
+	res := &sandbox.RunResult{
 		Status:    status,
 		ExitCode:  exitCode,
 		DurationS: int(endedAt.Sub(startedAt).Seconds()),
 		StartedAt: startedAt,
 		EndedAt:   endedAt,
-	}, nil
+	}
+	// Persist logs to object storage so StdoutURL/StderrURL are
+	// retrievable (mirrors the docker adapter). Best-effort.
+	a.persistLogs(runCtx, spec.ID, stdout, stderr, res)
+	return res, nil
+}
+
+// persistLogs uploads stdout + stderr to object storage and stamps the
+// resulting keys onto the RunResult. Best-effort: an upload failure logs
+// a warning and leaves the URL empty.
+func (a *Adapter) persistLogs(ctx context.Context, runID, stdout, stderr string, res *sandbox.RunResult) {
+	if a.store == nil || runID == "" {
+		return
+	}
+	uploadCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if obj, err := a.store.Upload(uploadCtx,
+		"sandbox/runs/"+runID+"/stdout.log",
+		strings.NewReader(stdout),
+		storage.UploadOpts{ContentType: "text/plain"},
+	); err == nil && obj != nil {
+		res.StdoutURL = obj.Key
+	} else if err != nil {
+		a.log.Warn("e2b: stdout upload failed", "run_id", runID, "error", err)
+	}
+	if obj, err := a.store.Upload(uploadCtx,
+		"sandbox/runs/"+runID+"/stderr.log",
+		strings.NewReader(stderr),
+		storage.UploadOpts{ContentType: "text/plain"},
+	); err == nil && obj != nil {
+		res.StderrURL = obj.Key
+	} else if err != nil {
+		a.log.Warn("e2b: stderr upload failed", "run_id", runID, "error", err)
+	}
 }
 
 // createSandbox POSTs the control plane and returns the sandbox id +
