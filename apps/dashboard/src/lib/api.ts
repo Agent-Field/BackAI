@@ -2323,10 +2323,20 @@ export const IntegrationFieldSchema = z.object({
 })
 export type IntegrationField = z.infer<typeof IntegrationFieldSchema>
 
+// One selectable backend inside a slot (e.g. browser → steel). The card
+// shows a provider dropdown when a slot has more than one.
+export const IntegrationProviderSchema = z.object({
+  id: z.string(),
+  label: z.string().optional().default(""),
+  fields: z.array(IntegrationFieldSchema).default([]),
+})
+export type IntegrationProvider = z.infer<typeof IntegrationProviderSchema>
+
 export const IntegrationSlotSchema = z.object({
   slot: z.string(),
   activeAdapter: z.string(),
   fields: z.array(IntegrationFieldSchema),
+  providers: z.array(IntegrationProviderSchema).optional().default([]),
 })
 export type IntegrationSlot = z.infer<typeof IntegrationSlotSchema>
 

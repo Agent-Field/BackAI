@@ -7,10 +7,17 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { ZoneCard, ZoneCardHeader } from "@/components/ui/zone-card"
 
 import { api } from "@/lib/api"
-import type { IntegrationSlot } from "@/lib/api"
+import type { IntegrationProvider, IntegrationSlot } from "@/lib/api"
 
 // One card per adapter slot. Renders each credential field as a password
 // input with a per-field "Clear stored value" action. Save semantics
@@ -75,10 +82,27 @@ interface IntegrationSlotCardProps {
   onSaved: () => Promise<void> | void
 }
 
+// providerConfigured reports whether any of a provider's fields has a
+// stored value — used to badge dropdown options and pick the default.
+function providerConfigured(p: IntegrationProvider): boolean {
+  return p.fields.some((f) => f.set)
+}
+
 export function IntegrationSlotCard({ slot, onSaved }: IntegrationSlotCardProps) {
   // Draft values keyed by field name. Only non-blank drafts are submitted.
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
+
+  // Provider grouping: the API always sends providers (single implicit
+  // one for simple slots). Show the dropdown only when there's a choice;
+  // default to the first configured provider so saved creds are visible.
+  const providers = slot.providers.length
+    ? slot.providers
+    : [{ id: slot.slot, label: "", fields: slot.fields }]
+  const [providerId, setProviderId] = useState(
+    () => (providers.find(providerConfigured) ?? providers[0]).id,
+  )
+  const active = providers.find((p) => p.id === providerId) ?? providers[0]
 
   const setDraft = (name: string, value: string) =>
     setDrafts((prev) => ({ ...prev, [name]: value }))
@@ -149,7 +173,28 @@ export function IntegrationSlotCard({ slot, onSaved }: IntegrationSlotCardProps)
       />
 
       <form onSubmit={save} className="flex flex-col gap-stack px-row-x py-row-y">
-        {slot.fields.map((field) => {
+        {providers.length > 1 ? (
+          <Field label="Provider">
+            <Select value={providerId} onValueChange={(v) => setProviderId(String(v))}>
+              <SelectTrigger size="sm" aria-label={`${slotLabel(slot.slot)} provider`}>
+                <SelectValue>
+                  {() => {
+                    const label = active.label || humanize(active.id)
+                    return providerConfigured(active) ? `${label} · configured` : label
+                  }}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {providers.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {(p.label || humanize(p.id)) + (providerConfigured(p) ? " · configured" : "")}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+        ) : null}
+        {active.fields.map((field) => {
           const label = fieldLabel(field.name)
           const hint = field.set
             ? `Currently set${field.hint ? ` (${field.hint})` : ""}. Leave blank to keep it.`
