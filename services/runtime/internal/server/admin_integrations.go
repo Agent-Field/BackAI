@@ -178,7 +178,7 @@ var integrationProviders = map[string][]integrationProvider{
 // ("defaults to …") instead of an empty required-looking input. Keep in
 // sync with the consuming factory's actual fallback.
 var integrationFieldDefaults = map[string]string{
-	"e2b_base_url":  "https://api.e2b.dev", // e2b adapter default (sandbox/adapters/e2b)
+	"e2b_base_url":  "https://api.e2b.app", // e2b adapter default (sandbox/adapters/e2b)
 	"allow_private": "false",               // SSRF guard blocks private endpoints unless enabled
 }
 

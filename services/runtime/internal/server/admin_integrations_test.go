@@ -446,7 +446,7 @@ func TestAdminIntegrationsSandboxBrowserSlots(t *testing.T) {
 	if brf["steel_api_key"].Kind != "" || brf["browserbase_api_key"].Kind != "" {
 		t.Error("provider API keys must stay secret (empty kind)")
 	}
-	if sbf["e2b_base_url"].Default != "https://api.e2b.dev" {
+	if sbf["e2b_base_url"].Default != "https://api.e2b.app" {
 		t.Errorf("e2b_base_url should advertise its default, got %q", sbf["e2b_base_url"].Default)
 	}
 	if brf["allow_private"].Default != "false" {

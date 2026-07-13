@@ -13,7 +13,7 @@ Set the adapter in `config.yaml`:
 sandbox:
   adapter: docker         # docker | gvisor | firecracker | e2b
   e2b_api_key: ""         # only when adapter=e2b
-  e2b_base_url: ""        # optional; defaults to https://api.e2b.dev
+  e2b_base_url: ""        # optional; defaults to https://api.e2b.app
 ```
 
 Or via env (overrides YAML):
@@ -21,7 +21,7 @@ Or via env (overrides YAML):
 ```bash
 AF_STACK_SANDBOX_ADAPTER=gvisor
 E2B_API_KEY=sk-...
-AF_STACK_E2B_BASE_URL=https://api.e2b.dev
+AF_STACK_E2B_BASE_URL=https://api.e2b.app
 ```
 
 The runtime logs the selection at startup:
