@@ -117,8 +117,12 @@ func TestUnconfiguredAdapter(t *testing.T) {
 		name, key, project string
 	}{
 		{"no key", "", "proj-1"},
-		{"no project", "bb-key", ""},
 		{"neither", "", ""},
+	}
+	// Key without project IS configured — Browserbase infers the project
+	// from a single-project API key.
+	if a := New("bb-key", "", false); !a.Configured() {
+		t.Error("key without project: Configured() = false, want true")
 	}
 	for _, tc := range cases {
 		a := New(tc.key, tc.project, false)

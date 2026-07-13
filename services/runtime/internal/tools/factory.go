@@ -194,8 +194,8 @@ func pickBrowserAdapter(choice string, creds BrowserCreds) (browser.Adapter, err
 		return ad, nil
 	case "browserbase":
 		ad := browserbase.New(creds.BrowserbaseAPIKey, creds.BrowserbaseProjectID, creds.AllowPrivate)
-		if creds.BrowserbaseAPIKey == "" || creds.BrowserbaseProjectID == "" {
-			return ad, fmt.Errorf("tools: AF_STACK_TOOL_BROWSER=browserbase but no API key / project id (BROWSERBASE_* or Integrations → browser)")
+		if creds.BrowserbaseAPIKey == "" {
+			return ad, fmt.Errorf("tools: AF_STACK_TOOL_BROWSER=browserbase but no API key (BROWSERBASE_API_KEY or Integrations → browser)")
 		}
 		return ad, nil
 	case "playwright":

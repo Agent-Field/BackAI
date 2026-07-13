@@ -65,9 +65,10 @@ type createSessionResponse struct {
 	ConnectURL string `json:"connectUrl"`
 }
 
-// New returns a Browserbase adapter. Configured() requires both the
-// API key and the project ID; when either is empty every verb returns
-// browser.ErrNotConfigured.
+// New returns a Browserbase adapter. Configured() requires only the
+// API key — Browserbase infers the project when the key is scoped to a
+// single one, so projectID is optional and only sent when non-empty.
+// With an empty key every verb returns browser.ErrNotConfigured.
 //
 // allowPrivate re-permits loopback / RFC-1918 CDP endpoints (only
 // relevant when pointing the adapter at a mock in tests — hosted
@@ -94,10 +95,10 @@ func New(apiKey, projectID string, allowPrivate bool) *Adapter {
 // ID returns the adapter identifier.
 func (a *Adapter) ID() string { return "browserbase" }
 
-// Configured reports whether BROWSERBASE_API_KEY and
-// BROWSERBASE_PROJECT_ID are both set.
+// Configured reports whether BROWSERBASE_API_KEY is set. The project id
+// is optional — Browserbase infers it from the key when omitted.
 func (a *Adapter) Configured() bool {
-	return a != nil && a.apiKey != "" && a.projectID != ""
+	return a != nil && a.apiKey != ""
 }
 
 // Close tears down every live browser session.
@@ -152,7 +153,13 @@ func (a *Adapter) Fill(ctx context.Context, sessionID, selector, value string) (
 // closure — Browserbase releases the session when the CDP connection
 // drops.
 func (a *Adapter) createSession(ctx context.Context, _ string) (string, func(), error) {
-	payload, err := json.Marshal(map[string]string{"projectId": a.projectID})
+	// projectId is optional — omit it entirely so Browserbase infers the
+	// project from the API key.
+	fields := map[string]string{}
+	if a.projectID != "" {
+		fields["projectId"] = a.projectID
+	}
+	payload, err := json.Marshal(fields)
 	if err != nil {
 		return "", nil, fmt.Errorf("browserbase: marshal: %w", err)
 	}
