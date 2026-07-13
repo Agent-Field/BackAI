@@ -111,6 +111,18 @@ model_list:
       model: deepseek/deepseek-reasoner
       api_key: os.environ/DEEPSEEK_API_KEY
 
+  # ───── Embeddings — suite memory + hybrid search ─────
+  # The runtime's default embedder id (memory.DefaultEmbeddingModel) is
+  # `openai/text-embedding-3-small`. Route it through OpenRouter's
+  # OpenAI-compatible /embeddings endpoint so the stock one-key setup
+  # (OPENROUTER_API_KEY) gets working vector memory + semantic search
+  # without a separate OpenAI key.
+  - model_name: openai/text-embedding-3-small
+    litellm_params:
+      model: openai/text-embedding-3-small
+      api_base: https://openrouter.ai/api/v1
+      api_key: os.environ/OPENROUTER_API_KEY
+
   # ───── Groq (direct) — activates when GROQ_API_KEY set ─────
   - model_name: groq/llama-3.3-70b-versatile
     litellm_params:

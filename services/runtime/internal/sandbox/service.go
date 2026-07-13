@@ -137,6 +137,14 @@ func (s *Service) Run(ctx context.Context, spec RunSpec) (*SandboxRun, error) {
 	// timeout (RunSpec.TimeoutS) — we don't wrap ctx here because the
 	// HTTP server's read/write timeouts already bound the parent.
 	res, runErr := s.adapter.Run(ctx, spec)
+	if runErr != nil {
+		// The adapter error is the only record of WHY a run failed
+		// (create rejected, auth, quota, upstream 5xx). The persisted
+		// row can't hold it, so log it here or the failure is a silent
+		// status=failed with no reason.
+		s.log.Error("sandbox: adapter run failed",
+			"run_id", run.ID, "adapter", adapterName, "error", runErr)
+	}
 
 	// Materialise the terminal status. A nil result + non-nil error is
 	// treated as a hard failure (the adapter couldn't even attempt).

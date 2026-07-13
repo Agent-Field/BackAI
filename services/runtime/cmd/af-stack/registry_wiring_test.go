@@ -27,6 +27,7 @@ func newTestRegistry(t *testing.T) map[string]registry.SlotView {
 		nil,             // llmGW
 		nil,             // litellmAdmin
 		nil,             // sandboxSvc
+		nil,             // toolsRegistry
 		nil,             // notificationsSvc
 		nil,             // webhooksSvc
 		nil,             // billingSvc
@@ -118,7 +119,7 @@ func TestRegistry_MultimodalHasNoSwapEnv(t *testing.T) {
 // a bogus value errors, a listed value passes.
 func TestRegistry_ValidateSelections(t *testing.T) {
 	r := buildAdapterRegistry(
-		config.Config{}, nil, nil, nil, nil, "", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		config.Config{}, nil, nil, nil, nil, "", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 	)
 
 	// Bogus storage adapter -> one SelectionError for the storage slot.

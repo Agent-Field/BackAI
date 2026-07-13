@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,7 +16,7 @@ import (
 )
 
 func TestAdapter_Unconfigured(t *testing.T) {
-	a := New("")
+	a := New("", false)
 	if a.Configured() {
 		t.Errorf("empty URL: Configured() = true, want false")
 	}
@@ -42,30 +41,37 @@ func TestAdapter_NavigateRoundtrip(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// safehttp blocks loopback by default; rewrite URL to use the test host
-	// via the resolved loopback. Without an allowlist, this would 403; we
-	// bypass by using the public ip from httptest (always 127.0.0.1 — so
-	// we instead implement test using a custom client mocked via the URL).
-	// Easiest fix: tunnel through a non-loopback alias.
-	// Approach: skip if listener isn't a non-loopback addr. httptest
-	// always uses 127.0.0.1 → expect ErrNotConfigured? No — safehttp
-	// blocks 127.0.0.0/8. So expect a transport error.
+	// httptest listens on 127.0.0.1, which safehttp blocks by default —
+	// allowPrivate=true is exactly the escape hatch for that.
+	a := New(srv.URL, true)
+	res, err := a.Navigate(context.Background(), "session-1", "https://example.com")
+	if err != nil {
+		t.Fatalf("Navigate: %v", err)
+	}
+	if res.Title != "Example" || res.StatusCode != 200 {
+		t.Errorf("res = %+v, want title Example / status 200", res)
+	}
+}
 
-	a := New(srv.URL)
-	_, err := a.Navigate(context.Background(), "session-1", "https://example.com")
-	if err == nil {
-		t.Log("note: safehttp blocked: skipping success assert (env may allow loopback in CI)")
-	} else if !strings.Contains(err.Error(), "blocked") {
-		t.Logf("err (may be blocked by safehttp): %v", err)
+func TestAdapter_PrivateBlockedByDefault(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	// Without allowPrivate the loopback sidecar must be SSRF-blocked.
+	a := New(srv.URL, false)
+	if _, err := a.Navigate(context.Background(), "", "https://example.com"); err == nil {
+		t.Fatal("Navigate to loopback sidecar succeeded, want safehttp block")
+	} else if !strings.Contains(err.Error(), "block") {
+		t.Logf("err = %v (expected a safehttp block; message wording may vary)", err)
 	}
 }
 
 func TestAdapter_ID(t *testing.T) {
-	a := New("http://example.com")
+	a := New("http://example.com", false)
 	if a.ID() != "browser-use" {
 		t.Errorf("ID = %q, want browser-use", a.ID())
 	}
 }
-
-// keep import alive for net.Dial in other tests
-var _ = net.Dial

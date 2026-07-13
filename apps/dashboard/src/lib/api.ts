@@ -2318,13 +2318,30 @@ export const IntegrationFieldSchema = z.object({
   name: z.string(),
   set: z.boolean(),
   hint: z.string().optional().default(""),
+  // "text" = non-secret (endpoint/flag), rendered unmasked. Absent = secret.
+  kind: z.string().optional().default(""),
+  // Non-empty = the runtime's fallback for a blank field; render as optional.
+  default: z.string().optional().default(""),
+  // Free-text optionality guidance (optional fields without a literal
+  // default). Empty default + empty note = required field.
+  note: z.string().optional().default(""),
 })
 export type IntegrationField = z.infer<typeof IntegrationFieldSchema>
+
+// One selectable backend inside a slot (e.g. browser → steel). The card
+// shows a provider dropdown when a slot has more than one.
+export const IntegrationProviderSchema = z.object({
+  id: z.string(),
+  label: z.string().optional().default(""),
+  fields: z.array(IntegrationFieldSchema).default([]),
+})
+export type IntegrationProvider = z.infer<typeof IntegrationProviderSchema>
 
 export const IntegrationSlotSchema = z.object({
   slot: z.string(),
   activeAdapter: z.string(),
   fields: z.array(IntegrationFieldSchema),
+  providers: z.array(IntegrationProviderSchema).optional().default([]),
 })
 export type IntegrationSlot = z.infer<typeof IntegrationSlotSchema>
 

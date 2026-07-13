@@ -47,6 +47,9 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
 } from "@/components/ui/sidebar"
 
 // IA derived from development/ux/journeys-v1.md §"What this implies for
@@ -75,6 +78,9 @@ interface NavItem {
    *  actually ready (e.g. needs an adapter deployed). Keeps the sidebar
    *  honest — "backend ready" must be literally true. */
   comingSoonNote?: string
+  /** Always-visible nested rows (no collapse) — used to surface the
+   *  platform's capability slots directly in the nav. */
+  subItems?: { id: string; label: string; href: string }[]
 }
 
 interface NavGroup {
@@ -133,7 +139,27 @@ const GROUPS: NavGroup[] = [
     label: "Platform",
     items: [
       { id: "adapters", label: "Adapters", href: "/platform/adapters", icon: Server },
-      { id: "integrations", label: "Integrations", href: "/platform/integrations", icon: Plug },
+      {
+        id: "integrations",
+        label: "Integrations",
+        href: "/platform/integrations",
+        icon: Plug,
+        // One row per capability slot so the pluggable surface is visible
+        // straight from the nav; each opens a focused single-slot form.
+        subItems: [
+          { id: "intg-browser", label: "Browser", href: "/platform/integrations/browser" },
+          { id: "intg-sandbox", label: "Sandbox", href: "/platform/integrations/sandbox" },
+          { id: "intg-llm", label: "LLM", href: "/platform/integrations/llm" },
+          {
+            id: "intg-notifications",
+            label: "Notifications",
+            href: "/platform/integrations/notifications",
+          },
+          { id: "intg-storage", label: "Storage", href: "/platform/integrations/storage" },
+          { id: "intg-secrets", label: "Secrets", href: "/platform/integrations/secrets" },
+          { id: "intg-oauth", label: "OAuth", href: "/platform/integrations/oauth" },
+        ],
+      },
       { id: "billing", label: "Billing", href: "/platform/billing", icon: CreditCard },
       { id: "secrets", label: "Secrets", href: "/platform/secrets", icon: KeyRound },
     ],
@@ -192,11 +218,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       <SidebarHeader className="px-row-x py-stack">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton
-              size="lg"
-              render={<Link href="/" />}
-              className="gap-inline"
-            >
+            <SidebarMenuButton size="lg" render={<Link href="/" />} className="gap-inline">
               <span className="inline-flex size-7 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
                 <Terminal className="size-4" aria-hidden />
               </span>
@@ -219,6 +241,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   key={item.id}
                   item={item}
                   active={isActive(pathname, item.href)}
+                  pathname={pathname}
                 />
               ))}
             </SidebarMenu>
@@ -234,6 +257,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                     key={item.id}
                     item={item}
                     active={isActive(pathname, item.href)}
+                    pathname={pathname}
                   />
                 ))}
               </SidebarMenu>
@@ -243,15 +267,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       </SidebarContent>
       <SidebarFooter>
         <div className="px-row-x py-row-y flex items-center justify-between">
-          <span className="text-meta text-muted-foreground">
-            v0.1 · feat/ui-redesign
-          </span>
+          <span className="text-meta text-muted-foreground">v0.1 · feat/ui-redesign</span>
           {/* Plain anchor: /sign-out is a route handler that kills the
               better-auth session server-side and redirects to /login. */}
-          <a
-            href="/sign-out"
-            className="text-meta text-muted-foreground hover:text-foreground"
-          >
+          <a href="/sign-out" className="text-meta text-muted-foreground hover:text-foreground">
             Sign out
           </a>
         </div>
@@ -260,7 +279,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   )
 }
 
-function NavLink({ item, active }: { item: NavItem; active: boolean }) {
+function NavLink({ item, active, pathname }: { item: NavItem; active: boolean; pathname: string }) {
   const Icon = item.icon
 
   // D1 — coming-soon items keep their place so operators can see the
@@ -281,9 +300,7 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
         >
           <Icon className="size-icon-inline" aria-hidden />
           <span className="flex-1 truncate">{item.label}</span>
-          <span className="text-meta text-muted-foreground tabular-nums">
-            soon
-          </span>
+          <span className="text-meta text-muted-foreground tabular-nums">soon</span>
         </SidebarMenuButton>
       </SidebarMenuItem>
     )
@@ -301,6 +318,21 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
         <Icon className="size-icon-inline" aria-hidden />
         <span className="flex-1 truncate">{item.label}</span>
       </SidebarMenuButton>
+      {item.subItems?.length ? (
+        <SidebarMenuSub>
+          {item.subItems.map((sub) => (
+            <SidebarMenuSubItem key={sub.id}>
+              <SidebarMenuSubButton
+                size="sm"
+                render={<Link href={sub.href} />}
+                isActive={pathname === sub.href}
+              >
+                <span>{sub.label}</span>
+              </SidebarMenuSubButton>
+            </SidebarMenuSubItem>
+          ))}
+        </SidebarMenuSub>
+      ) : null}
     </SidebarMenuItem>
   )
 }

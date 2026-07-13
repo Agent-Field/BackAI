@@ -382,3 +382,137 @@ func TestAdminIntegrationsNoVaultReturns503(t *testing.T) {
 	}
 	assertErrorEnvelope(t, rec.Body.Bytes(), "SECRETS_NOT_CONFIGURED")
 }
+
+// TestAdminIntegrationsSandboxBrowserSlots pins the two capability slots the
+// dashboard uses for sandbox / browser credential entry: both must exist,
+// accept a round-trip, and mark non-secret fields with kind "text" so the
+// UI can render them unmasked.
+func TestAdminIntegrationsSandboxBrowserSlots(t *testing.T) {
+	s, _ := newIntegrationsTestServer(t)
+
+	rec := doJSON(t, s, http.MethodPut, "/api/v1/admin/integrations/sandbox",
+		`{"credentials":{"e2b_api_key":"e2b_test_1234567890"}}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT sandbox status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	rec = doJSON(t, s, http.MethodPut, "/api/v1/admin/integrations/browser",
+		`{"credentials":{"browser_use_url":"http://browser-sidecar:8000","allow_private":"true"}}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT browser status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	rec = doJSON(t, s, http.MethodGet, "/api/v1/admin/integrations", "")
+	var out integrationsListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]integrationSlotStatus{}
+	for _, sl := range out.Integrations {
+		byName[sl.Slot] = sl
+	}
+	sb, ok := byName["sandbox"]
+	if !ok {
+		t.Fatal("sandbox slot missing from GET")
+	}
+	br, ok := byName["browser"]
+	if !ok {
+		t.Fatal("browser slot missing from GET")
+	}
+
+	fields := func(sl integrationSlotStatus) map[string]integrationFieldStatus {
+		m := map[string]integrationFieldStatus{}
+		for _, f := range sl.Fields {
+			m[f.Name] = f
+		}
+		return m
+	}
+	sbf, brf := fields(sb), fields(br)
+
+	if !sbf["e2b_api_key"].Set {
+		t.Error("sandbox e2b_api_key should be set after PUT")
+	}
+	if sbf["e2b_api_key"].Kind != "" {
+		t.Errorf("e2b_api_key is a secret, kind = %q", sbf["e2b_api_key"].Kind)
+	}
+	if !brf["browser_use_url"].Set || !brf["allow_private"].Set {
+		t.Error("browser fields should be set after PUT")
+	}
+	for _, name := range []string{"browser_use_url", "playwright_endpoint", "allow_private", "browserbase_project_id"} {
+		if brf[name].Kind != "text" {
+			t.Errorf("browser field %q kind = %q, want text", name, brf[name].Kind)
+		}
+	}
+	if brf["steel_api_key"].Kind != "" || brf["browserbase_api_key"].Kind != "" {
+		t.Error("provider API keys must stay secret (empty kind)")
+	}
+	if sbf["e2b_base_url"].Default != "https://api.e2b.app" {
+		t.Errorf("e2b_base_url should advertise its default, got %q", sbf["e2b_base_url"].Default)
+	}
+	if brf["allow_private"].Default != "false" {
+		t.Errorf("allow_private should advertise its default, got %q", brf["allow_private"].Default)
+	}
+	if sbf["e2b_api_key"].Default != "" {
+		t.Error("e2b_api_key has no default and must not advertise one")
+	}
+	if brf["browserbase_project_id"].Note == "" {
+		t.Error("browserbase_project_id is optional (inferred from key) and must carry a note")
+	}
+	if sbf["remote_token"].Note == "" {
+		t.Error("remote_token is optional and must carry a note")
+	}
+	if brf["steel_api_key"].Note != "" || brf["steel_api_key"].Default != "" {
+		t.Error("steel_api_key is required — no note/default")
+	}
+}
+
+// TestAdminIntegrationsProvidersConsistent pins the provider-grouping
+// contract: every provider field must exist in the slot's flat field
+// list, every multi-provider slot's fields must all be reachable through
+// some provider, and single-provider slots get the implicit group.
+func TestAdminIntegrationsProvidersConsistent(t *testing.T) {
+	for slot, provs := range integrationProviders {
+		flat := map[string]bool{}
+		for _, f := range integrationFields[slot] {
+			flat[f] = true
+		}
+		if len(flat) == 0 {
+			t.Errorf("integrationProviders has slot %q with no integrationFields entry", slot)
+			continue
+		}
+		covered := map[string]bool{}
+		for _, p := range provs {
+			if p.ID == "" || p.Label == "" {
+				t.Errorf("slot %q provider %+v missing id or label", slot, p)
+			}
+			for _, f := range p.Fields {
+				if !flat[f] {
+					t.Errorf("slot %q provider %q names unknown field %q", slot, p.ID, f)
+				}
+				covered[f] = true
+			}
+		}
+		for f := range flat {
+			if !covered[f] {
+				t.Errorf("slot %q field %q not reachable through any provider", slot, f)
+			}
+		}
+	}
+
+	s, _ := newIntegrationsTestServer(t)
+	rec := doJSON(t, s, http.MethodGet, "/api/v1/admin/integrations", "")
+	var out integrationsListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, sl := range out.Integrations {
+		if len(sl.Providers) == 0 {
+			t.Errorf("slot %q returned no providers", sl.Slot)
+		}
+		if len(integrationProviders[sl.Slot]) == 0 {
+			if len(sl.Providers) != 1 || len(sl.Providers[0].Fields) != len(sl.Fields) {
+				t.Errorf("slot %q implicit provider should carry all %d fields, got %+v", sl.Slot, len(sl.Fields), sl.Providers)
+			}
+		}
+	}
+}

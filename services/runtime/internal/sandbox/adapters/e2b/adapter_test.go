@@ -1,273 +1,315 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// e2b adapter unit tests.
-//
-// We stand up an httptest.Server to mock the e2b control plane, point the
-// adapter at it, and assert (a) the request shape and (b) that the
-// response is parsed into a sandbox.RunResult correctly.
-package e2b_test
+package e2b
 
 import (
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/sandbox"
-	"github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/e2b"
+	"github.com/Agent-Field/backai/services/runtime/internal/storage"
 )
 
-// recorded captures one HTTP call the adapter made against the mock.
-type recorded struct {
-	Method string
-	Path   string
-	Auth   string
-	Body   map[string]any
+func TestNewRequiresAPIKey(t *testing.T) {
+	if _, err := New(Config{}); err == nil {
+		t.Fatal("New with empty key should return ErrAPIKeyMissing")
+	}
+	if _, err := New(Config{APIKey: "e2b_x"}); err != nil {
+		t.Fatalf("New with key: %v", err)
+	}
 }
 
-// newMockServer returns an httptest server that:
-//   - matches the three e2b endpoints (create, write files, exec, delete)
-//   - records each call
-//   - returns canned responses suitable for happy-path Run().
-func newMockServer(t *testing.T, calls *[]recorded) *httptest.Server {
-	t.Helper()
-	var execCount atomic.Int32
+// connectFrame builds a Connect envelope: [flags][be-uint32 len][payload].
+func connectFrame(flags byte, payload []byte) []byte {
+	out := make([]byte, 5+len(payload))
+	out[0] = flags
+	binary.BigEndian.PutUint32(out[1:5], uint32(len(payload)))
+	copy(out[5:], payload)
+	return out
+}
 
+func dataFrame(stream, text string) []byte {
+	msg := map[string]any{"event": map[string]any{"data": map[string]any{
+		stream: base64.StdEncoding.EncodeToString([]byte(text)),
+	}}}
+	b, _ := json.Marshal(msg)
+	return connectFrame(0x00, b)
+}
+
+func endFrame(exitCode int) []byte {
+	msg := map[string]any{"event": map[string]any{"end": map[string]any{
+		"exitCode": exitCode, "exited": true,
+	}}}
+	b, _ := json.Marshal(msg)
+	return connectFrame(0x00, b)
+}
+
+func eosFrame() []byte { return connectFrame(0x02, []byte(`{}`)) }
+
+// e2bMock is a fake E2B: control plane (create/kill) + envd (files/exec).
+type e2bMock struct {
+	apiKey        string
+	createBody    createSandboxRequest
+	execProcess   processConfig
+	killedID      string
+	filesWritten  []string
+	stdout        string
+	stderr        string
+	exitCode      int
+	token         string
+	gotAPIKeyOn   []string
+	gotAccessTok  string
+	sandboxIDHdr  string
+	returnCreate5 bool
+}
+
+func newMockServer(t *testing.T, m *e2bMock) *httptest.Server {
+	t.Helper()
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/sandboxes", func(w http.ResponseWriter, r *http.Request) {
-		rec := readCall(t, r)
-		*calls = append(*calls, rec)
-		if r.Method != http.MethodPost {
-			http.Error(w, "wrong method", http.StatusMethodNotAllowed)
+	mux.HandleFunc("POST /sandboxes", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-API-Key") == m.apiKey {
+			m.gotAPIKeyOn = append(m.gotAPIKeyOn, "/sandboxes")
+		}
+		if m.returnCreate5 {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"code":401,"message":"Invalid auth"}`))
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"sandbox_id": "sbx_test_123",
+		_ = json.NewDecoder(r.Body).Decode(&m.createBody)
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(createSandboxResponse{
+			SandboxID: "sbx-123", EnvdAccessToken: m.token, EnvdVersion: "0.5.9",
 		})
 	})
 
-	// /sandboxes/sbx_test_123/files (PUT) and /sandboxes/sbx_test_123/exec (POST)
-	// and /sandboxes/sbx_test_123 (DELETE) all live under this prefix.
-	mux.HandleFunc("/sandboxes/", func(w http.ResponseWriter, r *http.Request) {
-		rec := readCall(t, r)
-		*calls = append(*calls, rec)
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/files") && r.Method == http.MethodPut:
-			w.WriteHeader(http.StatusOK)
-		case strings.HasSuffix(r.URL.Path, "/exec") && r.Method == http.MethodPost:
-			execCount.Add(1)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"exit_code":      0,
-				"stdout":         "hello from sandbox\n",
-				"stderr":         "",
-				"duration_ms":    1234,
-				"cpu_seconds":    0.42,
-				"memory_peak_mb": 64,
-			})
-		case r.Method == http.MethodDelete:
-			w.WriteHeader(http.StatusNoContent)
-		default:
-			http.Error(w, "unexpected route: "+r.Method+" "+r.URL.Path,
-				http.StatusNotFound)
+	mux.HandleFunc("DELETE /sandboxes/{id}", func(w http.ResponseWriter, r *http.Request) {
+		m.killedID = r.PathValue("id")
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	mux.HandleFunc("POST /files", func(w http.ResponseWriter, r *http.Request) {
+		m.gotAccessTok = r.Header.Get("X-Access-Token")
+		m.filesWritten = append(m.filesWritten, r.URL.Query().Get("path"))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`[]`))
+	})
+
+	mux.HandleFunc("POST /process.Process/Start", func(w http.ResponseWriter, r *http.Request) {
+		m.gotAccessTok = r.Header.Get("X-Access-Token")
+		m.sandboxIDHdr = r.Header.Get("E2b-Sandbox-Id")
+		hdr := make([]byte, 5)
+		_, _ = io.ReadFull(r.Body, hdr)
+		n := binary.BigEndian.Uint32(hdr[1:5])
+		body := make([]byte, n)
+		_, _ = io.ReadFull(r.Body, body)
+		var sr startRequest
+		_ = json.Unmarshal(body, &sr)
+		m.execProcess = sr.Process
+
+		w.Header().Set("Content-Type", "application/connect+json")
+		w.WriteHeader(http.StatusOK)
+		if m.stdout != "" {
+			_, _ = w.Write(dataFrame("stdout", m.stdout))
 		}
+		if m.stderr != "" {
+			_, _ = w.Write(dataFrame("stderr", m.stderr))
+		}
+		_, _ = w.Write(endFrame(m.exitCode))
+		_, _ = w.Write(eosFrame())
 	})
 
 	return httptest.NewServer(mux)
 }
 
-func readCall(t *testing.T, r *http.Request) recorded {
+func newTestAdapter(t *testing.T, srv *httptest.Server, key string) *Adapter {
 	t.Helper()
-	body, _ := io.ReadAll(r.Body)
-	var parsed map[string]any
-	if len(body) > 0 {
-		_ = json.Unmarshal(body, &parsed)
+	a, err := New(Config{
+		APIKey:      key,
+		BaseURL:     srv.URL,
+		EnvdBaseURL: srv.URL,
+		HTTPClient:  srv.Client(),
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	return recorded{
-		Method: r.Method,
-		Path:   r.URL.Path,
-		Auth:   r.Header.Get("Authorization"),
-		Body:   parsed,
-	}
-}
-
-func TestNewRequiresAPIKey(t *testing.T) {
-	_, err := e2b.New(e2b.Config{})
-	if !errors.Is(err, e2b.ErrAPIKeyMissing) {
-		t.Fatalf("New without APIKey err = %v, want ErrAPIKeyMissing", err)
-	}
+	return a
 }
 
 func TestRunHappyPath(t *testing.T) {
-	var calls []recorded
-	srv := newMockServer(t, &calls)
+	m := &e2bMock{apiKey: "e2b_key", token: "tok-abc", stdout: "hi\n", exitCode: 0}
+	srv := newMockServer(t, m)
 	defer srv.Close()
+	a := newTestAdapter(t, srv, "e2b_key")
 
-	a, err := e2b.New(e2b.Config{
-		APIKey:  "test-key",
-		BaseURL: srv.URL,
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	result, err := a.Run(ctx, sandbox.RunSpec{
-		Image:    "python:3.12-slim",
-		Command:  []string{"python", "-c", "print('hi')"},
-		Files:    map[string]string{"main.py": "print('hi')"},
-		Env:      map[string]string{"FOO": "bar"},
-		TimeoutS: 60,
-		Network:  sandbox.NetworkRestricted,
+	res, err := a.Run(context.Background(), sandbox.RunSpec{
+		Image: "base", Command: []string{"echo", "hi"}, TimeoutS: 60,
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-
-	// ── Assert result parsing ──────────────────────────────────────
-	if result.Status != sandbox.StatusDone {
-		t.Errorf("Status = %q, want done", result.Status)
+	if res.Status != sandbox.StatusDone || res.ExitCode != 0 {
+		t.Errorf("status=%v exit=%d, want done/0", res.Status, res.ExitCode)
 	}
-	if result.ExitCode != 0 {
-		t.Errorf("ExitCode = %d, want 0", result.ExitCode)
+	if len(m.gotAPIKeyOn) == 0 {
+		t.Error("create did not send X-API-Key")
 	}
-	if result.DurationS != 1 {
-		t.Errorf("DurationS = %d, want 1 (1234ms rounded down)", result.DurationS)
+	if m.createBody.TemplateID != "base" || m.createBody.Timeout != 60 {
+		t.Errorf("create body = %+v, want templateID=base timeout=60", m.createBody)
 	}
-	if result.CPUSeconds != 0.42 {
-		t.Errorf("CPUSeconds = %v, want 0.42", result.CPUSeconds)
+	if m.sandboxIDHdr != "sbx-123" || m.gotAccessTok != "tok-abc" {
+		t.Errorf("envd headers id=%q tok=%q", m.sandboxIDHdr, m.gotAccessTok)
 	}
-	if result.MemoryPeakMB != 64 {
-		t.Errorf("MemoryPeakMB = %d, want 64", result.MemoryPeakMB)
+	if m.execProcess.Cmd != "echo" || len(m.execProcess.Args) != 1 || m.execProcess.Args[0] != "hi" {
+		t.Errorf("exec process = %+v, want cmd=echo args=[hi]", m.execProcess)
 	}
-	if result.StartedAt.IsZero() || result.EndedAt.IsZero() {
-		t.Errorf("StartedAt/EndedAt should be set, got %+v / %+v",
-			result.StartedAt, result.EndedAt)
+	out, _ := a.fetchCachedLogs()
+	if out != "hi\n" {
+		t.Errorf("stdout = %q, want %q", out, "hi\n")
 	}
-
-	// ── Assert request shape ───────────────────────────────────────
-	// Expected sequence: POST /sandboxes -> PUT files -> POST exec -> DELETE.
-	if len(calls) != 4 {
-		t.Fatalf("expected 4 HTTP calls, got %d: %+v", len(calls), calls)
-	}
-
-	// All calls authed with Bearer token.
-	for i, c := range calls {
-		if c.Auth != "Bearer test-key" {
-			t.Errorf("call %d Auth = %q, want Bearer test-key", i, c.Auth)
-		}
-	}
-
-	// Call 0: create sandbox
-	create := calls[0]
-	if create.Method != http.MethodPost || create.Path != "/sandboxes" {
-		t.Errorf("call 0 = %s %s, want POST /sandboxes", create.Method, create.Path)
-	}
-	if create.Body["template"] != "python:3.12-slim" {
-		t.Errorf("create.template = %v, want python:3.12-slim", create.Body["template"])
-	}
-	if v, ok := create.Body["timeout_ms"].(float64); !ok || int(v) != 60000 {
-		t.Errorf("create.timeout_ms = %v, want 60000", create.Body["timeout_ms"])
-	}
-
-	// Call 1: write files
-	files := calls[1]
-	if files.Method != http.MethodPut || !strings.HasSuffix(files.Path, "/files") {
-		t.Errorf("call 1 = %s %s, want PUT .../files", files.Method, files.Path)
-	}
-	// File contents should be base64-encoded.
-	fileList, _ := files.Body["files"].([]any)
-	if len(fileList) != 1 {
-		t.Fatalf("expected 1 file, got %d", len(fileList))
-	}
-	first, _ := fileList[0].(map[string]any)
-	if first["path"] != "main.py" {
-		t.Errorf("file path = %v, want main.py", first["path"])
-	}
-	wantB64 := base64.StdEncoding.EncodeToString([]byte("print('hi')"))
-	if first["content_b64"] != wantB64 {
-		t.Errorf("file content_b64 = %v, want %v", first["content_b64"], wantB64)
-	}
-
-	// Call 2: exec
-	exec := calls[2]
-	if exec.Method != http.MethodPost || !strings.HasSuffix(exec.Path, "/exec") {
-		t.Errorf("call 2 = %s %s, want POST .../exec", exec.Method, exec.Path)
-	}
-	cmdList, _ := exec.Body["command"].([]any)
-	if len(cmdList) != 3 || cmdList[0] != "python" {
-		t.Errorf("exec.command = %v, want [python -c print('hi')]", exec.Body["command"])
-	}
-
-	// Call 3: delete (cleanup)
-	del := calls[3]
-	if del.Method != http.MethodDelete {
-		t.Errorf("call 3 = %s, want DELETE", del.Method)
+	if m.killedID != "sbx-123" {
+		t.Errorf("killed id = %q, want sbx-123", m.killedID)
 	}
 }
 
-func TestRunPropagatesAPIErrors(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "rate limited", http.StatusTooManyRequests)
-	}))
+func TestRunNonZeroExit(t *testing.T) {
+	m := &e2bMock{apiKey: "e2b_key", token: "t", stderr: "boom\n", exitCode: 3}
+	srv := newMockServer(t, m)
 	defer srv.Close()
+	a := newTestAdapter(t, srv, "e2b_key")
 
-	a, _ := e2b.New(e2b.Config{APIKey: "k", BaseURL: srv.URL})
-	_, err := a.Run(context.Background(), sandbox.RunSpec{Command: []string{"echo"}})
-	if err == nil {
-		t.Fatal("Run should have returned an error on 429")
+	res, err := a.Run(context.Background(), sandbox.RunSpec{Image: "base", Command: []string{"false"}})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
 	}
-	if !strings.Contains(err.Error(), "429") {
-		t.Errorf("error %q should mention status 429", err.Error())
+	if res.Status != sandbox.StatusFailed || res.ExitCode != 3 {
+		t.Errorf("status=%v exit=%d, want failed/3", res.Status, res.ExitCode)
+	}
+	_, se := a.fetchCachedLogs()
+	if se != "boom\n" {
+		t.Errorf("stderr = %q", se)
 	}
 }
 
-func TestStopBestEffort(t *testing.T) {
-	var seen atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/sandboxes/sbx_") {
-			seen.Add(1)
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		http.Error(w, "unexpected", http.StatusBadRequest)
-	}))
+func TestRunSeedsFiles(t *testing.T) {
+	m := &e2bMock{apiKey: "e2b_key", token: "t", stdout: "ok", exitCode: 0}
+	srv := newMockServer(t, m)
 	defer srv.Close()
+	a := newTestAdapter(t, srv, "e2b_key")
 
-	a, _ := e2b.New(e2b.Config{APIKey: "k", BaseURL: srv.URL})
-	if err := a.Stop(context.Background(), "sbx_abc"); err != nil {
-		t.Fatalf("Stop: %v", err)
+	_, err := a.Run(context.Background(), sandbox.RunSpec{
+		Image: "base", Command: []string{"cat", "/home/user/in.txt"},
+		Files: map[string]string{"/home/user/in.txt": "data"},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
 	}
-	if seen.Load() != 1 {
-		t.Errorf("expected 1 DELETE call, got %d", seen.Load())
+	if len(m.filesWritten) != 1 || m.filesWritten[0] != "/home/user/in.txt" {
+		t.Errorf("files written = %v", m.filesWritten)
+	}
+}
+
+func TestRunCreateAuthFailureSurfaces(t *testing.T) {
+	m := &e2bMock{apiKey: "e2b_key", returnCreate5: true}
+	srv := newMockServer(t, m)
+	defer srv.Close()
+	a := newTestAdapter(t, srv, "e2b_key")
+
+	_, err := a.Run(context.Background(), sandbox.RunSpec{Image: "base", Command: []string{"echo", "hi"}})
+	if err == nil || !strings.Contains(err.Error(), "401") {
+		t.Fatalf("expected a surfaced 401 error, got %v", err)
+	}
+}
+
+func TestRunEmptyCommand(t *testing.T) {
+	a, _ := New(Config{APIKey: "e2b_key"})
+	if _, err := a.Run(context.Background(), sandbox.RunSpec{Image: "base"}); err == nil {
+		t.Fatal("empty command should error")
+	}
+}
+
+func TestExecStreamMissingExitEvent(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /sandboxes", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(createSandboxResponse{SandboxID: "s"})
+	})
+	mux.HandleFunc("DELETE /sandboxes/{id}", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /process.Process/Start", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(dataFrame("stdout", "partial"))
+		_, _ = w.Write(eosFrame())
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	a := newTestAdapter(t, srv, "e2b_key")
+
+	_, err := a.Run(context.Background(), sandbox.RunSpec{Image: "base", Command: []string{"echo"}})
+	if err == nil || !strings.Contains(err.Error(), "exit event") {
+		t.Fatalf("expected missing-exit-event error, got %v", err)
 	}
 }
 
 func TestCapabilities(t *testing.T) {
-	a, _ := e2b.New(e2b.Config{APIKey: "k"})
-	caps := a.Capabilities()
-	if caps.Adapter != "e2b" {
-		t.Errorf("Adapter = %q, want e2b", caps.Adapter)
+	a, _ := New(Config{APIKey: "e2b_key"})
+	if c := a.Capabilities(); c.Adapter != "e2b" || c.MaxTimeoutS != 3600 {
+		t.Errorf("caps = %+v", c)
 	}
-	if caps.MaxTimeoutS != 3600 {
-		t.Errorf("MaxTimeoutS = %d, want 3600", caps.MaxTimeoutS)
+}
+
+// fakeStore records Upload calls; other methods are inert stubs.
+type fakeStore struct{ uploaded []string }
+
+func (f *fakeStore) Upload(_ context.Context, key string, _ io.Reader, _ storage.UploadOpts) (*storage.Object, error) {
+	f.uploaded = append(f.uploaded, key)
+	return &storage.Object{Key: key}, nil
+}
+func (f *fakeStore) Download(context.Context, string) (io.ReadCloser, *storage.Object, error) {
+	return nil, nil, nil
+}
+func (f *fakeStore) SignedURL(context.Context, string, time.Duration) (string, error) {
+	return "", nil
+}
+func (f *fakeStore) Delete(context.Context, string) error { return nil }
+func (f *fakeStore) List(context.Context, string, string, int) (*storage.ListResult, error) {
+	return &storage.ListResult{}, nil
+}
+func (f *fakeStore) EnsureBucket(context.Context) error { return nil }
+func (f *fakeStore) Capabilities() storage.Capabilities { return storage.Capabilities{} }
+
+func TestRunPersistsLogsToStorage(t *testing.T) {
+	m := &e2bMock{apiKey: "e2b_key", token: "t", stdout: "out", stderr: "err", exitCode: 0}
+	srv := newMockServer(t, m)
+	defer srv.Close()
+	store := &fakeStore{}
+	a, err := New(Config{
+		APIKey: "e2b_key", BaseURL: srv.URL, EnvdBaseURL: srv.URL,
+		HTTPClient: srv.Client(), Storage: store,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if caps.SupportsGPU {
-		t.Error("e2b should not advertise GPU support")
+
+	res, err := a.Run(context.Background(), sandbox.RunSpec{
+		ID: "run-77", Image: "base", Command: []string{"echo", "hi"},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
 	}
-	if !caps.SupportsNetwork || !caps.SupportsMounts {
-		t.Errorf("expected network+mounts support, got %+v", caps)
+	if res.StdoutURL != "sandbox/runs/run-77/stdout.log" || res.StderrURL != "sandbox/runs/run-77/stderr.log" {
+		t.Errorf("URLs = %q / %q", res.StdoutURL, res.StderrURL)
 	}
-	if caps.ColdStartMS != 1000 {
-		t.Errorf("ColdStartMS = %d, want 1000", caps.ColdStartMS)
+	if len(store.uploaded) != 2 {
+		t.Errorf("uploaded %d objects, want 2", len(store.uploaded))
 	}
 }

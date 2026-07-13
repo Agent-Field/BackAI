@@ -42,10 +42,19 @@ type Adapter struct {
 // New returns a browser-use adapter for the given sidecar URL. An empty
 // URL produces an unconfigured adapter — Configured() returns false and
 // every verb returns browser.ErrNotConfigured.
-func New(baseURL string) *Adapter {
+//
+// allowPrivate re-permits loopback / RFC-1918 sidecar addresses (a
+// docker-compose service name or localhost). Off by default so a hosted
+// deployment can't point the browser tool at internal services; the
+// factory gates it behind AF_STACK_BROWSER_ALLOW_PRIVATE.
+func New(baseURL string, allowPrivate bool) *Adapter {
+	opts := safehttp.Options{Timeout: 120 * time.Second}
+	if allowPrivate {
+		opts.AllowCIDRs = safehttp.LoopbackAndPrivateCIDRs()
+	}
 	return &Adapter{
 		baseURL: strings.TrimRight(baseURL, "/"),
-		client:  safehttp.New(safehttp.Options{Timeout: 120 * time.Second}),
+		client:  safehttp.New(opts),
 	}
 }
 
