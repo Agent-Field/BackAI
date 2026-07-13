@@ -139,6 +139,40 @@ func integrationVaultKey(slot, field string) string {
 
 // ─── response shapes (downstream dashboard MUST match these) ──────────────
 
+// integrationProvider groups a slot's fields by the concrete backend
+// they configure. The dashboard renders one provider at a time behind a
+// dropdown instead of a wall of every field for every backend. A field
+// may appear under more than one provider (same vault key either way).
+type integrationProvider struct {
+	ID     string
+	Label  string
+	Fields []string
+}
+
+// integrationProviders maps slots with multiple selectable backends to
+// their provider groups. Slots absent from this map render as a single
+// implicit provider carrying all of the slot's fields (no dropdown).
+// Every field named here MUST exist in integrationFields for the slot —
+// pinned by TestAdminIntegrationsProvidersConsistent.
+var integrationProviders = map[string][]integrationProvider{
+	"notifications": {
+		{ID: "resend", Label: "Resend (email)", Fields: []string{"resend_api_key"}},
+		{ID: "slack", Label: "Slack webhook", Fields: []string{"slack_webhook_url"}},
+		{ID: "twilio", Label: "Twilio (SMS)", Fields: []string{"twilio_account_sid", "twilio_auth_token", "twilio_from_number"}},
+		{ID: "fcm", Label: "Firebase push (FCM)", Fields: []string{"fcm_project_id", "fcm_access_token"}},
+	},
+	"sandbox": {
+		{ID: "e2b", Label: "E2B (hosted)", Fields: []string{"e2b_api_key", "e2b_base_url"}},
+		{ID: "remote", Label: "Remote sidecar", Fields: []string{"remote_url", "remote_token"}},
+	},
+	"browser": {
+		{ID: "browser-use", Label: "Self-hosted sidecar", Fields: []string{"browser_use_url", "allow_private"}},
+		{ID: "steel", Label: "Steel (hosted)", Fields: []string{"steel_api_key"}},
+		{ID: "browserbase", Label: "Browserbase (hosted)", Fields: []string{"browserbase_api_key", "browserbase_project_id"}},
+		{ID: "playwright", Label: "CDP / Playwright endpoint", Fields: []string{"playwright_endpoint", "allow_private"}},
+	},
+}
+
 // integrationFieldKinds marks fields that are NOT secrets (endpoints,
 // flags, plain identifiers) so the dashboard can render them as normal
 // text inputs instead of masked password fields. Absent = secret.
@@ -162,12 +196,23 @@ type integrationFieldStatus struct {
 	Kind string `json:"kind,omitempty"`
 }
 
+// integrationProviderStatus is one selectable backend inside a slot,
+// carrying just that backend's field statuses.
+type integrationProviderStatus struct {
+	ID     string                   `json:"id"`
+	Label  string                   `json:"label"`
+	Fields []integrationFieldStatus `json:"fields"`
+}
+
 // integrationSlotStatus is the per-slot status object returned by GET
-// (once per slot) and PUT (for the mutated slot).
+// (once per slot) and PUT (for the mutated slot). Fields is the flat
+// union (kept for compatibility); Providers groups the same statuses by
+// backend for the dropdown UI.
 type integrationSlotStatus struct {
-	Slot          string                   `json:"slot"`
-	ActiveAdapter string                   `json:"activeAdapter"`
-	Fields        []integrationFieldStatus `json:"fields"`
+	Slot          string                      `json:"slot"`
+	ActiveAdapter string                      `json:"activeAdapter"`
+	Fields        []integrationFieldStatus    `json:"fields"`
+	Providers     []integrationProviderStatus `json:"providers"`
 }
 
 // integrationsListResponse is the GET envelope.
@@ -249,21 +294,39 @@ func (s *Server) buildSlotStatus(ctx context.Context, tenantID, slot string, sto
 		ActiveAdapter: s.integrationActiveAdapter(ctx, slot),
 		Fields:        make([]integrationFieldStatus, 0, len(fields)),
 	}
+	byName := make(map[string]integrationFieldStatus, len(fields))
 	for _, f := range fields {
 		key := integrationVaultKey(slot, f)
 		fs := integrationFieldStatus{Name: f, Kind: integrationFieldKinds[f]}
 		if _, err := store.GetMetadata(ctx, tenantID, key); err != nil {
-			if errors.Is(err, secrets.ErrSecretNotFound) {
-				out.Fields = append(out.Fields, fs)
-				continue
+			if !errors.Is(err, secrets.ErrSecretNotFound) {
+				return integrationSlotStatus{}, err
 			}
-			return integrationSlotStatus{}, err
+		} else {
+			fs.Set = true
+			if plain, err := store.Get(ctx, tenantID, key); err == nil {
+				fs.Hint = maskHint(string(plain))
+			}
 		}
-		fs.Set = true
-		if plain, err := store.Get(ctx, tenantID, key); err == nil {
-			fs.Hint = maskHint(string(plain))
-		}
+		byName[f] = fs
 		out.Fields = append(out.Fields, fs)
+	}
+
+	// Group the same statuses by provider. Slots without an explicit
+	// provider map get one implicit provider holding every field, so the
+	// dashboard can treat providers as the universal shape (dropdown only
+	// when there is more than one).
+	provs := integrationProviders[slot]
+	if len(provs) == 0 {
+		provs = []integrationProvider{{ID: slot, Label: "", Fields: fields}}
+	}
+	out.Providers = make([]integrationProviderStatus, 0, len(provs))
+	for _, p := range provs {
+		ps := integrationProviderStatus{ID: p.ID, Label: p.Label, Fields: make([]integrationFieldStatus, 0, len(p.Fields))}
+		for _, f := range p.Fields {
+			ps.Fields = append(ps.Fields, byName[f])
+		}
+		out.Providers = append(out.Providers, ps)
 	}
 	return out, nil
 }

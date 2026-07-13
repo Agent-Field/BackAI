@@ -447,3 +447,54 @@ func TestAdminIntegrationsSandboxBrowserSlots(t *testing.T) {
 		t.Error("provider API keys must stay secret (empty kind)")
 	}
 }
+
+// TestAdminIntegrationsProvidersConsistent pins the provider-grouping
+// contract: every provider field must exist in the slot's flat field
+// list, every multi-provider slot's fields must all be reachable through
+// some provider, and single-provider slots get the implicit group.
+func TestAdminIntegrationsProvidersConsistent(t *testing.T) {
+	for slot, provs := range integrationProviders {
+		flat := map[string]bool{}
+		for _, f := range integrationFields[slot] {
+			flat[f] = true
+		}
+		if len(flat) == 0 {
+			t.Errorf("integrationProviders has slot %q with no integrationFields entry", slot)
+			continue
+		}
+		covered := map[string]bool{}
+		for _, p := range provs {
+			if p.ID == "" || p.Label == "" {
+				t.Errorf("slot %q provider %+v missing id or label", slot, p)
+			}
+			for _, f := range p.Fields {
+				if !flat[f] {
+					t.Errorf("slot %q provider %q names unknown field %q", slot, p.ID, f)
+				}
+				covered[f] = true
+			}
+		}
+		for f := range flat {
+			if !covered[f] {
+				t.Errorf("slot %q field %q not reachable through any provider", slot, f)
+			}
+		}
+	}
+
+	s, _ := newIntegrationsTestServer(t)
+	rec := doJSON(t, s, http.MethodGet, "/api/v1/admin/integrations", "")
+	var out integrationsListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, sl := range out.Integrations {
+		if len(sl.Providers) == 0 {
+			t.Errorf("slot %q returned no providers", sl.Slot)
+		}
+		if len(integrationProviders[sl.Slot]) == 0 {
+			if len(sl.Providers) != 1 || len(sl.Providers[0].Fields) != len(sl.Fields) {
+				t.Errorf("slot %q implicit provider should carry all %d fields, got %+v", sl.Slot, len(sl.Fields), sl.Providers)
+			}
+		}
+	}
+}
