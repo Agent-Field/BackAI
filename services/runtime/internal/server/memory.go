@@ -25,11 +25,19 @@ import (
 	"strings"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/memory"
+	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
 )
 
 // registerMemoryRoutes wires the /api/v1/memory/* endpoints.
 func (s *Server) registerMemoryRoutes() {
-	s.mux.HandleFunc("GET /api/v1/memory", s.handleListMemory)
+	// The bare list endpoint enumerates every memory row for a scope and,
+	// with no scope_id, falls back to a scope-only (all-tenants) filter —
+	// i.e. it can dump other tenants' memory. It lives on the /api/v1/memory
+	// public prefix (tenant resolver bypassed), so gate the cross-tenant
+	// browse behind operator auth like the other dashboard-owned surfaces.
+	// (Scoped get/put/search remain reachable for the header-only internal
+	// agent path; full closure of that path is tracked as a follow-up.)
+	s.mux.HandleFunc("GET /api/v1/memory", s.operatorGuard(rbac.ResourceAdminActivity, s.handleListMemory))
 	s.mux.HandleFunc("GET /api/v1/memory/get", s.handleGetMemory)
 	s.mux.HandleFunc("PUT /api/v1/memory", s.handlePutMemory)
 	s.mux.HandleFunc("DELETE /api/v1/memory", s.handleDeleteMemory)

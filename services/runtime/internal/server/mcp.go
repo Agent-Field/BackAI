@@ -31,6 +31,7 @@ import (
 
 	"github.com/Agent-Field/backai/services/runtime/internal/mcp"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
+	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
 	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 	"github.com/Agent-Field/backai/services/runtime/internal/tools"
 )
@@ -74,13 +75,19 @@ type callMCPInput struct {
 // ─── Registration ─────────────────────────────────────────────────────────
 
 func (s *Server) registerMCPRoutes() {
+	// The /api/v1/mcp surface is a public prefix (tenant resolver bypassed).
+	// Reads (list servers/tools) stay open for the dashboard, but the
+	// privileged routes were unauthenticated: POST /call runs native tools
+	// (native:exec = sandbox code exec, native:sql = DB read) and the server
+	// CRUD lets anyone register a global MCP/SSE server every tenant then
+	// trusts. Gate those to operators.
 	s.mux.HandleFunc("GET /api/v1/mcp/servers", s.handleListMCPServers)
 	s.mux.HandleFunc("GET /api/v1/mcp/servers/{name}", s.handleGetMCPServer)
-	s.mux.HandleFunc("POST /api/v1/mcp/servers", s.handleAddMCPServer)
-	s.mux.HandleFunc("DELETE /api/v1/mcp/servers/{name}", s.handleRemoveMCPServer)
-	s.mux.HandleFunc("PUT /api/v1/mcp/servers/{name}/enabled", s.handleEnableMCPServer)
+	s.mux.HandleFunc("POST /api/v1/mcp/servers", s.operatorGuard(rbac.ResourceAdminAdapters, s.handleAddMCPServer))
+	s.mux.HandleFunc("DELETE /api/v1/mcp/servers/{name}", s.operatorGuard(rbac.ResourceAdminAdapters, s.handleRemoveMCPServer))
+	s.mux.HandleFunc("PUT /api/v1/mcp/servers/{name}/enabled", s.operatorGuard(rbac.ResourceAdminAdapters, s.handleEnableMCPServer))
 	s.mux.HandleFunc("GET /api/v1/mcp/tools", s.handleListMCPTools)
-	s.mux.HandleFunc("POST /api/v1/mcp/call", s.handleCallMCP)
+	s.mux.HandleFunc("POST /api/v1/mcp/call", s.operatorGuard(rbac.ResourceAdminAdapters, s.handleCallMCP))
 }
 
 // writeMCPError maps mcp package errors to HTTP responses with the

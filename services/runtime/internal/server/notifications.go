@@ -25,6 +25,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/audit"
 	"github.com/Agent-Field/backai/services/runtime/internal/notifications"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
+	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
 )
 
 // ─── Wire shapes ──────────────────────────────────────────────────────────
@@ -82,8 +83,13 @@ type notificationChannelListResponse struct {
 
 func (s *Server) registerNotificationsRoutes() {
 	s.mux.HandleFunc("POST /api/v1/notifications", s.handleSendNotification)
-	s.mux.HandleFunc("GET /api/v1/notifications", s.handleListNotifications)
-	s.mux.HandleFunc("GET /api/v1/notifications/stats", s.handleNotificationsStats)
+	// List/stats/get read across the outbox and (before this guard) scoped
+	// only by a client-supplied ?tenant param — an unauthenticated IDOR that
+	// leaked other tenants' notifications. This surface is on the
+	// /api/v1/notifications public prefix; gate the cross-tenant reads to
+	// operators. Send stays open for the internal (header-only) agent path.
+	s.mux.HandleFunc("GET /api/v1/notifications", s.operatorGuard(rbac.ResourceAdminActivity, s.handleListNotifications))
+	s.mux.HandleFunc("GET /api/v1/notifications/stats", s.operatorGuard(rbac.ResourceAdminActivity, s.handleNotificationsStats))
 	s.mux.HandleFunc("GET /api/v1/notifications/channels", s.handleListNotificationChannels)
 	s.mux.HandleFunc("POST /api/v1/notifications/channels", s.handleUpsertNotificationChannel)
 	s.mux.HandleFunc("PATCH /api/v1/notifications/channels", s.handleUpsertNotificationChannel)
@@ -91,7 +97,7 @@ func (s *Server) registerNotificationsRoutes() {
 	s.mux.HandleFunc("GET /api/v1/notifications/mutes", s.handleListNotificationMutes)
 	s.mux.HandleFunc("POST /api/v1/notifications/mutes", s.handleCreateNotificationMute)
 	s.mux.HandleFunc("DELETE /api/v1/notifications/mutes/{id}", s.handleDeleteNotificationMute)
-	s.mux.HandleFunc("GET /api/v1/notifications/{id}", s.handleGetNotification)
+	s.mux.HandleFunc("GET /api/v1/notifications/{id}", s.operatorGuard(rbac.ResourceAdminActivity, s.handleGetNotification))
 }
 
 func (s *Server) handleListNotificationChannels(w http.ResponseWriter, r *http.Request) {

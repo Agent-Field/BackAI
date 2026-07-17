@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
 	"github.com/Agent-Field/backai/services/runtime/internal/sandbox"
 )
 
@@ -58,10 +59,14 @@ type sandboxRunListResponse struct {
 
 // registerSandboxRoutes wires the /api/v1/sandbox/* endpoints.
 func (s *Server) registerSandboxRoutes() {
-	s.mux.HandleFunc("POST /api/v1/sandbox/run", s.handleSandboxRun)
+	// /api/v1/sandbox is a public prefix. POST /run executes arbitrary code
+	// on the host docker daemon and was reachable unauthenticated — gate the
+	// mutating routes to operators (reads stay open for the dashboard). The
+	// internal agent/module path presents an operator key (AF_STACK_API_KEY).
+	s.mux.HandleFunc("POST /api/v1/sandbox/run", s.operatorGuard(rbac.ResourceAdminAdapters, s.handleSandboxRun))
 	s.mux.HandleFunc("GET /api/v1/sandbox/runs", s.handleSandboxListRuns)
 	s.mux.HandleFunc("GET /api/v1/sandbox/runs/{id}", s.handleSandboxGetRun)
-	s.mux.HandleFunc("DELETE /api/v1/sandbox/runs/{id}", s.handleSandboxStopRun)
+	s.mux.HandleFunc("DELETE /api/v1/sandbox/runs/{id}", s.operatorGuard(rbac.ResourceAdminAdapters, s.handleSandboxStopRun))
 	s.mux.HandleFunc("GET /api/v1/sandbox/pool", s.handleSandboxPool)
 	s.mux.HandleFunc("GET /api/v1/sandbox/runs/{id}/logs", s.handleSandboxLogs)
 }

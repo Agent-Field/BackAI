@@ -64,10 +64,10 @@ import (
 
 // Server holds the HTTP server and shared dependencies.
 type Server struct {
-	cfg    config.Config
-	log    *slog.Logger
-	mux    *http.ServeMux
-	srv    *http.Server
+	cfg config.Config
+	log *slog.Logger
+	mux *http.ServeMux
+	srv *http.Server
 	// metricsSrv serves the Prometheus scrape endpoint on a dedicated
 	// listener (cfg.Server.MetricsAddr, default :9090) so /metrics is NOT
 	// exposed on the public API port. The metrics carry per-tenant cost and
@@ -663,7 +663,11 @@ func (s *Server) registerRoutes() {
 	s.openapi.Register("GET", "/api/v1/oauth/refresh-history", openapi.RouteMeta{
 		Summary: "OAuth refresh attempt history", Tags: []string{"oauth"},
 	})
-	s.mux.HandleFunc("GET /api/v1/runs/{id}/events", s.handleRunEvents)
+	// /api/v1/runs is a public prefix and the sibling list route is already
+	// operator-gated; the per-run event stream was missed, leaving it
+	// unauthenticated. Gate it too so run events aren't streamable by an
+	// unauthenticated caller who can guess a run id.
+	s.mux.HandleFunc("GET /api/v1/runs/{id}/events", s.operatorGuard(rbac.ResourceAdminRuns, s.handleRunEvents))
 	s.openapi.Register("GET", "/api/v1/runs/{id}/events", openapi.RouteMeta{
 		Summary: "Subscribe to AgentField run events", Tags: []string{"agents"},
 		Parameters: []openapi.Parameter{

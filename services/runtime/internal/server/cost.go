@@ -118,7 +118,12 @@ func marshalBudget(b cost.Budget) budgetWire {
 
 // registerCostRoutes wires the cost ledger + budget endpoints.
 func (s *Server) registerCostRoutes() {
-	s.mux.HandleFunc("GET /api/v1/cost/events", s.handleListCostEvents)
+	// The cost ledger is a cross-tenant operator/dashboard view (it can
+	// filter by ?tenant). It lives on the /api/v1/cost public prefix
+	// (bypasses the tenant resolver), so gate it in-handler like secrets
+	// and db-studio do — otherwise an unauthenticated caller can read
+	// every tenant's cost events (tenant_id, api_key_id, request_id).
+	s.mux.HandleFunc("GET /api/v1/cost/events", s.operatorGuard(rbac.ResourceAdminBudgets, s.handleListCostEvents))
 	s.mux.HandleFunc("GET /api/v1/admin/budgets", s.handleAdminListBudgets)
 	s.mux.HandleFunc("GET /api/v1/admin/budgets/{tenantId}", s.handleAdminGetBudget)
 	s.mux.HandleFunc("PUT /api/v1/admin/budgets", s.handleAdminSetBudget)
