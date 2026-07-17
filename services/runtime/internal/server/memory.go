@@ -61,6 +61,9 @@ func writeMemoryError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, memory.ErrNotFound):
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "memory entry not found", nil)
+	case errors.Is(err, memory.ErrTenantRequired):
+		writeError(w, http.StatusUnauthorized, "TENANT_REQUIRED",
+			"a tenant-scoped credential is required for this operation", nil)
 	case errors.Is(err, memory.ErrInvalidScope):
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error(), nil)
 	case errors.Is(err, memory.ErrInvalidKey):

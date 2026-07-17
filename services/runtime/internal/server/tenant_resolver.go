@@ -66,11 +66,12 @@ const (
 // They serve cross-tenant diagnostics or the OpenAPI spec; gating them
 // behind auth would break the operator's first boot.
 var publicPaths = map[string]struct{}{
-	"/health":        {},
-	"/ready":         {},
-	"/metrics":       {},
-	"/openapi.json":  {},
-	"/api/v1/agents": {},
+	"/health":              {},
+	"/ready":               {},
+	"/metrics":             {},
+	"/openapi.json":        {},
+	"/api/v1/openapi.json": {},
+	"/api/v1/agents":       {},
 }
 
 // publicPrefixes are path prefixes that bypass resolution. The
@@ -92,9 +93,10 @@ var publicPrefixes = []string{
 	// operatorGuard (it can run arbitrary SQL), so a bare API key or an
 	// unauthenticated caller gets 401.
 	"/api/v1/db",
-	// Memory (Phase 8.2). Operator can browse + put + search from the
-	// dashboard. Tenant scoping is enforced at the Store layer via
-	// the resolved tenant context when scope=tenant.
+	// Memory (Phase 8.2). Only the operator LIST (GET /api/v1/memory)
+	// is public here; the scoped get/put/delete/search ops are carved
+	// out in tenantResolver so they bind a tenant (FORCE RLS on
+	// suite_memory is the isolation boundary).
 	"/api/v1/memory",
 	// Sandboxes (Phase 9.1). Dashboard-driven operator surface; the
 	// resolved tenant is read from the request when MT is on but the
@@ -177,10 +179,21 @@ func (s *Server) tenantResolver(next http.Handler) http.Handler {
 		ctx := r.Context()
 		path := r.URL.Path
 
+		// Memory scoped ops (get/put/delete/search) must bind a tenant.
+		// They used to ride the /api/v1/memory public prefix and trust a
+		// client-supplied scope_id, which let any caller reach another
+		// tenant's entries. Force them through auth so tenant_id (FORCE
+		// RLS on suite_memory) is bound from a real credential. Only the
+		// operator LIST (GET /api/v1/memory) stays public — it is
+		// operatorGuard-gated and bypasses RLS to browse cross-tenant.
+		scopedMemory := path == "/api/v1/memory/get" ||
+			path == "/api/v1/memory/search" ||
+			(path == "/api/v1/memory" && (r.Method == http.MethodPut || r.Method == http.MethodDelete))
+
 		// Public endpoints bypass entirely. They run with no tenant
 		// context; handlers that touch tenant-scoped data MUST check
 		// for an empty tenantctx.TenantID and refuse.
-		if isPublicPath(path) {
+		if !scopedMemory && isPublicPath(path) {
 			next.ServeHTTP(w, r)
 			return
 		}

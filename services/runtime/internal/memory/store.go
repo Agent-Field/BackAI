@@ -105,13 +105,18 @@ func resolveScope(ctx context.Context, scope Scope, scopeID string) (Scope, stri
 		}
 		return scope, "", nil
 	case ScopeTenant:
-		if scopeID == "" {
-			scopeID = tenantctx.TenantID(ctx)
+		// tenant_id (FORCE RLS) is the real isolation boundary now, so
+		// scope=tenant's scope_id is forced to the caller's tenant — a
+		// client-supplied value that names a different tenant is rejected
+		// rather than trusted (that was the cross-tenant hole).
+		tid := tenantctx.TenantID(ctx)
+		if tid == "" {
+			return "", "", fmt.Errorf("%w: scope=tenant requires tenant context", ErrInvalidScope)
 		}
-		if scopeID == "" {
-			return "", "", fmt.Errorf("%w: scope=tenant requires scope_id (request or tenant context)", ErrInvalidScope)
+		if scopeID != "" && scopeID != tid {
+			return "", "", fmt.Errorf("%w: scope=tenant scope_id must equal the caller's tenant", ErrInvalidScope)
 		}
-		return scope, scopeID, nil
+		return scope, tid, nil
 	case ScopeAgent, ScopeSession, ScopeRun:
 		if scopeID == "" {
 			return "", "", fmt.Errorf("%w: scope=%s requires scope_id", ErrInvalidScope, scope)
@@ -188,6 +193,12 @@ func (s *Store) Put(ctx context.Context, in PutInput) (Entry, error) {
 		span.RecordError(err)
 		return Entry{}, err
 	}
+	// Every row is partitioned by tenant_id (FORCE RLS). A write needs a
+	// resolved tenant so it can be attributed and pass the RLS with-check.
+	tenantID := tenantctx.TenantID(ctx)
+	if tenantID == "" {
+		return Entry{}, ErrTenantRequired
+	}
 
 	valueJSON, err := normaliseJSON(in.Value)
 	if err != nil {
@@ -234,10 +245,10 @@ func (s *Store) Put(ctx context.Context, in PutInput) (Entry, error) {
 
 	row := s.pool.QueryRow(ctx, `
 		insert into suite_memory
-			(scope, scope_id, key, value, metadata, embedding, created_at, updated_at)
+			(tenant_id, scope, scope_id, key, value, metadata, embedding, created_at, updated_at)
 		values
-			($1, $2, $3, $4, $5, $6, now(), now())
-		on conflict (scope, scope_id, key) do update set
+			($1, $2, $3, $4, $5, $6, $7, now(), now())
+		on conflict (tenant_id, scope, scope_id, key) do update set
 			value      = excluded.value,
 			metadata   = excluded.metadata,
 			embedding  = coalesce(excluded.embedding, suite_memory.embedding),
@@ -245,7 +256,7 @@ func (s *Store) Put(ctx context.Context, in PutInput) (Entry, error) {
 		returning scope, scope_id, key, value, metadata,
 		          (embedding is not null) as has_embedding,
 		          created_at, updated_at
-	`, string(scope), scopeID, in.Key, valueJSON, metaJSON, embeddingArg)
+	`, tenantID, string(scope), scopeID, in.Key, valueJSON, metaJSON, embeddingArg)
 
 	entry, err := scanEntry(row)
 	if err != nil {
@@ -357,15 +368,32 @@ func (s *Store) List(ctx context.Context, opts ListOpts) (List, error) {
 		where = "where " + strings.Join(conds, " and ")
 	}
 
+	// The operator List (dashboard browse) runs with no tenant bound, so
+	// FORCE RLS would return zero rows. With no tenant context, open a
+	// bypass-RLS transaction to browse cross-tenant; when a tenant IS
+	// bound, run under normal RLS so the list is scoped to that tenant.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		span.RecordError(err)
+		return List{Entries: []Entry{}}, fmt.Errorf("memory: list begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if tenantctx.TenantID(ctx) == "" {
+		if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+			span.RecordError(err)
+			return List{Entries: []Entry{}}, fmt.Errorf("memory: list bypass: %w", err)
+		}
+	}
+
 	var total int
-	if err := s.pool.QueryRow(ctx, fmt.Sprintf(`select count(*) from suite_memory %s`, where), args...).Scan(&total); err != nil {
+	if err := tx.QueryRow(ctx, fmt.Sprintf(`select count(*) from suite_memory %s`, where), args...).Scan(&total); err != nil {
 		span.RecordError(err)
 		return List{Entries: []Entry{}}, fmt.Errorf("memory: list count: %w", err)
 	}
 
 	listArgs := append([]any{}, args...)
 	listArgs = append(listArgs, limit, offset)
-	rows, err := s.pool.Query(ctx, fmt.Sprintf(`
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
 		select scope, scope_id, key, value, metadata,
 		       (embedding is not null) as has_embedding,
 		       created_at, updated_at
