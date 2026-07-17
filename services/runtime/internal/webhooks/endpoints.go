@@ -146,7 +146,18 @@ func (s *EndpointStore) List(ctx context.Context, f ListEndpointsFilter) ([]Endp
 	q := endpointSelectColumns + " from suite_webhook_endpoints" + where +
 		" order by created_at desc"
 
-	rows, err := s.pool.Query(ctx, q, args...)
+	// Operator-gated cross-tenant listing on the resolver-bypassing surface:
+	// bypass_rls so tenant-stamped endpoints aren't hidden (same as
+	// GetBySlug / the deliveries store).
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("webhooks: list endpoints begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return nil, fmt.Errorf("webhooks: list endpoints bypass: %w", err)
+	}
+	rows, err := tx.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("webhooks: list endpoints: %w", err)
 	}
@@ -170,7 +181,18 @@ func (s *EndpointStore) Get(ctx context.Context, id string) (*Endpoint, error) {
 	if !s.HasPool() {
 		return nil, ErrNotConfigured
 	}
-	rows, err := s.pool.Query(ctx, endpointSelectColumns+` from suite_webhook_endpoints where id = $1`, id)
+	// Operator-gated read on the resolver-bypassing surface: bypass_rls so
+	// the tenant-stamped row isn't hidden (else the dashboard get + delete
+	// flows 404). Same posture as GetBySlug.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("webhooks: get endpoint begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return nil, fmt.Errorf("webhooks: get endpoint bypass: %w", err)
+	}
+	rows, err := tx.Query(ctx, endpointSelectColumns+` from suite_webhook_endpoints where id = $1`, id)
 	if err != nil {
 		return nil, fmt.Errorf("webhooks: select endpoint: %w", err)
 	}
@@ -232,14 +254,25 @@ func (s *EndpointStore) Delete(ctx context.Context, id string) error {
 	if !s.HasPool() {
 		return ErrNotConfigured
 	}
-	tag, err := s.pool.Exec(ctx, `delete from suite_webhook_endpoints where id = $1`, id)
+	// Operator delete on the resolver-bypassing surface: bypass_rls so the
+	// DELETE can see the tenant-stamped row (else it removes 0 rows → 404
+	// even for an owner key — it's RLS, not RBAC).
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("webhooks: delete endpoint begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return fmt.Errorf("webhooks: delete endpoint bypass: %w", err)
+	}
+	tag, err := tx.Exec(ctx, `delete from suite_webhook_endpoints where id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("webhooks: delete endpoint: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrEndpointNotFound
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 // ─── internals ────────────────────────────────────────────────────────────

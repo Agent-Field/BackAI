@@ -63,7 +63,19 @@ func (s *Store) ListCustomers(ctx context.Context) ([]Customer, error) {
 		  from suite_billing_customers
 		 order by created_at desc
 	`
-	rows, err := s.pool.Query(ctx, q)
+	// Operator cross-tenant listing: no tenant to bind, so read inside a
+	// bypass_rls transaction (same pattern as ListMeters). Without it the
+	// FORCE-RLS policy on suite_billing_customers hides every row and the
+	// dashboard customers table is always empty.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("billing: list customers begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return nil, fmt.Errorf("billing: list customers bypass: %w", err)
+	}
+	rows, err := tx.Query(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("billing: list customers: %w", err)
 	}
@@ -92,6 +104,11 @@ func (s *Store) GetCustomer(ctx context.Context, tenantID string) (Customer, err
 	if strings.TrimSpace(tenantID) == "" {
 		return Customer{}, fmt.Errorf("%w: tenant_id is required", ErrInvalidInput)
 	}
+	// RLS: bind the tenant or the force policy hides the row (this runs on
+	// the operator/dashboard path where app.tenant_id is empty), so a
+	// tenant that upgraded keeps reading back as "free". Same fix as
+	// GetTotalForPeriod.
+	ctx = tenantctx.WithTenant(ctx, tenantID, "")
 	const q = `
 		select tenant_id::text, stripe_customer_id, email, plan,
 		       trial_ends_at, current_period_end, subscription_status,

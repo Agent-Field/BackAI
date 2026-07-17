@@ -16,7 +16,7 @@
 // in services/runtime/internal/server/dbstudio.go forward our return
 // values directly to writeJSON; do not add server-only fields here.
 //
-// Safety notes
+// # Safety notes
 //
 // Identifiers (schema, table, column names) used in dynamically built SQL
 // MUST be escaped via pgx.Identifier.Sanitize() — never via fmt.Sprintf
@@ -507,7 +507,18 @@ func (s *Studio) Rows(
 	stmt := fmt.Sprintf("select * from %s limit $1 offset $2", qualified)
 
 	start := time.Now()
-	rows, err := s.pool.Query(ctx, stmt, limit, offset)
+	// Bypass RLS for this operator-only browse (see RunSQL): the serving
+	// role has an empty app.tenant_id here, so FORCE-RLS tables would
+	// otherwise return zero rows.
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return SQLRunResult{}, fmt.Errorf("dbstudio: rows begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return SQLRunResult{}, fmt.Errorf("dbstudio: rows set bypass_rls: %w", err)
+	}
+	rows, err := tx.Query(ctx, stmt, limit, offset)
 	if err != nil {
 		return SQLRunResult{}, fmt.Errorf("dbstudio: rows query: %w", err)
 	}
@@ -585,6 +596,15 @@ func (s *Studio) RunSQL(
 
 	if _, err := tx.Exec(ctx, "set local statement_timeout = '15s'"); err != nil {
 		return SQLRunResult{}, fmt.Errorf("dbstudio: set timeout: %w", err)
+	}
+	// The DB studio is an operator-only, cross-tenant browse tool, but the
+	// runtime serves as the NOBYPASSRLS afstack_app role with an empty
+	// app.tenant_id on this operator path — so every FORCE-RLS table would
+	// return zero rows. Bypass RLS for the studio read (same posture as
+	// sql_history.go), gated by the operator auth already fronting these
+	// routes.
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return SQLRunResult{}, fmt.Errorf("dbstudio: set bypass_rls: %w", err)
 	}
 	if readOnly {
 		if _, err := tx.Exec(ctx, "set transaction read only"); err != nil {

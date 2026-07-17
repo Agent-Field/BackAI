@@ -196,7 +196,18 @@ func (s *DeliveryStore) Get(ctx context.Context, id string) (*Delivery, error) {
         from suite_webhook_deliveries
         where id = $1
     `
-	row := s.pool.QueryRow(ctx, q, id)
+	// Operator-gated cross-tenant read on the resolver-bypassing
+	// /api/v1/webhooks surface: bind bypass_rls so the FORCE-RLS policy
+	// doesn't hide the (tenant-stamped) row (same as List/UpdateStatus).
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("webhooks: get begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return nil, fmt.Errorf("webhooks: get set bypass: %w", err)
+	}
+	row := tx.QueryRow(ctx, q, id)
 	d, err := scanDelivery(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
@@ -489,16 +500,25 @@ func (s *DeliveryStore) ResetForRetry(ctx context.Context, id string) error {
             delivered_at = null
         where id = $1
     `
-	tag, err := s.pool.Exec(ctx, q, id)
+	// Operator /retry on the resolver-bypassing surface: bypass_rls so the
+	// UPDATE can see the tenant-stamped row (else it affects 0 rows → 404).
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("webhooks: reset begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "set local app.bypass_rls = 'on'"); err != nil {
+		return fmt.Errorf("webhooks: reset set bypass: %w", err)
+	}
+	tag, err := tx.Exec(ctx, q, id)
 	if err != nil {
 		return fmt.Errorf("webhooks: reset for retry: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit(ctx)
 }
-
 
 // ─── helpers ──────────────────────────────────────────────────────────────
 
