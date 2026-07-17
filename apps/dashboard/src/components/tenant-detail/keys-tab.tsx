@@ -3,12 +3,13 @@
 "use client"
 
 import { Trash2 } from "lucide-react"
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { CopyButton } from "@/components/ui/copy-button"
 import { GaugeBar } from "@/components/ui/gauge-bar"
+import { RelativeTime } from "@/components/ui/relative-time"
 import { ZoneCard, ZoneCardHeader } from "@/components/ui/zone-card"
 
 import { api } from "@/lib/api"
@@ -119,8 +120,14 @@ function KeyCard({
       </header>
 
       <div className="grid grid-cols-2 gap-stack md:grid-cols-4 text-meta">
-        <Meta label="Created" value={formatAge(apiKey.created_at)} />
-        <Meta label="Last used" value={formatAge(apiKey.last_used_at)} />
+        <Meta
+          label="Created"
+          value={<RelativeTime iso={apiKey.created_at} format={formatAge} />}
+        />
+        <Meta
+          label="Last used"
+          value={<RelativeTime iso={apiKey.last_used_at} format={formatAge} />}
+        />
         <Meta
           label="Rate limits"
           value={
@@ -173,7 +180,7 @@ function Meta({
   sublabel,
 }: {
   label: string
-  value: string
+  value: ReactNode
   sublabel?: string
 }) {
   return (
@@ -181,7 +188,10 @@ function Meta({
       <span className="text-eyebrow uppercase tracking-wide text-muted-foreground">
         {label}
       </span>
-      <span className="truncate font-mono text-foreground" title={value}>
+      <span
+        className="truncate font-mono text-foreground"
+        title={typeof value === "string" ? value : undefined}
+      >
         {value}
       </span>
       {sublabel ? (

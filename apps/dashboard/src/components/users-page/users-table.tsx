@@ -8,6 +8,7 @@ import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { RelativeTime } from "@/components/ui/relative-time"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -121,7 +122,7 @@ function UserRow({
         className="font-mono tabular-nums text-muted-foreground"
         title={user.created_at}
       >
-        {formatAge(user.created_at)}
+        <RelativeTime iso={user.created_at} format={formatAge} />
       </span>
       <span>
         {erased ? (

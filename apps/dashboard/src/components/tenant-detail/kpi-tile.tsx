@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ReactNode } from "react"
+
 import { Sparkline } from "@/components/ui/sparkline"
 
 // Compact KPI tile used in the tenant header. Same shape as Home /
@@ -8,7 +10,7 @@ import { Sparkline } from "@/components/ui/sparkline"
 
 interface TenantKpiTileProps {
   label: string
-  value: string
+  value: ReactNode
   sublabel?: string
   sparkline?: number[]
   status?: "ok" | "watch" | "act" | "idle"

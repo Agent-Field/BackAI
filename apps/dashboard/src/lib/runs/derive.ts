@@ -136,7 +136,8 @@ export function formatRunCost(usd?: number): string {
   return `$${Math.round(usd).toLocaleString()}`
 }
 
-export function formatRunAge(iso: string): string {
+export function formatRunAge(iso: string | null): string {
+  if (!iso) return "—"
   const ts = Date.parse(iso)
   if (Number.isNaN(ts)) return iso
   const diffMs = Math.max(0, Date.now() - ts)

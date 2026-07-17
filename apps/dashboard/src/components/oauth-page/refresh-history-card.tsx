@@ -3,6 +3,7 @@
 "use client"
 
 import { FilterChip, FilterChipGroup } from "@/components/ui/filter-chip"
+import { RelativeTime } from "@/components/ui/relative-time"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ZoneCard, ZoneCardHeader } from "@/components/ui/zone-card"
 
@@ -116,9 +117,11 @@ function HistoryRow({ event }: { event: OAuthRefreshEvent }) {
       className={`grid items-center gap-stack border-b px-row-x py-row-y text-meta ${HISTORY_COLUMNS}`}
     >
       <span aria-hidden className={`inline-block size-icon-dot rounded-pill ${DOT[tone]}`} />
-      <span className="truncate font-mono tabular-nums text-muted-foreground">
-        {formatOAuthAge(event.attempted_at)}
-      </span>
+      <RelativeTime
+        iso={event.attempted_at}
+        format={formatOAuthAge}
+        className="truncate font-mono tabular-nums text-muted-foreground"
+      />
       <span className="truncate font-mono text-foreground">{providerLabel(event.provider)}</span>
       <span className="truncate font-mono text-muted-foreground" title={event.user_id ?? undefined}>
         {event.user_id ? shortId(event.user_id) : "—"}

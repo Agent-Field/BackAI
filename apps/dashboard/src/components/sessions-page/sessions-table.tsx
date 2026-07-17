@@ -7,6 +7,7 @@ import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { RelativeTime } from "@/components/ui/relative-time"
 
 import { api } from "@/lib/api"
 import type { SessionInfo } from "@/lib/api"
@@ -123,7 +124,7 @@ function SessionRow({
         {session.user_agent ?? "—"}
       </span>
       <span className="font-mono tabular-nums text-muted-foreground">
-        {formatAge(session.created_at)}
+        <RelativeTime iso={session.created_at} format={formatAge} />
       </span>
       <span
         className={`font-mono tabular-nums ${

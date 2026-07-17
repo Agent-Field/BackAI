@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { RelativeTime } from "@/components/ui/relative-time"
 import { ZoneCard, ZoneCardHeader } from "@/components/ui/zone-card"
 
 import { api } from "@/lib/api"
@@ -212,7 +213,7 @@ function ProviderTile({
 
       {connected ? (
         <span className="text-meta text-muted-foreground">
-          Token {formatExpiry(connection.expires_at)}.
+          Token <RelativeTime iso={connection.expires_at} format={formatExpiry} />.
         </span>
       ) : null}
 

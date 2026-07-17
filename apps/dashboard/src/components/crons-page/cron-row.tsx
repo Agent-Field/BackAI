@@ -8,6 +8,7 @@ import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { RelativeTime } from "@/components/ui/relative-time"
 
 import { api } from "@/lib/api"
 import type { Cron } from "@/lib/api"
@@ -73,16 +74,22 @@ export function CronRow({ cron, expanded, onToggle, onMutated }: CronRowProps) {
             {cron.schedule}
           </Badge>
         </span>
-        <span className="truncate text-right font-mono tabular-nums text-muted-foreground">
-          {formatRelativeTime(cron.last_run_at)}
-        </span>
+        <RelativeTime
+          iso={cron.last_run_at}
+          format={formatRelativeTime}
+          className="truncate text-right font-mono tabular-nums text-muted-foreground"
+        />
         <span
           className={cn(
             "truncate text-right font-mono tabular-nums",
             cron.is_active ? "text-foreground" : "text-muted-foreground",
           )}
         >
-          {cron.is_active ? formatRelativeTime(cron.next_run_at) : "—"}
+          {cron.is_active ? (
+            <RelativeTime iso={cron.next_run_at} format={formatRelativeTime} />
+          ) : (
+            "—"
+          )}
         </span>
         <span
           className={cn(

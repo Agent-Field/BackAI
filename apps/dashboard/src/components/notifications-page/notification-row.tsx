@@ -3,8 +3,10 @@
 "use client"
 
 import { ChevronDown, ChevronRight } from "lucide-react"
+import type { ReactNode } from "react"
 
 import { Badge } from "@/components/ui/badge"
+import { RelativeTime } from "@/components/ui/relative-time"
 
 import type { Notification } from "@/lib/api"
 import type { StatusState } from "@/lib/home/types"
@@ -64,9 +66,11 @@ export function NotificationRow({ notification, expanded, onToggle }: Notificati
         )}
       >
         <span aria-hidden className={`inline-block size-icon-dot rounded-pill ${DOT[tone]}`} />
-        <span className="truncate font-mono tabular-nums text-muted-foreground">
-          {formatNotificationAge(notification.created_at)}
-        </span>
+        <RelativeTime
+          iso={notification.created_at}
+          format={formatNotificationAge}
+          className="truncate font-mono tabular-nums text-muted-foreground"
+        />
         <Badge variant="secondary">{notification.kind}</Badge>
         <div className="flex min-w-0 flex-col gap-tile-tight">
           <span
@@ -132,8 +136,16 @@ function NotificationDetail({ notification }: { notification: Notification }) {
           value={notification.provider_message_id ?? "—"}
           mono
         />
-        <DetailMeta label="Scheduled" value={formatNotificationAge(notification.scheduled_at)} />
-        <DetailMeta label="Sent" value={formatNotificationAge(notification.sent_at)} />
+        <DetailMeta
+          label="Scheduled"
+          value={
+            <RelativeTime iso={notification.scheduled_at} format={formatNotificationAge} />
+          }
+        />
+        <DetailMeta
+          label="Sent"
+          value={<RelativeTime iso={notification.sent_at} format={formatNotificationAge} />}
+        />
       </dl>
       <div className="flex flex-col gap-tile-tight">
         <span className="text-eyebrow uppercase tracking-wide text-muted-foreground">
@@ -161,11 +173,14 @@ function NotificationDetail({ notification }: { notification: Notification }) {
   )
 }
 
-function DetailMeta({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function DetailMeta({ label, value, mono }: { label: string; value: ReactNode; mono?: boolean }) {
   return (
     <div className="flex min-w-0 flex-col gap-tile-tight">
       <dt className="text-eyebrow uppercase tracking-wide text-muted-foreground">{label}</dt>
-      <dd className={`truncate text-meta text-foreground ${mono ? "font-mono" : ""}`} title={value}>
+      <dd
+        className={`truncate text-meta text-foreground ${mono ? "font-mono" : ""}`}
+        title={typeof value === "string" ? value : undefined}
+      >
         {value}
       </dd>
     </div>
