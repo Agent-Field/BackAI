@@ -122,6 +122,30 @@ func (s *Store) GetPlan(ctx context.Context, id string) (Plan, error) {
 	return p, nil
 }
 
+// GetPlanExact resolves a plan by id with NO default fallback: an empty
+// or unknown id returns ErrPlanNotFound. Use this for caller-supplied
+// plan ids (e.g. checkout) where silently substituting the default plan
+// would subscribe the tenant to the wrong plan. GetPlan keeps the
+// default-fallback semantics for resolving a tenant's *current* plan.
+func (s *Store) GetPlanExact(ctx context.Context, id string) (Plan, error) {
+	if !s.HasPool() {
+		return Plan{}, ErrPlanNotFound
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return Plan{}, ErrPlanNotFound
+	}
+	p, err := scanPlan(s.pool.QueryRow(ctx,
+		`select`+planCols+` from suite_billing_plans where id = $1`, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Plan{}, ErrPlanNotFound
+	}
+	if err != nil {
+		return Plan{}, fmt.Errorf("billing: get plan %s: %w", id, err)
+	}
+	return p, nil
+}
+
 // PlanByStripePrice resolves the plan bound to a Stripe Price id — the
 // webhook handler uses this to map subscription events back to a plan.
 func (s *Store) PlanByStripePrice(ctx context.Context, priceID string) (Plan, error) {
