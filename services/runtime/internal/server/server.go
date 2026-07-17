@@ -9,11 +9,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -519,6 +521,11 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 	// /openapi.json, dashboard reads) bypass internally — see
 	// isPublicPath.
 	handler = s.tenantResolver(handler)
+	// withRecover sits just outside the resolver + mux so it catches
+	// panics from any handler (and the resolver), turning them into a
+	// logged error + 500 envelope. It runs inside withLogging so the
+	// recovered 500 is still access-logged and metered.
+	handler = withRecover(log, handler)
 	if deps.Telemetry != nil {
 		handler = observability.TraceMiddleware(cfg.Observability.ServiceName)(handler)
 	}
@@ -564,6 +571,10 @@ func (s *Server) registerRoutes() {
 	s.openapi.Register("GET", "/openapi.json", openapi.RouteMeta{
 		Summary: "OpenAPI 3.1 spec for this runtime", Tags: []string{"system"},
 	})
+	// Alias under the versioned prefix. AGENTS.md, the CLI, and several
+	// docs reference GET /api/v1/openapi.json; serve it there too so every
+	// documented path resolves. Kept public in the tenant resolver.
+	s.mux.HandleFunc("GET /api/v1/openapi.json", s.handleOpenAPI)
 
 	s.mux.HandleFunc("GET /api/v1/realtime", s.handleRealtime)
 	s.openapi.Register("GET", "/api/v1/realtime", openapi.RouteMeta{
@@ -1221,6 +1232,18 @@ func (s *Server) forwardAgentCall(w http.ResponseWriter, r *http.Request, afPref
 	// the agent's raw, per-framework error shape. Success + redirects pass
 	// through untouched.
 	if afResp.StatusCode >= 400 {
+		if afResp.StatusCode >= 500 {
+			// A 5xx from the agent means the run itself failed (the reasoner
+			// raised, timed out, or the harness crashed). Emit at Error
+			// level so it surfaces on the Errors dashboard, which derives
+			// its groups from error-level log lines — otherwise a failed run
+			// is visible only in the Runs view.
+			s.log.Error("agent run failed",
+				"call", call,
+				"status", afResp.StatusCode,
+				"execution_id", afResp.ExecutionID,
+			)
+		}
 		s.writeAgentUpstreamError(w, afResp)
 		s.logGatewayRequest(r, endpoint, afResp.StatusCode, len(body), len(afResp.Body), afResp.ExecutionID, start)
 		return
@@ -1620,7 +1643,13 @@ func withLogging(log *slog.Logger, ring *metricsRing, next http.Handler) http.Ha
 		// populateLineField routes a "trace_id" attr into the log line's
 		// trace column, which the dashboard Logs view surfaces + filters.
 		traceID := requestTraceID(r)
-		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		// Expose the correlation id on every response (success and error)
+		// and stash it on the writer so writeError can stamp it into the
+		// envelope's error.request_id — the id AGENTS.md promises on every
+		// failure. Set before the handler runs so it lands ahead of the
+		// first WriteHeader.
+		w.Header().Set("X-Request-ID", traceID)
+		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK, requestID: traceID}
 		next.ServeHTTP(sw, r)
 		dur := time.Since(start)
 		log.Info("http.request",
@@ -1666,11 +1695,56 @@ func isHex(s string) bool {
 type statusWriter struct {
 	http.ResponseWriter
 	status int
+	// requestID is the per-request correlation id (also emitted as the
+	// X-Request-ID response header). writeError reads it to populate
+	// error.request_id in the canonical envelope.
+	requestID string
+	// wrote records whether the response has been committed, so the
+	// panic-recovery middleware knows not to write a second (superfluous)
+	// header after a handler already started responding.
+	wrote bool
 }
 
 func (s *statusWriter) WriteHeader(code int) {
 	s.status = code
+	s.wrote = true
 	s.ResponseWriter.WriteHeader(code)
+}
+
+func (s *statusWriter) Write(b []byte) (int, error) {
+	s.wrote = true
+	return s.ResponseWriter.Write(b)
+}
+
+// withRecover converts an unrecovered handler panic into a logged error
+// plus a clean 500 envelope. Without it, net/http's built-in per-request
+// recovery writes the panic to the process-default stderr logger,
+// bypassing slog and the log ring — so the Errors dashboard (which
+// derives groups from error-level ring lines) never sees it. The
+// error-level line carries a "stack" field so logfilter fingerprints
+// panics by call site rather than by message.
+func withRecover(log *slog.Logger, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			rec := recover()
+			if rec == nil {
+				return
+			}
+			log.Error("handler panic recovered",
+				"method", r.Method,
+				"path", r.URL.Path,
+				"panic", fmt.Sprintf("%v", rec),
+				"stack", string(debug.Stack()),
+			)
+			// Only send the envelope if the handler hadn't already
+			// committed a response before panicking.
+			if sw, ok := w.(*statusWriter); !ok || !sw.wrote {
+				writeError(w, http.StatusInternalServerError, "INTERNAL",
+					"internal server error", nil)
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Flush propagates to the underlying writer so SSE handlers

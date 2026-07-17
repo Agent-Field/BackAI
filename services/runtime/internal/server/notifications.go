@@ -332,9 +332,8 @@ func (s *Server) handleGetNotification(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "notification not found", nil)
 		return
 	}
-	id := r.PathValue("id")
-	if id == "" {
-		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "id is required", nil)
+	id, ok := validUUIDParam(w, r.PathValue("id"))
+	if !ok {
 		return
 	}
 	out, err := s.notifications.Get(ctx, id)
