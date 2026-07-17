@@ -606,6 +606,9 @@ func TestLLMModelsReturnsCatalog(t *testing.T) {
 
 func TestLLMCacheStatsZeroesWhenUnwired(t *testing.T) {
 	srv := newLLMTestServer(t, Deps{})
+	// cache/stats is operator-gated (it exposes cross-tenant cache metrics);
+	// authorize the request so the test exercises the zero-cache behavior.
+	withOperator(srv, "owner")
 	req := httptest.NewRequest("GET", "/api/v1/llm/cache/stats", nil)
 	rec := httptest.NewRecorder()
 	srv.mux.ServeHTTP(rec, req)

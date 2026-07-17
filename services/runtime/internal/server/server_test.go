@@ -198,6 +198,9 @@ func TestRunEventsWebSocketRelaysAgentFieldSSE(t *testing.T) {
 	srv := New(config.Default(), slog.Default(), Deps{
 		AF: agentfield.New(agentfield.Config{URL: afSrv.URL}),
 	})
+	// The run-event stream is operator-gated (it can stream any tenant's
+	// run); authorize so the test exercises the SSE relay behavior.
+	withOperator(srv, "owner")
 	httpSrv := httptest.NewServer(srv.srv.Handler)
 	defer httpSrv.Close()
 
@@ -238,6 +241,7 @@ func TestRunEventsReturns404WhenAgentFieldStreamMissing(t *testing.T) {
 	srv := New(config.Default(), slog.Default(), Deps{
 		AF: agentfield.New(agentfield.Config{URL: afSrv.URL}),
 	})
+	withOperator(srv, "owner")
 	req := httptest.NewRequest("GET", "/api/v1/runs/run_404/events", nil)
 	rec := httptest.NewRecorder()
 	srv.mux.ServeHTTP(rec, req)
