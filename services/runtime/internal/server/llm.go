@@ -1592,6 +1592,11 @@ func classifyHookError(err error) (string, string, int) {
 			"tenant monthly budget exhausted — raise the cap in the operator dashboard (Cost → Budgets)",
 			http.StatusPaymentRequired
 	}
+	if errors.Is(err, cost.ErrKeyBudgetExceeded) {
+		return llmgateway.ErrCodeBudgetExceeded,
+			"API key budget exhausted — raise this key's budget_max_usd or use another key",
+			http.StatusPaymentRequired
+	}
 	return "POLICY_VIOLATION", err.Error(), http.StatusForbidden
 }
 

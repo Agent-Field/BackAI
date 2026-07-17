@@ -243,6 +243,72 @@ func (b *Budgets) Spent(ctx context.Context, tenantID string, periodStart time.T
 	return spent, nil
 }
 
+// SpentByKey returns the lifetime total cost_usd attributed to a single
+// API key (suite_cost_events.api_key_id). budget_max_usd is a lifetime
+// cap, not a monthly window, so this sums across all time. Returns 0 when
+// the key has no recorded events.
+func (b *Budgets) SpentByKey(ctx context.Context, apiKeyID string) (float64, error) {
+	if b == nil || b.pool == nil {
+		return 0, nil
+	}
+	if apiKeyID == "" {
+		return 0, fmt.Errorf("%w: api_key_id is required", ErrInvalidInput)
+	}
+	var spent float64
+	err := b.pool.QueryRow(ctx, `
+        select coalesce(sum(cost_usd), 0)
+          from suite_cost_events
+         where api_key_id = $1
+    `, apiKeyID).Scan(&spent)
+	if err != nil {
+		return 0, fmt.Errorf("cost: load key spend: %w", err)
+	}
+	return spent, nil
+}
+
+// HasKeyBudget gates a call on the calling API key's lifetime budget cap
+// (suite_api_keys.budget_max_usd). Returns (true, nil) when the key has
+// no cap set, budgets are disabled, or the running lifetime spend +
+// estimate stays within the cap; (false, nil) when the cap would be
+// exceeded. Mirrors HasBudget's fail-open-on-DB-error contract.
+//
+// This enforces per-key ceilings runtime-side from the cost_events
+// ledger, independent of whether LiteLLM's virtual-key budgets are wired
+// (they require LiteLLM to have its own database).
+func (b *Budgets) HasKeyBudget(ctx context.Context, apiKeyID string, estimatedUSD float64) (bool, error) {
+	if b == nil || b.pool == nil {
+		return true, nil
+	}
+	if b.disabled {
+		return true, nil
+	}
+	if apiKeyID == "" {
+		return true, nil
+	}
+	var capUSD *float64
+	err := b.pool.QueryRow(ctx, `
+        select budget_max_usd from suite_api_keys where id = $1
+    `, apiKeyID).Scan(&capUSD)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return true, nil
+		}
+		return false, fmt.Errorf("cost: lookup key budget: %w", err)
+	}
+	if capUSD == nil || *capUSD <= 0 {
+		// No per-key cap configured.
+		return true, nil
+	}
+	spent, err := b.SpentByKey(ctx, apiKeyID)
+	if err != nil {
+		return false, err
+	}
+	if spent+estimatedUSD > *capUSD {
+		return false, nil
+	}
+	return true, nil
+}
+
 // HasBudget is the gateway pre-call gate.
 //
 // Returns (true, nil) when:
