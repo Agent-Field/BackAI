@@ -233,9 +233,12 @@ func (s *Server) tenantResolver(next http.Handler) http.Handler {
 		}
 
 		// WebSocket clients in browsers cannot attach arbitrary headers.
-		// Accept api_key on the realtime handshake only; normal HTTP
-		// surfaces must continue using Authorization: Bearer.
-		if path == "/api/v1/realtime" {
+		// Accept api_key on the realtime handshakes only; normal HTTP
+		// surfaces must continue using Authorization: Bearer. Both the
+		// table stream (/api/v1/realtime) and the run stream
+		// (/api/v1/realtime/runs) are browser-reachable WS endpoints and
+		// both SDKs authenticate them via ?api_key=.
+		if path == "/api/v1/realtime" || path == "/api/v1/realtime/runs" {
 			if token := strings.TrimSpace(r.URL.Query().Get("api_key")); token != "" {
 				tenantID, apiKeyID, err := s.resolveBearer(ctx, token)
 				if err != nil {

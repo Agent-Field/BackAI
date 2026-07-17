@@ -981,6 +981,11 @@ func (s *Server) handleAdminIssueKey(w http.ResponseWriter, r *http.Request) {
 	if scopes == nil {
 		scopes = []string{}
 	}
+	// Prevent privilege escalation: granting operator-plane scopes is
+	// owner-only (an admin operator must not mint itself an owner key).
+	if s.operatorPlaneScopeDenied(w, r, scopes) {
+		return
+	}
 	issue := tenancy.IssueAPIKeyInput{
 		TenantID:     in.TenantID,
 		Name:         in.Name,
