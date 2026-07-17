@@ -23,10 +23,11 @@
 //
 // Network mode handling
 //
-//	open       -> bridge (default)
-//	restricted -> bridge with AllowEgress as a TODO note for the
-//	              upstream iptables work (v1 keeps bridge for parity)
-//	isolated   -> none
+//	isolated   -> none   (the DEFAULT — secure by default)
+//	open       -> bridge (full egress; reaches host-published services,
+//	              so it is an explicit opt-in, never the default)
+//	restricted -> rejected by RunSpec.Validate (per-host egress filtering
+//	              is unimplemented); would fail safe to none here anyway
 //
 // The Phase 9.1 spec acknowledges the simplification: building a custom
 // network with per-host iptables rules is a sizeable side-project; v1
@@ -35,6 +36,7 @@
 package docker
 
 import (
+	"archive/tar"
 	"bufio"
 	"bytes"
 	"context"
@@ -43,6 +45,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -201,6 +204,11 @@ func (a *Adapter) Run(ctx context.Context, spec sandbox.RunSpec) (*sandbox.RunRe
 	a.trackRun(spec.ID, containerID)
 	defer a.untrackRun(spec.ID)
 
+	// Seed input files (if any) before start.
+	if err := a.writeFiles(runCtx, containerID, spec.Files); err != nil {
+		return nil, err
+	}
+
 	// Start container.
 	if err := a.cli.ContainerStart(runCtx, containerID, container.StartOptions{}); err != nil {
 		return nil, fmt.Errorf("container start: %w", err)
@@ -303,7 +311,7 @@ func (a *Adapter) Run(ctx context.Context, spec sandbox.RunSpec) (*sandbox.RunRe
 	}
 
 	// Persist logs.
-	a.persistLogs(ctx, spec.ID, stdoutBuf.Bytes(), stderrBuf.Bytes(), res)
+	a.persistLogs(ctx, spec, stdoutBuf.Bytes(), stderrBuf.Bytes(), res)
 
 	return res, nil
 }
@@ -409,6 +417,56 @@ func (a *Adapter) createContainer(ctx context.Context, spec sandbox.RunSpec) (st
 	return resp.ID, nil
 }
 
+// writeFiles copies spec.Files into the container before it starts, so
+// the documented "write a file, then run it" workflow works — not just
+// inline `-c`. Docker has no create-time seed-files API; the standard
+// mechanism is CopyToContainer with a tar stream, done after create and
+// before start. Absolute in-container paths are honored as-is; relative
+// paths are resolved against the image's WorkingDir so `python app.py`
+// finds a file written as "app.py".
+func (a *Adapter) writeFiles(ctx context.Context, containerID string, files map[string]string) error {
+	if len(files) == 0 {
+		return nil
+	}
+	baseDir := "/"
+	if info, err := a.cli.ContainerInspect(ctx, containerID); err == nil {
+		if info.Config != nil {
+			if wd := strings.TrimSpace(info.Config.WorkingDir); wd != "" {
+				baseDir = wd
+			}
+		}
+	}
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for p, body := range files {
+		full := p
+		if !strings.HasPrefix(full, "/") {
+			full = path.Join(baseDir, p)
+		}
+		full = path.Clean(full)
+		hdr := &tar.Header{
+			Name: strings.TrimPrefix(full, "/"),
+			Mode: 0o644,
+			Size: int64(len(body)),
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return fmt.Errorf("sandbox/docker: tar header %q: %w", p, err)
+		}
+		if _, err := tw.Write([]byte(body)); err != nil {
+			return fmt.Errorf("sandbox/docker: tar write %q: %w", p, err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		return fmt.Errorf("sandbox/docker: tar close: %w", err)
+	}
+	// The tar is extracted relative to "/"; header names are absolute-from-
+	// root, so files land at their requested absolute paths.
+	if err := a.cli.CopyToContainer(ctx, containerID, "/", &buf, container.CopyToContainerOptions{}); err != nil {
+		return fmt.Errorf("sandbox/docker: copy files: %w", err)
+	}
+	return nil
+}
+
 // observeStats samples ContainerStats until ctx is cancelled and
 // extracts the peak memory + total network bytes + CPU seconds. Sends
 // the final values on the provided channels (which the caller drains
@@ -492,29 +550,29 @@ func (a *Adapter) observeStats(
 
 // persistLogs uploads stdout + stderr to object storage and stamps the
 // resulting keys onto the RunResult.
-func (a *Adapter) persistLogs(ctx context.Context, runID string, stdout, stderr []byte, res *sandbox.RunResult) {
-	if a.cfg.Storage == nil || runID == "" {
+func (a *Adapter) persistLogs(ctx context.Context, spec sandbox.RunSpec, stdout, stderr []byte, res *sandbox.RunResult) {
+	if a.cfg.Storage == nil || spec.ID == "" {
 		return
 	}
 	uploadCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if obj, err := a.cfg.Storage.Upload(uploadCtx,
-		"sandbox/runs/"+runID+"/stdout.log",
+		spec.LogKey("stdout.log"),
 		bytes.NewReader(stdout),
 		storage.UploadOpts{ContentType: "text/plain"},
 	); err == nil && obj != nil {
 		res.StdoutURL = obj.Key
 	} else if err != nil {
-		a.log.Warn("docker: stdout upload failed", "run_id", runID, "error", err)
+		a.log.Warn("docker: stdout upload failed", "run_id", spec.ID, "error", err)
 	}
 	if obj, err := a.cfg.Storage.Upload(uploadCtx,
-		"sandbox/runs/"+runID+"/stderr.log",
+		spec.LogKey("stderr.log"),
 		bytes.NewReader(stderr),
 		storage.UploadOpts{ContentType: "text/plain"},
 	); err == nil && obj != nil {
 		res.StderrURL = obj.Key
 	} else if err != nil {
-		a.log.Warn("docker: stderr upload failed", "run_id", runID, "error", err)
+		a.log.Warn("docker: stderr upload failed", "run_id", spec.ID, "error", err)
 	}
 }
 
@@ -596,6 +654,14 @@ func (a *Adapter) Stream(ctx context.Context, spec sandbox.RunSpec) (<-chan sand
 		return nil, nil, fmt.Errorf("container create: %w", err)
 	}
 	a.trackRun(spec.ID, containerID)
+
+	if err := a.writeFiles(runCtx, containerID, spec.Files); err != nil {
+		cancel()
+		close(linesCh)
+		a.untrackRun(spec.ID)
+		a.cleanup(containerID)
+		return nil, nil, err
+	}
 
 	if err := a.cli.ContainerStart(runCtx, containerID, container.StartOptions{}); err != nil {
 		cancel()
@@ -688,7 +754,7 @@ func (a *Adapter) Stream(ctx context.Context, spec sandbox.RunSpec) (<-chan sand
 			EndedAt:   endedAt,
 			Error:     runErr,
 		}
-		a.persistLogs(ctx, spec.ID, stdoutBuf.Bytes(), stderrBuf.Bytes(), res)
+		a.persistLogs(ctx, spec, stdoutBuf.Bytes(), stderrBuf.Bytes(), res)
 		resultCh <- res
 	}()
 

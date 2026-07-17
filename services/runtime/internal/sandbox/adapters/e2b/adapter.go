@@ -259,36 +259,37 @@ func (a *Adapter) Run(ctx context.Context, spec sandbox.RunSpec) (*sandbox.RunRe
 	}
 	// Persist logs to object storage so StdoutURL/StderrURL are
 	// retrievable (mirrors the docker adapter). Best-effort.
-	a.persistLogs(runCtx, spec.ID, stdout, stderr, res)
+	a.persistLogs(runCtx, spec, stdout, stderr, res)
 	return res, nil
 }
 
 // persistLogs uploads stdout + stderr to object storage and stamps the
 // resulting keys onto the RunResult. Best-effort: an upload failure logs
-// a warning and leaves the URL empty.
-func (a *Adapter) persistLogs(ctx context.Context, runID, stdout, stderr string, res *sandbox.RunResult) {
-	if a.store == nil || runID == "" {
+// a warning and leaves the URL empty. Keys are tenant-scoped via
+// spec.LogKey so a tenant-scoped storage read resolves them.
+func (a *Adapter) persistLogs(ctx context.Context, spec sandbox.RunSpec, stdout, stderr string, res *sandbox.RunResult) {
+	if a.store == nil || spec.ID == "" {
 		return
 	}
 	uploadCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if obj, err := a.store.Upload(uploadCtx,
-		"sandbox/runs/"+runID+"/stdout.log",
+		spec.LogKey("stdout.log"),
 		strings.NewReader(stdout),
 		storage.UploadOpts{ContentType: "text/plain"},
 	); err == nil && obj != nil {
 		res.StdoutURL = obj.Key
 	} else if err != nil {
-		a.log.Warn("e2b: stdout upload failed", "run_id", runID, "error", err)
+		a.log.Warn("e2b: stdout upload failed", "run_id", spec.ID, "error", err)
 	}
 	if obj, err := a.store.Upload(uploadCtx,
-		"sandbox/runs/"+runID+"/stderr.log",
+		spec.LogKey("stderr.log"),
 		strings.NewReader(stderr),
 		storage.UploadOpts{ContentType: "text/plain"},
 	); err == nil && obj != nil {
 		res.StderrURL = obj.Key
 	} else if err != nil {
-		a.log.Warn("e2b: stderr upload failed", "run_id", runID, "error", err)
+		a.log.Warn("e2b: stderr upload failed", "run_id", spec.ID, "error", err)
 	}
 }
 

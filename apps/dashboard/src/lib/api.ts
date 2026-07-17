@@ -677,7 +677,11 @@ export const SandboxRunInputSchema = z.object({
   timeout_s: z.number().int().min(1).max(86400).default(300),
   cpu: z.number().int().min(1).max(32).default(2),
   memory_gb: z.number().int().min(1).max(64).default(4),
-  network: z.enum(["open", "restricted", "isolated"]).default("restricted"),
+  // Default matches the runtime: "isolated" (secure by default). "open"
+  // is an explicit opt-in — it can reach host-published services.
+  // "restricted" (internet-but-not-host) is not yet implemented and the
+  // runtime rejects it.
+  network: z.enum(["open", "restricted", "isolated"]).default("isolated"),
   allow_egress: z.array(z.string()).optional(),
   workspace_id: z.string().optional(),
 })

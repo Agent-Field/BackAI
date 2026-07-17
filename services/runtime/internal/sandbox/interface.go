@@ -56,10 +56,15 @@ func (s Status) IsTerminal() bool {
 
 // NetworkMode controls outbound network access for a run.
 //
-//   - "open"       — full egress (the default)
-//   - "restricted" — per-host egress allowlist. NOT YET IMPLEMENTED: Validate
-//     rejects it rather than silently granting full egress.
-//   - "isolated"   — no network at all
+//   - "isolated"   — no network at all (the DEFAULT: secure by default)
+//   - "open"       — full egress. Reaches the public internet AND any
+//     host-published service (incl. the suite Postgres, whose compose
+//     superuser role bypasses RLS), so it is a cross-tenant escape hatch
+//     and must be an explicit, deliberate opt-in.
+//   - "restricted" — per-host egress allowlist (internet yes, host no).
+//     NOT YET IMPLEMENTED: Validate rejects it rather than silently
+//     granting full egress. This is the intended future default once
+//     host-egress filtering lands.
 type NetworkMode string
 
 const (
@@ -91,6 +96,13 @@ type RunSpec struct {
 	TenantID    string
 	WorkspaceID string
 
+	// StorageKeyPrefix is the object-storage prefix under which this run's
+	// log artifacts are written (e.g. "tenants/<id>"). The server fills it
+	// from the resolved tenant so persisted logs land under the same
+	// tenant-scoped path a tenant-scoped storage read expects — otherwise
+	// completed-run logs 404 when multi-tenancy is on. Empty = no prefix.
+	StorageKeyPrefix string
+
 	Image   string            // e.g. "python:3.12-slim"
 	Command []string          // argv
 	Files   map[string]string // path -> contents, written before exec
@@ -101,6 +113,18 @@ type RunSpec struct {
 	MemoryGB    int
 	Network     NetworkMode
 	AllowEgress []string
+}
+
+// LogKey returns the object-storage key for one of this run's log
+// artifacts (e.g. "stdout.log"), tenant-scoped by StorageKeyPrefix so a
+// tenant-scoped storage read resolves it. Every adapter uses this so
+// logs are written to one canonical, correctly-prefixed location.
+func (s RunSpec) LogKey(name string) string {
+	raw := "sandbox/runs/" + s.ID + "/" + name
+	if s.StorageKeyPrefix == "" {
+		return raw
+	}
+	return strings.TrimSuffix(s.StorageKeyPrefix, "/") + "/" + raw
 }
 
 // RunResult is the terminal outcome of a sandbox run.
@@ -309,11 +333,14 @@ func (s *RunSpec) Validate() error {
 	}
 	switch s.Network {
 	case "":
-		// Default to open. Per-host egress filtering ("restricted") is not
-		// implemented yet, and we will not silently grant full egress under
-		// that name (which is what the old default did). Callers that want no
-		// egress must ask for "isolated" explicitly.
-		s.Network = NetworkOpen
+		// Default to isolated — secure by default. A sandbox on the "open"
+		// bridge can reach host-published services, including the suite
+		// Postgres whose compose superuser role bypasses RLS, so "open" is a
+		// cross-tenant escape hatch and must never be the implicit default.
+		// Callers that genuinely need internet egress opt in with
+		// network=open. (Per-host "restricted" egress filtering — internet
+		// yes, host no — is the intended future default once implemented.)
+		s.Network = NetworkIsolated
 	case NetworkOpen, NetworkIsolated:
 		// ok
 	case NetworkRestricted:
