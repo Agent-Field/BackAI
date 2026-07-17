@@ -335,7 +335,7 @@ func runAgentNew(args []string, stdout, _ io.Writer) error {
 		return fmt.Errorf("agent new: %s already exists", filepath.ToSlash(dir))
 	}
 	files := map[string]string{
-		"requirements.txt": "agentfield>=0.4.0\npydantic>=2\n",
+		"requirements.txt": "agentfield>=0.1.109\npydantic>=2\n",
 		"main.py":          agentTemplate(id),
 		"Dockerfile":       agentDockerfileTemplate(id),
 		"README.md":        fmt.Sprintf("# %s agent\n\nInvoked as `%s.echo` and `%s.summarize`.\n", title(id), id, id),
