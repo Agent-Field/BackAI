@@ -37,10 +37,12 @@ The default local URLs:
 | AgentField control plane | `http://localhost:8081/` | Agent registry + traces |
 | MinIO console | `http://localhost:9001/` | Dev object storage |
 
-Prove the wiring without any key:
+Prove the wiring without any key (the default `supportdesk` agent ships a
+no-key `echo` reasoner for exactly this — the heavier `sample` agent lives
+behind the `advanced` compose profile):
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/agents/sample.echo \
+curl -X POST http://localhost:8080/api/v1/agents/supportdesk.echo \
   -H "Content-Type: application/json" \
   -d '{"input":{"payload":{"message":"hello world"}}}'
 ```

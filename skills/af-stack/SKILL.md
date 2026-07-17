@@ -103,7 +103,8 @@ how you call it from a workload module / runtime handler (`suite.*`).
 | ③ API Gateway | OAuth-on-behalf-of-user | — | `suite.oauth.authorize_url(provider, scopes, return_to)`, `suite.oauth.connected()`, `suite.oauth.token(provider, user_id)`, `suite.oauth.disconnect(provider)` | `OAUTH_<NAME>_CLIENT_ID` / `_SECRET` per provider, or the **People → OAuth** setup dialog (vault-stored, no restart; vault wins over env) | ✅ (GitHub + Google shipped; Notion / Slack / Linear stubbed — see `docs/oauth.md`) |
 | ③ API Gateway | Audit | — | auto on admin mutations | (built-in) | ✅ |
 | ③ API Gateway | Cost ledger | — | auto on every LLM call. Source of truth: LiteLLM `/spend/keys` per AF Stack api key (item #22). `suite_cost_events` is write-through audit. | (built-in) | ✅ |
-| ③ API Gateway | Per-key budget + rate limit | — | enforced upstream by LiteLLM. Set `budget_max_usd` / `rate_limit_rpm` / `rate_limit_tpm` on `POST /api/v1/admin/keys` (item #22). LiteLLM returns 429 / 402 when caps hit; AF Stack surfaces them as OpenAI-shaped errors. | LiteLLM (built-in) | ✅ |
+| ③ API Gateway | Per-key budget + rate limit | — | **Budget** (`budget_max_usd`) is enforced runtime-side from the `suite_cost_events` ledger (402 `BUDGET_EXCEEDED`), so it holds even with a DB-less LiteLLM; a mirrored key is also capped upstream. **Rate limits** (`rate_limit_rpm`/`_tpm`) are enforced by LiteLLM only when the key is mirrored — check a key's `mirror_status` (`mirrored` vs `local-only`). Set all three on `POST /api/v1/admin/keys` (item #22). | runtime + LiteLLM | ✅ (budget), 🚧 (rpm unless mirrored) |
+| ③ API Gateway | Approvals (human decision gate) | — | `POST /api/v1/approvals` (request), `GET /api/v1/approvals`, `GET /api/v1/approvals/{id}`, `POST /api/v1/approvals/{id}/decide`; tenant-scoped (RLS), with an operator dashboard tab to decide | (built-in) | ✅ |
 
 ### Yet to ship — workarounds below
 
@@ -115,7 +116,6 @@ will be when it lands.
 |---|---|---|---|
 | ④ Intelligence | **Video generation** | Same shape as image generation but for `/api/v1/video/generations`. Provider routing: Pika / Runway / Luma when their LiteLLM coverage lands, or first-party adapter behind them. | Call the provider directly from a workload module (loses cost attribution). |
 | ③ API Gateway | **PII redaction + moderation** | Pre/post hooks on the LLM gateway: regex-default + adapter for Presidio / AWS Comprehend. Transparent — no SDK call; just config. | Run redaction inside your reasoner before calling `app.ai(...)`. |
-| ③ API Gateway | **Approvals** | Pause-for-decision primitive. Surface: `suite.approvals.request(kind, payload)`, dashboard tab for operators to decide. | Build it yourself in a workload module: `approvals` table + a poll loop in your agent that blocks until status changes. Common enough that the primitive is queued. |
 
 ### Tier 2 — Operator / inventory verbs
 

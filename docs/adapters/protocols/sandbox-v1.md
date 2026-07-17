@@ -46,8 +46,7 @@ Run the spec to completion and return the terminal result.
   "timeout_s": 300,
   "cpu": 2,
   "memory_gb": 4,
-  "network": "restricted",
-  "allow_egress": ["pypi.org"]
+  "network": "open"
 }
 ```
 
@@ -63,7 +62,7 @@ Run the spec to completion and return the terminal result.
 | `timeout_s` | int | yes | Hard kill after this many seconds. Adapters MUST enforce this; runtime also enforces context cancellation. |
 | `cpu` | int | yes | CPU cores. |
 | `memory_gb` | int | yes | Memory cap in gigabytes. |
-| `network` | enum | yes | `open` (no restrictions), `restricted` (only `allow_egress` hosts reachable), `isolated` (no network). |
+| `network` | enum | no | **Defaults to `isolated` (no network) — secure by default.** `open` = full egress; it can reach host-published services (incl. the suite Postgres, whose compose superuser role bypasses RLS), so treat it as an explicit opt-in for trusted workloads. `restricted` (only `allow_egress` hosts reachable) is not yet implemented and the runtime rejects it. |
 | `allow_egress` | string[] | when `network=restricted` | Hostnames the run may reach. |
 
 **Response (200 OK)**: terminal result.

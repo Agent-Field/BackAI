@@ -269,7 +269,7 @@ else
 fi
 
 # ── 5. Call gateway with each key ──────────────────────────────────────────
-step "5/9  Call sample.echo via the gateway with each key"
+step "5/9  Call supportdesk.echo via the gateway with each key"
 
 call_echo() {
     local key="$1" msg="$2"
@@ -278,19 +278,19 @@ call_echo() {
         -H "Authorization: Bearer ${key}" \
         -H 'Content-Type: application/json' \
         -d "{\"input\":{\"payload\":{\"message\":\"${msg}\"}}}" \
-        "${RUNTIME_URL}/api/v1/agents/sample.echo"
+        "${RUNTIME_URL}/api/v1/agents/supportdesk.echo"
 }
 
 ACME_ECHO="$(call_echo "$ACME_KEY_VALUE" "hello-from-acme")"
 GLOBEX_ECHO="$(call_echo "$GLOBEX_KEY_VALUE" "hello-from-globex")"
 
 if echo "$ACME_ECHO" | grep -q 'hello-from-acme\|echoed'; then
-    pass_step "acme key invoked sample.echo successfully"
+    pass_step "acme key invoked supportdesk.echo successfully"
 else
     fail_step "acme key gateway call did not return expected payload (resp: ${ACME_ECHO:0:200})"
 fi
 if echo "$GLOBEX_ECHO" | grep -q 'hello-from-globex\|echoed'; then
-    pass_step "globex key invoked sample.echo successfully"
+    pass_step "globex key invoked supportdesk.echo successfully"
 else
     fail_step "globex key gateway call did not return expected payload (resp: ${GLOBEX_ECHO:0:200})"
 fi
@@ -381,7 +381,7 @@ else
                 -H "Authorization: Bearer ${ACME_KEY_VALUE}" \
                 -H 'Content-Type: application/json' \
                 -d '{"input":{"payload":{"message":"burst"}}}' \
-                "${RUNTIME_URL}/api/v1/agents/sample.echo" 2>/dev/null \
+                "${RUNTIME_URL}/api/v1/agents/supportdesk.echo" 2>/dev/null \
                 || echo '000')"
             echo "$code"
         done

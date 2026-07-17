@@ -163,7 +163,7 @@ What it checks:
    API.
 3. Issuing an API key returns `value` exactly once; listing keys does
    not leak it.
-4. Both keys can invoke `sample.echo` through the gateway.
+4. Both keys can invoke `supportdesk.echo` through the gateway.
 5. `GET /admin/audit?tenant=<acme>` contains acme's key id and **never**
    globex's key id (audit scope is per-tenant).
 6. A secret written by acme is **not visible** when listed as globex

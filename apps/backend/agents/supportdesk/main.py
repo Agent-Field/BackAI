@@ -349,6 +349,19 @@ async def compose_reply_brief(
     }
 
 
+@app.reasoner(tags=["test", "echo"])
+async def echo(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return the input verbatim — the no-key wiring probe.
+
+    This lets a fresh ``af-stack dev`` prove the gateway → AgentField
+    round-trip with no model key, and without the heavier
+    ``advanced``-profile sample agent (which builds harness CLIs). It
+    mirrors the sample agent's echo contract exactly: ``{"echoed": …}``.
+    """
+
+    return {"echoed": payload or {}}
+
+
 app.include_router(router)
 
 
