@@ -27,11 +27,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"strconv"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/Agent-Field/backai/services/cli/internal/client"
+	"github.com/Agent-Field/backai/services/cli/internal/output"
 )
 
 func tab(w io.Writer) *tabwriter.Writer {
@@ -249,6 +251,18 @@ func RunReasoners(ctx context.Context, c *client.Client, args []string, stdout, 
 
 // ─── logs ─────────────────────────────────────────────────────────────────
 
+type logLine struct {
+	TS      string         `json:"ts"`
+	Level   string         `json:"level"`
+	Service string         `json:"service"`
+	Msg     string         `json:"msg"`
+	Fields  map[string]any `json:"fields"`
+}
+
+type logsResponse struct {
+	Logs []logLine `json:"logs"`
+}
+
 func RunLogs(ctx context.Context, c *client.Client, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("af-stack logs", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -256,41 +270,53 @@ func RunLogs(ctx context.Context, c *client.Client, args []string, stdout, stder
 	service := fs.String("service", "", "service filter")
 	search := fs.String("search", "", "substring search")
 	limit := fs.Int("limit", 50, "max lines")
-	if err := fs.Parse(args); err != nil {
-		return err
+	tail := fs.Int("tail", 0, "show only the most recent N lines (alias for --limit)")
+	since := fs.String("since", "", "only lines at/after this time (RFC3339 or a duration like 15m)")
+	asJSON := fs.Bool("json", false, "emit the log lines as JSON")
+	if _, err := output.ParseArgs(fs, args); err != nil {
+		return output.Usage("logs: %v", err)
+	}
+	// --tail is an ergonomic alias for --limit; when set it wins.
+	if *tail > 0 {
+		*limit = *tail
 	}
 	q := "?limit=" + strconv.Itoa(*limit)
 	if *level != "" {
-		q += "&level=" + *level
+		q += "&level=" + url.QueryEscape(*level)
 	}
 	if *service != "" {
-		q += "&service=" + *service
+		q += "&service=" + url.QueryEscape(*service)
 	}
 	if *search != "" {
-		q += "&search=" + *search
+		q += "&search=" + url.QueryEscape(*search)
 	}
-	var out struct {
-		Logs []struct {
-			TS      string         `json:"ts"`
-			Level   string         `json:"level"`
-			Service string         `json:"service"`
-			Msg     string         `json:"msg"`
-			Fields  map[string]any `json:"fields"`
-		} `json:"logs"`
+	if *since != "" {
+		q += "&since=" + url.QueryEscape(*since)
 	}
+	var out logsResponse
 	if err := c.Do(ctx, "GET", "/admin/logs"+q, nil, &out); err != nil {
+		// A runtime that doesn't expose the logs route (404) is a
+		// capability gap, not a "your target is missing" 404 — surface it
+		// as the remote exit code so scripts can branch on "no logs here".
+		var apiErr *client.APIError
+		if errors.As(err, &apiErr) && apiErr.Status == 404 {
+			return output.Wrap(output.ExitRemote,
+				"logs: this runtime does not expose GET /admin/logs (no operator logs route)", err)
+		}
 		return err
 	}
-	for _, l := range out.Logs {
-		extra := ""
-		if len(l.Fields) > 0 {
-			if b, err := json.Marshal(l.Fields); err == nil {
-				extra = " " + string(b)
+	return output.Result(stdout, *asJSON, out, func(w io.Writer) error {
+		for _, l := range out.Logs {
+			extra := ""
+			if len(l.Fields) > 0 {
+				if b, err := json.Marshal(l.Fields); err == nil {
+					extra = " " + string(b)
+				}
 			}
+			fmt.Fprintf(w, "%s %-5s %s %s%s\n", l.TS, strings.ToUpper(l.Level), l.Service, l.Msg, extra)
 		}
-		fmt.Fprintf(stdout, "%s %-5s %s %s%s\n", l.TS, strings.ToUpper(l.Level), l.Service, l.Msg, extra)
-	}
-	return nil
+		return nil
+	})
 }
 
 // ─── errors ───────────────────────────────────────────────────────────────
