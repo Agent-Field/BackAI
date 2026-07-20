@@ -88,7 +88,11 @@ type Server struct {
 	// ready is set to true by MarkReady() once main.go has finished
 	// startup (migrations applied, workers spawned). Until then
 	// /ready returns 503 {"status":"booting"}.
-	ready         atomic.Bool
+	ready atomic.Bool
+	// prodReady caches the R7 production-posture evaluation so /ready can fold
+	// it in without re-querying pg_catalog on every probe. Zero value is ready
+	// to use. See prodready.go.
+	prodReady     prodReadyCache
 	db            *db.DB
 	af            *agentfield.Client
 	tel           *observability.Telemetry
@@ -1111,6 +1115,18 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+	}
+
+	// R7 production operating contract: when armed (saas + AF_STACK_ENV=
+	// production), a drift in the production posture (e.g. an operator ALTERs
+	// a tenant table's RLS) turns the pod un-ready. No-op otherwise. Cached
+	// with a short TTL so probe traffic never hammers pg_catalog.
+	if code, ok := s.productionReady(r.Context()); !ok {
+		w.Header().Set("Retry-After", "15")
+		writeReadyError(w, "not_production_ready", "production posture check failed: "+code, map[string]any{
+			"prodcheck_code": code,
+		})
+		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
