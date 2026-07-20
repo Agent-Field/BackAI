@@ -2852,6 +2852,29 @@ func startJobsManager(ctx context.Context, log *slog.Logger, pool *pgxpool.Pool,
 		log.Error("sample job registration failed", "error", err)
 		// non-fatal — manager is still usable
 	}
+	// Remote (Python/TypeScript) job kinds, R3. Enqueue requires a
+	// definition, and remote handlers live outside this binary, so the
+	// deployment declares them: AF_STACK_REMOTE_JOB_KINDS is a comma list
+	// of <kind>[:<language>] pairs (language defaults to python).
+	for _, spec := range strings.Split(os.Getenv("AF_STACK_REMOTE_JOB_KINDS"), ",") {
+		if spec = strings.TrimSpace(spec); spec == "" {
+			continue
+		}
+		kind, lang := spec, string(jobs.LanguagePython)
+		if i := strings.IndexByte(spec, ':'); i >= 0 {
+			kind, lang = strings.TrimSpace(spec[:i]), strings.TrimSpace(spec[i+1:])
+		}
+		def := jobs.Definition{
+			Name:        kind,
+			Language:    jobs.Language(lang),
+			Description: "Remote worker job kind (declared via AF_STACK_REMOTE_JOB_KINDS).",
+			MaxAttempts: 3,
+		}
+		if err := mgr.Registry().RegisterRemote(def); err != nil {
+			log.Error("remote job kind registration failed", "kind", kind, "error", err)
+			// non-fatal — the remaining kinds still register
+		}
+	}
 	startCtx, startCancel := context.WithTimeout(ctx, 15*time.Second)
 	defer startCancel()
 	if err := mgr.Start(startCtx, true, 25); err != nil {

@@ -154,10 +154,10 @@ func (r *Registry) RegisterGo(def Definition, handler func(ctx context.Context, 
 	return nil
 }
 
-// RegisterRemote stores a definition that points at a non-Go handler. The
-// dashboard can list the definition, but until a cross-language dispatcher
-// lands the runtime cannot run it — Manager.Enqueue rejects it with
-// ErrRemoteJobsNotSupported (see TODO above) instead of silently dropping it.
+// RegisterRemote stores a definition that points at a non-Go handler,
+// executed by an external worker over the pull protocol (lease/heartbeat/
+// complete on /api/v1/jobs/worker/*). Deployments declare their remote
+// kinds via AF_STACK_REMOTE_JOB_KINDS at boot.
 func (r *Registry) RegisterRemote(def Definition) error {
 	if def.Name == "" {
 		return fmt.Errorf("jobs: definition name required")

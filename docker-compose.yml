@@ -125,6 +125,9 @@ services:
       # is a reference, opt in with AF_STACK_WORKLOAD_MODULES=notes.
       WORKLOAD_MODULES_PATH: /app/workload-modules
       AF_STACK_WORKLOAD_MODULES: ${AF_STACK_WORKLOAD_MODULES:-}
+      # Remote (Python/TS) job kinds served by external pull-workers (R3):
+      # comma list of <kind>[:<language>], e.g. "index-document:python".
+      AF_STACK_REMOTE_JOB_KINDS: ${AF_STACK_REMOTE_JOB_KINDS:-}
       # KMS for the secrets vault (envelope encryption). Override in
       # production with `openssl rand -hex 32`.
       AF_STACK_AUTH_SECRET: ${AF_STACK_AUTH_SECRET:-dev-secret-change-me-in-prod}
