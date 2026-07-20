@@ -73,11 +73,11 @@ func TestRequireTenantCap_PersonalModeGrantsAll(t *testing.T) {
 	ctx := tenantctx.WithTenantAndUser(t.Context(), "00000000-0000-0000-0000-000000000000", "", "")
 	req := httptest.NewRequest("POST", "/api/v1/me/keys", nil).WithContext(ctx)
 	rec := httptest.NewRecorder()
-	for _, cap := range []tenantrole.Capability{
+	for _, capab := range []tenantrole.Capability{
 		tenantrole.CapKeysManage, tenantrole.CapTenantManage, tenantrole.CapBillingManage,
 	} {
-		if _, _, ok := s.requireTenantCap(rec, req, cap); !ok {
-			t.Errorf("personal mode should grant %q", cap)
+		if _, _, ok := s.requireTenantCap(rec, req, capab); !ok {
+			t.Errorf("personal mode should grant %q", capab)
 		}
 	}
 }

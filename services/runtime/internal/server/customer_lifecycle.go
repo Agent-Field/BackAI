@@ -46,6 +46,8 @@ func (s *Server) registerLifecycleRoutes() {
 	s.mux.HandleFunc("GET /api/v1/me/invitations", s.handleMeListInvitations)
 	s.mux.HandleFunc("POST /api/v1/me/invitations", s.handleMeCreateInvitation)
 	s.mux.HandleFunc("DELETE /api/v1/me/invitations/{id}", s.handleMeRevokeInvitation)
+	s.mux.HandleFunc("GET /api/v1/me/sessions", s.handleMeListSessions)
+	s.mux.HandleFunc("DELETE /api/v1/me/sessions/{id}", s.handleMeRevokeSession)
 	s.mux.HandleFunc("GET /api/v1/me/audit", s.handleMeAudit)
 	s.mux.HandleFunc("POST /api/v1/me/transfer-ownership", s.handleMeTransferOwnership)
 	s.mux.HandleFunc("DELETE /api/v1/me/tenant", s.handleMeDeleteTenant)
@@ -60,6 +62,8 @@ func (s *Server) registerLifecycleRoutes() {
 	b.Register("GET", "/api/v1/me/invitations", openapi.RouteMeta{Summary: "List the caller tenant's invitations", Tags: []string{"lifecycle"}})
 	b.Register("POST", "/api/v1/me/invitations", openapi.RouteMeta{Summary: "Invite a member to the caller's tenant (admin+)", Tags: []string{"lifecycle"}})
 	b.Register("DELETE", "/api/v1/me/invitations/{id}", openapi.RouteMeta{Summary: "Revoke a pending invitation", Tags: []string{"lifecycle"}})
+	b.Register("GET", "/api/v1/me/sessions", openapi.RouteMeta{Summary: "List the caller's own active sessions", Tags: []string{"lifecycle"}})
+	b.Register("DELETE", "/api/v1/me/sessions/{id}", openapi.RouteMeta{Summary: "Revoke one of the caller's own sessions", Tags: []string{"lifecycle"}})
 	b.Register("GET", "/api/v1/me/audit", openapi.RouteMeta{Summary: "Read the caller tenant's audit trail", Tags: []string{"lifecycle"}})
 	b.Register("POST", "/api/v1/me/transfer-ownership", openapi.RouteMeta{Summary: "Transfer tenant ownership (owner only)", Tags: []string{"lifecycle"}})
 	b.Register("DELETE", "/api/v1/me/tenant", openapi.RouteMeta{Summary: "Soft-delete the caller's tenant (owner only)", Tags: []string{"lifecycle"}})
@@ -83,7 +87,7 @@ func (s *Server) invitationStore() *invitations.Store {
 // Personal mode is a single-user app with no login and no RBAC — every
 // capability is granted (the sole user owns the default tenant), mirroring
 // operatorAccessDenied's personal-mode short-circuit.
-func (s *Server) requireTenantCap(w http.ResponseWriter, r *http.Request, cap tenantrole.Capability) (tenantID, userID string, ok bool) {
+func (s *Server) requireTenantCap(w http.ResponseWriter, r *http.Request, capab tenantrole.Capability) (tenantID, userID string, ok bool) {
 	tenantID = strings.TrimSpace(tenantctx.TenantID(r.Context()))
 	if tenantID == "" {
 		writeError(w, http.StatusUnauthorized, "TENANT_REQUIRED",
@@ -112,7 +116,7 @@ func (s *Server) requireTenantCap(w http.ResponseWriter, r *http.Request, cap te
 			"you are not a member of this tenant", nil)
 		return "", "", false
 	}
-	if !tenantrole.CanString(role, cap) {
+	if !tenantrole.CanString(role, capab) {
 		writeError(w, http.StatusForbidden, "RBAC_DENIED",
 			"your role is not allowed to perform this action", nil)
 		return "", "", false
@@ -425,6 +429,97 @@ func (s *Server) handleMeDeleteTenant(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit.Write(r.Context(), r, auditEventTenantDelete(tenantID))
 	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+}
+
+// ─── Sessions ─────────────────────────────────────────────────────────────
+
+type meSessionWire struct {
+	ID        string  `json:"id"`
+	CreatedAt string  `json:"created_at"`
+	ExpiresAt string  `json:"expires_at"`
+	IPAddress *string `json:"ip_address"`
+	UserAgent *string `json:"user_agent"`
+	Current   bool    `json:"current"`
+}
+
+func (s *Server) handleMeListSessions(w http.ResponseWriter, r *http.Request) {
+	_, userID, ok := s.requireTenantCap(w, r, tenantrole.CapSelfManage)
+	if !ok {
+		return
+	}
+	// No DB, or personal mode (no better-auth user) → nothing to list.
+	if s.db == nil || s.db.Pool == nil || strings.TrimSpace(userID) == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"sessions": []meSessionWire{}})
+		return
+	}
+	currentToken := betterAuthSessionToken(r)
+	rows, err := s.db.Pool.Query(r.Context(), `
+		select s."id", s."createdAt", s."expiresAt", s."ipAddress", s."userAgent",
+		       (s."token" = $2) as current
+		  from "session" s
+		  join "user" u on u."id" = s."userId"
+		  join suite_users su on lower(su.email) = lower(u."email")
+		 where su.id = $1 and s."expiresAt" > now()
+		 order by s."createdAt" desc
+	`, userID, currentToken)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL", "could not list sessions", nil)
+		return
+	}
+	defer rows.Close()
+	out := []meSessionWire{}
+	for rows.Next() {
+		var (
+			sw                   meSessionWire
+			createdAt, expiresAt time.Time
+		)
+		if err := rows.Scan(&sw.ID, &createdAt, &expiresAt, &sw.IPAddress, &sw.UserAgent, &sw.Current); err != nil {
+			writeError(w, http.StatusInternalServerError, "INTERNAL", "could not read sessions", nil)
+			return
+		}
+		sw.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
+		sw.ExpiresAt = expiresAt.UTC().Format(time.RFC3339Nano)
+		out = append(out, sw)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sessions": out})
+}
+
+func (s *Server) handleMeRevokeSession(w http.ResponseWriter, r *http.Request) {
+	tenantID, userID, ok := s.requireTenantCap(w, r, tenantrole.CapSelfManage)
+	if !ok {
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "id is required", nil)
+		return
+	}
+	if s.db == nil || s.db.Pool == nil || strings.TrimSpace(userID) == "" {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "no such session", nil)
+		return
+	}
+	// Scope the delete to the caller's own sessions (join through email) so a
+	// caller can only revoke sessions that belong to them.
+	tag, err := s.db.Pool.Exec(r.Context(), `
+		delete from "session"
+		 where "id" = $1
+		   and "userId" in (
+		     select u."id" from "user" u
+		     join suite_users su on lower(su.email) = lower(u."email")
+		     where su.id = $2
+		   )
+	`, id, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL", "could not revoke session", nil)
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "no such session", nil)
+		return
+	}
+	s.audit.Write(r.Context(), r, audit.Event{Action: "session.revoke", ResourceType: "session", ResourceID: id,
+		Metadata: map[string]any{"tenant_id": tenantID, "user_id": userID}})
+	writeJSON(w, http.StatusOK, map[string]bool{"revoked": true})
 }
 
 // ─── Audit trail ──────────────────────────────────────────────────────────
