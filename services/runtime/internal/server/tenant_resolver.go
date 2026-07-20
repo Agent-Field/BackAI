@@ -229,8 +229,7 @@ func (s *Server) tenantResolver(next http.Handler) http.Handler {
 			token := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
 			tenantID, apiKeyID, err := s.resolveBearer(ctx, token)
 			if err != nil {
-				writeAuthError(w, http.StatusUnauthorized, "INVALID_API_KEY",
-					"invalid API key")
+				writeBearerError(w, err)
 				return
 			}
 			ctx = tenantctx.WithTenantAndUser(ctx, tenantID, apiKeyID, "")
@@ -255,8 +254,7 @@ func (s *Server) tenantResolver(next http.Handler) http.Handler {
 			if token := strings.TrimSpace(r.URL.Query().Get("api_key")); token != "" {
 				tenantID, apiKeyID, err := s.resolveBearer(ctx, token)
 				if err != nil {
-					writeAuthError(w, http.StatusUnauthorized, "INVALID_API_KEY",
-						"invalid API key")
+					writeBearerError(w, err)
 					return
 				}
 				ctx = tenantctx.WithTenantAndUser(ctx, tenantID, apiKeyID, "")
@@ -350,6 +348,22 @@ func (s *Server) resolveBearer(ctx context.Context, token string) (tenantID, api
 		return "", "", vErr
 	}
 	return k.TenantID, k.ID, nil
+}
+
+// writeBearerError maps a resolveBearer failure to the response envelope.
+// Expired keys get a distinct 401 KEY_EXPIRED so a caller who legitimately
+// holds the key (the secret matched — expiry is only checked AFTER bcrypt
+// succeeds, so this never leaks whether an arbitrary key exists) can tell an
+// expired credential from a wrong one and rotate it. Every other failure
+// mode collapses to INVALID_API_KEY to avoid an existence oracle.
+func writeBearerError(w http.ResponseWriter, err error) {
+	if errors.Is(err, tenancy.ErrKeyExpired) {
+		writeAuthError(w, http.StatusUnauthorized, "KEY_EXPIRED",
+			"API key has expired")
+		return
+	}
+	writeAuthError(w, http.StatusUnauthorized, "INVALID_API_KEY",
+		"invalid API key")
 }
 
 // errNoSession is returned by resolveSession when the request has no

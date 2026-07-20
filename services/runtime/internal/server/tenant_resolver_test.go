@@ -15,6 +15,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -186,6 +187,45 @@ func TestResolverIsPublicPath(t *testing.T) {
 		if got != c.public {
 			t.Errorf("isPublicPath(%q) = %v, want %v", c.path, got, c.public)
 		}
+	}
+}
+
+// TestWriteBearerError_ExpiredKeySurfacesKeyExpired verifies the R8
+// contract: an expired key produces a distinct 401 KEY_EXPIRED envelope
+// (the caller holds the key — expiry is checked only after bcrypt succeeds),
+// while every other credential failure collapses to INVALID_API_KEY so it
+// can't be used as a key-existence oracle.
+func TestWriteBearerError_ExpiredKeySurfacesKeyExpired(t *testing.T) {
+	cases := []struct {
+		name     string
+		err      error
+		wantCode string
+	}{
+		{"expired", tenancy.ErrKeyExpired, "KEY_EXPIRED"},
+		{"revoked", tenancy.ErrKeyRevoked, "INVALID_API_KEY"},
+		{"not found", tenancy.ErrAPIKeyNotFound, "INVALID_API_KEY"},
+		{"secret mismatch", tenancy.ErrKeySecretMismatch, "INVALID_API_KEY"},
+		{"bad format", tenancy.ErrInvalidAPIKeyFormat, "INVALID_API_KEY"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			writeBearerError(rec, c.err)
+			if rec.Code != http.StatusUnauthorized {
+				t.Errorf("status = %d, want 401", rec.Code)
+			}
+			var env struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+				t.Fatalf("decode body: %v (%s)", err, rec.Body.String())
+			}
+			if env.Error.Code != c.wantCode {
+				t.Errorf("code = %q, want %q", env.Error.Code, c.wantCode)
+			}
+		})
 	}
 }
 
