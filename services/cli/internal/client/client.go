@@ -82,6 +82,30 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("HTTP %d: %s", e.Status, e.Message)
 }
 
+// Probe issues a GET to a ROOT-level runtime path (NOT prefixed with
+// /api/v1) — used for liveness/readiness probes at /health and /ready,
+// which the runtime serves off the root. It returns the HTTP status and
+// the raw body. A transport error (runtime unreachable) is returned as
+// err with status 0, so callers can distinguish "down" from "responded
+// non-2xx" and degrade gracefully.
+func (c *Client) Probe(ctx context.Context, path string) (int, []byte, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.BaseURL+path, nil)
+	if err != nil {
+		return 0, nil, fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("accept", "application/json")
+	if c.APIKey != "" {
+		req.Header.Set("authorization", "Bearer "+c.APIKey)
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, body, nil
+}
+
 // Do issues an HTTP request, sending JSON when body is non-nil, and
 // decodes the response into out (pass nil to ignore the body).
 func (c *Client) Do(

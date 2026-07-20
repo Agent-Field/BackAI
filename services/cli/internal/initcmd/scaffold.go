@@ -3,13 +3,15 @@
 package initcmd
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+
+	"github.com/Agent-Field/backai/services/cli/internal/output"
 )
 
 // runScaffold implements the npm-like `af-stack init <name>`: it creates a
@@ -30,49 +32,74 @@ func runScaffold(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("af-stack init <name>", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dir := fs.String("dir", ".", "parent directory to create the project in")
-	template := fs.String("template", "node", "starter template (node)")
+	template := fs.String("template", "node", "starter template: node | saas")
 	force := fs.Bool("force", false, "scaffold into an existing non-empty directory")
+	asJSON := fs.Bool("json", false, "emit the created file list as JSON")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return output.Usage("init: %v", err)
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("init: unexpected argument %q", fs.Arg(0))
+		return output.Usage("init: unexpected argument %q", fs.Arg(0))
 	}
 	if name == "" {
-		return errors.New("init: a project name is required (af-stack init <name>)")
+		return output.Usage("init: a project name is required (af-stack init <name>)")
 	}
 
-	if *template != "node" {
-		return fmt.Errorf("init: unknown template %q for a new project (available: node); to scaffold the coding-agent hero template inside an AF Stack checkout, run `af-stack init --template coding-agent` without a project name", *template)
+	tmpl := strings.TrimSpace(strings.ToLower(*template))
+	var files map[string]string
+	switch tmpl {
+	case "", "node":
+		tmpl = "node"
+		files = nodeTemplate(name, slugify(name))
+	case "saas":
+		files = SaaSTemplateFiles(name, slugify(name))
+	default:
+		return output.Usage("init: unknown template %q for a new project (available: node, saas); to scaffold the coding-agent hero template inside an AF Stack checkout, run `af-stack init --template coding-agent` without a project name", *template)
 	}
 
-	slug := slugify(name)
-	target := filepath.Join(*dir, slug)
+	projectSlug := slugify(name)
+	target := filepath.Join(*dir, projectSlug)
 
 	if err := ensureTargetDir(target, *force); err != nil {
 		return err
 	}
 
-	files := nodeTemplate(name, slug)
+	written := make([]string, 0, len(files))
 	for rel, contents := range files {
 		path := filepath.Join(target, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return fmt.Errorf("init: create %s: %w", rel, err)
+			return output.Fail("init: create %s: %v", rel, err)
 		}
 		// #nosec G306 -- scaffolded project source files, not secrets.
 		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
-			return fmt.Errorf("init: write %s: %w", rel, err)
+			return output.Fail("init: write %s: %v", rel, err)
 		}
+		written = append(written, rel)
 	}
+	sort.Strings(written)
 
-	fmt.Fprintf(stdout, "Created %s — a new app on the AF Stack backend.\n\n", target)
-	fmt.Fprintln(stdout, "Next steps:")
-	fmt.Fprintf(stdout, "  cd %s\n", target)
-	fmt.Fprintln(stdout, "  cp .env.example .env    # set AF_STACK_URL / AF_STACK_API_KEY")
-	fmt.Fprintln(stdout, "  npm install && npm start")
-	fmt.Fprintln(stdout, "")
-	fmt.Fprintln(stdout, "No backend yet? Start one from your AF Stack checkout with: af-stack dev")
-	return nil
+	machine := map[string]any{
+		"project":  projectSlug,
+		"template": tmpl,
+		"target":   target,
+		"files":    written,
+	}
+	return output.Result(stdout, *asJSON, machine, func(w io.Writer) error {
+		fmt.Fprintf(w, "Created %s — a new %s app on the AF Stack backend (%d files).\n\n", target, tmpl, len(written))
+		fmt.Fprintln(w, "Next steps:")
+		fmt.Fprintf(w, "  cd %s\n", target)
+		if tmpl == "saas" {
+			fmt.Fprintln(w, "  cp .env.example .env    # set VITE_AF_STACK_URL")
+			fmt.Fprintln(w, "  npm install && npm run dev")
+			fmt.Fprintln(w, "  af-stack test           # run the fork gates")
+		} else {
+			fmt.Fprintln(w, "  cp .env.example .env    # set AF_STACK_URL / AF_STACK_API_KEY")
+			fmt.Fprintln(w, "  npm install && npm start")
+		}
+		fmt.Fprintln(w, "")
+		fmt.Fprintln(w, "No backend yet? Start one from your AF Stack checkout with: af-stack dev")
+		return nil
+	})
 }
 
 // ensureTargetDir creates target, refusing to clobber a non-empty directory
