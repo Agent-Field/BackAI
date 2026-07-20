@@ -1,5 +1,6 @@
 .PHONY: help preflight dev test test-go test-py test-ts lint lint-go lint-py lint-ts \
         lint-migrations \
+        sdk-conformance worker-conformance \
         build build-go build-cli build-runtime build-dashboard build-images \
         install-cli smoke-cli \
         up down logs clean install-deps fmt
@@ -18,6 +19,8 @@ help:
 	@echo "  make test-go        Run Go tests"
 	@echo "  make test-py        Run Python tests"
 	@echo "  make test-ts        Run TypeScript tests"
+	@echo "  make sdk-conformance     Live SDK conformance (py+ts) vs a running stack"
+	@echo "  make worker-conformance  Live worker-protocol conformance vs a running stack"
 	@echo "  make lint           Run all linters"
 	@echo "  make fmt            Auto-format all code"
 	@echo "  make build          Build all artifacts (CLI + runtime + dashboard)"
@@ -63,6 +66,27 @@ test-py:
 test-ts:
 	@echo "==> Running TypeScript tests"
 	@command -v pnpm >/dev/null && pnpm -r test 2>/dev/null || echo "(no TS tests yet)"
+
+# ─── Live conformance harnesses (run against a RUNNING stack) ──────────────
+# Config: BASE_URL (default below) and API_KEY (optional in personal mode).
+# Both harnesses emit a JSON summary on stdout and exit non-zero on any FAIL.
+BASE_URL ?= http://localhost:8080
+
+# sdk-conformance runs the Python AND TypeScript SDK harnesses back-to-back,
+# proving both SDKs speak the same live wire contract (see scripts/sdk-conformance).
+sdk-conformance:
+	@echo "==> SDK conformance (Python)"
+	@BASE_URL="$(BASE_URL)" API_KEY="$(API_KEY)" python3 scripts/sdk-conformance/run.py
+	@echo "==> SDK conformance (TypeScript)"
+	@pnpm --filter @af-stack/sdk build >/dev/null
+	@BASE_URL="$(BASE_URL)" API_KEY="$(API_KEY)" sh -c 'if command -v tsx >/dev/null 2>&1; then tsx scripts/sdk-conformance/run.ts; else node --experimental-strip-types scripts/sdk-conformance/run.ts; fi'
+
+# worker-conformance enqueues the spec.json vector jobs and verifies their
+# terminal states against a reference worker (see scripts/worker-conformance).
+# WORKER=py|ts selects the reference worker language (default py).
+worker-conformance:
+	@echo "==> Worker conformance (WORKER=$(or $(WORKER),py))"
+	@BASE_URL="$(BASE_URL)" API_KEY="$(API_KEY)" WORKER="$(or $(WORKER),py)" bash scripts/worker-conformance/run.sh
 
 lint: lint-go lint-py lint-ts
 	@echo "==> Lint passed"

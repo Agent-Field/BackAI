@@ -16,10 +16,121 @@ import { ctx } from "./ctx.js"
 const DEFAULT_BASE_URL = "http://localhost:8080"
 const PATH_PREFIX = "/api/v1"
 
-export interface HttpOptions {
-  /** Override `AF_STACK_URL`. */
+// Default per-request timeout (ms) that explicit `BackAI` clients apply. The
+// env-configured singleton keeps its historical behaviour (no timeout unless
+// the caller passes one), so the existing call sites are unaffected.
+export const DEFAULT_TIMEOUT_MS = 30_000
+// Explicit `BackAI` clients retry transient failures by default; the
+// singleton does not (its effective `maxRetries` is 0). Mirrors
+// `af_stack._http.DEFAULT_MAX_RETRIES`.
+export const DEFAULT_MAX_RETRIES = 2
+
+// Status codes worth retrying: rate limiting + transient upstream failures.
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504])
+// Only inherently-idempotent methods retry automatically; mutations retry
+// solely when the caller supplies an `idempotencyKey` (which also sends the
+// `Idempotency-Key` header so the server can dedupe). Mirrors the Python rule.
+const IDEMPOTENT_METHODS = new Set(["GET", "HEAD", "OPTIONS"])
+const RETRY_BASE_DELAY_MS = 500
+const RETRY_MAX_DELAY_MS = 20_000
+
+// ---------------------------------------------------------------------------
+// Runtime-version compatibility policy (mirrors `af_stack._http`).
+//
+// The SDK lazily fetches `GET /api/v1/version` once per explicit client and
+// *warns* (never fails) when the runtime's major version is out of range.
+// 404 (older runtimes without the endpoint) is tolerated.
+// ---------------------------------------------------------------------------
+export const SUPPORTED_RUNTIME = ">=0.0.0,<1.0.0"
+export const SUPPORTED_RUNTIME_MAJOR = 0
+
+const SEMVER_RE = /^\s*v?(\d+)\.(\d+)\.(\d+)/
+
+/**
+ * Return a warning message when `version` is major-incompatible, else `null`.
+ * Pure + side-effect free so it can be unit-tested without a network. Unknown
+ * / unparseable / missing versions are tolerated (return `null`).
+ */
+export function checkRuntimeCompat(version: string | null | undefined): string | null {
+  if (version === null || version === undefined || version === "") return null
+  const m = SEMVER_RE.exec(String(version))
+  if (m === null) return null
+  const major = Number(m[1])
+  if (major !== SUPPORTED_RUNTIME_MAJOR) {
+    return (
+      `BackAI runtime version ${version} (major ${major}) is outside the ` +
+      `range this SDK supports (${SUPPORTED_RUNTIME}). Behaviour may be ` +
+      `incompatible — upgrade the SDK.`
+    )
+  }
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// Ambient client config (the TypeScript mirror of `af_stack`'s contextvar
+// transport). An explicit `BackAI` client binds its `{baseUrl, apiKey,
+// timeout, maxRetries}` here for the *synchronous* duration of each delegated
+// call; the resolvers below consult it when a per-call override is absent,
+// then fall back to `process.env`, then the built-in default. When unset
+// (the singleton path) behaviour is identical to earlier releases.
+// ---------------------------------------------------------------------------
+export interface ClientConfig {
   baseUrl?: string
-  /** Override `AF_STACK_API_KEY`. */
+  apiKey?: string
+  /** Per-request timeout in milliseconds. */
+  timeout?: number
+  /** Automatic retries for transient (429/5xx) failures. */
+  maxRetries?: number
+}
+
+const ambient: { current: ClientConfig | null } = { current: null }
+
+/** The active explicit-client config, or `null` on the singleton path. */
+export function getAmbientConfig(): ClientConfig | null {
+  return ambient.current
+}
+
+/**
+ * Run `fn` with `config` bound as the ambient client config, restoring the
+ * previous binding afterwards. Concurrency-safe: SDK functions read the
+ * ambient config synchronously (before their first `await`), and there is no
+ * `await` between binding and restoring here, so interleaved calls never
+ * observe another call's config.
+ */
+export function runWithConfig<T>(config: ClientConfig, fn: () => T): T {
+  const prev = ambient.current
+  ambient.current = config
+  try {
+    return fn()
+  } finally {
+    ambient.current = prev
+  }
+}
+
+/**
+ * Async-generator variant of {@link runWithConfig}. The binding is held for
+ * the lifetime of the returned iterable so a streaming method (whose body
+ * only runs on the first `.next()`) still resolves config against the client.
+ */
+export function runGenWithConfig<T>(
+  config: ClientConfig,
+  gen: () => AsyncIterable<T>,
+): AsyncIterable<T> {
+  return (async function* () {
+    const prev = ambient.current
+    ambient.current = config
+    try {
+      yield* gen()
+    } finally {
+      ambient.current = prev
+    }
+  })()
+}
+
+export interface HttpOptions {
+  /** Override `AF_STACK_URL` / the ambient client base URL. */
+  baseUrl?: string
+  /** Override `AF_STACK_API_KEY` / the ambient client API key. */
   apiKey?: string
   /** Extra headers merged into the request. */
   headers?: Record<string, string>
@@ -29,6 +140,16 @@ export interface HttpOptions {
   requestId?: string
   /** W3C `traceparent` for distributed tracing. */
   traceparent?: string
+  /** Per-request timeout in milliseconds (aborts the fetch). */
+  timeout?: number
+  /** Max transient-failure retries for THIS call (overrides the client default). */
+  maxRetries?: number
+  /**
+   * Idempotency-Key header value. Supplying it both dedupes the request
+   * server-side AND makes an otherwise non-idempotent mutation eligible for
+   * automatic retry (safe because the server dedupes replays).
+   */
+  idempotencyKey?: string
 }
 
 export interface StructuredErrorBody {
@@ -72,15 +193,19 @@ function envVar(name: string): string | undefined {
   return g.process?.env?.[name]
 }
 
-function resolveBaseUrl(override?: string): string {
+export function resolveBaseUrl(override?: string): string {
   if (override !== undefined && override !== "") return override.replace(/\/+$/, "")
+  const amb = ambient.current?.baseUrl
+  if (amb !== undefined && amb !== "") return amb.replace(/\/+$/, "")
   const fromEnv = envVar("AF_STACK_URL")
   if (fromEnv !== undefined && fromEnv !== "") return fromEnv.replace(/\/+$/, "")
   return DEFAULT_BASE_URL
 }
 
-function resolveApiKey(override?: string): string | undefined {
+export function resolveApiKey(override?: string): string | undefined {
   if (override !== undefined && override !== "") return override
+  const amb = ambient.current?.apiKey
+  if (amb !== undefined && amb !== "") return amb
   const fromEnv = envVar("AF_STACK_API_KEY")
   if (fromEnv !== undefined && fromEnv !== "") return fromEnv
   return undefined
@@ -101,7 +226,10 @@ function buildUrl(baseUrl: string, path: string): string {
   return `${baseUrl}${PATH_PREFIX}${cleanPath}`
 }
 
-function buildHeaders(opts: HttpOptions, hasBody: boolean): {
+function buildHeaders(
+  opts: HttpOptions,
+  hasBody: boolean,
+): {
   headers: Record<string, string>
   requestId: string
 } {
@@ -118,6 +246,10 @@ function buildHeaders(opts: HttpOptions, hasBody: boolean): {
 
   if (opts.traceparent !== undefined) headers.traceparent = opts.traceparent
 
+  if (opts.idempotencyKey !== undefined && opts.idempotencyKey !== "") {
+    headers["idempotency-key"] = opts.idempotencyKey
+  }
+
   if (opts.headers !== undefined) {
     for (const [k, v] of Object.entries(opts.headers)) headers[k.toLowerCase()] = v
   }
@@ -125,10 +257,63 @@ function buildHeaders(opts: HttpOptions, hasBody: boolean): {
   return { headers, requestId }
 }
 
-async function parseError(
-  response: Response,
-  requestId: string,
-): Promise<SuiteError> {
+/** Promise that resolves after `ms` milliseconds. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Compute the delay (ms) before the next retry attempt, honouring a
+ * `Retry-After` header (numeric seconds or an HTTP-date, capped at 20s) and
+ * otherwise using exponential backoff with full jitter. Exported for tests.
+ */
+export function retryDelayMs(response: Response, attempt: number): number {
+  const retryAfter = response.headers.get("retry-after")
+  if (retryAfter !== null && retryAfter !== "") {
+    const asNum = Number(retryAfter)
+    if (!Number.isNaN(asNum)) {
+      return Math.max(0, Math.min(asNum * 1000, RETRY_MAX_DELAY_MS))
+    }
+    const when = Date.parse(retryAfter)
+    if (!Number.isNaN(when)) {
+      const delta = when - Date.now()
+      if (delta > 0) return Math.min(delta, RETRY_MAX_DELAY_MS)
+    }
+  }
+  const ceiling = Math.min(RETRY_BASE_DELAY_MS * 2 ** attempt, RETRY_MAX_DELAY_MS)
+  return Math.random() * ceiling
+}
+
+/**
+ * Combine an optional caller signal with an optional timeout into a single
+ * AbortSignal. Returns the caller signal untouched when no timeout is set, so
+ * the singleton path (no timeout) behaves exactly as before.
+ */
+function buildSignal(
+  userSignal: AbortSignal | undefined,
+  timeoutMs: number | undefined,
+): AbortSignal | undefined {
+  if (timeoutMs === undefined || timeoutMs <= 0) return userSignal
+  const timeoutSignal = AbortSignal.timeout(timeoutMs)
+  if (userSignal === undefined) return timeoutSignal
+  const anyFn = (AbortSignal as { any?: (s: AbortSignal[]) => AbortSignal }).any
+  if (anyFn !== undefined) return anyFn([userSignal, timeoutSignal])
+  return userSignal
+}
+
+/**
+ * Effective retry budget + timeout for a call: an explicit per-call option
+ * wins, else the ambient client default, else 0 / no-timeout (singleton).
+ */
+function retryConfig(opts: HttpOptions): { maxRetries: number; timeout: number | undefined } {
+  const amb = getAmbientConfig()
+  return {
+    maxRetries: Math.max(0, opts.maxRetries ?? amb?.maxRetries ?? 0),
+    timeout: opts.timeout ?? amb?.timeout,
+  }
+}
+
+async function parseError(response: Response, requestId: string): Promise<SuiteError> {
   let body: StructuredErrorBody = {}
   try {
     body = (await response.json()) as StructuredErrorBody
@@ -167,17 +352,28 @@ export async function rawRequest(
     })
   }
 
-  const init: RequestInit = {
-    method,
-    headers,
-  }
-  if (hasBody) init.body = JSON.stringify(body)
-  if (opts.signal !== undefined) init.signal = opts.signal
-
+  const methodU = method.toUpperCase()
+  const { maxRetries, timeout } = retryConfig(opts)
+  const retryable = IDEMPOTENT_METHODS.has(methodU) || opts.idempotencyKey !== undefined
   const url = buildUrl(baseUrl, path)
-  const response = await fetchFn(url, init)
-  if (!response.ok) throw await parseError(response, requestId)
-  return response
+
+  let attempt = 0
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const init: RequestInit = { method, headers }
+    if (hasBody) init.body = JSON.stringify(body)
+    const signal = buildSignal(opts.signal, timeout)
+    if (signal !== undefined) init.signal = signal
+
+    const response = await fetchFn(url, init)
+    if (response.ok) return response
+    if (attempt < maxRetries && retryable && RETRYABLE_STATUS.has(response.status)) {
+      await sleep(retryDelayMs(response, attempt))
+      attempt += 1
+      continue
+    }
+    throw await parseError(response, requestId)
+  }
 }
 
 /** Raw body helper for multipart/binary endpoints. */
@@ -205,13 +401,28 @@ export async function rawBodyRequest(
     })
   }
 
-  const init: RequestInit = { method, headers }
-  if (body !== null) init.body = body
-  if (opts.signal !== undefined) init.signal = opts.signal
+  const methodU = method.toUpperCase()
+  const { maxRetries, timeout } = retryConfig(opts)
+  const retryable = IDEMPOTENT_METHODS.has(methodU) || opts.idempotencyKey !== undefined
+  const url = buildUrl(baseUrl, path)
 
-  const response = await fetchFn(buildUrl(baseUrl, path), init)
-  if (!response.ok) throw await parseError(response, requestId)
-  return response
+  let attempt = 0
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const init: RequestInit = { method, headers }
+    if (body !== null) init.body = body
+    const signal = buildSignal(opts.signal, timeout)
+    if (signal !== undefined) init.signal = signal
+
+    const response = await fetchFn(url, init)
+    if (response.ok) return response
+    if (attempt < maxRetries && retryable && RETRYABLE_STATUS.has(response.status)) {
+      await sleep(retryDelayMs(response, attempt))
+      attempt += 1
+      continue
+    }
+    throw await parseError(response, requestId)
+  }
 }
 
 /** Request + parse JSON. */
@@ -229,8 +440,11 @@ export async function request<T = unknown>(
 // ---------- camelCase / snake_case translation ----------
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v) && (
-    Object.getPrototypeOf(v) === Object.prototype || Object.getPrototypeOf(v) === null
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    !Array.isArray(v) &&
+    (Object.getPrototypeOf(v) === Object.prototype || Object.getPrototypeOf(v) === null)
   )
 }
 
@@ -279,9 +493,7 @@ export interface SseEvent {
  * Parse a `text/event-stream` ReadableStream into an async iterable of
  * SSE events. Follows the WHATWG event-stream spec for line splitting.
  */
-export async function* parseSse(
-  stream: ReadableStream<Uint8Array>,
-): AsyncIterable<SseEvent> {
+export async function* parseSse(stream: ReadableStream<Uint8Array>): AsyncIterable<SseEvent> {
   const reader = stream.getReader()
   const decoder = new TextDecoder("utf-8")
   let buffer = ""

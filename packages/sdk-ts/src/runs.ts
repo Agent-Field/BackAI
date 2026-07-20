@@ -13,9 +13,7 @@
 // async iterators because that's the Python idiom; here we expose
 // WebSockets so apps can hook them into React state, RxJS, etc.
 
-import { type HttpOptions } from "./_http.js"
-
-const DEFAULT_BASE_URL = "http://localhost:8080"
+import { resolveApiKey, resolveBaseUrl, type HttpOptions } from "./_http.js"
 
 // ─── existing per-run shape (kept for back-compat) ────────────────────────
 
@@ -33,25 +31,6 @@ export interface SubscribeRunOptions extends HttpOptions {
    * WebSocket. Browsers and most edge runtimes do not need this.
    */
   WebSocket?: typeof WebSocket
-}
-
-function envVar(name: string): string | undefined {
-  const g = globalThis as { process?: { env?: Record<string, string | undefined> } }
-  return g.process?.env?.[name]
-}
-
-function resolveBaseUrl(override?: string): string {
-  if (override !== undefined && override !== "") return override.replace(/\/+$/, "")
-  const fromEnv = envVar("AF_STACK_URL")
-  if (fromEnv !== undefined && fromEnv !== "") return fromEnv.replace(/\/+$/, "")
-  return DEFAULT_BASE_URL
-}
-
-function resolveApiKey(override?: string): string | undefined {
-  if (override !== undefined && override !== "") return override
-  const fromEnv = envVar("AF_STACK_API_KEY")
-  if (fromEnv !== undefined && fromEnv !== "") return fromEnv
-  return undefined
 }
 
 function websocketBase(baseUrl: string): string {
