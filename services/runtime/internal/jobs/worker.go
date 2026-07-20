@@ -30,6 +30,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/riverqueue/river"
 	"go.opentelemetry.io/otel"
@@ -120,9 +121,11 @@ func (d dispatchArgs) KindAliases() []string {
 
 // dispatcherWorker is the single in-process worker that handles every Go
 // job kind. It dispatches inside Work based on the row's real Kind field.
+// For remote (python/ts) kinds it hands off to manager.runRemoteJob.
 type dispatcherWorker struct {
 	river.WorkerDefaults[dispatchArgs]
 	registry *Registry
+	manager  *Manager
 }
 
 // Work is the entry point River calls when any registered-kind row becomes
@@ -151,21 +154,20 @@ func (w *dispatcherWorker) Work(ctx context.Context, job *river.Job[dispatchArgs
 		return err
 	}
 
-	// Remote jobs: we have no live handler. Manager.Enqueue now rejects
-	// remote-language kinds up front (ErrRemoteJobsNotSupported), so this
-	// branch should be unreachable for freshly-enqueued work — it remains as
-	// defense-in-depth for any pre-existing row, cancelling instead of
-	// retrying forever.
+	// Remote (python/typescript) jobs have no in-process Go handler. Hand
+	// them to the pull-worker executor: it registers a DB-backed rendezvous
+	// attempt and blocks until an out-of-process worker leases + resolves it
+	// (or the lease TTL expires / the job is cancelled). River keeps the job
+	// `running` throughout, so its durability + retry semantics are retained.
 	if !def.HasLiveHandler() {
-		w.registry.log.Info("remote job has no live handler; cancelling",
-			"kind", kind,
-			"language", def.Language,
-			"job_id", job.ID,
-		)
-		// TODO Phase 5+: publish to a per-language webhook channel or
-		// LISTEN/NOTIFY topic that SDKs subscribe to so SDK-py / SDK-ts
-		// can subscribe and process.
-		return river.JobCancel(errors.New("remote job pending dispatch (Phase 5+ cross-language handler not yet implemented)"))
+		if w.manager == nil {
+			err := errors.New("jobs: remote job but manager not wired for pull workers")
+			span.RecordError(err)
+			return river.JobCancel(err)
+		}
+		span.SetAttributes(attribute.String("job.exec", "remote-pull"))
+		var deadline *time.Time
+		return w.manager.runRemoteJob(ctx, job.ID, job.Attempt, kind, job.Args.TenantID, job.Args.Payload, deadline)
 	}
 
 	if err := def.goHandler(ctx, job.Args.Payload); err != nil {

@@ -55,6 +55,7 @@ from . import (
 )
 from .ctx import RequestContext, bind, ctx, current, reset, scope
 from .tools import Tools  # noqa: F401 — backward-compat re-export
+from .worker import JobContext, PermanentError, Worker  # noqa: F401 — pull-worker SDK
 
 __version__ = "0.0.1"
 
@@ -99,8 +100,11 @@ suite = SimpleNamespace(
 
 
 __all__ = [
+    "JobContext",
+    "PermanentError",
     "RequestContext",
     "Tools",
+    "Worker",
     "__version__",
     "admin",
     "agents",
@@ -132,4 +136,5 @@ __all__ = [
     "suite",
     "tools",
     "webhooks",
+    "worker",
 ]

@@ -60,11 +60,12 @@ func registeredAliases() []string {
 	return out
 }
 
-// ErrRemoteJobsNotSupported is returned by Enqueue when a job's definition is
-// a remote language (python/typescript). This runtime has no cross-language
-// dispatcher, so persisting such a row would produce a job that never runs.
-// Rather than silently accept and drop it, Enqueue fails fast with this
-// sentinel. Track cross-language job dispatch on the roadmap.
+// ErrRemoteJobsNotSupported was returned by Enqueue when a job's definition
+// was a remote language (python/typescript) back when this runtime had no
+// cross-language dispatcher. Remote jobs are now supported via the pull-based
+// worker protocol (remote_store.go / remote_executor.go), so Enqueue no
+// longer returns this. The sentinel is retained for backward compatibility
+// with callers (e.g. the REST handler) that still branch on it.
 var ErrRemoteJobsNotSupported = errors.New("jobs: remote-language jobs are not supported by this runtime")
 
 // Manager is the public handle for the jobs module.
@@ -89,6 +90,12 @@ type Manager struct {
 	// not a Go function — we still need to enqueue the row).
 	cronCancels []context.CancelFunc
 	cronWG      sync.WaitGroup
+
+	// remote is the DB-backed rendezvous store for remote (python/ts) jobs
+	// executed by out-of-process pull workers. Nil disables remote jobs.
+	remote RemoteStore
+	// remoteParams tunes the executor's lease polling.
+	remoteParams remoteParams
 }
 
 // Config configures a Manager.
@@ -130,12 +137,14 @@ func NewManager(cfg Config) (*Manager, error) {
 	}
 	registry := NewRegistry(log)
 	return &Manager{
-		log:      log,
-		registry: registry,
-		pool:     cfg.Pool,
-		driver:   riverpgxv5.New(cfg.Pool),
-		workers:  river.NewWorkers(),
-		schema:   cfg.Schema,
+		log:          log,
+		registry:     registry,
+		pool:         cfg.Pool,
+		driver:       riverpgxv5.New(cfg.Pool),
+		workers:      river.NewWorkers(),
+		schema:       cfg.Schema,
+		remote:       newPGRemoteStore(cfg.Pool),
+		remoteParams: defaultRemoteParams(),
 	}, nil
 }
 
@@ -194,7 +203,7 @@ func (m *Manager) Start(ctx context.Context, runWorkers bool, maxWorkers int) er
 
 	// Register the umbrella worker. River will key it under umbrellaKind
 	// (primary) plus every name in `names` (via KindAliases).
-	river.AddWorker(m.workers, &dispatcherWorker{registry: m.registry})
+	river.AddWorker(m.workers, &dispatcherWorker{registry: m.registry, manager: m})
 
 	if maxWorkers <= 0 {
 		maxWorkers = 25
@@ -351,13 +360,12 @@ func (m *Manager) Enqueue(ctx context.Context, name string, args json.RawMessage
 	if def == nil {
 		return nil, fmt.Errorf("jobs.Enqueue: unknown kind %q", name)
 	}
-	// Remote (python/typescript) definitions have no in-process handler:
-	// enqueuing one would persist a River row this runtime can never execute.
-	// Reject it up front so callers get an explicit failure instead of a
-	// job that vanishes into a "pending dispatch" log line.
-	if !def.HasLiveHandler() {
-		return nil, fmt.Errorf("%w (kind %q, language %q); track cross-language job dispatch on the roadmap", ErrRemoteJobsNotSupported, name, def.Language)
-	}
+	// Both Go (in-process handler) and remote (python/typescript) definitions
+	// are enqueued the same way: a River row. Go kinds run in-process via the
+	// dispatcher worker; remote kinds block on the DB-backed rendezvous while
+	// an out-of-process pull worker leases and executes them (see worker.go /
+	// remote_executor.go). Remote execution requires a started manager with
+	// running workers.
 	if m.client == nil {
 		return nil, errors.New("jobs.Enqueue: manager not started")
 	}
@@ -429,7 +437,7 @@ func (m *Manager) List(ctx context.Context, f ListFilters) (ListResult, error) {
 
 	// River's JobList doesn't support OFFSET directly; emulate via
 	// First(offset+limit) and slicing.
-	params := river.NewJobListParams().First(offset + limit).OrderBy(river.JobListOrderByID, river.SortOrderDesc)
+	params := river.NewJobListParams().First(offset+limit).OrderBy(river.JobListOrderByID, river.SortOrderDesc)
 	if f.Name != "" {
 		params = params.Kinds(f.Name)
 	}
@@ -575,6 +583,13 @@ func (m *Manager) countByStates(ctx context.Context, states []rivertype.JobState
 // JobIDFromString parses a job-id string (used by REST handlers).
 func JobIDFromString(s string) (int64, error) {
 	return strconv.ParseInt(s, 10, 64)
+}
+
+// JobIDToString renders a job id as a decimal string. River ids are int64
+// and can exceed JS's safe-integer range, so they always cross the wire as
+// strings (matching the dashboard's JobSchema.id).
+func JobIDToString(id int64) string {
+	return strconv.FormatInt(id, 10)
 }
 
 // JobList exposes the River client's JobList directly. Used by the

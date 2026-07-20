@@ -811,6 +811,9 @@ func (s *Server) registerRoutes() {
 	s.openapi.Register("POST", "/api/v1/jobs/{id}/retry", openapi.RouteMeta{
 		Summary: "Mark a job retryable", Tags: []string{"jobs"},
 	})
+	// Pull-based remote worker protocol (PRD R3). Out-of-process python/ts
+	// workers lease + execute remote job kinds. Registered in jobs_worker.go.
+	s.registerJobsWorkerRoutes()
 
 	// LLM gateway (Phase 7.1). Endpoints return 503 when no
 	// llmgateway.Gateway is wired (main.go constructs one from the
