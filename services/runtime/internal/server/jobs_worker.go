@@ -191,15 +191,6 @@ func bearerToken(r *http.Request) string {
 	return strings.TrimSpace(auth[len(bearer):])
 }
 
-func scopesContain(scopes []string, want string) bool {
-	for _, s := range scopes {
-		if strings.TrimSpace(s) == want {
-			return true
-		}
-	}
-	return false
-}
-
 // ─── handlers ─────────────────────────────────────────────────────────────
 
 // handleWorkerLease long-polls for the next ready attempt.
