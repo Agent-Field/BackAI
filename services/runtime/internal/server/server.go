@@ -835,6 +835,10 @@ func (s *Server) registerRoutes() {
 	s.registerWebhookSubscriptionRoutes()
 	s.registerWebhooksOpenAPI()
 
+	// R8 lifecycle — customer-facing tenant self-management (keys,
+	// invitations, ownership, deletion, audit).
+	s.registerLifecycleRoutes()
+
 	// Billing (Phase 10.4). Read endpoints serve empty / synthesised
 	// rows when no service is wired; the portal-link mutation returns
 	// 503 BILLING_NOT_CONFIGURED. Also registers the Stripe webhook

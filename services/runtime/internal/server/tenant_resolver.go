@@ -116,6 +116,13 @@ var publicPrefixes = []string{
 	// OAuth provider callbacks validate their own signed state because
 	// providers may not return the same app session cookie shape.
 	"/oauth/callback",
+	// R8 invitation accept (/api/v1/invitations/accept). Bypasses the tenant
+	// resolver because the invitee has no membership yet (the resolver would
+	// 403 them). The handler self-authenticates via the invite token
+	// (capability) + the session user id, and looks the row up under
+	// bypass_rls. NOTE: /api/v1/me/* is deliberately NOT here — those routes
+	// must go through the resolver so tenant + user are bound for RBAC.
+	"/api/v1/invitations",
 	// Billing dashboard surface (Phase 10.4). Same auth shape as
 	// admin/* — the dashboard's session gates it.
 	"/api/v1/billing",
