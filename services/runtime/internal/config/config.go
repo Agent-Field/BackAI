@@ -187,6 +187,10 @@ type ModulesConfig struct {
 	// WorkloadModules lists domain modules loaded on top of the core
 	// suite (e.g. "agent-commerce", "interior-design").
 	WorkloadModules []string `yaml:"workload_modules"`
+	// WorkloadModulesPath is the filesystem root the runtime scans for
+	// declarative workload modules (each a <id>/backai.module.yaml). Set
+	// via WORKLOAD_MODULES_PATH; defaults to ./workload-modules.
+	WorkloadModulesPath string `yaml:"workload_modules_path"`
 }
 
 // ServerConfig holds HTTP listener settings.
@@ -276,6 +280,9 @@ func Default() Config {
 		Observability: ObservabilityConfig{
 			ServiceName: "af-stack",
 			Enabled:     true,
+		},
+		Modules: ModulesConfig{
+			WorkloadModulesPath: "./workload-modules",
 		},
 		Storage: StorageConfig{
 			Adapter: "minio",
@@ -390,6 +397,14 @@ func applyEnvOverrides(cfg *Config) {
 			cfg.Modules.Enabled = make(map[string]bool)
 		}
 		cfg.Modules.Enabled[moduleID] = on
+	}
+
+	// Filesystem root the runtime scans for declarative workload modules.
+	if v := os.Getenv("WORKLOAD_MODULES_PATH"); v != "" {
+		cfg.Modules.WorkloadModulesPath = v
+	}
+	if strings.TrimSpace(cfg.Modules.WorkloadModulesPath) == "" {
+		cfg.Modules.WorkloadModulesPath = "./workload-modules"
 	}
 
 	// Storage. AF_STACK_S3_* mirrors the .env.example contract.

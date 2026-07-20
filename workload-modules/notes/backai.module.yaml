@@ -1,0 +1,35 @@
+# Reference workload module (PRD R2).
+#
+# A workload module is declarative: this manifest plus the versioned SQL
+# under migrations/ is all the runtime needs to auto-generate tenant-scoped
+# CRUD. No Go/Python handler code is required for straight CRUD resources.
+#
+# The runtime discovers this file at <WORKLOAD_MODULES_PATH>/notes/backai.module.yaml
+# (default WORKLOAD_MODULES_PATH=./workload-modules). It is `enabled: false`
+# so it ships as a living example without auto-serving. To turn it on, add
+# `notes` to modules.workload_modules in config.yaml (or set the module
+# enabled list) and restart — routes appear on the next boot; disabling
+# removes the routes WITHOUT dropping the table.
+id: notes
+name: Notes
+version: 0.1.0
+description: Reference workload module — a tenant-scoped notes resource.
+enabled: false
+migrations: migrations
+
+resources:
+  # Backing table follows the <module>_<resource> convention: `notes_notes`.
+  # The migration under migrations/ MUST create that table with id +
+  # tenant_id + created_at + updated_at plus these declared columns, and
+  # enable/force RLS with a tenant-isolation policy (statically enforced at
+  # load — a tenantless table refuses to load).
+  - name: notes
+    fields:
+      - name: title
+        type: string
+        required: true
+      - name: body
+        type: string
+      - name: done
+        type: bool
+        default: false

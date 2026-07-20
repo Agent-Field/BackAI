@@ -32,8 +32,19 @@ func TestScaffoldCommands(t *testing.T) {
 	if err := RunModule([]string{"new", "Notes"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatalf("RunModule returned error: %v", err)
 	}
-	if got := read(t, root, "workload-modules/notes/manifest.yaml"); !strings.Contains(got, "id: notes") {
-		t.Fatalf("unexpected module manifest:\n%s", got)
+	// The scaffold emits the declarative manifest shape (PRD R2): a
+	// backai.module.yaml with resources, plus an RLS-compliant migration.
+	got := read(t, root, "workload-modules/notes/backai.module.yaml")
+	for _, want := range []string{"id: notes", "resources:", "name: items", "type: string"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("scaffolded manifest missing %q:\n%s", want, got)
+		}
+	}
+	mig := read(t, root, "workload-modules/notes/migrations/00001_init.sql")
+	for _, want := range []string{"tenant_id", "force row level security", "create policy"} {
+		if !strings.Contains(mig, want) {
+			t.Fatalf("scaffolded migration missing %q:\n%s", want, mig)
+		}
 	}
 
 	if err := RunPlugin([]string{"new", "Tenant Health"}, &stdout, &bytes.Buffer{}); err != nil {

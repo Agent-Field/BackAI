@@ -44,6 +44,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/logger"
 	"github.com/Agent-Field/backai/services/runtime/internal/mcp"
 	"github.com/Agent-Field/backai/services/runtime/internal/memory"
+	"github.com/Agent-Field/backai/services/runtime/internal/modules"
 	"github.com/Agent-Field/backai/services/runtime/internal/notifications"
 	"github.com/Agent-Field/backai/services/runtime/internal/oauth"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
@@ -117,6 +118,10 @@ type Server struct {
 	// search indexes tenant-scoped app/workload records. nil when no
 	// DB is wired; /api/v1/search returns 503 SEARCH_NOT_CONFIGURED.
 	search *search.Store
+	// modules is the filesystem-discovered workload-module manager (PRD
+	// R2). nil = no declarative modules mounted; the admin inventory
+	// endpoint serves an empty list. Route mounting happens in New().
+	modules *modules.Manager
 	// activity records tenant-scoped customer/product events. nil when
 	// no DB is wired; /api/v1/activity returns 503 ACTIVITY_NOT_CONFIGURED.
 	activity *activity.Store
@@ -309,6 +314,12 @@ type Deps struct {
 	// memory/runs/traces and from suite memory; apps/workload modules
 	// index product records here for FTS/vector/hybrid lookup.
 	Search *search.Store
+	// Modules is the workload-module manager (PRD R2). main.go constructs
+	// it via modules.Load(cfg.Modules.WorkloadModulesPath,
+	// cfg.Modules.WorkloadModules, log) and calls ApplyMigrations before
+	// New() so migrations land before module traffic is served. nil = no
+	// declarative workload modules.
+	Modules *modules.Manager
 	// Activity is the customer/user activity log store. It is separate
 	// from admin audit and AgentField state.
 	Activity *activity.Store
@@ -477,6 +488,7 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		guardrails:      deps.Guardrails,
 		memory:          deps.Memory,
 		search:          deps.Search,
+		modules:         deps.Modules,
 		activity:        deps.Activity,
 		featureFlags:    deps.FeatureFlags,
 		dbStudio:        deps.DBStudio,
@@ -816,6 +828,12 @@ func (s *Server) registerRoutes() {
 	// AgentField stateful primitives and suite memory.
 	s.registerSearchRoutes()
 	s.registerSearchOpenAPI()
+
+	// Workload modules (PRD R2). Filesystem-discovered declarative modules
+	// mount tenant-scoped CRUD under /api/v1/workload/*; the admin
+	// inventory lives at GET /api/v1/admin/modules. No-op mounting when no
+	// manager is wired.
+	s.registerWorkloadModuleRoutes()
 
 	// User activity log (Phase 2 completeness). Product/customer events
 	// live here; admin mutations stay in suite_audit_log.
