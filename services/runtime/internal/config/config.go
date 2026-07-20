@@ -29,12 +29,30 @@ const (
 	ModePersonal = "personal"
 )
 
+// EnvProduction is the AF_STACK_ENV value that turns on the production
+// operating contract. When Mode is saas AND Env is production, the startup
+// production preflight (internal/prodcheck) refuses to boot an un-hardened
+// deployment, and /ready folds the same posture checks into readiness. Any
+// other Env value (empty, "dev", "staging") leaves the extra gates off so
+// local + preview environments boot freely.
+const EnvProduction = "production"
+
+// NetworkPolicyIsolated is the secure-by-default sandbox network posture: no
+// egress. It is the only policy the production preflight accepts, so a
+// production SaaS deployment can't ship sandboxes on the open bridge — a
+// cross-tenant escape hatch (see internal/sandbox/interface.go).
+const NetworkPolicyIsolated = "isolated"
+
 // Config is the top-level runtime configuration.
 type Config struct {
 	// Mode is the deployment mode: "saas" (default) or "personal". Personal
 	// mode forces auth and billing off (see PersonalMode). Set via
 	// AF_STACK_MODE. Both frontends read it (server-side) to skip login.
-	Mode          string              `yaml:"mode"`
+	Mode string `yaml:"mode"`
+	// Env names the deployment environment: "production" arms the production
+	// operating contract (see EnvProduction). Empty for local/dev. Set via
+	// AF_STACK_ENV. Only "production" (with Mode=saas) changes behaviour today.
+	Env           string              `yaml:"env"`
 	Server        ServerConfig        `yaml:"server"`
 	Database      DatabaseConfig      `yaml:"database"`
 	AgentField    AgentFieldConfig    `yaml:"agentfield"`
@@ -62,11 +80,18 @@ type Config struct {
 // E2BAPIKey / E2BBaseURL are only consumed when Adapter="e2b".
 // RemoteURL / RemoteToken are only consumed when Adapter="remote".
 type SandboxConfig struct {
-	Adapter     string `yaml:"adapter"`
-	E2BAPIKey   string `yaml:"e2b_api_key"`
-	E2BBaseURL  string `yaml:"e2b_base_url"`
-	RemoteURL   string `yaml:"remote_url"`
-	RemoteToken string `yaml:"remote_token"`
+	Adapter    string `yaml:"adapter"`
+	E2BAPIKey  string `yaml:"e2b_api_key"`
+	E2BBaseURL string `yaml:"e2b_base_url"`
+	// NetworkPolicy is the default network posture for sandbox runs:
+	// "isolated" (no egress — the secure default) or "open". The production
+	// preflight refuses to boot a saas+production deployment on any policy
+	// other than "isolated". Set via AF_STACK_SANDBOX_NETWORK_POLICY. Empty
+	// is treated as "isolated" (matching the per-run default validated in
+	// internal/sandbox/interface.go).
+	NetworkPolicy string `yaml:"network_policy"`
+	RemoteURL     string `yaml:"remote_url"`
+	RemoteToken   string `yaml:"remote_token"`
 }
 
 // LogsConfig selects the runtime log-store adapter. The ring adapter is the
@@ -240,6 +265,37 @@ func (c Config) PersonalMode() bool {
 	return strings.EqualFold(strings.TrimSpace(c.Mode), ModePersonal)
 }
 
+// SaaSMode reports whether the runtime is in multi-tenant SaaS mode. This is
+// the default: any Mode that isn't "personal" (including the empty string,
+// which Default()/validate() treat as saas) is saas.
+func (c Config) SaaSMode() bool {
+	return !c.PersonalMode()
+}
+
+// ProductionEnv reports whether AF_STACK_ENV names the production environment.
+func (c Config) ProductionEnv() bool {
+	return strings.EqualFold(strings.TrimSpace(c.Env), EnvProduction)
+}
+
+// ProductionHardening reports whether the production operating contract is in
+// force: SaaS mode AND the production environment. This is the single gate the
+// startup preflight and /ready posture checks key off — personal mode and
+// non-production environments are exempt so local + preview boots stay simple.
+func (c Config) ProductionHardening() bool {
+	return c.SaaSMode() && c.ProductionEnv()
+}
+
+// SandboxNetworkPolicy returns the effective default sandbox network posture,
+// normalising the empty string to the secure "isolated" default (matching the
+// per-run default in internal/sandbox).
+func (c Config) SandboxNetworkPolicy() string {
+	p := strings.ToLower(strings.TrimSpace(c.Sandbox.NetworkPolicy))
+	if p == "" {
+		return NetworkPolicyIsolated
+	}
+	return p
+}
+
 // BillingEnabled reports whether billing/budget enforcement should run.
 // It is off in personal mode, and off when the billing module is explicitly
 // disabled (AF_STACK_MODULE_BILLING=false); otherwise it defaults on so
@@ -289,7 +345,8 @@ func Default() Config {
 			Region:  "us-east-1",
 		},
 		Sandbox: SandboxConfig{
-			Adapter: "docker",
+			Adapter:       "docker",
+			NetworkPolicy: NetworkPolicyIsolated,
 		},
 		Logs: LogsConfig{
 			Adapter: "ring",
@@ -341,6 +398,11 @@ func applyEnvOverrides(cfg *Config) {
 	// AF_STACK_MODE is the master switch: "saas" (default) or "personal".
 	if v := os.Getenv("AF_STACK_MODE"); v != "" {
 		cfg.Mode = strings.ToLower(strings.TrimSpace(v))
+	}
+	// AF_STACK_ENV arms the production operating contract when set to
+	// "production" (in saas mode). Left lowercase so ProductionEnv() matches.
+	if v := os.Getenv("AF_STACK_ENV"); v != "" {
+		cfg.Env = strings.ToLower(strings.TrimSpace(v))
 	}
 	if v := os.Getenv("AF_STACK_HTTP_ADDR"); v != "" {
 		cfg.Server.HTTPAddr = v
@@ -442,6 +504,11 @@ func applyEnvOverrides(cfg *Config) {
 	// Sandbox adapter selection + e2b credentials.
 	if v := os.Getenv("AF_STACK_SANDBOX_ADAPTER"); v != "" {
 		cfg.Sandbox.Adapter = strings.ToLower(v)
+	}
+	// Default sandbox network posture; the production preflight requires
+	// "isolated" (see internal/prodcheck).
+	if v := os.Getenv("AF_STACK_SANDBOX_NETWORK_POLICY"); v != "" {
+		cfg.Sandbox.NetworkPolicy = strings.ToLower(strings.TrimSpace(v))
 	}
 	if v := os.Getenv("E2B_API_KEY"); v != "" {
 		cfg.Sandbox.E2BAPIKey = v

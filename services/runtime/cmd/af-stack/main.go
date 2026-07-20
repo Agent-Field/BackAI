@@ -1186,6 +1186,9 @@ func main() {
 		})
 		sqlDB := stdlib.OpenDBFromPool(database.Pool)
 		systemCrons := crons.NewSystemScheduler(log)
+		// R7: opt-in backup/restore verification cron (no-op unless
+		// BACKUP_TEST_ENABLED). Registered before Run() starts below.
+		registerBackupTestCron(systemCrons, log)
 		if err := systemCrons.RegisterSystem("retention.daily", "0 3 * * *", func(runCtx context.Context) error {
 			retentionCtx, cancel := context.WithTimeout(runCtx, 5*time.Minute)
 			defer cancel()
@@ -1811,6 +1814,11 @@ func main() {
 
 	probeReg.WithAdapterRegistry(adapterRegistry)
 
+	// R7 production operating contract: refuse to boot a mis-hardened
+	// saas+production deployment (RLS, KMS, CORS, storage, sandbox posture).
+	// No-op outside AF_STACK_ENV=production. See prodpreflight.go.
+	runProductionPreflight(ctx, cfg, database, store != nil, log)
+
 	srv := server.New(cfg, log, server.Deps{
 		DB:              database,
 		AF:              afClient,
@@ -1904,6 +1912,10 @@ func main() {
 			}
 		}()
 	}
+
+	// R7: background sampler for the pool-saturation + jobs-queue-age gauges
+	// the default Prometheus alerts watch. No-op without a database.
+	startProductionMetricsSampler(ctx, database, log)
 
 	// Start listener.
 	listenerErr := make(chan error, 1)
