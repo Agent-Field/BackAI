@@ -2,33 +2,30 @@
 
 // suite.secrets.* — per-tenant secret reads.
 //
-// The main SDK only exposes `get` (reveal the plaintext value). Admin
-// verbs (list/set/delete/rotate) move to a separate `@af-stack/sdk-admin`
-// package post-v1.
+// The main SDK exposes `get` (reveal the plaintext value). It targets the
+// tenant-principal vault surface, which is authorized by the caller's own
+// API key (or session) — no operator privileges required:
+//   POST /api/v1/vault/secrets/{key}/reveal -> { key, value }
 //
-// Endpoint comes from `apps/dashboard/src/lib/api.ts`:
-//   POST /api/v1/secrets/{key}/reveal -> { key, value }
+// The runtime keeps a separate operator-gated surface at /api/v1/secrets
+// for the dashboard; the SDK never touches it.
 
 import { z } from "zod"
 import { request, type HttpOptions } from "./_http.js"
-
-// TODO(admin-sdk): list/set/delete/rotate live in `@af-stack/sdk-admin`
-// once that package ships. Keep them out of this module so accidental
-// writes from app code are impossible.
 
 const SecretValueSchema = z.object({
   key: z.string(),
   value: z.string(),
 })
 
-/** Return the plaintext value of a secret. */
+/** Return the plaintext value of a secret (tenant-scoped, audited). */
 export async function get(key: string, opts: HttpOptions = {}): Promise<string> {
   if (typeof key !== "string" || key.length === 0) {
     throw new Error("secret key must be a non-empty string")
   }
   const raw = await request<unknown>(
     "POST",
-    `/secrets/${encodeURIComponent(key)}/reveal`,
+    `/vault/secrets/${encodeURIComponent(key)}/reveal`,
     null,
     opts,
   )
