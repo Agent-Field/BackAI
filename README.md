@@ -2,12 +2,13 @@
 
 # BackAI
 
-### The open backend for AI products.
+### The agent-first backend for products in the AI era.
 
-**Ship the product. Stop rebuilding the backend around it.**
+**Think Supabase for AI backends:** one open, self-hosted stack for identity,
+data, models, agents, jobs, storage, billing, cost, and operations.
 
-BackAI gives your app one self-hosted backend for auth, tenants, LLMs, agents,
-jobs, storage, billing, cost, and operations — already wired together.
+Run it locally. Hand the repo to Codex or Claude Code. Let them build inside
+explicit, auditable boundaries. Own the code, data, and deployment.
 
 [Quickstart](#quickstart) · [What you get](#what-you-get) · [Build with an agent](#built-for-codex-and-claude-code) · [Docs](docs/dx/README.md)
 
@@ -17,14 +18,10 @@ jobs, storage, billing, cost, and operations — already wired together.
 
 </div>
 
-Think **Supabase for AI-native backends**: open source, self-hostable,
-CLI-first, and built with agents, model calls, cost, and policy as backend
-primitives — not application glue.
-
 <div align="center">
-  <img src="docs/assets/readme/operator-overview.png" alt="BackAI operator console showing API setup, cost, runs, activity, and service health" width="1000" />
+  <img src="docs/assets/readme/hero-control-plane.png" alt="A developer and coding agent connect a product through a backend control plane to models, data, and runtime infrastructure" width="1000" />
   <br />
-  <sub>One console for the backend behind your AI product.</sub>
+  <sub>You and your coding agent build the product. The control plane carries identity, policy, cost, and operations.</sub>
 </div>
 
 ## Quickstart
@@ -52,22 +49,30 @@ service URL.
 
 ## What you get
 
-| Primitive            | Wired into BackAI                                                                                                           |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| **Agents**           | AgentField execution, multi-reasoner call graphs, streaming, approvals, cancellation, and run traces                        |
-| **LLMs**             | OpenAI-compatible gateway, LiteLLM provider routing, streaming, embeddings, cache, guardrails, and model-level cost records |
-| **Data**             | Postgres 16, pgvector, tenant-aware memory, search, realtime, migrations, and an operator database browser                  |
-| **Identity**         | better-auth, users, sessions, tenants, memberships, roles, OAuth, and scoped API keys                                       |
-| **Async work**       | River-backed jobs, crons, inbound webhooks, signed outbound webhooks, retries, and notifications                            |
-| **Agent tools**      | Isolated sandboxes, MCP servers, native tools, skills, secrets, and coding-harness discovery                                |
-| **Commercial layer** | Usage metering, cost ledger, per-tenant budgets, plan entitlements, and Stripe-shaped billing                               |
-| **Operations**       | Admin console for runs, errors, logs, queue, spend, customers, keys, audit, integrations, and health                        |
-| **Product shell**    | A customer-facing Next.js app and SupportDesk AI flow that can be replaced with your product                                |
-| **Delivery**         | Local Compose plus production recipes for Helm, Fly.io, Railway, Render, and a single VM                                    |
+The priority order is deliberate: establish identity and tenant policy, execute
+AI work, account for cost, then make the whole path observable and operable.
+
+| Primitive            | Wired into BackAI                                                                                                                             |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Identity**         | Users, sessions, tenants, memberships, roles, OAuth, scoped API keys, and row-level tenant isolation                                          |
+| **Data**             | Postgres, pgvector, tenant-aware memory, search, realtime, migrations, storage, and an operator database browser                              |
+| **Models**           | OpenAI-compatible gateway, provider routing, streaming, embeddings, cache, guardrails, budgets, and model-level cost records                  |
+| **Agents**           | Multi-reasoner execution, streaming, approvals, cancellation, durable jobs, crons, webhooks, and run traces                                   |
+| **Agent tools**      | Isolated sandboxes, MCP servers, native tools, skills, secrets, and coding-harness discovery                                                  |
+| **Commercial layer** | Usage metering, cost ledger, per-tenant budgets, plan entitlements, and Stripe-shaped billing                                                 |
+| **Operations**       | Admin dashboard for traffic, errors, spend, budgets, queues, runs, traces, logs, webhooks, customers, audit, integrations, and service health |
+| **Product shell**    | A customer-facing Next.js app and SupportDesk AI flow that can be replaced with your product                                                  |
+| **Delivery**         | One CLI-managed Compose stack plus production recipes for Helm, Fly.io, Railway, Render, and a private VM or VPC                              |
 
 These are one system, not a catalog of disconnected containers. Tenant identity
 flows through model calls, jobs, storage, billing, audit, and cost so builders do
 not have to recreate those connections for every product.
+
+<div align="center">
+  <img src="docs/assets/readme/operator-overview.png" alt="BackAI operator console showing API setup, cost, runs, activity, and service health" width="1000" />
+  <br />
+  <sub>One console for the backend behind your AI product.</sub>
+</div>
 
 ## What can you build?
 
@@ -90,6 +95,10 @@ BackAI is designed to be handed to a coding agent after initialization. The
 repo includes `AGENTS.md`, `CLAUDE.md`, and a versioned BackAI skill that explain
 the architecture, safe edit boundaries, SDKs, and verification workflow.
 
+Repo access is not runtime authority. Scoped keys, tenant policy, budgets,
+approvals, sandbox limits, and audit records keep build and live operations
+inside explicit boundaries.
+
 ```bash
 # Scaffold a small app that consumes a BackAI deployment.
 af-stack init my-ai-product
@@ -110,6 +119,10 @@ Inside a fork, builders and agents usually edit only four surfaces:
 
 The platform runtime stays behind those boundaries. Existing apps can skip the
 customer shell and [attach BackAI as a backend](docs/attach-existing-app.md).
+
+<div align="center">
+  <img src="docs/assets/readme/agent-workflow.png" alt="A CLI initializes a repository for a coding agent to edit through safe surfaces before testing and running the stack" width="1000" />
+</div>
 
 ## One URL, two compatible interfaces
 
@@ -172,30 +185,21 @@ and your own threat model. Start with [deployment guidance](docs/deploy.md),
 
 ## How it fits together
 
-```text
-Your product or agent
-        │
-        ▼
-BackAI API + Suite SDK ─── auth · tenants · policy · cost · audit
-        │
-        ├── Postgres + pgvector     data · memory · jobs · billing
-        ├── AgentField             reasoners · runs · traces · approvals
-        ├── LiteLLM                model providers behind one gateway
-        └── S3 + sandbox adapters  files · artifacts · isolated execution
-```
+<div align="center">
+  <img src="docs/assets/readme/architecture.png" alt="A backend control plane connects product APIs, SDKs, and an admin dashboard to data, agent runtime, model gateway, storage, and sandbox infrastructure" width="1000" />
+</div>
 
 Every app-level model call should go through `/api/v1/llm/*`. Direct provider
 calls bypass BackAI's tenant identity, budgets, cost records, and guardrails.
 
-<div align="center">
-  <img src="docs/assets/dashboard-screenshots/agentfield-swe-af-run-detail.png" alt="AgentField run detail for a multi-reasoner coding-agent execution" width="1000" />
-  <br />
-  <sub>AgentField owns the reasoner graph and trace; BackAI connects it to the product backend.</sub>
-</div>
+## Self-host it
 
-## Deploy
+`af-stack dev` starts the complete local composition. The same open-source
+stack can run in your cloud or VPC without a mandatory hosted control plane.
+Use your own model keys, Postgres, object storage, secrets, backups, and network
+policy. See the [OSS audit](docs/oss-audit.md) for what is included and why.
 
-Use the target that matches your operations posture:
+Choose the target that matches your operations posture:
 
 | Target           | Best for                                           |
 | ---------------- | -------------------------------------------------- |
