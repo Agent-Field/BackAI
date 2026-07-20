@@ -22,9 +22,9 @@ AI infrastructure. Own the code, data, and deployment.
 </div>
 
 <div align="center">
-  <img src="docs/assets/readme/hero-control-plane.png" alt="A developer and coding agent connect a product through a backend control plane to models, data, and runtime infrastructure" width="1000" />
+  <img src="docs/assets/readme/hero-control-plane.png" alt="A product connects through a backend control plane with application-backend, AI-runtime, and operating-plane layers to pluggable infrastructure" width="1000" />
   <br />
-  <sub>Coding agents build the product; runtime agents power it. The control plane carries identity, policy, cost, and operations across both.</sub>
+  <sub>Application backend, AI runtime, and operating controls—one abstraction over models, data, sandboxes, and browsers.</sub>
 </div>
 
 ## Quickstart
@@ -70,7 +70,7 @@ and observability.
 | **Data**             | Postgres, pgvector, tenant-aware memory, search, realtime, migrations, storage, and an operator database browser                              |
 | **Models**           | OpenAI-compatible gateway, provider routing, streaming, embeddings, cache, guardrails, budgets, and model-level cost records                  |
 | **Agents**           | Multi-reasoner execution, streaming, approvals, cancellation, durable jobs, crons, webhooks, and run traces                                   |
-| **Agent tools**      | Isolated sandboxes, MCP servers, native tools, skills, secrets, and coding-harness discovery                                                  |
+| **Agent tools**      | Isolated sandboxes, browser adapters, MCP servers, native tools, skills, secrets, and coding-harness discovery                                |
 | **Commercial layer** | Usage metering, cost ledger, per-tenant budgets, plan entitlements, and Stripe-shaped billing                                                 |
 | **Operations**       | Admin dashboard for traffic, errors, spend, budgets, queues, runs, traces, logs, webhooks, customers, audit, integrations, and service health |
 | **Product shell**    | A customer-facing Next.js app and SupportDesk AI flow that can be replaced with your product                                                  |
@@ -225,7 +225,7 @@ and your own threat model. Start with [deployment guidance](docs/deploy.md),
 ## How it fits together
 
 <div align="center">
-  <img src="docs/assets/readme/architecture.png" alt="A backend control plane connects product APIs, SDKs, and an admin dashboard to data, agent runtime, model gateway, storage, and sandbox infrastructure" width="1000" />
+  <img src="docs/assets/readme/architecture.png" alt="A layered backend control plane connects product APIs, SDKs, and an admin dashboard to data, models, agents, tools, sandbox, and browser infrastructure" width="1000" />
 </div>
 
 Every app-level model call should go through `/api/v1/llm/*`. Direct provider
