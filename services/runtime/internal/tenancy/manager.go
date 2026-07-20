@@ -1197,15 +1197,20 @@ func (m *Manager) IssueKey(ctx context.Context, in IssueAPIKeyInput) (IssuedAPIK
 		c := in.CreatedBy
 		createdByPtr = &c
 	}
+	var serviceAcctPtr *string
+	if strings.TrimSpace(in.ServiceAccountName) != "" {
+		sa := in.ServiceAccountName
+		serviceAcctPtr = &sa
+	}
 
 	err = m.pool.QueryRow(ctx, `
 		insert into suite_api_keys
-			(tenant_id, prefix, hashed_secret, name, scopes, created_by, expires_at,
+			(tenant_id, prefix, hashed_secret, name, service_account_name, scopes, created_by, expires_at,
 			 budget_max_usd, rate_limit_rpm, rate_limit_tpm)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		returning id::text, created_at
 	`,
-		in.TenantID, prefix, string(hash), namePtr, in.Scopes, createdByPtr, in.ExpiresAt,
+		in.TenantID, prefix, string(hash), namePtr, serviceAcctPtr, in.Scopes, createdByPtr, in.ExpiresAt,
 		in.BudgetMaxUSD, in.RateLimitRPM, in.RateLimitTPM,
 	).Scan(&id, &createdAt)
 	if err != nil {
@@ -1258,17 +1263,18 @@ func (m *Manager) IssueKey(ctx context.Context, in IssueAPIKeyInput) (IssuedAPIK
 	}
 
 	pub := APIKey{
-		ID:           id,
-		TenantID:     in.TenantID,
-		Prefix:       prefix,
-		Name:         namePtr,
-		Scopes:       append([]string{}, in.Scopes...),
-		CreatedBy:    createdByPtr,
-		CreatedAt:    createdAt,
-		ExpiresAt:    in.ExpiresAt,
-		BudgetMaxUSD: in.BudgetMaxUSD,
-		RateLimitRPM: in.RateLimitRPM,
-		RateLimitTPM: in.RateLimitTPM,
+		ID:                 id,
+		TenantID:           in.TenantID,
+		Prefix:             prefix,
+		Name:               namePtr,
+		ServiceAccountName: serviceAcctPtr,
+		Scopes:             append([]string{}, in.Scopes...),
+		CreatedBy:          createdByPtr,
+		CreatedAt:          createdAt,
+		ExpiresAt:          in.ExpiresAt,
+		BudgetMaxUSD:       in.BudgetMaxUSD,
+		RateLimitRPM:       in.RateLimitRPM,
+		RateLimitTPM:       in.RateLimitTPM,
 	}
 	if litellmAlias != "" {
 		a := litellmAlias
@@ -1323,15 +1329,20 @@ func (m *Manager) issueLocalKeyWith(ctx context.Context, writer keyWriter, in Is
 		c := in.CreatedBy
 		createdByPtr = &c
 	}
+	var serviceAcctPtr *string
+	if strings.TrimSpace(in.ServiceAccountName) != "" {
+		sa := in.ServiceAccountName
+		serviceAcctPtr = &sa
+	}
 
 	err = writer.QueryRow(ctx, `
 		insert into suite_api_keys
-			(tenant_id, prefix, hashed_secret, name, scopes, created_by, expires_at,
+			(tenant_id, prefix, hashed_secret, name, service_account_name, scopes, created_by, expires_at,
 			 budget_max_usd, rate_limit_rpm, rate_limit_tpm)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		returning id::text, created_at
 	`,
-		in.TenantID, prefix, string(hash), namePtr, in.Scopes, createdByPtr, in.ExpiresAt,
+		in.TenantID, prefix, string(hash), namePtr, serviceAcctPtr, in.Scopes, createdByPtr, in.ExpiresAt,
 		in.BudgetMaxUSD, in.RateLimitRPM, in.RateLimitTPM,
 	).Scan(&id, &createdAt)
 	if err != nil {
@@ -1344,17 +1355,18 @@ func (m *Manager) issueLocalKeyWith(ctx context.Context, writer keyWriter, in Is
 
 	return IssuedAPIKey{
 		APIKey: APIKey{
-			ID:           id,
-			TenantID:     in.TenantID,
-			Prefix:       prefix,
-			Name:         namePtr,
-			Scopes:       append([]string{}, in.Scopes...),
-			CreatedBy:    createdByPtr,
-			CreatedAt:    createdAt,
-			ExpiresAt:    in.ExpiresAt,
-			BudgetMaxUSD: in.BudgetMaxUSD,
-			RateLimitRPM: in.RateLimitRPM,
-			RateLimitTPM: in.RateLimitTPM,
+			ID:                 id,
+			TenantID:           in.TenantID,
+			Prefix:             prefix,
+			Name:               namePtr,
+			ServiceAccountName: serviceAcctPtr,
+			Scopes:             append([]string{}, in.Scopes...),
+			CreatedBy:          createdByPtr,
+			CreatedAt:          createdAt,
+			ExpiresAt:          in.ExpiresAt,
+			BudgetMaxUSD:       in.BudgetMaxUSD,
+			RateLimitRPM:       in.RateLimitRPM,
+			RateLimitTPM:       in.RateLimitTPM,
 		},
 		Value: keyTokenPrefix + prefix + "_" + secret,
 	}, nil
@@ -1391,7 +1403,7 @@ func (m *Manager) listKeysImpl(ctx context.Context, opts ListKeysOpts) ([]APIKey
 	if len(conds) > 0 {
 		where = " where " + strings.Join(conds, " and ")
 	}
-	q := `select id::text, tenant_id::text, prefix, name, scopes, created_by::text,
+	q := `select id::text, tenant_id::text, prefix, name, service_account_name, scopes, created_by::text,
 		         created_at, last_used_at, expires_at, revoked_at,
 		         litellm_key_alias, budget_max_usd, rate_limit_rpm, rate_limit_tpm
 		  from suite_api_keys ` + where + ` order by created_at desc`
@@ -1522,7 +1534,7 @@ func (m *Manager) RotateKey(ctx context.Context, id string) (IssuedAPIKey, error
 	}()
 
 	row := tx.QueryRow(ctx, `
-		select id::text, tenant_id::text, prefix, name, scopes, created_by::text,
+		select id::text, tenant_id::text, prefix, name, service_account_name, scopes, created_by::text,
 		       created_at, last_used_at, expires_at, revoked_at,
 		       litellm_key_alias, budget_max_usd, rate_limit_rpm, rate_limit_tpm
 		  from suite_api_keys
@@ -1549,15 +1561,20 @@ func (m *Manager) RotateKey(ctx context.Context, id string) (IssuedAPIKey, error
 	if oldVal.CreatedBy != nil {
 		createdBy = *oldVal.CreatedBy
 	}
+	serviceAcct := ""
+	if oldVal.ServiceAccountName != nil {
+		serviceAcct = *oldVal.ServiceAccountName
+	}
 	in := IssueAPIKeyInput{
-		TenantID:     oldVal.TenantID,
-		Name:         name,
-		Scopes:       append([]string{}, oldVal.Scopes...),
-		ExpiresAt:    oldVal.ExpiresAt,
-		CreatedBy:    createdBy,
-		BudgetMaxUSD: oldVal.BudgetMaxUSD,
-		RateLimitRPM: oldVal.RateLimitRPM,
-		RateLimitTPM: oldVal.RateLimitTPM,
+		TenantID:           oldVal.TenantID,
+		Name:               name,
+		ServiceAccountName: serviceAcct,
+		Scopes:             append([]string{}, oldVal.Scopes...),
+		ExpiresAt:          oldVal.ExpiresAt,
+		CreatedBy:          createdBy,
+		BudgetMaxUSD:       oldVal.BudgetMaxUSD,
+		RateLimitRPM:       oldVal.RateLimitRPM,
+		RateLimitTPM:       oldVal.RateLimitTPM,
 	}
 	issued, err := m.issueLocalKeyWith(ctx, tx, in)
 	if err != nil {
@@ -1883,7 +1900,7 @@ func scanTenant(r rowScanner) (Tenant, error) {
 // of this helper.
 func scanAPIKey(r rowScanner) (APIKey, error) {
 	var k APIKey
-	if err := r.Scan(&k.ID, &k.TenantID, &k.Prefix, &k.Name, &k.Scopes, &k.CreatedBy,
+	if err := r.Scan(&k.ID, &k.TenantID, &k.Prefix, &k.Name, &k.ServiceAccountName, &k.Scopes, &k.CreatedBy,
 		&k.CreatedAt, &k.LastUsedAt, &k.ExpiresAt, &k.RevokedAt,
 		&k.LiteLLMKeyAlias, &k.BudgetMaxUSD, &k.RateLimitRPM, &k.RateLimitTPM); err != nil {
 		return APIKey{}, err
