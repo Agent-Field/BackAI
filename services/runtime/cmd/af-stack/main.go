@@ -57,6 +57,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/logger"
 	"github.com/Agent-Field/backai/services/runtime/internal/mcp"
 	"github.com/Agent-Field/backai/services/runtime/internal/memory"
+	"github.com/Agent-Field/backai/services/runtime/internal/modules"
 	"github.com/Agent-Field/backai/services/runtime/internal/notifications"
 	notificationslog "github.com/Agent-Field/backai/services/runtime/internal/notifications/adapters/log"
 	notificationspush "github.com/Agent-Field/backai/services/runtime/internal/notifications/adapters/push"
@@ -1896,6 +1897,31 @@ func main() {
 	// No-op outside AF_STACK_ENV=production. See prodpreflight.go.
 	runProductionPreflight(ctx, cfg, database, store != nil, log)
 
+	// R2 workload modules: discover declarative manifests, apply their
+	// migrations (DDL — needs the privileged migrate connection when the
+	// serving role is restricted), and hand the manager to the server so
+	// /api/v1/workload/<id>/ routes mount. A module whose manifest or
+	// migrations fail is logged and excluded; boot continues.
+	var workloadModules *modules.Manager
+	if database != nil && database.Pool != nil {
+		workloadModules = modules.Load(cfg.Modules.WorkloadModulesPath, cfg.Modules.WorkloadModules, log)
+		migPool := database.Pool
+		if cfg.Database.MigrateURL != "" && cfg.Database.MigrateURL != cfg.Database.URL {
+			if privDB, err := db.Open(ctx, db.Config{URL: cfg.Database.MigrateURL}); err != nil {
+				log.Error("workload modules: privileged migrate connection failed; module migrations skipped", "error", err)
+				migPool = nil
+			} else {
+				defer privDB.Close()
+				migPool = privDB.Pool
+			}
+		}
+		if migPool != nil {
+			if err := workloadModules.ApplyMigrations(ctx, migPool); err != nil {
+				log.Error("workload modules: some migrations failed", "error", err)
+			}
+		}
+	}
+
 	srv := server.New(cfg, log, server.Deps{
 		DB:              database,
 		AF:              afClient,
@@ -1911,6 +1937,7 @@ func main() {
 		Guardrails:      guardrailsSvc,
 		DBStudio:        studioSvc,
 		Memory:          memoryStore,
+		Modules:         workloadModules,
 		Search:          searchStore,
 		Activity:        activityStore,
 		FeatureFlags:    featureFlagStore,
