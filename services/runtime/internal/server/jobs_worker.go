@@ -167,7 +167,10 @@ func (s *Server) jobsWorkerAuth(w http.ResponseWriter, r *http.Request) (string,
 		writeError(w, http.StatusUnauthorized, "INVALID_API_KEY", "invalid API key", nil)
 		return "", false
 	}
-	if !scopesContain(k.Scopes, scopeJobsWork) {
+	// scopeSatisfied is the platform rule (scopes.go): explicit jobs:work,
+	// a bare "jobs" area grant, or a full-access key (empty scopes / "*" /
+	// "admin") may lease; other narrow keys may not.
+	if !scopeSatisfied(k.Scopes, scopeJobsWork) {
 		writeError(w, http.StatusForbidden, "SCOPE_REQUIRED",
 			"API key is missing the required jobs:work scope", nil)
 		return "", false
