@@ -6,14 +6,7 @@
 // module never reaches a model provider directly.
 
 import { z } from "zod"
-import {
-  parseSse,
-  rawRequest,
-  request,
-  toCamel,
-  type HttpOptions,
-  type SseEvent,
-} from "./_http.js"
+import { parseSse, rawRequest, request, toCamel, type HttpOptions, type SseEvent } from "./_http.js"
 
 // ---------- shared schemas ----------
 
@@ -29,6 +22,9 @@ const executionStatusSchema = z.enum([
 const callResultSchema = z.object({
   executionId: z.string(),
   status: executionStatusSchema,
+  // The runtime returns the agent's value under `result`; `output` is a
+  // deprecated alias kept for older callers (mirrored in camelEnvelope).
+  result: z.unknown().optional(),
   output: z.unknown().optional(),
   durationMs: z.number().optional(),
   error: z
@@ -49,6 +45,7 @@ export type AsyncCallResult = z.infer<typeof asyncCallResultSchema>
 const executionStatusResponseSchema = z.object({
   executionId: z.string(),
   status: executionStatusSchema,
+  result: z.unknown().optional(),
   output: z.unknown().optional(),
   error: z
     .object({
@@ -108,10 +105,7 @@ function encodeAgent(name: string): string {
   return encodeURIComponent(name).replace(/%2E/g, ".")
 }
 
-function buildCallBody(
-  input: unknown,
-  extras: Record<string, unknown>,
-): Record<string, unknown> {
+function buildCallBody(input: unknown, extras: Record<string, unknown>): Record<string, unknown> {
   // Agent input is forwarded verbatim — agent-defined schemas may carry
   // semantically-meaningful keys (e.g. `result_text` vs `resultText`)
   // and we must not silently rename them. Envelope fields below
@@ -125,10 +119,12 @@ function buildCallBody(
 
 /**
  * Convert only the envelope fields of an execution response to camelCase,
- * leaving user-defined payload fields (`output`, `payload`, `input`)
- * untouched — those follow agent-defined schemas the SDK must not rename.
+ * leaving user-defined payload fields (`result`, `output`, `payload`,
+ * `input`) untouched — those follow agent-defined schemas the SDK must not
+ * rename. `result` and `output` are mirrored so callers on either name see
+ * the agent's return value.
  */
-const OPAQUE_FIELDS = ["output", "payload", "input"] as const
+const OPAQUE_FIELDS = ["result", "output", "payload", "input"] as const
 
 function camelEnvelope(raw: unknown): unknown {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return raw
@@ -140,6 +136,13 @@ function camelEnvelope(raw: unknown): unknown {
       preserved[field] = source[field]
       delete stripped[field]
     }
+  }
+  // Mirror result <-> output so a consumer on either name works regardless
+  // of which the runtime emitted.
+  if (preserved.result === undefined && preserved.output !== undefined) {
+    preserved.result = preserved.output
+  } else if (preserved.output === undefined && preserved.result !== undefined) {
+    preserved.output = preserved.result
   }
   const camelRest = toCamel<Record<string, unknown>>(stripped)
   return { ...camelRest, ...preserved }
@@ -177,12 +180,7 @@ export async function callAsync(
     idempotency_key: idempotencyKey,
     webhook_url: webhookUrl,
   })
-  const raw = await request<unknown>(
-    "POST",
-    `/agents/async/${encodeAgent(agent)}`,
-    body,
-    http,
-  )
+  const raw = await request<unknown>("POST", `/agents/async/${encodeAgent(agent)}`, body, http)
   return asyncCallResultSchema.parse(camelEnvelope(raw))
 }
 
@@ -202,12 +200,10 @@ export async function* stream(
     idempotency_key: idempotencyKey,
   })
   const headers = { ...(http.headers ?? {}), accept: "text/event-stream" }
-  const response = await rawRequest(
-    "POST",
-    `/agents/stream/${encodeAgent(agent)}`,
-    body,
-    { ...http, headers },
-  )
+  const response = await rawRequest("POST", `/agents/stream/${encodeAgent(agent)}`, body, {
+    ...http,
+    headers,
+  })
   if (response.body === null) return
   yield* parseSse(response.body)
 }
@@ -240,43 +236,25 @@ export async function cancel(
 }
 
 /** HITL approval. */
-export async function approve(
-  executionId: string,
-  opts: ApproveOptions = {},
-): Promise<void> {
+export async function approve(executionId: string, opts: ApproveOptions = {}): Promise<void> {
   const { byUserId, note, ...http } = opts
   const body: Record<string, unknown> = {}
   if (byUserId !== undefined) body.by_user_id = byUserId
   if (note !== undefined) body.note = note
-  await rawRequest(
-    "POST",
-    `/executions/${encodeURIComponent(executionId)}/approve`,
-    body,
-    http,
-  )
+  await rawRequest("POST", `/executions/${encodeURIComponent(executionId)}/approve`, body, http)
 }
 
 /** HITL denial. */
-export async function deny(
-  executionId: string,
-  opts: DenyOptions = {},
-): Promise<void> {
+export async function deny(executionId: string, opts: DenyOptions = {}): Promise<void> {
   const { byUserId, reason, ...http } = opts
   const body: Record<string, unknown> = {}
   if (byUserId !== undefined) body.by_user_id = byUserId
   if (reason !== undefined) body.reason = reason
-  await rawRequest(
-    "POST",
-    `/executions/${encodeURIComponent(executionId)}/deny`,
-    body,
-    http,
-  )
+  await rawRequest("POST", `/executions/${encodeURIComponent(executionId)}/deny`, body, http)
 }
 
 /** List executions awaiting human approval. */
-export async function pendingApprovals(
-  opts: HttpOptions = {},
-): Promise<PendingApproval[]> {
+export async function pendingApprovals(opts: HttpOptions = {}): Promise<PendingApproval[]> {
   const raw = await request<unknown>("GET", "/approvals/pending", null, opts)
   // Apply camelEnvelope to each item to preserve user-defined payloads.
   const rawItems = (raw as { items?: unknown[] }).items ?? []

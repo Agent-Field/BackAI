@@ -88,7 +88,10 @@ async function checkEcho(client: BackAI): Promise<void> {
   try {
     const marker = uuid().slice(0, 8)
     const res = await client.agents.call("supportdesk.echo", { payload: { message: marker } })
-    const ok = res.status === "succeeded" && res.output !== undefined
+    // Runtime returns the agent value under `result` (`output` is a
+    // back-compat alias mirrored by the SDK); accept either.
+    const value = res.result ?? res.output
+    const ok = res.status === "succeeded" && value !== undefined
     record("agents.call:supportdesk.echo", ok ? "pass" : "fail", `status=${res.status}`)
   } catch (err) {
     if (err instanceof SuiteError) {

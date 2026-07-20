@@ -105,10 +105,12 @@ async def check_echo(client: BackAI) -> None:
         status = getattr(res, "status", None) or (
             res.get("status") if isinstance(res, dict) else None
         )
-        output = getattr(res, "output", None)
+        # The runtime returns the agent's value under `result` (with `output`
+        # as a back-compat alias); accept either.
+        value = getattr(res, "result", None) or getattr(res, "output", None)
         if isinstance(res, dict):
-            output = res.get("output", output)
-        ok = str(status) == "succeeded" and output is not None
+            value = res.get("result", res.get("output", value))
+        ok = str(status) == "succeeded" and value is not None
         record("agents.call:supportdesk.echo", "pass" if ok else "fail", f"status={status}")
     except AFStackError as exc:
         if exc.code in _NOT_CONFIGURED or exc.status_code == 404:

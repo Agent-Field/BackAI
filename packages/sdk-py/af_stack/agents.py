@@ -26,19 +26,34 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from . import _http
 
 
 class CallResult(BaseModel):
-    """Synchronous ``agents.call`` response."""
+    """Synchronous ``agents.call`` response.
+
+    The runtime returns the agent's return value under ``result`` with a
+    terminal ``status`` of ``"succeeded"``. ``output`` is a back-compat
+    alias that mirrors ``result`` when the response omits it.
+    """
 
     model_config = ConfigDict(extra="allow")
 
     execution_id: str = Field(..., description="AF execution id")
-    output: Any = Field(default=None, description="Agent return value")
+    result: Any = Field(default=None, description="Agent return value")
+    output: Any = Field(default=None, description="Deprecated alias for result")
     status: str = Field(default="done")
+
+    @model_validator(mode="after")
+    def _mirror_result(self) -> CallResult:
+        # Keep result/output in lockstep so callers on either name work.
+        if self.result is None and self.output is not None:
+            self.result = self.output
+        elif self.output is None and self.result is not None:
+            self.output = self.result
+        return self
 
 
 class AsyncHandle(BaseModel):
