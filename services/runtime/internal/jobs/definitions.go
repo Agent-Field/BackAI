@@ -14,14 +14,12 @@
 //
 //   - **Go (native)**: registered live with a River worker. The runtime
 //     itself executes the handler in-process.
-//   - **Remote (python/typescript)**: the actual handler would live in
-//     another service. The cross-language dispatcher does not exist yet, so
-//     the runtime cannot execute these. A remote definition may still be
-//     *registered* (so the dashboard can enumerate it), but Manager.Enqueue
-//     rejects it up front with ErrRemoteJobsNotSupported rather than
-//     persisting a row that would silently never run.
-//     (TODO Phase 5+: implement webhook callback or river-jobs-listener
-//     sidecar so SDK-py / SDK-ts can subscribe and process.)
+//   - **Remote (python/typescript)**: the handler lives in an external
+//     worker process built on the af_stack / @af-stack/sdk Worker, which
+//     leases attempts over the pull protocol (/api/v1/jobs/worker/*).
+//     River retains durability and retry semantics; a lease that expires
+//     (worker died) surfaces as a retryable failure. Deployments declare
+//     their remote kinds via AF_STACK_REMOTE_JOB_KINDS.
 package jobs
 
 import (
@@ -80,8 +78,8 @@ type Definition struct {
 }
 
 // HasLiveHandler reports whether this definition currently has an in-process
-// worker. False for remote definitions (python/ts) until a cross-language
-// dispatcher lands.
+// worker. False for remote definitions (python/ts) — those execute in
+// external workers over the pull protocol.
 func (d *Definition) HasLiveHandler() bool {
 	return d.goHandler != nil
 }
