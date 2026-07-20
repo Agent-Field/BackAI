@@ -1896,6 +1896,10 @@ func main() {
 		}()
 	}
 
+	// R7: background sampler for the pool-saturation + jobs-queue-age gauges
+	// the default Prometheus alerts watch. No-op without a database.
+	startProductionMetricsSampler(ctx, database, log)
+
 	// Start listener.
 	listenerErr := make(chan error, 1)
 	go func() {

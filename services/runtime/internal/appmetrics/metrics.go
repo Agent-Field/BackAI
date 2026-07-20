@@ -48,6 +48,34 @@ var (
 		Help: "Total AgentField execute runs by agent and terminal status.",
 	}, []string{"agent", "status"})
 
+	// R7 production operating contract metrics — the signals the default
+	// Prometheus alert rules (deploy/prometheus/alerts.yml) fire on.
+
+	budgetRejectionsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "backai_budget_rejections_total",
+		Help: "Total LLM gateway calls rejected by budget enforcement (402), by tenant and reason.",
+	}, []string{"tenant", "reason"})
+
+	jobsQueueOldestAgeSeconds = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "backai_jobs_queue_oldest_age_seconds",
+		Help: "Age in seconds of the oldest not-yet-completed background job (0 when the queue is empty or unsampled).",
+	})
+
+	dbPoolAcquiredConnections = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "backai_db_pool_acquired_connections",
+		Help: "Currently acquired (in-use) connections in the runtime Postgres pool.",
+	})
+
+	dbPoolMaxConnections = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "backai_db_pool_max_connections",
+		Help: "Maximum connections the runtime Postgres pool may open.",
+	})
+
+	backupTestLastSuccessTimestamp = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "backai_backup_test_last_success_timestamp",
+		Help: "Unix timestamp of the last successful backup/restore verification (0 when it has never succeeded or is disabled).",
+	})
+
 	initOnce sync.Once
 )
 
@@ -62,6 +90,11 @@ func Register(reg *prometheus.Registry) error {
 		llmTTFTSeconds,
 		sandboxRunsTotal,
 		runsTotal,
+		budgetRejectionsTotal,
+		jobsQueueOldestAgeSeconds,
+		dbPoolAcquiredConnections,
+		dbPoolMaxConnections,
+		backupTestLastSuccessTimestamp,
 	} {
 		if err := reg.Register(collector); err != nil {
 			if _, ok := err.(prometheus.AlreadyRegisteredError); ok {
@@ -100,6 +133,33 @@ func ObserveRun(agent, status string) {
 	runsTotal.WithLabelValues(normalizeLabel(agent, defaultAgent), normalizeLabel(status, "unknown")).Inc()
 }
 
+// ObserveBudgetRejection records one budget-enforcement rejection (HTTP 402).
+// reason is "tenant" (monthly budget) or "key" (per-key lifetime cap).
+func ObserveBudgetRejection(tenant, reason string) {
+	budgetRejectionsTotal.WithLabelValues(normalizeTenant(tenant), normalizeLabel(reason, "unknown")).Inc()
+}
+
+// SetJobsQueueOldestAge sets the age (seconds) of the oldest not-yet-completed
+// background job. Sampled periodically by the runtime.
+func SetJobsQueueOldestAge(seconds float64) {
+	if seconds < 0 {
+		seconds = 0
+	}
+	jobsQueueOldestAgeSeconds.Set(seconds)
+}
+
+// SetDBPoolStats sets the Postgres pool saturation gauges. Sampled periodically.
+func SetDBPoolStats(acquired, max int) {
+	dbPoolAcquiredConnections.Set(float64(acquired))
+	dbPoolMaxConnections.Set(float64(max))
+}
+
+// SetBackupTestLastSuccess records the Unix timestamp of the last successful
+// backup/restore verification. Called by the backup-test cron.
+func SetBackupTestLastSuccess(unixSeconds int64) {
+	backupTestLastSuccessTimestamp.Set(float64(unixSeconds))
+}
+
 func initZeroSeries() {
 	costUSDTotal.WithLabelValues(defaultTenant, defaultModel, defaultAgent).Add(0)
 	llmRequestsTotal.WithLabelValues(defaultTenant, defaultModel, "success").Add(0)
@@ -109,6 +169,12 @@ func initZeroSeries() {
 	sandboxRunsTotal.WithLabelValues(defaultAgent, "failed").Add(0)
 	runsTotal.WithLabelValues(defaultAgent, "succeeded").Add(0)
 	runsTotal.WithLabelValues(defaultAgent, "failed").Add(0)
+	budgetRejectionsTotal.WithLabelValues(defaultTenant, "tenant").Add(0)
+	budgetRejectionsTotal.WithLabelValues(defaultTenant, "key").Add(0)
+	jobsQueueOldestAgeSeconds.Set(0)
+	dbPoolAcquiredConnections.Set(0)
+	dbPoolMaxConnections.Set(0)
+	backupTestLastSuccessTimestamp.Set(0)
 }
 
 func normalizeTenant(v string) string {
@@ -136,5 +202,6 @@ func ResetForTest() {
 	llmTTFTSeconds.Reset()
 	sandboxRunsTotal.Reset()
 	runsTotal.Reset()
+	budgetRejectionsTotal.Reset()
 	initZeroSeries()
 }
