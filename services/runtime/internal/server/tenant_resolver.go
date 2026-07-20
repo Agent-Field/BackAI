@@ -116,6 +116,12 @@ var publicPrefixes = []string{
 	// OAuth provider callbacks validate their own signed state because
 	// providers may not return the same app session cookie shape.
 	"/oauth/callback",
+	// R5 connection OAuth callbacks (/connections/callback/{provider}).
+	// Same rationale as /oauth/callback: the browser redirect from the
+	// provider carries no reliable app session, so the callback trusts the
+	// HMAC-signed state (which carries the tenant) instead. Note this does
+	// NOT match /api/v1/connections/* — those go through the resolver.
+	"/connections/callback",
 	// Billing dashboard surface (Phase 10.4). Same auth shape as
 	// admin/* — the dashboard's session gates it.
 	"/api/v1/billing",
