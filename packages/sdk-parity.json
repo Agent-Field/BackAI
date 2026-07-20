@@ -1,0 +1,181 @@
+{
+  "_comment": "Cross-language parity contract for the BackAI SDKs (packages/sdk-py + packages/sdk-ts). Each governed namespace lists the methods that MUST exist, identically, on the explicit `BackAI` client in BOTH languages. `name` is the canonical (camelCase) identity; `py` / `ts` are the actual attribute names in each SDK. The parity test in each SDK introspects its own `BackAI` client and asserts the method set of every governed namespace equals this file — so adding a method to one language only fails that language's test. See scripts/sdk-conformance for the live conformance harness. This file is maintained by hand; keep it sorted and in sync with both clients.",
+  "version": 1,
+  "supported_runtime": ">=0.0.0,<1.0.0",
+  "namespaces": {
+    "agents": {
+      "methods": [
+        { "name": "approve", "py": "approve", "ts": "approve" },
+        { "name": "call", "py": "call", "ts": "call" },
+        { "name": "callAsync", "py": "call_async", "ts": "callAsync" },
+        { "name": "cancel", "py": "cancel", "ts": "cancel" },
+        { "name": "deny", "py": "deny", "ts": "deny" },
+        { "name": "pendingApprovals", "py": "pending_approvals", "ts": "pendingApprovals" },
+        { "name": "status", "py": "status", "ts": "status" },
+        { "name": "stream", "py": "stream", "ts": "stream" }
+      ]
+    },
+    "approvals": {
+      "methods": [
+        { "name": "decide", "py": "decide", "ts": "decide" },
+        { "name": "get", "py": "get", "ts": "get" },
+        { "name": "list", "py": "list", "ts": "list" },
+        { "name": "request", "py": "request", "ts": "request" }
+      ]
+    },
+    "audio": {
+      "methods": [
+        { "name": "speech", "py": "speech", "ts": "speech" },
+        { "name": "transcribe", "py": "transcribe", "ts": "transcribe" },
+        { "name": "translate", "py": "translate", "ts": "translate" }
+      ]
+    },
+    "auth": {
+      "methods": [
+        { "name": "whoami", "py": "whoami", "ts": "whoami" }
+      ]
+    },
+    "billing": {
+      "methods": [
+        { "name": "checkout", "py": "checkout", "ts": "checkout" },
+        { "name": "customer", "py": "customer", "ts": "customer" },
+        { "name": "customers", "py": "customers", "ts": "customers" },
+        { "name": "entitlements", "py": "entitlements", "ts": "entitlements" },
+        { "name": "hasBudget", "py": "has_budget", "ts": "hasBudget" },
+        { "name": "meter", "py": "meter", "ts": "meter" },
+        { "name": "meters", "py": "meters", "ts": "meters" },
+        { "name": "plans", "py": "plans", "ts": "plans" },
+        { "name": "portalLink", "py": "portal_link", "ts": "portalLink" }
+      ]
+    },
+    "cost": {
+      "methods": [
+        { "name": "events", "py": "events", "ts": "events" }
+      ]
+    },
+    "harnesses": {
+      "methods": [
+        { "name": "get", "py": "get", "ts": "get" },
+        { "name": "list", "py": "list", "ts": "list" },
+        { "name": "probe", "py": "probe", "ts": "probe" }
+      ]
+    },
+    "images": {
+      "methods": [
+        { "name": "edit", "py": "edit", "ts": "edit" },
+        { "name": "generate", "py": "generate", "ts": "generate" },
+        { "name": "variations", "py": "variations", "ts": "variations" }
+      ]
+    },
+    "jobs": {
+      "methods": [
+        { "name": "enqueue", "py": "enqueue", "ts": "enqueue" },
+        { "name": "get", "py": "get", "ts": "get" },
+        { "name": "list", "py": "list", "ts": "list" },
+        { "name": "retry", "py": "retry", "ts": "retry" }
+      ]
+    },
+    "llm": {
+      "methods": [
+        { "name": "cacheStats", "py": "cache_stats", "ts": "cacheStats" },
+        { "name": "chat", "py": "chat", "ts": "chat" },
+        { "name": "embed", "py": "embed", "ts": "embed" },
+        { "name": "models", "py": "models", "ts": "models" }
+      ]
+    },
+    "memory": {
+      "methods": [
+        { "name": "delete", "py": "delete", "ts": "delete" },
+        { "name": "get", "py": "get", "ts": "get" },
+        { "name": "list", "py": "list", "ts": "list" },
+        { "name": "put", "py": "put", "ts": "put" },
+        { "name": "search", "py": "search", "ts": "search" }
+      ]
+    },
+    "notifications": {
+      "methods": [
+        { "name": "email", "py": "email", "ts": "email" },
+        { "name": "get", "py": "get", "ts": "get" },
+        { "name": "list", "py": "list", "ts": "list" },
+        { "name": "send", "py": "send", "ts": "send" },
+        { "name": "stats", "py": "stats", "ts": "stats" }
+      ]
+    },
+    "oauth": {
+      "methods": [
+        { "name": "authorizeUrl", "py": "authorize_url", "ts": "authorizeUrl" },
+        { "name": "connected", "py": "connected", "ts": "connected" },
+        { "name": "disconnect", "py": "disconnect", "ts": "disconnect" },
+        { "name": "token", "py": "token", "ts": "token" }
+      ]
+    },
+    "realtime": {
+      "methods": [
+        { "name": "subscribe", "py": "subscribe", "ts": "subscribe" }
+      ]
+    },
+    "runs": {
+      "methods": [
+        { "name": "subscribe", "py": "subscribe", "ts": "subscribe" }
+      ]
+    },
+    "sandbox": {
+      "methods": [
+        { "name": "get", "py": "get", "ts": "get" },
+        { "name": "list", "py": "list", "ts": "list" },
+        { "name": "pool", "py": "pool", "ts": "pool" },
+        { "name": "run", "py": "run", "ts": "run" },
+        { "name": "stop", "py": "stop", "ts": "stop" }
+      ]
+    },
+    "search": {
+      "methods": [
+        { "name": "delete", "py": "delete", "ts": "delete" },
+        { "name": "search", "py": "search", "ts": "search" },
+        { "name": "upsert", "py": "upsert", "ts": "upsert" }
+      ]
+    },
+    "shipwright": {
+      "methods": [
+        { "name": "complete", "py": "complete", "ts": "complete" },
+        { "name": "create", "py": "create", "ts": "create" },
+        { "name": "get", "py": "get", "ts": "get" },
+        { "name": "list", "py": "list", "ts": "list" }
+      ]
+    },
+    "storage": {
+      "methods": [
+        { "name": "delete", "py": "delete", "ts": "delete" },
+        { "name": "download", "py": "download", "ts": "download" },
+        { "name": "list", "py": "list", "ts": "list" },
+        { "name": "signedUrl", "py": "signed_url", "ts": "signedURL" },
+        { "name": "upload", "py": "upload", "ts": "upload" }
+      ]
+    },
+    "tools": {
+      "methods": [
+        { "name": "addMcpServer", "py": "add_mcp_server", "ts": "addMcpServer" },
+        { "name": "callAdapter", "py": "call_adapter", "ts": "callAdapter" },
+        { "name": "callMcp", "py": "call_mcp", "ts": "callMcp" },
+        { "name": "enableMcpServer", "py": "enable_mcp_server", "ts": "enableMcpServer" },
+        { "name": "listAdapters", "py": "list_adapters", "ts": "listAdapters" },
+        { "name": "listMcpServers", "py": "list_mcp_servers", "ts": "listMcpServers" },
+        { "name": "listMcpTools", "py": "list_mcp_tools", "ts": "listMcpTools" },
+        { "name": "removeMcpServer", "py": "remove_mcp_server", "ts": "removeMcpServer" },
+        { "name": "setAdapterEnabled", "py": "set_adapter_enabled", "ts": "setAdapterEnabled" }
+      ]
+    },
+    "webhooks": {
+      "methods": [
+        { "name": "emit", "py": "emit", "ts": "emit" },
+        { "name": "get", "py": "get", "ts": "get" },
+        { "name": "list", "py": "list", "ts": "list" },
+        { "name": "retry", "py": "retry", "ts": "retry" },
+        { "name": "send", "py": "send", "ts": "send" },
+        { "name": "subscribe", "py": "subscribe", "ts": "subscribe" },
+        { "name": "subscriptions", "py": "subscriptions", "ts": "subscriptions" },
+        { "name": "unsubscribe", "py": "unsubscribe", "ts": "unsubscribe" }
+      ]
+    }
+  }
+}

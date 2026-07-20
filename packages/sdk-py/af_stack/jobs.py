@@ -93,13 +93,15 @@ async def enqueue(
     *,
     scheduled_at: datetime | None = None,
     max_attempts: int | None = None,
+    idempotency_key: str | None = None,
 ) -> Job:
     """Enqueue a background job and return the persisted row.
 
     ``name`` is the job definition name (e.g. ``"send-welcome-email"``).
     ``args`` is the JSON-serialisable argument payload forwarded verbatim
     to the worker. ``scheduled_at`` defers execution until the given time;
-    when omitted the runtime queues immediately.
+    when omitted the runtime queues immediately. Passing ``idempotency_key``
+    sends the ``Idempotency-Key`` header (dedupe + safe retry).
     """
     if not name:
         raise ValueError("job name must be a non-empty string")
@@ -113,7 +115,7 @@ async def enqueue(
         if max_attempts < 1 or max_attempts > 50:
             raise ValueError("max_attempts must be between 1 and 50")
         payload["max_attempts"] = max_attempts
-    body = await _http.request_json("POST", "/jobs", json=payload)
+    body = await _http.request_json("POST", "/jobs", json=payload, idempotency_key=idempotency_key)
     return Job.model_validate(body or {})
 
 
