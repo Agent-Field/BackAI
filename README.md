@@ -110,6 +110,23 @@ SupportDesk product, or a focused example: [LLM gateway](examples/03-llm-gateway
 [deep research](examples/06-deep-research/), or
 [coding agents](examples/02-shipwright/).
 
+## Where it fits
+
+The closest overlap is [InsForge](https://github.com/InsForge/insforge). The
+comparison below is about each category's primary system boundary, not checkbox
+parity; these products evolve quickly.
+
+| Category                                                                                                                                                                                                                          | Primarily owns                                                                                                               | This project's boundary                                                                                                                                                                                        |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Agent-native BaaS** — [InsForge](https://github.com/InsForge/insforge)                                                                                                                                                          | Backend resources that coding agents can provision and operate: auth, database, storage, compute, hosting, and model gateway | Closest comparison. This repo emphasizes the runtime and operating plane inside an owned product fork: tenant-aware model and agent calls, jobs, billing, cost, audit, sandboxes, and customer/admin surfaces. |
+| **General and reactive BaaS** — [Supabase](https://github.com/supabase/supabase), [Appwrite](https://github.com/appwrite/appwrite), [Conduit](https://getconduit.dev/), [Convex](https://www.convex.dev/)                         | Application data, auth, storage, functions, realtime, and—in Convex—agent components                                         | Starts with the same application foundation, then makes model, agent, job, policy, and cost lifecycles part of one tenant-aware control plane.                                                                 |
+| **Backend and agent runtimes** — [Motia](https://motia.tech/), [Xians](https://xians.ai/), [Appstrate](https://appstrate.com/), [Tidebase](https://tidebase.dev/), [Cloudflare Agents](https://developers.cloudflare.com/agents/) | API/workflow execution, agent lifecycle, durable state, credentials, or tools                                                | Includes the surrounding SaaS backend, commercial layer, customer product shell, and operator plane; the agent runtime is one layer rather than the whole product boundary.                                    |
+| **Visual AI workflow builders** — [Dify](https://github.com/langgenius/dify), [Flowise](https://github.com/FlowiseAI/Flowise), [n8n](https://github.com/n8n-io/n8n)                                                               | Visual authoring for prompts, agents, RAG, integrations, and automation                                                      | Code- and repo-first infrastructure for building a product, not a workflow canvas.                                                                                                                             |
+| **Model gateways and observability** — [LiteLLM](https://github.com/BerriAI/litellm), [Langfuse](https://github.com/langfuse/langfuse), [Helicone](https://github.com/Helicone/helicone)                                          | Model routing, traces, evaluations, reliability, and cost visibility                                                         | Treats gateway and observability as layers behind identity, tenancy, jobs, billing, audit, and product operations.                                                                                             |
+
+The bet is not that every component is novel. It is that an AI SaaS should not
+have to assemble and secure these categories independently before it can ship.
+
 ## Built for Codex and Claude Code
 
 BackAI is designed to be handed to a coding agent after initialization. The
