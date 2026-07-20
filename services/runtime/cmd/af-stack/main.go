@@ -866,6 +866,11 @@ func main() {
 	// Optional: connect to Postgres. If DATABASE_URL is empty, the runtime
 	// still boots — it just reports the DB as not-configured in /health.
 	var database *db.DB
+	// rlsUnsafe is set when the runtime intends to enforce per-tenant
+	// isolation but the serving DB role can bypass RLS (only reachable via
+	// the AF_STACK_ALLOW_INSECURE_DB override — the no-override case exits
+	// at boot). It is handed to server.Deps so /ready reports "rls_unsafe".
+	var rlsUnsafe bool
 	if cfg.Database.URL != "" {
 		dbCtx, dbCancel := context.WithTimeout(ctx, 30*time.Second)
 		database, err = db.Open(dbCtx, db.Config{
@@ -893,7 +898,7 @@ func main() {
 			// serving role can bypass RLS (superuser or BYPASSRLS). Refuse to
 			// start in that state when multi-tenancy is enabled; warn otherwise.
 			assertCtx, assertCancel := context.WithTimeout(ctx, 5*time.Second)
-			assertTenantSafeRole(assertCtx, cfg, database, log)
+			rlsUnsafe = assertTenantSafeRole(assertCtx, cfg, database, log)
 			assertCancel()
 			statsCtx, statsCancel := context.WithTimeout(ctx, 5*time.Second)
 			warnIfPGStatsRoleMissing(statsCtx, database.Pool, log)
@@ -1846,6 +1851,7 @@ func main() {
 		MetricsStore:    metricsStore,
 		ErrorsStore:     errorsStore,
 		Version:         version,
+		RLSUnsafe:       rlsUnsafe,
 	})
 
 	// Phase 14.3: ordered graceful shutdown.
@@ -2572,29 +2578,57 @@ func kmsBootDecision(loadErr error, kmsConfigured bool) kmsDecision {
 	return kmsDegrade
 }
 
-func assertTenantSafeRole(ctx context.Context, cfg config.Config, database *db.DB, log *slog.Logger) {
+// effectiveMTEnabled reports whether the runtime is actually enforcing
+// per-tenant isolation: multi-tenancy is enabled AND the deployment is not
+// in personal mode (personal mode forces auth off and runs everything under
+// the default tenant, so RLS is intentionally relaxed). This mirrors the
+// resolver's multiTenancyEnabled() so the boot gate and request-time
+// behaviour can never disagree.
+func effectiveMTEnabled(cfg config.Config) bool {
+	if cfg.PersonalMode() {
+		return false
+	}
+	return cfg.Modules.Enabled["multi-tenancy"]
+}
+
+// rlsUnsafeForReady reports whether the runtime should advertise itself as
+// not-ready due to unenforceable tenant isolation: isolation is intended
+// (mtEnabled) but the serving role can bypass RLS. Personal mode / a
+// NOBYPASSRLS role both make this false.
+func rlsUnsafeForReady(canBypass, mtEnabled bool) bool {
+	return canBypass && mtEnabled
+}
+
+// assertTenantSafeRole enforces that the serving DB role cannot bypass RLS
+// when the runtime intends to isolate tenants. In SaaS mode with
+// multi-tenancy on, a superuser / BYPASSRLS serving role is fatal (unless
+// explicitly overridden with AF_STACK_ALLOW_INSECURE_DB); personal mode and
+// single-tenant dev warn and boot. It returns whether the runtime is in the
+// unsafe-but-booting state so /ready can report "rls_unsafe".
+func assertTenantSafeRole(ctx context.Context, cfg config.Config, database *db.DB, log *slog.Logger) bool {
 	rs, err := database.ConnRoleSecurity(ctx)
 	if err != nil {
 		log.Warn("could not verify DB role RLS safety", "error", err)
-		return
+		return false
 	}
-	mtOn := cfg.Modules.Enabled["multi-tenancy"]
+	mtOn := effectiveMTEnabled(cfg)
 	override := envBool("AF_STACK_ALLOW_INSECURE_DB", false)
 	switch rlsBootDecision(rs.CanBypassRLS(), mtOn, override) {
 	case rlsOK:
 		log.Info("tenant isolation: serving DB role is RLS-safe", "role", rs.Name)
 	case rlsFatal:
 		log.Error("refusing to start: the serving DB role can bypass row-level security, so multi-tenant isolation is unenforceable",
-			"role", rs.Name, "superuser", rs.IsSuperuser, "bypassrls", rs.BypassRLS,
+			"role", rs.Name, "superuser", rs.IsSuperuser, "bypassrls", rs.BypassRLS, "mode", cfg.Mode,
 			"fix", "point AF_STACK_DATABASE_URL at a NOSUPERUSER NOBYPASSRLS role and run migrations via AF_STACK_MIGRATE_DATABASE_URL, or set AF_STACK_ALLOW_INSECURE_DB=true to override")
 		database.Close()
 		os.Exit(1)
 	case rlsWarn:
 		log.Warn("serving DB role can bypass row-level security; per-tenant isolation is NOT enforced",
 			"role", rs.Name, "superuser", rs.IsSuperuser, "bypassrls", rs.BypassRLS,
-			"multi_tenancy_enabled", mtOn, "override", override,
+			"multi_tenancy_enabled", mtOn, "override", override, "mode", cfg.Mode,
 			"recommendation", "use a NOSUPERUSER NOBYPASSRLS serving role before enabling multi-tenancy")
 	}
+	return rlsUnsafeForReady(rs.CanBypassRLS(), mtOn)
 }
 
 // tenancySecretSink adapts *secrets.Vault to the tenancy.SecretSink

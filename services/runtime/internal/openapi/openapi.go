@@ -86,12 +86,20 @@ func (p Path) MarshalJSON() ([]byte, error) {
 }
 
 // Operation is the spec for one method-on-path.
+//
+// RequiredScope + Principals are emitted as the OpenAPI extension fields
+// x-required-scope / x-principals (extensions are permitted on any object
+// in OpenAPI 3.1). They declare the tenant API-key scope a caller must
+// hold and which principal types may satisfy it — populated from the
+// scope registry via AnnotateSecurityFunc.
 type Operation struct {
-	Summary     string              `json:"summary,omitempty"`
-	Description string              `json:"description,omitempty"`
-	Tags        []string            `json:"tags,omitempty"`
-	Parameters  []Parameter         `json:"parameters,omitempty"`
-	Responses   map[string]Response `json:"responses,omitempty"`
+	Summary       string              `json:"summary,omitempty"`
+	Description   string              `json:"description,omitempty"`
+	Tags          []string            `json:"tags,omitempty"`
+	Parameters    []Parameter         `json:"parameters,omitempty"`
+	Responses     map[string]Response `json:"responses,omitempty"`
+	RequiredScope string              `json:"x-required-scope,omitempty"`
+	Principals    []string            `json:"x-principals,omitempty"`
 }
 
 // Parameter is a query / path / header param descriptor.
@@ -276,6 +284,31 @@ func (b *Builder) Register(method, path string, meta RouteMeta) {
 	}
 
 	b.paths[path][method] = op
+}
+
+// AnnotateSecurityFunc walks every registered operation and, for each,
+// calls fn(method, path) — method is the lowercase OpenAPI verb. When fn
+// returns a non-empty scope (or principals) the operation is annotated
+// with its x-required-scope / x-principals extensions. This lets a
+// central scope registry attach security metadata to the whole spec
+// without editing every Register call site.
+func (b *Builder) AnnotateSecurityFunc(fn func(method, path string) (scope string, principals []string)) {
+	if fn == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for path, ops := range b.paths {
+		for method, op := range ops {
+			scope, principals := fn(method, path)
+			if scope == "" && len(principals) == 0 {
+				continue
+			}
+			op.RequiredScope = scope
+			op.Principals = principals
+			ops[method] = op
+		}
+	}
 }
 
 // Build returns a deep-enough snapshot of the spec for JSON

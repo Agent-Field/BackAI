@@ -227,20 +227,31 @@ func (s *Server) tenantResolver(next http.Handler) http.Handler {
 		// precedence over the session cookie when both are present.
 		if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
 			token := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
-			tenantID, apiKeyID, err := s.resolveBearer(ctx, token)
+			k, err := s.resolveBearer(ctx, token)
 			if err != nil {
 				writeAuthError(w, http.StatusUnauthorized, "INVALID_API_KEY",
 					"invalid API key")
 				return
 			}
-			ctx = tenantctx.WithTenantAndUser(ctx, tenantID, apiKeyID, "")
-			s.firePostAuth(ctx, preAuthPayload, tenantID, apiKeyID, "", srcAPIKey)
-			// Best-effort touch — we don't block on the write.
-			go func(id string) {
-				touchCtx, cancel := context.WithTimeout(context.Background(), 2_000_000_000)
-				defer cancel()
-				s.tenancy.TouchKey(touchCtx, id)
-			}(apiKeyID)
+			// Per-route scope enforcement. A key with empty/["*"]/"admin"
+			// scopes has full tenant access (legacy default); a narrow key
+			// is fail-closed with 403 SCOPE_DENIED. Session/default
+			// principals below are never scope-gated.
+			if s.scopeDenied(w, r, k.Scopes) {
+				return
+			}
+			ctx = tenantctx.WithTenantAndUser(ctx, k.TenantID, k.ID, "")
+			s.firePostAuth(ctx, preAuthPayload, k.TenantID, k.ID, "", srcAPIKey)
+			// Best-effort touch — we don't block on the write. Guarded on a
+			// live manager: the keyVerifier seam can resolve a key without a
+			// tenancy.Manager (tests), and a nil manager must not panic.
+			if s.tenancy != nil {
+				go func(id string) {
+					touchCtx, cancel := context.WithTimeout(context.Background(), 2_000_000_000)
+					defer cancel()
+					s.tenancy.TouchKey(touchCtx, id)
+				}(k.ID)
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
@@ -253,14 +264,17 @@ func (s *Server) tenantResolver(next http.Handler) http.Handler {
 		// both SDKs authenticate them via ?api_key=.
 		if path == "/api/v1/realtime" || path == "/api/v1/realtime/runs" {
 			if token := strings.TrimSpace(r.URL.Query().Get("api_key")); token != "" {
-				tenantID, apiKeyID, err := s.resolveBearer(ctx, token)
+				k, err := s.resolveBearer(ctx, token)
 				if err != nil {
 					writeAuthError(w, http.StatusUnauthorized, "INVALID_API_KEY",
 						"invalid API key")
 					return
 				}
-				ctx = tenantctx.WithTenantAndUser(ctx, tenantID, apiKeyID, "")
-				s.firePostAuth(ctx, preAuthPayload, tenantID, apiKeyID, "", srcAPIKey)
+				if s.scopeDenied(w, r, k.Scopes) {
+					return
+				}
+				ctx = tenantctx.WithTenantAndUser(ctx, k.TenantID, k.ID, "")
+				s.firePostAuth(ctx, preAuthPayload, k.TenantID, k.ID, "", srcAPIKey)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
@@ -323,14 +337,22 @@ func (s *Server) firePostAuth(
 }
 
 // resolveBearer validates `token` against suite_api_keys via the
-// tenancy manager. Returns the tenant id and api-key id on success.
-// All error modes collapse to a single sentinel so callers can't tell
-// invalid format from revoked key from missing key.
-func (s *Server) resolveBearer(ctx context.Context, token string) (tenantID, apiKeyID string, err error) {
-	if s.tenancy == nil {
-		return "", "", errors.New("tenancy manager not configured")
+// tenancy manager. Returns the full key row (tenant id, api-key id, and
+// scopes) on success. All error modes collapse to a single sentinel so
+// callers can't tell invalid format from revoked key from missing key.
+//
+// The verification call is indirected through s.keyVerifier so tests can
+// inject a fake without a Postgres round-trip (the same seam pattern as
+// s.operatorResolver). When unset it falls back to s.tenancy.VerifyKey.
+func (s *Server) resolveBearer(ctx context.Context, token string) (tenancy.APIKey, error) {
+	verify := s.keyVerifier
+	if verify == nil {
+		if s.tenancy == nil {
+			return tenancy.APIKey{}, errors.New("tenancy manager not configured")
+		}
+		verify = s.tenancy.VerifyKey
 	}
-	k, vErr := s.tenancy.VerifyKey(ctx, token)
+	k, vErr := verify(ctx, token)
 	if vErr != nil {
 		// Differentiate in logs only — never in the 401 envelope.
 		switch {
@@ -347,9 +369,9 @@ func (s *Server) resolveBearer(ctx context.Context, token string) (tenantID, api
 		default:
 			s.log.Warn("bearer: verify failed", "error", vErr)
 		}
-		return "", "", vErr
+		return tenancy.APIKey{}, vErr
 	}
-	return k.TenantID, k.ID, nil
+	return k, nil
 }
 
 // errNoSession is returned by resolveSession when the request has no

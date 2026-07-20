@@ -134,6 +134,16 @@ type Server struct {
 	// better-auth session. It defaults to s.resolveOperatorPrincipal; tests
 	// inject a fake to exercise the operator-gated surfaces without a DB.
 	operatorResolver func(context.Context, *http.Request) (operatorPrincipal, error)
+	// keyVerifier verifies a tenant API key token. It defaults to
+	// s.tenancy.VerifyKey (see resolveBearer); tests inject a fake to
+	// exercise per-route scope enforcement without a Postgres round-trip.
+	keyVerifier func(context.Context, string) (tenancy.APIKey, error)
+	// rlsUnsafe is set at boot when the runtime intends to enforce
+	// per-tenant isolation (SaaS mode + multi-tenancy) but the serving DB
+	// role can bypass row-level security. /ready reports "rls_unsafe" so a
+	// load balancer never routes tenant traffic to a pod that cannot
+	// isolate it. See cmd/af-stack.assertTenantSafeRole.
+	rlsUnsafe bool
 	// sandbox powers /api/v1/sandbox/*. nil = endpoints either return
 	// 503 SANDBOX_NOT_CONFIGURED (mutating) or tolerant empty
 	// responses (reads).
@@ -397,6 +407,12 @@ type Deps struct {
 	// Version is the runtime version string surfaced via
 	// /api/v1/metrics/summary. Defaults to "dev".
 	Version string
+	// RLSUnsafe marks that the runtime intends to enforce per-tenant
+	// isolation but the serving DB role can bypass row-level security.
+	// When true, /ready reports "rls_unsafe" (503). Computed at boot by
+	// cmd/af-stack.assertTenantSafeRole; false in personal mode or when a
+	// NOBYPASSRLS serving role is in use.
+	RLSUnsafe bool
 }
 
 // New constructs a Server with the given config + logger + dependencies.
@@ -479,6 +495,7 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		metricsStore:    deps.MetricsStore,
 		errorsStore:     deps.ErrorsStore,
 		version:         deps.Version,
+		rlsUnsafe:       deps.RLSUnsafe,
 	}
 	if s.billing != nil {
 		// Close the billing loop: plan applied (webhook or stub
@@ -952,6 +969,13 @@ func (s *Server) registerRoutes() {
 			})
 		}
 	}
+
+	// Declare each scoped route's required API-key scope + accepted
+	// principal types on its OpenAPI operation (x-required-scope /
+	// x-principals). The scope registry in scopes.go is the single source
+	// of truth for both enforcement and this annotation, so the spec can
+	// never drift from what the resolver enforces.
+	s.openapi.AnnotateSecurityFunc(scopeAndPrincipalsFor)
 }
 
 // Start runs the HTTP server. Blocks until ctx is cancelled, then
@@ -1095,6 +1119,21 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		writeReadyError(w, "booting", "server has not finished startup", map[string]any{
 			"since_s": int(since.Seconds()),
 		})
+		return
+	}
+
+	// RLS enforcement check — the runtime intends to isolate tenants
+	// (SaaS mode + multi-tenancy) but the serving DB role can bypass
+	// row-level security, so per-tenant isolation is not actually
+	// enforceable. Report not-ready so a load balancer never routes
+	// tenant traffic to a pod that cannot isolate it. In personal mode or
+	// with a NOBYPASSRLS serving role this flag is false and readiness
+	// proceeds normally.
+	if s.rlsUnsafe {
+		w.Header().Set("Retry-After", "5")
+		writeReadyError(w, "rls_unsafe",
+			"tenant isolation is not enforceable: the serving database role can bypass row-level security",
+			map[string]any{})
 		return
 	}
 
