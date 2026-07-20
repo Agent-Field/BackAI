@@ -32,8 +32,8 @@
       "behavior": "permanent",
       "payload": {},
       "max_attempts": 3,
-      "expect_state": "discarded",
-      "description": "handler raises PermanentError -> DEAD-LETTER (discarded) with NO retry despite the budget"
+      "expect_state": "cancelled",
+      "description": "handler raises PermanentError -> terminal without retry. Maps to river.JobCancel: 'cancelled' is River's terminal state for explicitly-non-retryable failures; 'discarded' is reserved for exhausted-retry dead-letter."
     },
     {
       "name": "payload_roundtrip",
