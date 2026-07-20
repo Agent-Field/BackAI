@@ -192,6 +192,30 @@ and your own threat model. Start with [deployment guidance](docs/deploy.md),
 Every app-level model call should go through `/api/v1/llm/*`. Direct provider
 calls bypass BackAI's tenant identity, budgets, cost records, and guardrails.
 
+## Open-source layers
+
+The repository is Apache 2.0 and assembles the stack around open-source
+components. Optional model, email, billing, and remote-sandbox providers remain
+adapters; they are not a required hosted control plane.
+
+| Layer                | Responsibility                                                             | Current implementation                                                     |
+| -------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| **1. Interfaces**    | Customer app, admin dashboard, API explorer, docs, SDKs, and CLI           | Next.js, React, shadcn/ui, Scalar, Astro Starlight, Python, TypeScript, Go |
+| **2. Edge**          | TLS termination and routing                                                | Caddy                                                                      |
+| **3. Control plane** | HTTP/OpenAPI, identity, tenancy, authorization, policy, audit, and secrets | Go runtime, better-auth, Postgres RLS, AES-GCM                             |
+| **4. AI runtime**    | Model routing, agent execution, memory, tools, and coding harnesses        | LiteLLM, AgentField, MCP, pluggable harnesses                              |
+| **5. Execution**     | Durable jobs, crons, webhooks, and isolated code execution                 | River, robfig/cron, Docker, gVisor, Firecracker; optional e2b adapter      |
+| **6. Delivery**      | Signed outbound events, notifications, and billing                         | Native Postgres outbox, Lago; optional Resend and Stripe adapters          |
+| **7. Observability** | Traces, metrics, structured logs, cost, queues, and service health         | OpenTelemetry, Prometheus, slog, and the admin dashboard                   |
+| **8. Data**          | Relational data, vectors, full-text search, queues, and objects            | Postgres 16, pgvector, MinIO or S3-compatible storage                      |
+
+The value is the wiring between layers, not the number of logos. If you use
+another open-source package, implement its existing adapter contract where one
+exists. If the capability or contract is missing, [open an issue](https://github.com/Agent-Field/backai/issues)
+with the use case, project, license, deployment model, and expected interface.
+We add maintained OSS when it removes platform work, not merely to grow the
+dependency list.
+
 ## Self-host it
 
 `af-stack dev` starts the complete local composition. The same open-source
