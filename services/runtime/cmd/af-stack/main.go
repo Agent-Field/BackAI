@@ -1174,6 +1174,9 @@ func main() {
 		})
 		sqlDB := stdlib.OpenDBFromPool(database.Pool)
 		systemCrons := crons.NewSystemScheduler(log)
+		// R7: opt-in backup/restore verification cron (no-op unless
+		// BACKUP_TEST_ENABLED). Registered before Run() starts below.
+		registerBackupTestCron(systemCrons, log)
 		if err := systemCrons.RegisterSystem("retention.daily", "0 3 * * *", func(runCtx context.Context) error {
 			retentionCtx, cancel := context.WithTimeout(runCtx, 5*time.Minute)
 			defer cancel()
