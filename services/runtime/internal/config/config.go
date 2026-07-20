@@ -468,6 +468,17 @@ func applyEnvOverrides(cfg *Config) {
 	if strings.TrimSpace(cfg.Modules.WorkloadModulesPath) == "" {
 		cfg.Modules.WorkloadModulesPath = "./workload-modules"
 	}
+	// Comma-separated enabled list for compose/env-first deployments, the
+	// same posture as AF_STACK_MODULE_* — a discovered module serves when
+	// its manifest says enabled: true OR its id appears here.
+	if v := os.Getenv("AF_STACK_WORKLOAD_MODULES"); v != "" {
+		cfg.Modules.WorkloadModules = cfg.Modules.WorkloadModules[:0]
+		for _, id := range strings.Split(v, ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				cfg.Modules.WorkloadModules = append(cfg.Modules.WorkloadModules, id)
+			}
+		}
+	}
 
 	// Storage. AF_STACK_S3_* mirrors the .env.example contract.
 	if v := os.Getenv("AF_STACK_S3_ADAPTER"); v != "" {
