@@ -13,12 +13,17 @@ import (
 	"strings"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/featureflags"
+	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
 	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 )
 
 func (s *Server) registerConfigRoutes() {
-	s.mux.HandleFunc("GET /api/v1/config/flags", s.handleListFeatureFlags)
-	s.mux.HandleFunc("PUT /api/v1/config/flags/{key}", s.handleSetFeatureFlag)
+	// Feature flags are operator-owned platform config on the /api/v1/config
+	// public prefix (tenant resolver bypassed). Without an in-handler guard
+	// anyone on the network could read and flip flags globally, so gate them
+	// to operators like the secrets surface does.
+	s.mux.HandleFunc("GET /api/v1/config/flags", s.operatorGuard(rbac.ResourceAdminAdapters, s.handleListFeatureFlags))
+	s.mux.HandleFunc("PUT /api/v1/config/flags/{key}", s.operatorGuard(rbac.ResourceAdminAdapters, s.handleSetFeatureFlag))
 }
 
 func writeFeatureFlagError(w http.ResponseWriter, err error) {

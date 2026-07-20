@@ -93,6 +93,16 @@ func PreCallHandler(b *Budgets) hooks.Handler {
 		if !ok2 {
 			return payload, fmt.Errorf("%w: tenant %s", ErrBudgetExceeded, tenantID)
 		}
+		// Per-key lifetime cap (suite_api_keys.budget_max_usd), enforced
+		// runtime-side from the cost_events ledger so it works even when
+		// LiteLLM's virtual-key budgets aren't wired. Same fail-open
+		// contract: a DB error admits the call.
+		if apiKeyID, _ := m["api_key_id"].(string); apiKeyID != "" {
+			okKey, kerr := b.HasKeyBudget(ctx, apiKeyID, estimated)
+			if kerr == nil && !okKey {
+				return payload, fmt.Errorf("%w: api key %s", ErrKeyBudgetExceeded, apiKeyID)
+			}
+		}
 		return payload, nil
 	}
 }

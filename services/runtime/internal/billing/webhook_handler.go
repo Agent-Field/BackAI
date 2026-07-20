@@ -86,6 +86,15 @@ func (s *Service) HandleStripeWebhook(ctx context.Context, body []byte, sigHeade
 // dispatchEvent routes a verified event to the right Service method.
 // Unknown event types are no-ops (acknowledged 200).
 func (s *Service) dispatchEvent(ctx context.Context, ev *stripe.Event) error {
+	// A well-formed Stripe event always carries a data object, but a
+	// hand-crafted / truncated payload (common in stub mode, where the
+	// signature check is skipped) can arrive with no `data` key, leaving
+	// ev.Data nil. The per-type handlers read ev.Data.Raw, so guard here
+	// rather than nil-deref (which otel span.End turns into a double panic).
+	if ev.Data == nil {
+		s.log.Warn("billing: webhook event has no data object", "type", ev.Type, "event_id", ev.ID)
+		return nil
+	}
 	switch ev.Type {
 	case "customer.subscription.updated", "customer.subscription.created":
 		return s.handleSubscriptionUpdated(ctx, ev)

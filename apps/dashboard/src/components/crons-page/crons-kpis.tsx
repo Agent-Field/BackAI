@@ -2,6 +2,8 @@
 
 "use client"
 
+import { RelativeTime } from "@/components/ui/relative-time"
+
 import { TenantKpiTile } from "@/components/tenant-detail/kpi-tile"
 
 import type { Cron } from "@/lib/api"
@@ -45,7 +47,13 @@ export function CronsKpis({ crons, healthy }: CronsKpisProps) {
       />
       <TenantKpiTile
         label="Next fire"
-        value={healthy ? formatRelativeTime(nextFire) : "—"}
+        value={
+          healthy ? (
+            <RelativeTime iso={nextFire} format={formatRelativeTime} />
+          ) : (
+            "—"
+          )
+        }
         sublabel="soonest active tick"
         status="watch"
       />

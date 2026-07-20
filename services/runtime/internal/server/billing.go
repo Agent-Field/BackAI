@@ -163,6 +163,9 @@ func writeBillingError(w http.ResponseWriter, err error) {
 	case errors.Is(err, billing.ErrPriceStale):
 		writeError(w, http.StatusConflict, "BILLING_PRICE_STALE",
 			err.Error()+" — re-provision it with `af-stack billing plan set` or the dashboard Billing page, then retry.", nil)
+	case errors.Is(err, billing.ErrPlanNotFound):
+		writeError(w, http.StatusNotFound, "PLAN_NOT_FOUND",
+			"no such billing plan — check the plan id or create it with `af-stack billing plan set`", nil)
 	case errors.Is(err, billing.ErrNotFound):
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "billing customer not found", nil)
 	case errors.Is(err, billing.ErrBillingUnavailable):
@@ -203,7 +206,10 @@ func (s *Server) handleBillingGetCustomer(w http.ResponseWriter, r *http.Request
 	ctx, span := s.dashTracer().Start(r.Context(), "dashboard.billing.get_customer")
 	defer span.End()
 
-	tenantID := r.PathValue("tenantId")
+	tenantID, ok := validUUIDParam(w, r.PathValue("tenantId"))
+	if !ok {
+		return
+	}
 	if s.billing == nil {
 		// Synthesise a "free plan" row so the dashboard renders the
 		// default state without a 503.

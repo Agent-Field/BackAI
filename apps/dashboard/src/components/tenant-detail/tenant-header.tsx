@@ -6,6 +6,7 @@ import { Pause, Play } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { CopyButton } from "@/components/ui/copy-button"
+import { RelativeTime } from "@/components/ui/relative-time"
 
 import type { TenantDrilldown } from "@/lib/api"
 import type { StatusState } from "@/lib/home/types"
@@ -86,7 +87,7 @@ export function TenantHeader({
           </span>
           <span aria-hidden>·</span>
           <span title={tenant.created_at}>
-            created {formatAge(tenant.created_at)}
+            created <RelativeTime iso={tenant.created_at} format={formatAge} />
           </span>
         </span>
       </header>

@@ -281,7 +281,7 @@ CMD ["python", "main.py"]
 func codingAgentRequirements() string {
 	// Floor-pinned so a flexible constraint still busts the Docker layer
 	// cache when the SDK is bumped.
-	return "agentfield>=0.4.0\npydantic>=2.0\n"
+	return "agentfield>=0.1.109\npydantic>=2.0\n"
 }
 
 func codingAgentReadme(nodeID string) string {

@@ -48,6 +48,9 @@ func writeToolAdapterError(w http.ResponseWriter, err error) {
 			"tool adapter is disabled for this tenant", nil)
 	case errors.Is(err, tooladapters.ErrUnavailable):
 		writeError(w, http.StatusServiceUnavailable, "TOOL_ADAPTER_UNAVAILABLE", err.Error(), nil)
+	case errors.Is(err, tooladapters.ErrBlockedDestination):
+		writeError(w, http.StatusBadRequest, "DESTINATION_BLOCKED",
+			"the requested URL resolves to a blocked address", nil)
 	case errors.Is(err, tooladapters.ErrInvalidInput):
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error(), nil)
 	default:

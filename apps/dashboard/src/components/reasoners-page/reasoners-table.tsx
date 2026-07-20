@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { RelativeTime } from "@/components/ui/relative-time"
+
 import {
   ERROR_RATE_ALERT,
   formatErrorRatePct,
   formatReasonerCost,
 } from "@/lib/reasoners-page/derive"
 import type { ReasonerRow } from "@/lib/reasoners-page/types"
-import { formatRunAge, formatRunDuration } from "@/lib/runs/derive"
+import { formatRunDuration } from "@/lib/runs/derive"
 
 // Reasoner analytics table — sticky header, one row per agent.reasoner
 // pair. Server-rendered; loading / empty / degraded states share the
@@ -68,9 +70,10 @@ export function ReasonersTable({
               <span className="text-right font-mono tabular-nums text-muted-foreground">
                 {formatReasonerCost(row.cost_usd)}
               </span>
-              <span className="text-right font-mono tabular-nums text-muted-foreground">
-                {row.last_called_at ? formatRunAge(row.last_called_at) : "—"}
-              </span>
+              <RelativeTime
+                iso={row.last_called_at}
+                className="text-right font-mono tabular-nums text-muted-foreground"
+              />
             </li>
           ))}
         </ul>

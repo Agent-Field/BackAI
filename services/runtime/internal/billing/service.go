@@ -390,6 +390,17 @@ func (s *Service) GetPlan(ctx context.Context, id string) (Plan, error) {
 	return s.store.GetPlan(ctx, id)
 }
 
+// getPlanExact resolves a caller-supplied plan id with no default
+// fallback (see Store.GetPlanExact). Checkout uses it so a typo'd,
+// deleted, or empty plan id is rejected instead of silently subscribing
+// the tenant to the default plan.
+func (s *Service) getPlanExact(ctx context.Context, id string) (Plan, error) {
+	if s == nil || s.store == nil {
+		return Plan{}, ErrPlanNotFound
+	}
+	return s.store.GetPlanExact(ctx, id)
+}
+
 // PlanByStripePrice maps a Stripe Price id to a catalog plan.
 func (s *Service) PlanByStripePrice(ctx context.Context, priceID string) (Plan, error) {
 	if s == nil || s.store == nil {
@@ -593,7 +604,9 @@ func (s *Service) Checkout(ctx context.Context, tenantID, planID, successURL, ca
 	if tenantID == "" {
 		return CheckoutResult{}, fmt.Errorf("%w: tenant_id is required", ErrInvalidInput)
 	}
-	plan, err := s.GetPlan(ctx, planID)
+	// Exact lookup — a nonexistent plan id must fail loudly, not silently
+	// resolve to the default plan and subscribe the tenant to it.
+	plan, err := s.getPlanExact(ctx, planID)
 	if err != nil {
 		return CheckoutResult{}, err
 	}

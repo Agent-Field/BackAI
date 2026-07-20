@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Badge } from "@/components/ui/badge"
+import { RelativeTime } from "@/components/ui/relative-time"
 import { ZoneCard, ZoneCardHeader } from "@/components/ui/zone-card"
 
 import type { TenantDrilldown } from "@/lib/api"
@@ -55,9 +56,11 @@ export function MembersTab({ drilldown }: { drilldown: TenantDrilldown }) {
                 >
                   {m.role}
                 </Badge>
-                <span className="text-right font-mono text-meta tabular-nums text-muted-foreground">
-                  {formatAge(m.last_active_at)}
-                </span>
+                <RelativeTime
+                  iso={m.last_active_at}
+                  format={formatAge}
+                  className="text-right font-mono text-meta tabular-nums text-muted-foreground"
+                />
               </li>
             )
           })}

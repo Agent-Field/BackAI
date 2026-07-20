@@ -35,6 +35,12 @@ var ErrInvalidScope = errors.New("memory: invalid scope")
 // ErrInvalidKey is returned for empty / oversized keys.
 var ErrInvalidKey = errors.New("memory: invalid key")
 
+// ErrTenantRequired is returned by write paths when no tenant is bound
+// to the request context. Every entry is partitioned by tenant_id (FORCE
+// RLS on suite_memory); without a resolved tenant a write can't be
+// attributed and would breach isolation. The handler maps this to 401.
+var ErrTenantRequired = errors.New("memory: tenant context required")
+
 // ErrEmbeddingDimMismatch is returned when an embedder returns a vector
 // whose dimensionality does not match the schema (1536 for
 // text-embedding-3-small).

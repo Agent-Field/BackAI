@@ -289,7 +289,11 @@ func (c *Cache) Flush(ctx context.Context, opts FlushOpts) (int64, error) {
 		if err := c.pool.QueryRow(ctx, `select count(*)::bigint from suite_llm_cache`).Scan(&count); err != nil {
 			return 0, fmt.Errorf("llmcache: flush count: %w", err)
 		}
-		if _, err := c.pool.Exec(ctx, `truncate table suite_llm_cache`); err != nil {
+		// DELETE, not TRUNCATE: the restricted serving role (afstack_app)
+		// is granted DML but not TRUNCATE, so `truncate` fails with
+		// "permission denied for table". DELETE with no WHERE clears every
+		// row within the granted privileges.
+		if _, err := c.pool.Exec(ctx, `delete from suite_llm_cache`); err != nil {
 			return 0, fmt.Errorf("llmcache: flush: %w", err)
 		}
 		return count, nil

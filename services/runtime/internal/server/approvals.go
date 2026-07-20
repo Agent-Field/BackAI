@@ -129,7 +129,11 @@ func (s *Server) handleGetApproval(w http.ResponseWriter, r *http.Request) {
 	if s.approvalsUnavailable(w) {
 		return
 	}
-	a, err := s.approvals.Get(ctx, r.PathValue("id"))
+	id, ok := validUUIDParam(w, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	a, err := s.approvals.Get(ctx, id)
 	if err != nil {
 		writeApprovalError(w, err)
 		return

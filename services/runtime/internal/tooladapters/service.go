@@ -282,6 +282,12 @@ func (s *Service) callHTTP(ctx context.Context, tool string, args map[string]any
 	}
 	resp, err := client.Do(req)
 	if err != nil {
+		// The SSRF guard's rejection message embeds the resolved internal
+		// IP + CIDR; collapse it to a sanitized sentinel so the handler
+		// returns a 400 without leaking host-network topology.
+		if safehttp.IsBlocked(err) {
+			return nil, ErrBlockedDestination
+		}
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	defer resp.Body.Close()

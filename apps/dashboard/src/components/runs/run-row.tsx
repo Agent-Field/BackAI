@@ -4,6 +4,8 @@
 
 import { ChevronRight } from "lucide-react"
 
+import { RelativeTime } from "@/components/ui/relative-time"
+
 import type { Run } from "@/lib/api"
 import type { StatusState } from "@/lib/home/types"
 import {
@@ -73,9 +75,11 @@ export function RunRow({ run, selected, onSelect }: RunRowProps) {
         aria-hidden
         className={`inline-block size-icon-dot rounded-pill ${DOT[tone]}`}
       />
-      <span className="truncate font-mono tabular-nums text-muted-foreground">
-        {formatRunAge(run.started_at)}
-      </span>
+      <RelativeTime
+        iso={run.started_at}
+        format={formatRunAge}
+        className="truncate font-mono tabular-nums text-muted-foreground"
+      />
       <div className="flex min-w-0 flex-col gap-tile-tight">
         <span
           className="truncate font-mono text-body text-foreground"

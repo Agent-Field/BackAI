@@ -299,21 +299,43 @@ func randomBase32(bytesN int) (string, error) {
 		base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(buf)), nil
 }
 
-func runAgentNew(args []string, stdout, _ io.Writer) error {
+// scaffoldName validates the single positional <name>/<id> argument of the
+// scaffold subcommands. Flag-like arguments (e.g. `--help`) must not become
+// scaffold directories, and the slug must be non-empty after normalization.
+func scaffoldName(cmd string, args []string) (string, error) {
+	usage := fmt.Errorf("%s: usage: af-stack %s <name>", cmd, cmd)
 	if len(args) != 1 {
-		return errors.New("agent new: usage: af-stack agent new <name>")
+		return "", usage
+	}
+	if strings.HasPrefix(args[0], "-") {
+		return "", usage
+	}
+	// slugify falls back to "app" for unusable input (an init-time
+	// convenience); scaffolds must not silently rename, so require at
+	// least one usable character up front.
+	if !strings.ContainsFunc(strings.ToLower(args[0]), func(r rune) bool {
+		return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+	}) {
+		return "", fmt.Errorf("%s: name %q contains no usable characters (want [a-z0-9-])", cmd, args[0])
+	}
+	return slugify(args[0]), nil
+}
+
+func runAgentNew(args []string, stdout, _ io.Writer) error {
+	id, err := scaffoldName("agent new", args)
+	if err != nil {
+		return err
 	}
 	root, err := findRepoRoot()
 	if err != nil {
 		return err
 	}
-	id := slugify(args[0])
 	dir := filepath.Join(root, "apps", "backend", "agents", id)
 	if exists(dir) {
 		return fmt.Errorf("agent new: %s already exists", filepath.ToSlash(dir))
 	}
 	files := map[string]string{
-		"requirements.txt": "agentfield>=0.4.0\npydantic>=2\n",
+		"requirements.txt": "agentfield>=0.1.109\npydantic>=2\n",
 		"main.py":          agentTemplate(id),
 		"Dockerfile":       agentDockerfileTemplate(id),
 		"README.md":        fmt.Sprintf("# %s agent\n\nInvoked as `%s.echo` and `%s.summarize`.\n", title(id), id, id),
@@ -326,14 +348,14 @@ func runAgentNew(args []string, stdout, _ io.Writer) error {
 }
 
 func runModuleNew(args []string, stdout, _ io.Writer) error {
-	if len(args) != 1 {
-		return errors.New("module new: usage: af-stack module new <id>")
+	id, err := scaffoldName("module new", args)
+	if err != nil {
+		return err
 	}
 	root, err := findRepoRoot()
 	if err != nil {
 		return err
 	}
-	id := slugify(args[0])
 	dir := filepath.Join(root, "workload-modules", id)
 	if exists(dir) {
 		return fmt.Errorf("module new: %s already exists", filepath.ToSlash(dir))
@@ -352,14 +374,14 @@ func runModuleNew(args []string, stdout, _ io.Writer) error {
 }
 
 func runPluginNew(args []string, stdout, _ io.Writer) error {
-	if len(args) != 1 {
-		return errors.New("plugin new: usage: af-stack plugin new <id>")
+	id, err := scaffoldName("plugin new", args)
+	if err != nil {
+		return err
 	}
 	root, err := findRepoRoot()
 	if err != nil {
 		return err
 	}
-	id := slugify(args[0])
 	dir := filepath.Join(root, "apps", "dashboard", "plugins", id)
 	if exists(dir) {
 		return fmt.Errorf("plugin new: %s already exists", filepath.ToSlash(dir))
@@ -797,13 +819,15 @@ func pluginPageTemplate(id string) string {
 	var buf bytes.Buffer
 	fmt.Fprintf(&buf, `// SPDX-License-Identifier: Apache-2.0
 
-import { PageHeader } from "@/components/layout/page-header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
 export default function %sPluginPage() {
   return (
     <div className="space-y-6">
-      <PageHeader title="%s" description="Fork-specific operator view." />
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">%s</h1>
+        <p className="text-sm text-muted-foreground">Fork-specific operator view.</p>
+      </div>
       <Card>
         <CardHeader>
           <CardTitle>Custom metric</CardTitle>

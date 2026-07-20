@@ -225,7 +225,7 @@ As a secondary touchpoint, the API runtime is callable directly with the
 same agent the customer app uses internally:
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/agents/sample.echo \
+curl -X POST http://localhost:8080/api/v1/agents/supportdesk.echo \
   -H "Content-Type: application/json" \
   -d '{"input":{"payload":{"message":"hello world"}}}'
 # → {"status":"succeeded","result":{"echoed":{"message":"hello world"}}, ...}

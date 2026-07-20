@@ -210,7 +210,7 @@ kill -TERM $PID &
 sleep 0.5
 curl -s localhost:8080/ready    # {"status":"draining","since_s":0,...}
 curl -s localhost:8080/health   # {"status":"alive",...} (still 200)
-curl -s -X POST localhost:8080/api/v1/agents/sample.echo -d '{}'
+curl -s -X POST localhost:8080/api/v1/agents/supportdesk.echo -d '{}'
 # {"error":{"code":"DRAINING","message":"server is shutting down..."}}
 
 # Wait for process to exit

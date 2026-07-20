@@ -4,7 +4,8 @@
 // both the server page and the client shell can import them.
 
 /** Compact relative age for first_seen / last_seen columns. */
-export function formatErrorAge(iso: string): string {
+export function formatErrorAge(iso: string | null): string {
+  if (!iso) return "—"
   const ts = Date.parse(iso)
   if (Number.isNaN(ts)) return "—"
   const diffMs = Math.max(0, Date.now() - ts)

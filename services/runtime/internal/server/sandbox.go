@@ -17,6 +17,7 @@
 package server
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -26,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
 	"github.com/Agent-Field/backai/services/runtime/internal/sandbox"
 )
 
@@ -58,10 +60,14 @@ type sandboxRunListResponse struct {
 
 // registerSandboxRoutes wires the /api/v1/sandbox/* endpoints.
 func (s *Server) registerSandboxRoutes() {
-	s.mux.HandleFunc("POST /api/v1/sandbox/run", s.handleSandboxRun)
+	// /api/v1/sandbox is a public prefix. POST /run executes arbitrary code
+	// on the host docker daemon and was reachable unauthenticated — gate the
+	// mutating routes to operators (reads stay open for the dashboard). The
+	// internal agent/module path presents an operator key (AF_STACK_API_KEY).
+	s.mux.HandleFunc("POST /api/v1/sandbox/run", s.operatorGuard(rbac.ResourceAdminAdapters, s.handleSandboxRun))
 	s.mux.HandleFunc("GET /api/v1/sandbox/runs", s.handleSandboxListRuns)
 	s.mux.HandleFunc("GET /api/v1/sandbox/runs/{id}", s.handleSandboxGetRun)
-	s.mux.HandleFunc("DELETE /api/v1/sandbox/runs/{id}", s.handleSandboxStopRun)
+	s.mux.HandleFunc("DELETE /api/v1/sandbox/runs/{id}", s.operatorGuard(rbac.ResourceAdminAdapters, s.handleSandboxStopRun))
 	s.mux.HandleFunc("GET /api/v1/sandbox/pool", s.handleSandboxPool)
 	s.mux.HandleFunc("GET /api/v1/sandbox/runs/{id}/logs", s.handleSandboxLogs)
 }
@@ -138,6 +144,10 @@ func (s *Server) handleSandboxRun(w http.ResponseWriter, r *http.Request) {
 	// Tenant comes from the resolved context (Phase 6.1). When MT is
 	// off this is the default tenant.
 	spec.TenantID = s.defaultTenant(r)
+	// Persist logs under the tenant-scoped storage prefix so a
+	// tenant-scoped read resolves them (otherwise completed-run logs 404
+	// under multi-tenancy).
+	spec.StorageKeyPrefix = s.tenantStoragePrefix(ctx)
 
 	run, err := s.sandbox.Run(ctx, spec)
 	if err != nil {
@@ -277,12 +287,25 @@ func (s *Server) handleSandboxLogs(w http.ResponseWriter, r *http.Request) {
 		writeSandboxError(w, err)
 		return
 	}
+
+	// SSE headers up-front — both the terminal replay and the live stream
+	// speak Server-Sent Events.
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError,
+			"NO_STREAMING", "response writer does not support streaming", nil)
+		return
+	}
+
 	if run.Status.IsTerminal() {
-		// Run already finished. We don't replay stored logs over SSE
-		// in v1 — the dashboard can fetch stdout_url / stderr_url
-		// directly. Tell the client the stream is empty.
-		writeError(w, http.StatusGone, "RUN_TERMINAL",
-			"run already terminated; fetch stdout_url / stderr_url instead", nil)
+		// The container is gone; replay the persisted stdout/stderr from
+		// object storage so completed-run logs are still readable over the
+		// same SSE contract (they used to 410, and the stdout_url fallback
+		// 404s under multi-tenancy).
+		s.replaySandboxLogs(ctx, w, flusher, run)
 		return
 	}
 
@@ -300,16 +323,7 @@ func (s *Server) handleSandboxLogs(w http.ResponseWriter, r *http.Request) {
 	if run.WorkspaceID != nil {
 		spec.WorkspaceID = *run.WorkspaceID
 	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeError(w, http.StatusInternalServerError,
-			"NO_STREAMING", "response writer does not support streaming", nil)
-		return
-	}
+	spec.StorageKeyPrefix = s.tenantStoragePrefix(ctx)
 
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -355,4 +369,44 @@ func (s *Server) handleSandboxLogs(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+// replaySandboxLogs streams a terminated run's persisted stdout/stderr
+// from object storage as SSE log-line events, then a terminal result
+// event. This is how completed-run logs are read — the live container is
+// gone, so there is nothing to attach to. Best-effort: a missing or
+// unreadable object is skipped rather than failing the stream.
+func (s *Server) replaySandboxLogs(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, run *sandbox.SandboxRun) {
+	emit := func(stream string, key *string) {
+		if key == nil || *key == "" || s.storage == nil {
+			return
+		}
+		body, _, err := s.storage.Download(ctx, *key)
+		if err != nil {
+			return
+		}
+		defer body.Close()
+		ts := time.Now().UTC().Format(time.RFC3339Nano)
+		sc := bufio.NewScanner(body)
+		sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+		for sc.Scan() {
+			payload := map[string]any{"ts": ts, "stream": stream, "text": sc.Text()}
+			b, _ := json.Marshal(payload)
+			fmt.Fprintf(w, "data: %s\n\n", b)
+		}
+		flusher.Flush()
+	}
+	emit("stdout", run.StdoutURL)
+	emit("stderr", run.StderrURL)
+
+	result := map[string]any{"status": string(run.Status)}
+	if run.ExitCode != nil {
+		result["exit_code"] = *run.ExitCode
+	}
+	if run.DurationS != nil {
+		result["duration_s"] = *run.DurationS
+	}
+	b, _ := json.Marshal(result)
+	fmt.Fprintf(w, "event: result\ndata: %s\n\n", b)
+	flusher.Flush()
 }

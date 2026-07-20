@@ -5,6 +5,7 @@
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { RelativeTime } from "@/components/ui/relative-time"
 
 import { api } from "@/lib/api"
 import type { ErrorCapabilities, ErrorGroup } from "@/lib/api"
@@ -117,9 +118,11 @@ export function ErrorRow({ group, capabilities, onMutated }: ErrorRowProps) {
       <span className="text-right font-mono tabular-nums text-muted-foreground">
         {group.user_count !== undefined ? formatCount(group.user_count) : "—"}
       </span>
-      <span className="text-right font-mono tabular-nums text-muted-foreground">
-        {formatErrorAge(group.last_seen)}
-      </span>
+      <RelativeTime
+        iso={group.last_seen}
+        format={formatErrorAge}
+        className="text-right font-mono tabular-nums text-muted-foreground"
+      />
       <div className="flex items-center justify-end gap-inline">
         {actions.map(({ action, label, busy }) => (
           <Button

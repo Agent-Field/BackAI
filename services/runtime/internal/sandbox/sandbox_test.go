@@ -38,8 +38,21 @@ func TestValidate_AppliesDefaults(t *testing.T) {
 	if spec.MemoryGB != sandbox.DefaultMemoryGB {
 		t.Errorf("MemoryGB default = %d, want %d", spec.MemoryGB, sandbox.DefaultMemoryGB)
 	}
+	// Secure by default: an unspecified network is "isolated" (no egress),
+	// not "open" — "open" can reach host-published services (incl. the
+	// RLS-bypassing suite Postgres) and must be an explicit opt-in.
+	if spec.Network != sandbox.NetworkIsolated {
+		t.Errorf("Network default = %q, want %q", spec.Network, sandbox.NetworkIsolated)
+	}
+}
+
+func TestValidate_OpenNetworkIsOptIn(t *testing.T) {
+	spec := sandbox.RunSpec{Image: "alpine", Command: []string{"echo", "hi"}, Network: sandbox.NetworkOpen}
+	if err := spec.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
 	if spec.Network != sandbox.NetworkOpen {
-		t.Errorf("Network default = %q, want %q", spec.Network, sandbox.NetworkOpen)
+		t.Errorf("explicit Network=open must be preserved, got %q", spec.Network)
 	}
 }
 
@@ -183,7 +196,7 @@ func (f *fakeAdapter) Stream(ctx context.Context, spec sandbox.RunSpec) (<-chan 
 	return lines, results, f.err
 }
 func (f *fakeAdapter) Stop(ctx context.Context, runID string) error { return nil }
-func (f *fakeAdapter) Capabilities() sandbox.Capabilities          { return f.caps }
+func (f *fakeAdapter) Capabilities() sandbox.Capabilities           { return f.caps }
 
 func TestService_RunNoDB(t *testing.T) {
 	// No DB wired -> service synthesises an in-memory row and the

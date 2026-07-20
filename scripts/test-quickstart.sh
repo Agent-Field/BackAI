@@ -2,7 +2,7 @@
 # Validates the 60-second quickstart end to end.
 #
 # Brings up the full docker-compose stack from a clean slate, polls until
-# the suite gateway is reachable, then verifies the sample agent responds.
+# the suite gateway is reachable, then verifies the supportdesk agent responds.
 #
 # Used in CI (when re-enabled) and by maintainers before each release.
 #
@@ -59,8 +59,8 @@ fi
 ELAPSED=$(($(date +%s) - START_TS))
 green "  ready in ${ELAPSED}s"
 
-step "4/5  Verify sample agent is registered with AgentField"
-# Give the sample agent up to 30 seconds to register
+step "4/5  Verify supportdesk agent is registered with AgentField"
+# Give the supportdesk agent up to 30 seconds to register
 REG_DEADLINE=$(($(date +%s) + 30))
 REGISTERED=""
 while [ "$(date +%s)" -lt "$REG_DEADLINE" ]; do
@@ -73,28 +73,28 @@ while [ "$(date +%s)" -lt "$REG_DEADLINE" ]; do
 done
 
 if [ -z "$REGISTERED" ]; then
-    yellow "  WARN: sample agent not visible in /api/v1/agents after 30s"
+    yellow "  WARN: supportdesk agent not visible in /api/v1/agents after 30s"
     echo "  agents response: $AGENTS_JSON"
-    echo "  --- sample-agent logs ---"
-    docker compose logs sample-agent --tail 30
+    echo "  --- supportdesk-agent logs ---"
+    docker compose logs supportdesk-agent --tail 30
     # Don't fail — agent discovery format may differ. We test invocation next.
 fi
 
-step "5/5  POST to sample.echo via the gateway"
+step "5/5  POST to supportdesk.echo via the gateway"
 # AgentField's REST shape: {"input": {<arg_name>: <arg_value>}}.
 # Our `echo` reasoner takes one arg `payload: dict`, so we send:
 ECHO_RESP="$(curl -s -X POST \
     -H "Content-Type: application/json" \
     -d '{"input":{"payload":{"message":"hello world"}}}' \
-    "http://localhost:${PORT}/api/v1/agents/sample.echo")"
+    "http://localhost:${PORT}/api/v1/agents/supportdesk.echo")"
 
 echo "  response: $ECHO_RESP"
 
 if echo "$ECHO_RESP" | grep -q 'hello world\|echoed'; then
-    green "  PASS  sample.echo round-trip works"
+    green "  PASS  supportdesk.echo round-trip works"
 else
-    red "  FAIL  sample.echo did not return expected payload"
-    docker compose logs sample-agent --tail 30
+    red "  FAIL  supportdesk.echo did not return expected payload"
+    docker compose logs supportdesk-agent --tail 30
     docker compose logs runtime --tail 30
     exit 1
 fi

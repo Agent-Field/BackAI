@@ -3,10 +3,11 @@
 import { ArrowUpRight } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { RelativeTime } from "@/components/ui/relative-time"
 
 import type { AdminService } from "@/lib/api"
 import type { StatusState } from "@/lib/home/types"
-import { classifyServiceStatus, formatRelative } from "@/lib/health/derive"
+import { classifyServiceStatus } from "@/lib/health/derive"
 
 // One row in Zone B per backing service. Dot is always left-of-name
 // (C4 consistency rule), version/host sit in the middle, and every
@@ -71,9 +72,10 @@ export function ServiceHealthRow({ service }: { service: AdminService }) {
         ) : null}
       </div>
       <span className={`text-right text-meta ${statusTone}`}>{statusLabel}</span>
-      <span className="text-right font-mono text-meta tabular-nums text-muted-foreground">
-        {formatRelative(service.checked_at)}
-      </span>
+      <RelativeTime
+        iso={service.checked_at}
+        className="text-right font-mono text-meta tabular-nums text-muted-foreground"
+      />
       {service.admin_url ? (
         <Button
           size="sm"

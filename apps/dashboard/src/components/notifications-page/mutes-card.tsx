@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { RelativeTime } from "@/components/ui/relative-time"
 import { ZoneCard, ZoneCardHeader } from "@/components/ui/zone-card"
 
 import { api } from "@/lib/api"
@@ -89,9 +90,14 @@ export function MutesCard({ mutes, healthy, onMutated }: MutesCardProps) {
                 {mute.reason ?? "—"}
               </span>
               <span className="whitespace-nowrap font-mono text-meta text-muted-foreground">
-                {mute.expires_at
-                  ? `expires ${formatNotificationAge(mute.expires_at)}`
-                  : "no expiry"}
+                {mute.expires_at ? (
+                  <>
+                    expires{" "}
+                    <RelativeTime iso={mute.expires_at} format={formatNotificationAge} />
+                  </>
+                ) : (
+                  "no expiry"
+                )}
               </span>
               <Button
                 type="button"

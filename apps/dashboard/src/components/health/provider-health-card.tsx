@@ -3,6 +3,7 @@
 import { ArrowUpRight } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { RelativeTime } from "@/components/ui/relative-time"
 import { Sparkline } from "@/components/ui/sparkline"
 
 import type { ProviderHealth } from "@/lib/api"
@@ -10,7 +11,6 @@ import type { StatusState } from "@/lib/home/types"
 import {
   deriveProviderStatus,
   formatLatency,
-  formatRelative,
   providerSparkline,
 } from "@/lib/health/derive"
 
@@ -101,9 +101,7 @@ export function ProviderHealthCard({
         <span>
           {sampleCount.toLocaleString()} sample
           {sampleCount === 1 ? "" : "s"} · last check{" "}
-          <span className="tabular-nums">
-            {formatRelative(provider.last_observed_at)}
-          </span>
+          <RelativeTime iso={provider.last_observed_at} className="tabular-nums" />
         </span>
         <div className="flex items-center gap-inline">
           {tone !== "ok" && tone !== "idle" ? (

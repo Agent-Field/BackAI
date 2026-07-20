@@ -3,11 +3,12 @@
 "use client"
 
 import { ArrowUpRight, ChevronDown, ChevronRight, RotateCcw } from "lucide-react"
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { RelativeTime } from "@/components/ui/relative-time"
 
 import { api } from "@/lib/api"
 import type { WebhookDelivery } from "@/lib/api"
@@ -79,9 +80,11 @@ export function DeliveryRow({
           aria-hidden
           className={`inline-block size-icon-dot rounded-pill ${DOT[tone]}`}
         />
-        <span className="truncate font-mono tabular-nums text-muted-foreground">
-          {formatDeliveryAge(delivery.created_at)}
-        </span>
+        <RelativeTime
+          iso={delivery.created_at}
+          format={formatDeliveryAge}
+          className="truncate font-mono tabular-nums text-muted-foreground"
+        />
         <Badge variant={delivery.direction === "inbound" ? "secondary" : "outline"}>
           {delivery.direction}
         </Badge>
@@ -172,11 +175,11 @@ function DeliveryDetail({
         <DetailMeta label="Destination" value={delivery.destination} mono />
         <DetailMeta
           label="Scheduled"
-          value={formatDeliveryAge(delivery.scheduled_at)}
+          value={<RelativeTime iso={delivery.scheduled_at} format={formatDeliveryAge} />}
         />
         <DetailMeta
           label="Delivered"
-          value={formatDeliveryAge(delivery.delivered_at)}
+          value={<RelativeTime iso={delivery.delivered_at} format={formatDeliveryAge} />}
         />
       </dl>
       <div className="flex flex-col gap-tile-tight">
@@ -242,7 +245,7 @@ function DetailMeta({
   mono,
 }: {
   label: string
-  value: string
+  value: ReactNode
   mono?: boolean
 }) {
   return (
@@ -252,7 +255,7 @@ function DetailMeta({
       </dt>
       <dd
         className={`truncate text-meta text-foreground ${mono ? "font-mono" : ""}`}
-        title={value}
+        title={typeof value === "string" ? value : undefined}
       >
         {value}
       </dd>

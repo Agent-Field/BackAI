@@ -162,6 +162,12 @@ type EventsOpts struct {
 // gateway then returns HTTP 402 to the client.
 var ErrBudgetExceeded = errors.New("cost: budget exceeded for tenant")
 
+// ErrKeyBudgetExceeded is returned by Budgets.HasKeyBudget when the
+// calling API key's lifetime spend would exceed its budget_max_usd cap.
+// The LLM gateway hook maps this to HTTP 402, exactly like the per-tenant
+// cap — the two are independent ceilings.
+var ErrKeyBudgetExceeded = errors.New("cost: budget exceeded for api key")
+
 // ErrBudgetNotFound is returned by Budgets.Get when the tenant has no
 // budget row. The admin handler maps this to HTTP 404.
 var ErrBudgetNotFound = errors.New("cost: no budget set for tenant")

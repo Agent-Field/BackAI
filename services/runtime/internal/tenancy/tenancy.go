@@ -160,12 +160,15 @@ type APIKey struct {
 	// when no LiteLLM mapping exists (legacy keys, or LiteLLM was
 	// unreachable at issuance).
 	LiteLLMKeyAlias *string `json:"litellm_key_alias"`
-	// BudgetMaxUSD is the per-key lifetime cap LiteLLM enforces.
-	// Nil = unlimited (legacy / unconfigured). The customer sees a
-	// 429 from LiteLLM when their key overruns.
+	// BudgetMaxUSD is the per-key lifetime spend cap. When a LiteLLM
+	// virtual key exists it is mirrored upstream; independently, the
+	// runtime enforces it from the cost_events ledger in the gateway
+	// pre-call hook (402 BUDGET_EXCEEDED) so the cap holds even with a
+	// DB-less LiteLLM. Nil = unlimited.
 	BudgetMaxUSD *float64 `json:"budget_max_usd"`
-	// RateLimitRPM is the per-minute request cap LiteLLM enforces.
-	// Nil = unlimited.
+	// RateLimitRPM is the per-minute request cap LiteLLM enforces when the
+	// key is mirrored upstream. Not enforced runtime-side today (see a
+	// key's mirror_status). Nil = unlimited.
 	RateLimitRPM *int `json:"rate_limit_rpm"`
 	// RateLimitTPM is the per-minute token cap LiteLLM enforces.
 	RateLimitTPM *int `json:"rate_limit_tpm"`

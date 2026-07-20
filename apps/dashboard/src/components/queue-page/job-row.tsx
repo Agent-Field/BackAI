@@ -3,10 +3,11 @@
 "use client"
 
 import { ChevronDown, ChevronRight, RotateCcw } from "lucide-react"
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import { RelativeTime } from "@/components/ui/relative-time"
 
 import { api } from "@/lib/api"
 import type { Job } from "@/lib/api"
@@ -74,9 +75,11 @@ export function JobRow({ job, expanded, onToggle, onMutated }: JobRowProps) {
           aria-hidden
           className={`inline-block size-icon-dot rounded-pill ${DOT[tone]}`}
         />
-        <span className="truncate font-mono tabular-nums text-muted-foreground">
-          {formatJobAge(job.enqueued_at)}
-        </span>
+        <RelativeTime
+          iso={job.enqueued_at}
+          format={formatJobAge}
+          className="truncate font-mono tabular-nums text-muted-foreground"
+        />
         <div className="flex min-w-0 flex-col gap-tile-tight">
           <span
             className="truncate font-mono text-body text-foreground"
@@ -154,9 +157,18 @@ function JobDetail({
     <div className="flex flex-col gap-stack border-b bg-accent/10 px-row-x py-tile">
       <dl className="grid grid-cols-2 gap-stack text-meta md:grid-cols-4">
         <DetailMeta label="Job ID" value={job.id} mono />
-        <DetailMeta label="Scheduled" value={formatJobAge(job.scheduled_at)} />
-        <DetailMeta label="Attempted" value={formatJobAge(job.attempted_at)} />
-        <DetailMeta label="Finalized" value={formatJobAge(job.finalized_at)} />
+        <DetailMeta
+          label="Scheduled"
+          value={<RelativeTime iso={job.scheduled_at} format={formatJobAge} />}
+        />
+        <DetailMeta
+          label="Attempted"
+          value={<RelativeTime iso={job.attempted_at} format={formatJobAge} />}
+        />
+        <DetailMeta
+          label="Finalized"
+          value={<RelativeTime iso={job.finalized_at} format={formatJobAge} />}
+        />
       </dl>
       <div className="flex flex-col gap-tile-tight">
         <span className="text-eyebrow uppercase tracking-wide text-muted-foreground">
@@ -210,7 +222,7 @@ function DetailMeta({
   mono,
 }: {
   label: string
-  value: string
+  value: ReactNode
   mono?: boolean
 }) {
   return (
@@ -220,7 +232,7 @@ function DetailMeta({
       </dt>
       <dd
         className={`truncate text-meta text-foreground ${mono ? "font-mono" : ""}`}
-        title={value}
+        title={typeof value === "string" ? value : undefined}
       >
         {value}
       </dd>

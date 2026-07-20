@@ -58,7 +58,7 @@ func testSetup(t *testing.T, embedder Embedder) (*Store, *pgxpool.Pool, func()) 
 	}
 	schema := "memory_test_" + hex.EncodeToString(rb)
 
-	ctx := context.Background()
+	ctx := tenantctx.WithTenant(context.Background(), "tenant-test", "")
 	boot, err := pgx.Connect(ctx, dsn)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
@@ -87,8 +87,16 @@ func testSetup(t *testing.T, embedder Embedder) (*Store, *pgxpool.Pool, func()) 
 		t.Fatalf("pool: %v", err)
 	}
 
+	// Mirrors the production schema after 00032_memory_tenant_rls: a
+	// tenant_id dimension in the primary key. RLS is intentionally left
+	// off in this isolated test schema (there is no suite_tenants FK
+	// target and no PrepareConn app.tenant_id binding here) — these tests
+	// exercise the store's functional behavior; cross-tenant RLS
+	// enforcement is covered by the migration (mirroring the proven
+	// 00016_search pattern) and end-to-end.
 	const schemaSQL = `
 create table suite_memory (
+  tenant_id uuid not null default '00000000-0000-0000-0000-000000000000',
   scope text not null,
   scope_id text not null default '',
   key text not null,
@@ -97,9 +105,9 @@ create table suite_memory (
   embedding vector(1536),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  primary key (scope, scope_id, key)
+  primary key (tenant_id, scope, scope_id, key)
 );
-create index suite_memory_scope_idx on suite_memory (scope, scope_id);
+create index suite_memory_tenant_scope_idx on suite_memory (tenant_id, scope, scope_id);
 `
 	if _, err := pool.Exec(ctx, schemaSQL); err != nil {
 		t.Fatalf("schema: %v", err)
@@ -186,7 +194,7 @@ func TestPutGetRoundTrip(t *testing.T) {
 	store, _, cleanup := testSetup(t, nil)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := tenantctx.WithTenant(context.Background(), "tenant-test", "")
 	in := PutInput{
 		Scope:    ScopeGlobal,
 		Key:      "fav-color",
@@ -238,7 +246,7 @@ func TestScopeIDIsolation(t *testing.T) {
 	store, _, cleanup := testSetup(t, nil)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := tenantctx.WithTenant(context.Background(), "tenant-test", "")
 	// Same scope + key under different scope_ids must remain distinct.
 	_, err := store.Put(ctx, PutInput{
 		Scope:   ScopeAgent,
@@ -277,7 +285,7 @@ func TestListPrefixFilter(t *testing.T) {
 	store, _, cleanup := testSetup(t, nil)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := tenantctx.WithTenant(context.Background(), "tenant-test", "")
 	for _, k := range []string{"prefs/lang", "prefs/theme", "session/id"} {
 		if _, err := store.Put(ctx, PutInput{
 			Scope: ScopeGlobal,
@@ -309,7 +317,7 @@ func TestSearchTopK(t *testing.T) {
 	store, _, cleanup := testSetup(t, emb)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := tenantctx.WithTenant(context.Background(), "tenant-test", "")
 	docs := []struct{ key, value string }{
 		{"d1", "the quick brown fox"},
 		{"d2", "lorem ipsum dolor sit amet"},
@@ -353,7 +361,7 @@ func TestSearchThresholdFilter(t *testing.T) {
 	store, _, cleanup := testSetup(t, emb)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := tenantctx.WithTenant(context.Background(), "tenant-test", "")
 	// Two unrelated documents.
 	for _, kv := range [][2]string{
 		{"d1", "alpha"},
@@ -393,7 +401,7 @@ func TestPutEmbedderFailureStoresEntry(t *testing.T) {
 	store, pool, cleanup := testSetup(t, emb)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := tenantctx.WithTenant(context.Background(), "tenant-test", "")
 	entry, err := store.Put(ctx, PutInput{
 		Scope: ScopeGlobal,
 		Key:   "k",
@@ -424,7 +432,7 @@ func TestPutNoEmbedderWithEmbedFlag(t *testing.T) {
 	store, _, cleanup := testSetup(t, nil)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := tenantctx.WithTenant(context.Background(), "tenant-test", "")
 	entry, err := store.Put(ctx, PutInput{
 		Scope: ScopeGlobal,
 		Key:   "k",
@@ -474,7 +482,7 @@ func TestDelete(t *testing.T) {
 	store, _, cleanup := testSetup(t, nil)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := tenantctx.WithTenant(context.Background(), "tenant-test", "")
 	if _, err := store.Put(ctx, PutInput{
 		Scope: ScopeGlobal,
 		Key:   "k",

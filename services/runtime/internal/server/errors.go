@@ -23,6 +23,9 @@ package server
 
 import (
 	"net/http"
+	"strings"
+
+	"github.com/google/uuid"
 )
 
 // errEnvelope returns the standard AF Stack error envelope without
@@ -50,6 +53,21 @@ func errEnvelopeWith(code, message string, details any) map[string]any {
 	}
 }
 
+// validUUIDParam validates that a path/query id is a well-formed UUID
+// before it reaches Postgres. A non-UUID string bound to a uuid column
+// returns SQLSTATE 22P02, which would otherwise surface as a 500 leaking
+// the raw driver error. On failure it writes a 400 VALIDATION_FAILED and
+// returns ok=false; callers must return immediately when ok is false.
+func validUUIDParam(w http.ResponseWriter, raw string) (string, bool) {
+	id := strings.TrimSpace(raw)
+	if _, err := uuid.Parse(id); err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED",
+			"id must be a valid UUID", nil)
+		return "", false
+	}
+	return id, true
+}
+
 // writeError is the canonical helper for any error response.
 //
 // Always sets Content-Type: application/json and writes the envelope.
@@ -62,9 +80,20 @@ func errEnvelopeWith(code, message string, details any) map[string]any {
 // WriteHeader is called from inside writeJSON, header mutations are
 // ignored.
 func writeError(w http.ResponseWriter, status int, code, message string, details any) {
-	if details == nil {
-		writeJSON(w, status, errEnvelope(code, message))
-		return
+	body := errEnvelope(code, message)
+	if details != nil {
+		body = errEnvelopeWith(code, message, details)
 	}
-	writeJSON(w, status, errEnvelopeWith(code, message, details))
+	// Stamp the per-request correlation id (same value as the
+	// X-Request-ID response header) into error.request_id so every
+	// failure is traceable, per the AGENTS.md contract. The id rides on
+	// the statusWriter installed by withLogging; if a handler is invoked
+	// outside that middleware (e.g. a bare unit test) the field is simply
+	// omitted.
+	if sw, ok := w.(*statusWriter); ok && sw.requestID != "" {
+		if e, ok := body["error"].(map[string]any); ok {
+			e["request_id"] = sw.requestID
+		}
+	}
+	writeJSON(w, status, body)
 }

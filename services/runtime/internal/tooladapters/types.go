@@ -30,6 +30,11 @@ var (
 	ErrNotFound       = errors.New("tooladapters: adapter not found")
 	ErrDisabled       = errors.New("tooladapters: adapter disabled")
 	ErrUnavailable    = errors.New("tooladapters: adapter unavailable")
+	// ErrBlockedDestination is returned when the safehttp SSRF guard
+	// refuses a destination (loopback/private/link-local/metadata). It
+	// maps to a 400 with a static, IP-free message so the resolved
+	// internal address is never echoed back to the caller.
+	ErrBlockedDestination = errors.New("tooladapters: destination address is not allowed")
 )
 
 var adapterPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)

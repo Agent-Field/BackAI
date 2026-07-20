@@ -4,11 +4,12 @@
 
 import { ArrowUpRight, ChevronLeft, ChevronRight } from "lucide-react"
 import Link from "next/link"
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { CopyButton } from "@/components/ui/copy-button"
+import { RelativeTime } from "@/components/ui/relative-time"
 import {
   Sheet,
   SheetContent,
@@ -157,7 +158,7 @@ export function RunDrawer({
               <SheetDescription className="flex items-center gap-inline">
                 Run <span className="font-mono">{shortId(run.id)}</span>
                 <CopyButton value={run.id} label="Copy run id" />
-                · started {formatRunAge(run.started_at)}
+                · started <RelativeTime iso={run.started_at} format={formatRunAge} />
               </SheetDescription>
             </SheetHeader>
 
@@ -242,7 +243,7 @@ function QuickFacts({ run }: { run: Run }) {
       />
       <Meta
         label="Started"
-        value={formatRunAge(run.started_at)}
+        value={<RelativeTime iso={run.started_at} format={formatRunAge} />}
         tooltip={formatAbsolute(run.started_at)}
       />
       <IdMeta runId={run.id} />
@@ -257,7 +258,7 @@ function Meta({
   tooltip,
 }: {
   label: string
-  value: string
+  value: ReactNode
   mono?: boolean
   tooltip?: string
 }) {
@@ -268,7 +269,7 @@ function Meta({
       </dt>
       <dd
         className={`truncate text-meta text-foreground ${mono ? "font-mono" : ""}`}
-        title={tooltip ?? value}
+        title={tooltip ?? (typeof value === "string" ? value : undefined)}
       >
         {value}
       </dd>

@@ -61,6 +61,21 @@ func TestResolveScopeTenantMissing(t *testing.T) {
 	}
 }
 
+// A caller must not be able to name a *different* tenant via scope_id on
+// scope=tenant — that was the cross-tenant hole. resolveScope forces the
+// scope_id to the caller's own tenant and rejects a mismatch.
+func TestResolveScopeTenantRejectsForeignScopeID(t *testing.T) {
+	ctx := tenantctx.WithTenant(context.Background(), "tenant-me", "")
+	if _, _, err := resolveScope(ctx, ScopeTenant, "tenant-victim"); err == nil {
+		t.Errorf("expected rejection when scope_id names a different tenant than the caller")
+	}
+	// The caller naming its OWN tenant explicitly is fine.
+	scope, id, err := resolveScope(ctx, ScopeTenant, "tenant-me")
+	if err != nil || scope != ScopeTenant || id != "tenant-me" {
+		t.Errorf("own-tenant scope_id should be accepted, got scope=%q id=%q err=%v", scope, id, err)
+	}
+}
+
 func TestResolveScopeAgentSessionRun(t *testing.T) {
 	cases := []Scope{ScopeAgent, ScopeSession, ScopeRun}
 	for _, s := range cases {

@@ -8,6 +8,7 @@ import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { RelativeTime } from "@/components/ui/relative-time"
 
 import { api } from "@/lib/api"
 import type { SecretMetadata, SecretValue } from "@/lib/api"
@@ -144,13 +145,13 @@ function SecretRow({
         className="text-right font-mono tabular-nums text-muted-foreground"
         title={secret.updated_at}
       >
-        {formatAge(secret.updated_at)}
+        <RelativeTime iso={secret.updated_at} format={formatAge} />
       </span>
       <span
         className="text-right font-mono tabular-nums text-muted-foreground"
         title={secret.created_at}
       >
-        {formatAge(secret.created_at)}
+        <RelativeTime iso={secret.created_at} format={formatAge} />
       </span>
       <div className="flex items-center justify-end gap-inline">
         {phase === "confirm-delete" ? (

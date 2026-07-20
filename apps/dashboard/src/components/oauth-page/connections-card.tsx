@@ -3,6 +3,7 @@
 "use client"
 
 import { Badge } from "@/components/ui/badge"
+import { RelativeTime } from "@/components/ui/relative-time"
 import { ZoneCard, ZoneCardHeader } from "@/components/ui/zone-card"
 
 import type { OAuthConnection } from "@/lib/api"
@@ -87,7 +88,7 @@ function ConnectionRow({ connection }: { connection: OAuthConnection }) {
         className="truncate tabular-nums text-muted-foreground"
         title={connection.expires_at ?? undefined}
       >
-        {formatExpiry(connection.expires_at)}
+        <RelativeTime iso={connection.expires_at} format={formatExpiry} />
       </span>
       <div className="flex items-center justify-end">
         <Badge variant={tone === "act" ? "destructive" : tone === "ok" ? "secondary" : "outline"}>

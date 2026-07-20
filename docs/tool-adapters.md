@@ -8,7 +8,7 @@ BackAI ships a tenant-scoped catalogue of built-in tool adapters:
 | `sql` | Suite Postgres | Configured when the runtime has a DB. Read-only queries only. |
 | `exec` | Sandbox service | Configured when a sandbox adapter is available. |
 | `fs` | Sandbox service | Configured when a sandbox adapter is available; operates on ephemeral sandbox files, not the host filesystem. |
-| `searxng` | SearXNG HTTP endpoint | Set `AF_STACK_SEARXNG_URL`. |
+| `searxng` | SearXNG HTTP endpoint | Set `SEARXNG_URL`. |
 | `browser-use` | browser sidecar HTTP endpoint | Set `BROWSER_USE_URL`. Reference sidecar: `examples/adapters/browser-use-sidecar` (compose profile `browser`). Add `AF_STACK_BROWSER_ALLOW_PRIVATE=true` when the sidecar lives on a loopback/private address (e.g. a compose service). |
 | `steel` | Steel.dev hosted browsers (CDP) | Set `STEEL_API_KEY` (+ optional `STEEL_BASE_URL` for self-hosted steel-browser) and `AF_STACK_TOOL_BROWSER=steel`. |
 | `browserbase` | Browserbase hosted browsers (CDP) | Set `BROWSERBASE_API_KEY` + `BROWSERBASE_PROJECT_ID` and `AF_STACK_TOOL_BROWSER=browserbase`. |

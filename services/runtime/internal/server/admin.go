@@ -230,6 +230,12 @@ type apiKeyWire struct {
 	RateLimitRPM    *int     `json:"rate_limit_rpm"`
 	RateLimitTPM    *int     `json:"rate_limit_tpm"`
 	LiveSpendUSD    *float64 `json:"live_spend_usd"`
+	// MirrorStatus tells the operator which enforcement is active for this
+	// key: "mirrored" (a LiteLLM virtual key exists, so LiteLLM enforces
+	// its budget + rpm/tpm caps), or "local-only" (no LiteLLM mirror — the
+	// runtime enforces budget_max_usd from the cost_events ledger, but
+	// rate_limit_rpm/tpm are not enforced without an upstream mirror).
+	MirrorStatus *string `json:"mirror_status,omitempty"`
 }
 
 type apiKeyListWire struct {
@@ -473,6 +479,14 @@ func marshalAPIKey(k tenancy.APIKey) apiKeyWire {
 		RateLimitRPM:    k.RateLimitRPM,
 		RateLimitTPM:    k.RateLimitTPM,
 	}
+	// Derive the enforcement status from whether a LiteLLM virtual key was
+	// minted for this row. This is the honest signal the operator needs to
+	// know whether rate_limit_rpm/tpm are actually being enforced.
+	mirrorStatus := "local-only"
+	if k.LiteLLMKeyAlias != nil && *k.LiteLLMKeyAlias != "" {
+		mirrorStatus = "mirrored"
+	}
+	w.MirrorStatus = &mirrorStatus
 	if k.LastUsedAt != nil {
 		s := k.LastUsedAt.UTC().Format(time.RFC3339Nano)
 		w.LastUsedAt = &s
@@ -940,25 +954,30 @@ func (s *Server) handleAdminListKeys(w http.ResponseWriter, r *http.Request) {
 // tenant has <10 keys, and the list page reloads on action only.
 func (s *Server) enrichKeyWithLiveSpend(ctx context.Context, k tenancy.APIKey) apiKeyWire {
 	w := marshalAPIKey(k)
-	if k.LiteLLMKeyAlias == nil || *k.LiteLLMKeyAlias == "" {
-		return w
-	}
 	mirror := s.tenancy.LiteLLMMirror()
-	if mirror == nil || !mirror.Configured() {
-		return w
+	if k.LiteLLMKeyAlias != nil && *k.LiteLLMKeyAlias != "" && mirror != nil && mirror.Configured() {
+		spendCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		spend, err := mirror.KeySpend(spendCtx, *k.LiteLLMKeyAlias)
+		if err != nil {
+			// Don't propagate — log only. The dashboard already tolerates
+			// nil LiveSpendUSD ("—").
+			s.log.Warn("admin: litellm KeySpend failed",
+				"alias", *k.LiteLLMKeyAlias, "error", err)
+		} else {
+			v := spend.TotalUSD
+			w.LiveSpendUSD = &v
+		}
 	}
-	spendCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	spend, err := mirror.KeySpend(spendCtx, *k.LiteLLMKeyAlias)
-	if err != nil {
-		// Don't propagate — log only. The dashboard already tolerates
-		// nil LiveSpendUSD ("—").
-		s.log.Warn("admin: litellm KeySpend failed",
-			"alias", *k.LiteLLMKeyAlias, "error", err)
-		return w
+	// Fallback to the cost_events ledger when LiteLLM's mirror didn't
+	// supply a figure (DB-less LiteLLM, legacy un-mirrored key, or a
+	// failed round-trip) — otherwise live spend shows "—" even though the
+	// gateway recorded real costs.
+	if w.LiveSpendUSD == nil && s.budgets != nil {
+		if spent, err := s.budgets.SpentByKey(ctx, k.ID); err == nil {
+			w.LiveSpendUSD = &spent
+		}
 	}
-	v := spend.TotalUSD
-	w.LiveSpendUSD = &v
 	return w
 }
 
@@ -980,6 +999,11 @@ func (s *Server) handleAdminIssueKey(w http.ResponseWriter, r *http.Request) {
 	scopes := in.Scopes
 	if scopes == nil {
 		scopes = []string{}
+	}
+	// Prevent privilege escalation: granting operator-plane scopes is
+	// owner-only (an admin operator must not mint itself an owner key).
+	if s.operatorPlaneScopeDenied(w, r, scopes) {
+		return
 	}
 	issue := tenancy.IssueAPIKeyInput{
 		TenantID:     in.TenantID,
@@ -1071,6 +1095,26 @@ func (s *Server) handleAdminKeySpend(w http.ResponseWriter, r *http.Request) {
 				resp.RemainingUSD = &r
 			}
 		}
+	}
+	// Fallback: when LiteLLM's mirror is unwired or reports nothing (the
+	// common DB-less setup), report spend from the cost_events ledger the
+	// gateway populates on every metered call — otherwise spend always
+	// reads $0.
+	if resp.SpendUSD == 0 && s.budgets != nil {
+		if spent, serr := s.budgets.SpentByKey(ctx, found.ID); serr != nil {
+			s.log.Warn("admin: cost_events key spend failed", "key", found.ID, "error", serr)
+		} else {
+			resp.SpendUSD = spent
+		}
+	}
+	// The per-key cap lives on the key row; surface it (and remaining) even
+	// when the mirror didn't supply it.
+	if resp.MaxBudgetUSD == nil && found.BudgetMaxUSD != nil {
+		resp.MaxBudgetUSD = found.BudgetMaxUSD
+	}
+	if resp.RemainingUSD == nil && resp.MaxBudgetUSD != nil {
+		rem := *resp.MaxBudgetUSD - resp.SpendUSD
+		resp.RemainingUSD = &rem
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

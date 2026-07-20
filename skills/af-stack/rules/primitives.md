@@ -307,11 +307,15 @@ workload module POST endpoint
 
 ### Approval-gated action
 
+Approvals are shipped and tenant-scoped: `POST /api/v1/approvals` to
+request, `POST /api/v1/approvals/{id}/decide` for the operator, and
+`GET /api/v1/approvals/{id}` to poll.
+
 ```
 workload module POST endpoint
-  → suite.approvals.request({kind: "deploy_to_prod", payload})  (not yet)
-    → blocks
-  → operator approves in dashboard
+  → POST /api/v1/approvals {kind: "deploy_to_prod", payload}
+    → poll GET /api/v1/approvals/{id} until decided
+  → operator approves in dashboard (POST /api/v1/approvals/{id}/decide)
     → workload module job handler proceeds
       → suite.sandbox.run(...) etc.
 ```

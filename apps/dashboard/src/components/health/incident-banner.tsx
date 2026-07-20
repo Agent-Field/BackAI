@@ -2,7 +2,7 @@
 
 import { CheckCircle2, OctagonAlert } from "lucide-react"
 
-import { formatRelative } from "@/lib/health/derive"
+import { RelativeTime } from "@/components/ui/relative-time"
 import type { OverallSummary } from "@/lib/health/types"
 
 // Zone 0 — Incident banner / All-clear card.
@@ -59,7 +59,7 @@ function DegradedBanner({
           </ul>
         </div>
         <span className="shrink-0 text-meta text-muted-foreground tabular-nums">
-          last check {formatRelative(fetchedAt)}
+          last check <RelativeTime iso={fetchedAt} />
         </span>
       </header>
     </article>
@@ -95,7 +95,7 @@ function AllClearCard({
         </p>
       </div>
       <span className="shrink-0 text-meta text-muted-foreground tabular-nums">
-        last full sweep {formatRelative(fetchedAt)}
+        last full sweep <RelativeTime iso={fetchedAt} />
       </span>
     </article>
   )

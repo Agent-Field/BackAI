@@ -40,6 +40,36 @@ func (s *Server) adminAccessDenied(
 	return s.operatorAccessDenied(w, r, resource, action)
 }
 
+// operatorPlaneScopeDenied returns true (and writes 403) when a key-issue
+// request tries to grant an operator-plane scope ("operator",
+// "operator:owner") but the requesting principal is not an owner. Minting
+// operator keys is an owner-only power: without this gate an admin-role
+// operator (which can write admin:keys but cannot delete) could issue
+// itself an operator:owner key and escalate to full owner.
+func (s *Server) operatorPlaneScopeDenied(w http.ResponseWriter, r *http.Request, scopes []string) bool {
+	grantsOperator := false
+	for _, sc := range scopes {
+		if strings.HasPrefix(strings.TrimSpace(sc), "operator") {
+			grantsOperator = true
+			break
+		}
+	}
+	if !grantsOperator || s.personalMode() {
+		return false
+	}
+	resolve := s.operatorResolver
+	if resolve == nil {
+		resolve = s.resolveOperatorPrincipal
+	}
+	principal, err := resolve(r.Context(), r)
+	if err != nil || principal.Role != rbac.RoleOwner {
+		writeJSON(w, http.StatusForbidden,
+			errEnvelope("RBAC_DENIED", "only an owner may grant operator-plane scopes"))
+		return true
+	}
+	return false
+}
+
 func (s *Server) operatorAccessDenied(
 	w http.ResponseWriter,
 	r *http.Request,

@@ -3,6 +3,7 @@
 import { ArrowUpRight, FileText, Send } from "lucide-react"
 import Link from "next/link"
 
+import { RelativeTime } from "@/components/ui/relative-time"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { ZoneCard, ZoneCardHeader } from "@/components/ui/zone-card"
 
@@ -83,9 +84,11 @@ function ActivityCard({
                     aria-hidden
                     className={`inline-block size-icon-dot rounded-pill ${DOT[event.severity]}`}
                   />
-                  <span className="shrink-0 font-mono text-meta tabular-nums text-muted-foreground">
-                    {formatAge(event.occurredAt)}
-                  </span>
+                  <RelativeTime
+                    iso={event.occurredAt}
+                    format={formatAge}
+                    className="shrink-0 font-mono text-meta tabular-nums text-muted-foreground"
+                  />
                   <Icon
                     className="size-3.5 shrink-0 text-muted-foreground"
                     aria-hidden
@@ -138,9 +141,11 @@ function RecentRunsCard({ drilldown }: { drilldown: TenantDrilldown }) {
                 aria-hidden
                 className={`inline-block size-icon-dot rounded-pill ${DOT[run.status === "failed" ? "act" : run.status === "succeeded" ? "ok" : "watch"]}`}
               />
-              <span className="font-mono tabular-nums text-muted-foreground">
-                {formatAge(run.started_at)}
-              </span>
+              <RelativeTime
+                iso={run.started_at}
+                format={formatAge}
+                className="font-mono tabular-nums text-muted-foreground"
+              />
               <span className="min-w-0 truncate font-mono text-foreground" title={run.agent}>
                 {run.agent}
               </span>

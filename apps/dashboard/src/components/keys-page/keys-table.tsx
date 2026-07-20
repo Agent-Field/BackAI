@@ -9,6 +9,7 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { CopyButton } from "@/components/ui/copy-button"
+import { RelativeTime } from "@/components/ui/relative-time"
 
 import { api } from "@/lib/api"
 import type { APIKey, IssuedAPIKey, Tenant } from "@/lib/api"
@@ -190,13 +191,13 @@ function KeyRow({
         className="text-right font-mono tabular-nums text-muted-foreground"
         title={apiKey.created_at}
       >
-        {formatAge(apiKey.created_at)}
+        <RelativeTime iso={apiKey.created_at} format={formatAge} />
       </span>
       <span
         className="text-right font-mono tabular-nums text-muted-foreground"
         title={apiKey.last_used_at ?? undefined}
       >
-        {formatAge(apiKey.last_used_at)}
+        <RelativeTime iso={apiKey.last_used_at} format={formatAge} />
       </span>
       <div className="flex items-center justify-end gap-inline">
         {status === "active" ? (

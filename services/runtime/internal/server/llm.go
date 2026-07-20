@@ -55,6 +55,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/llmgateway"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmgateway/adapters"
 	"github.com/Agent-Field/backai/services/runtime/internal/openapi"
+	"github.com/Agent-Field/backai/services/runtime/internal/rbac"
 	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 )
 
@@ -181,8 +182,12 @@ func (s *Server) registerLLMRoutes() {
 	s.mux.HandleFunc("POST /api/v1/audio/transcriptions", s.handleLLMAudioTranscriptions)
 	s.mux.HandleFunc("POST /api/v1/audio/translations", s.handleLLMAudioTranslations)
 	s.mux.HandleFunc("GET /api/v1/llm/models", s.handleLLMModels)
-	s.mux.HandleFunc("GET /api/v1/llm/cache/stats", s.handleLLMCacheStats)
-	s.mux.HandleFunc("POST /api/v1/llm/cache/flush", s.handleLLMCacheFlush)
+	// Cache stats/flush are operator surfaces: flush trusted a client ?tenant
+	// param with no auth, so any caller could evict another tenant's cache.
+	// Gate both to operators (the handler still honors ?tenant so an operator
+	// can target a specific tenant from the dashboard).
+	s.mux.HandleFunc("GET /api/v1/llm/cache/stats", s.operatorGuard(rbac.ResourceAdminBudgets, s.handleLLMCacheStats))
+	s.mux.HandleFunc("POST /api/v1/llm/cache/flush", s.operatorGuard(rbac.ResourceAdminBudgets, s.handleLLMCacheFlush))
 }
 
 // registerLLMOpenAPI describes /api/v1/llm/* in the OpenAPI 3.1 spec.
@@ -1585,6 +1590,11 @@ func classifyHookError(err error) (string, string, int) {
 	if errors.Is(err, cost.ErrBudgetExceeded) {
 		return llmgateway.ErrCodeBudgetExceeded,
 			"tenant monthly budget exhausted — raise the cap in the operator dashboard (Cost → Budgets)",
+			http.StatusPaymentRequired
+	}
+	if errors.Is(err, cost.ErrKeyBudgetExceeded) {
+		return llmgateway.ErrCodeBudgetExceeded,
+			"API key budget exhausted — raise this key's budget_max_usd or use another key",
 			http.StatusPaymentRequired
 	}
 	return "POLICY_VIOLATION", err.Error(), http.StatusForbidden

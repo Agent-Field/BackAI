@@ -468,11 +468,10 @@ func (r *Recorder) UpdateStatus(
 		return ErrNotConfigured
 	}
 	var (
-		adapterPtr   *string
-		providerPtr  *string
-		errMsgPtr    *string
-		setSentAt    bool
-		bumpAttempts bool
+		adapterPtr  *string
+		providerPtr *string
+		errMsgPtr   *string
+		setSentAt   bool
 	)
 	if adapter != "" {
 		a := adapter
@@ -486,14 +485,13 @@ func (r *Recorder) UpdateStatus(
 		e := errMsg
 		errMsgPtr = &e
 	}
+	// attempts is bumped exactly once per delivery try, when the worker
+	// claims the row in ClaimQueued (status → 'sending'). UpdateStatus
+	// records the *outcome* of that try, so it must NOT bump again — else
+	// a first-try success would land at attempts=2.
 	switch status {
 	case StatusSent:
 		setSentAt = true
-		bumpAttempts = true
-	case StatusFailed:
-		bumpAttempts = true
-	case StatusSending:
-		bumpAttempts = true
 	}
 	// Lifecycle updates are keyed by id from the worker, which does not
 	// know the row's tenant. Run under a bypass-RLS tx so the FORCE-RLS
@@ -512,10 +510,9 @@ func (r *Recorder) UpdateStatus(
 		       adapter             = coalesce($3, adapter),
 		       provider_message_id = coalesce($4, provider_message_id),
 		       last_error          = case when $5::text is not null then $5 else last_error end,
-		       attempts            = case when $6 then attempts + 1 else attempts end,
-		       sent_at             = case when $7 then now() else sent_at end
+		       sent_at             = case when $6 then now() else sent_at end
 		 where id = $1
-	`, id, string(status), adapterPtr, providerPtr, errMsgPtr, bumpAttempts, setSentAt)
+	`, id, string(status), adapterPtr, providerPtr, errMsgPtr, setSentAt)
 	if err != nil {
 		return fmt.Errorf("notifications: update status: %w", err)
 	}
