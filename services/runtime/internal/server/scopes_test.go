@@ -93,6 +93,16 @@ func TestRequiredScopeFor(t *testing.T) {
 		{"PUT", "/api/v1/secrets/openai", "secrets:write"},
 		{"GET", "/api/v1/admin/tenants", "admin:read"},
 		{"POST", "/api/v1/admin/keys", "admin:write"},
+		// Cross-stream families wired at integration time.
+		{"POST", "/api/v1/jobs/worker/lease", "jobs:work"},
+		{"POST", "/api/v1/jobs/worker/heartbeat", "jobs:work"},
+		{"GET", "/api/v1/vault/secrets", "secrets:read"},
+		{"PUT", "/api/v1/vault/secrets/stripe", "secrets:write"},
+		{"POST", "/api/v1/vault/secrets/stripe/reveal", "secrets:write"},
+		{"GET", "/api/v1/connections", "connections:read"},
+		{"POST", "/api/v1/connections/c-1/request", "connections:write"},
+		{"GET", "/api/v1/workload/notes/notes", "workload:read"},
+		{"POST", "/api/v1/workload/notes/notes", "workload:write"},
 		// Unmapped / public routes carry no scope requirement.
 		{"GET", "/api/v1/agents", ""},
 		{"GET", "/health", ""},

@@ -147,7 +147,13 @@ func requiredScopeFor(method, path string) string {
 	case strings.HasPrefix(path, "/api/v1/executions"):
 		return rwScope("agents", method)
 
-	// Background jobs.
+	// Background jobs. The remote-worker protocol endpoints take the
+	// dedicated jobs:work scope (its in-handler check predates this
+	// registry; mapping it here keeps the resolver from demanding
+	// jobs:write of a lease-only worker key). A bare "jobs" area grant
+	// satisfies both.
+	case strings.HasPrefix(path, "/api/v1/jobs/worker"):
+		return "jobs:work"
 	case strings.HasPrefix(path, "/api/v1/jobs"):
 		return rwScope("jobs", method)
 
@@ -175,6 +181,22 @@ func requiredScopeFor(method, path string) string {
 		return "webhooks:write"
 	case strings.HasPrefix(path, "/api/v1/webhooks/subscriptions"):
 		return rwScope("webhooks", method)
+
+	// Tenant secrets vault (R1). Metadata list/get are reads; put/delete
+	// and the POST reveal/rotate operations are writes — reveal returns
+	// plaintext, so it is deliberately held to the write bar.
+	case strings.HasPrefix(path, "/api/v1/vault/secrets"):
+		return rwScope("secrets", method)
+
+	// External-service connections (R5). Listing metadata is a read;
+	// create/delete and the credential-injecting request/verify-webhook
+	// calls are writes.
+	case strings.HasPrefix(path, "/api/v1/connections"):
+		return rwScope("connections", method)
+
+	// Workload-module CRUD (R2) — the generated domain routes.
+	case strings.HasPrefix(path, "/api/v1/workload/"):
+		return rwScope("workload", method)
 
 	// Secrets + admin — documented for OpenAPI; operator-gated at runtime.
 	case strings.HasPrefix(path, "/api/v1/secrets"):
