@@ -34,6 +34,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/approvals"
 	"github.com/Agent-Field/backai/services/runtime/internal/billing"
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
+	"github.com/Agent-Field/backai/services/runtime/internal/connections"
 	"github.com/Agent-Field/backai/services/runtime/internal/cost"
 	"github.com/Agent-Field/backai/services/runtime/internal/crons"
 	"github.com/Agent-Field/backai/services/runtime/internal/db"
@@ -74,6 +75,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/observability/traces/traceselect"
 	"github.com/Agent-Field/backai/services/runtime/internal/probe"
 	"github.com/Agent-Field/backai/services/runtime/internal/retention"
+	"github.com/Agent-Field/backai/services/runtime/internal/safehttp"
 	"github.com/Agent-Field/backai/services/runtime/internal/sandbox"
 	dockersandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/docker"
 	e2bsandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/e2b"
@@ -944,6 +946,7 @@ func main() {
 	// envelope vault regardless of selection.
 	var vault *secrets.Vault
 	var billingSettingsStore *billing.SettingsStore
+	var connectionsSvc *connections.Service
 	secretsRemoteName := ""
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("AF_STACK_SECRETS_ADAPTER"))) {
 	case "remote":
@@ -1011,6 +1014,10 @@ func main() {
 						"key_id", cipher.KeyID(),
 						"dev_mode", cipher.DevMode(),
 					)
+					// R5 connections: credentials ride the same KMS-backed
+					// cipher; the store persists refs + FORCE-RLS rows in
+					// suite_connections. Requires DB + vault, so it lives here.
+					connectionsSvc = buildConnectionsService(database.Pool, cipher, vault, log)
 				}
 			}
 		} else {
@@ -1838,6 +1845,7 @@ func main() {
 		ToolsRegistry:   toolsRegistry,
 		OAuthManager:    oauthManager,
 		OAuthFactory:    oauthFactory,
+		Connections:     connectionsSvc,
 		Shipwright:      shipwrightStore,
 		Approvals:       approvalsStore,
 		LogRing:         logRing,
@@ -1981,6 +1989,54 @@ func main() {
 		return
 	}
 	log.Info("af-stack exited cleanly")
+}
+
+// buildConnectionsService constructs the R5 connections subsystem. Connection
+// credentials ride the same KMS-backed cipher as the secrets vault; the
+// outbound provider HTTP client is SSRF-guarded (safehttp). Platform OAuth
+// client creds resolve from each descriptor's env vars
+// (CONNECTIONS_<PROVIDER>_CLIENT_ID / _CLIENT_SECRET). Returns nil on a
+// construction failure so /api/v1/connections degrades to 503 rather than
+// crashing boot.
+func buildConnectionsService(pool *pgxpool.Pool, cipher connections.Cipher, vault *secrets.Vault, log *slog.Logger) *connections.Service {
+	store, err := connections.NewStore(pool, cipher, vault, log)
+	if err != nil {
+		log.Error("connections: store init failed", "error", err)
+		return nil
+	}
+	reg := connections.DefaultRegistry()
+	svc, err := connections.New(connections.Config{
+		Store:       store,
+		Registry:    reg,
+		HTTPClient:  safehttp.New(safehttp.Options{}),
+		ClientCreds: connectionsClientCreds(reg),
+		StateSecret: strings.TrimSpace(os.Getenv("AF_STACK_AUTH_SECRET")),
+		Log:         log,
+	})
+	if err != nil {
+		log.Error("connections: service init failed", "error", err)
+		return nil
+	}
+	log.Info("connections ready", "providers", reg.Names())
+	return svc
+}
+
+// connectionsClientCreds resolves a provider's platform OAuth app credentials
+// from the env vars named on its descriptor. ok=false leaves the provider
+// unconfigured for OAuth (api_key connections still work).
+func connectionsClientCreds(reg *connections.Registry) connections.ClientCredsResolver {
+	return connections.ClientCredsFunc(func(_ context.Context, provider string) (connections.ClientCreds, bool) {
+		d, err := reg.Get(provider)
+		if err != nil || d.ClientIDEnv == "" || d.ClientSecretEnv == "" {
+			return connections.ClientCreds{}, false
+		}
+		id := strings.TrimSpace(os.Getenv(d.ClientIDEnv))
+		secret := strings.TrimSpace(os.Getenv(d.ClientSecretEnv))
+		if id == "" || secret == "" {
+			return connections.ClientCreds{}, false
+		}
+		return connections.ClientCreds{ClientID: id, ClientSecret: secret}, true
+	})
 }
 
 // newStorage constructs the storage adapter selected by cfg.Adapter.
