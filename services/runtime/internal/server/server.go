@@ -29,6 +29,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/audit"
 	"github.com/Agent-Field/backai/services/runtime/internal/billing"
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
+	"github.com/Agent-Field/backai/services/runtime/internal/connections"
 	"github.com/Agent-Field/backai/services/runtime/internal/cost"
 	"github.com/Agent-Field/backai/services/runtime/internal/crons"
 	"github.com/Agent-Field/backai/services/runtime/internal/db"
@@ -218,6 +219,9 @@ type Server struct {
 	// retrieves plaintext from the secrets vault for backend agents.
 	oauthManager *oauth.Manager
 	oauthFactory *oauth.Factory
+	// connections is the R5 external-service connection subsystem. nil ⇒
+	// the /api/v1/connections endpoints return 503 CONNECTIONS_NOT_CONFIGURED.
+	connections *connections.Service
 	// shipwright stores only task/patch metadata for the Shipwright
 	// coding-agent factory. AgentField owns the execution graph, harness
 	// calls, logs, spans, traces, and memory.
@@ -406,6 +410,9 @@ type Deps struct {
 	// connect/token/disconnect return 503.
 	OAuthManager *oauth.Manager
 	OAuthFactory *oauth.Factory
+	// Connections is the R5 external-service connection subsystem. nil ⇒
+	// /api/v1/connections returns 503 CONNECTIONS_NOT_CONFIGURED.
+	Connections *connections.Service
 	// Shipwright stores task + patch metadata for the autonomous
 	// coding-agent factory. nil means /api/v1/shipwright/* returns 503.
 	Shipwright ShipwrightStore
@@ -514,6 +521,7 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		toolsRegistry:   deps.ToolsRegistry,
 		oauthManager:    deps.OAuthManager,
 		oauthFactory:    deps.OAuthFactory,
+		connections:     deps.Connections,
 		shipwright:      deps.Shipwright,
 		approvals:       deps.Approvals,
 		metricsRing:     newMetricsRing(MetricsRingSize),
@@ -971,6 +979,10 @@ func (s *Server) registerRoutes() {
 	// third-party user grants in the secrets vault for backend agents.
 	s.registerOAuthRoutes()
 	s.registerOAuthOpenAPI()
+
+	// R5 external-service connections (/api/v1/connections).
+	s.registerConnectionsRoutes()
+	s.registerConnectionsOpenAPI()
 
 	// Shipwright (Phase 3 Tier 1). AF Stack owns task/patch metadata;
 	// AgentField owns the coding-agent execution state.
