@@ -1,4 +1,5 @@
 .PHONY: help preflight dev test test-go test-py test-ts lint lint-go lint-py lint-ts \
+        lint-migrations \
         build build-go build-cli build-runtime build-dashboard build-images \
         install-cli smoke-cli \
         up down logs clean install-deps fmt
@@ -66,10 +67,16 @@ test-ts:
 lint: lint-go lint-py lint-ts
 	@echo "==> Lint passed"
 
-lint-go:
+lint-go: lint-migrations
 	@echo "==> Linting Go"
 	@command -v golangci-lint >/dev/null && golangci-lint run ./... 2>/dev/null || echo "(golangci-lint not installed or no Go yet)"
 	@go vet ./... 2>/dev/null || echo "(no Go packages yet)"
+
+# Static safety lint for goose migrations (Up/Down present, no unmarked
+# destructive Up ops, balanced StatementBegin/End). Fails hard on any finding.
+lint-migrations:
+	@echo "==> Linting migrations"
+	@go run ./services/runtime/cmd/migrationlint
 
 lint-py:
 	@echo "==> Linting Python"
