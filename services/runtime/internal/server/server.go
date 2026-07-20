@@ -98,11 +98,16 @@ type Server struct {
 	storage       storage.Storage
 	storagePrefix string // tenant key-prefix when multi-tenancy is on; "" otherwise
 	secrets       *secrets.Vault
-	jobs          *jobs.Manager
-	tenancy       *tenancy.Manager
-	openapi       *openapi.Builder
-	llmCache      *llmcache.Cache
-	llmGateway    *llmgateway.Gateway
+	// secretStore is a test-only override for the tenant secrets backend
+	// used by the /api/v1/vault/secrets/* handlers. Production leaves it
+	// nil and tenantSecretStore() falls back to the concrete vault
+	// (s.secrets), so the nil-vault 503 path is preserved.
+	secretStore secrets.Store
+	jobs        *jobs.Manager
+	tenancy     *tenancy.Manager
+	openapi     *openapi.Builder
+	llmCache    *llmcache.Cache
+	llmGateway  *llmgateway.Gateway
 	// guardrails applies gateway-local PII redaction and moderation to
 	// LLM request/response text. It does not own AgentField state.
 	guardrails *guardrails.Service
@@ -765,6 +770,12 @@ func (s *Server) registerRoutes() {
 	// Secrets vault (Phase 5). Endpoints return 503 when no vault is wired.
 	s.registerSecretsRoutes()
 	s.registerSecretsOpenAPI()
+
+	// Tenant-scoped secrets vault (PRD R1). The operator surface above is
+	// operator-gated on the hardcoded default tenant; this surface rides
+	// the tenant resolver so an API-key / session caller manages its own
+	// tenant's secrets (/api/v1/vault/secrets/*).
+	s.registerTenantSecretsRoutes()
 
 	// Jobs queue (Phase 5). Endpoints return tolerant empty responses when
 	// no manager is wired (no DB present at boot time).
