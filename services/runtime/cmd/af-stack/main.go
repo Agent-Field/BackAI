@@ -1799,6 +1799,11 @@ func main() {
 
 	probeReg.WithAdapterRegistry(adapterRegistry)
 
+	// R7 production operating contract: refuse to boot a mis-hardened
+	// saas+production deployment (RLS, KMS, CORS, storage, sandbox posture).
+	// No-op outside AF_STACK_ENV=production. See prodpreflight.go.
+	runProductionPreflight(ctx, cfg, database, store != nil, log)
+
 	srv := server.New(cfg, log, server.Deps{
 		DB:              database,
 		AF:              afClient,
