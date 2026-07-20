@@ -5,9 +5,9 @@
 ### The backend for agent-built, agent-powered SaaS.
 
 **Think Supabase for agentic SaaS—with the AI runtime and operating plane
-included.** Auth, Postgres, model routing, agent execution, sandbox adapters,
-durable jobs, billing, cost controls, and observability are wired together in
-one open-source, self-hosted stack.
+included.** Auth, Postgres, model routing, agent execution, sandboxed execution,
+browser automation, durable jobs, billing, cost controls, and observability are
+wired together in one open-source, self-hosted stack.
 
 Give a coding agent (Codex, Claude Code, Gemini CLI, OpenCode, or another coding
 harness) a backend, not a blank repo. Build the product without assembling the
@@ -22,9 +22,9 @@ AI infrastructure. Own the code, data, and deployment.
 </div>
 
 <div align="center">
-  <img src="docs/assets/readme/hero-control-plane.png" alt="A product connects through a backend control plane with application-backend, AI-runtime, and operating-plane layers to pluggable infrastructure" width="1000" />
+  <img src="docs/assets/readme/hero-control-plane.png" alt="A product and coding agent connect to a complete backend control plane containing the application backend, AI runtime, sandbox, browser, billing, security, and operations" width="1000" />
   <br />
-  <sub>Application backend, AI runtime, and operating controls—one abstraction over models, data, sandboxes, and browsers.</sub>
+  <sub>Included and wired: auth, data, AI runtime, jobs, billing, sandbox, browser, security, and operations.</sub>
 </div>
 
 ## Quickstart
@@ -225,7 +225,7 @@ and your own threat model. Start with [deployment guidance](docs/deploy.md),
 ## How it fits together
 
 <div align="center">
-  <img src="docs/assets/readme/architecture.png" alt="A layered backend control plane connects product APIs, SDKs, and an admin dashboard to data, models, agents, tools, sandbox, and browser infrastructure" width="1000" />
+  <img src="docs/assets/readme/architecture.png" alt="A self-hosted backend control plane includes product interfaces, identity, data, model gateway, agent runtime, jobs, billing, sandbox, browser, and observability services" width="1000" />
 </div>
 
 Every app-level model call should go through `/api/v1/llm/*`. Direct provider
