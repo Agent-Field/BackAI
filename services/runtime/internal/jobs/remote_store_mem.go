@@ -90,7 +90,7 @@ func (m *memRemoteStore) Lease(_ context.Context, req LeaseRequest) (*RemoteAtte
 	}
 
 	// Oldest ready attempt for this tenant among the declared kinds.
-	var candidates []*RemoteAttempt
+	candidates := make([]*RemoteAttempt, 0, len(m.byKey))
 	for _, a := range m.byKey {
 		if a.TenantID != req.TenantID || a.State != AttemptReady {
 			continue

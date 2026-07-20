@@ -161,9 +161,9 @@ func SetJobsQueueOldestAge(seconds float64) {
 }
 
 // SetDBPoolStats sets the Postgres pool saturation gauges. Sampled periodically.
-func SetDBPoolStats(acquired, max int) {
+func SetDBPoolStats(acquired, maxConns int) {
 	dbPoolAcquiredConnections.Set(float64(acquired))
-	dbPoolMaxConnections.Set(float64(max))
+	dbPoolMaxConnections.Set(float64(maxConns))
 }
 
 // SetBackupTestLastSuccess records the Unix timestamp of the last successful

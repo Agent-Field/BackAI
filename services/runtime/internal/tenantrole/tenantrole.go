@@ -93,18 +93,18 @@ var matrix = map[Role]map[Capability]bool{
 
 // Can reports whether role is permitted to exercise capability on its own
 // tenant. Unknown roles hold no capabilities (fail closed).
-func Can(role Role, cap Capability) bool {
+func Can(role Role, capability Capability) bool {
 	caps, ok := matrix[role]
 	if !ok {
 		return false
 	}
-	return caps[cap]
+	return caps[capability]
 }
 
 // CanString is a convenience wrapper for callers holding a bare string role
 // (e.g. the value read from suite_memberships).
-func CanString(role string, cap Capability) bool {
-	return Can(Role(role), cap)
+func CanString(role string, capability Capability) bool {
+	return Can(Role(role), capability)
 }
 
 // IsValidRole reports whether s names one of the five known roles. Used to

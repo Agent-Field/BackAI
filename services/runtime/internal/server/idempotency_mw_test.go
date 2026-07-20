@@ -100,7 +100,7 @@ func newIdemHarness(t *testing.T) idemHarness {
 	store := newFakeIdemStore()
 	srv := New(config.Default(), slog.Default(), Deps{Idempotency: store})
 	var calls int64
-	counting := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	counting := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		n := atomic.AddInt64(&calls, 1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)

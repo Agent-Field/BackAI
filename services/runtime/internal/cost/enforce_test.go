@@ -21,12 +21,6 @@ func (l *fakeLedger) committed() float64 {
 	return l.spent
 }
 
-func (l *fakeLedger) record(c float64) {
-	l.mu.Lock()
-	l.spent += c
-	l.mu.Unlock()
-}
-
 // enforcer models one runtime replica. It shares the ledger with every other
 // replica (there is no per-replica spend state) and runs the real production
 // decider keyBudgetDecision, exactly like the gateway pre-call gate.
@@ -104,14 +98,14 @@ func TestTwoEnforcersShareCommittedSpend(t *testing.T) {
 // and the admitted total is exact — the correctness a shared, serialised store
 // buys over per-replica counters.
 func TestConcurrentEnforcersNeverExceedCap(t *testing.T) {
-	const cap = 5.0
+	const budgetCap = 5.0
 	const callCost = 1.0
 	const attemptsPerReplica = 100
 
 	ledger := &fakeLedger{}
 	replicas := []*enforcer{
-		{id: "a", cap: cap, ledger: ledger},
-		{id: "b", cap: cap, ledger: ledger},
+		{id: "a", cap: budgetCap, ledger: ledger},
+		{id: "b", cap: budgetCap, ledger: ledger},
 	}
 
 	var admitted int64
@@ -132,11 +126,11 @@ func TestConcurrentEnforcersNeverExceedCap(t *testing.T) {
 	}
 	wg.Wait()
 
-	if got := ledger.committed(); got > cap {
-		t.Fatalf("shared committed spend = %v exceeded cap %v — enforcement is not shared/atomic", got, cap)
+	if got := ledger.committed(); got > budgetCap {
+		t.Fatalf("shared committed spend = %v exceeded cap %v — enforcement is not shared/atomic", got, budgetCap)
 	}
 	// Exactly cap/callCost calls should have been admitted, no more, no fewer.
-	if wantAdmitted := int64(cap / callCost); admitted != wantAdmitted {
+	if wantAdmitted := int64(budgetCap / callCost); admitted != wantAdmitted {
 		t.Fatalf("admitted %d calls, want exactly %d (cap/cost)", admitted, wantAdmitted)
 	}
 }

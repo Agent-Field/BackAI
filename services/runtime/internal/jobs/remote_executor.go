@@ -163,6 +163,10 @@ func remoteOutcomeToRiverErr(o remoteOutcome, att *RemoteAttempt, snooze time.Du
 	switch o {
 	case outcomeCompleted:
 		return nil
+	case outcomeContinue:
+		// The poll loop never hands outcomeContinue to the mapper; treat a
+		// slip as a retryable driver bug rather than dropping the job.
+		return errors.New("internal: outcomeContinue reached the river mapper")
 	case outcomeFailedRetryable:
 		return errors.New(attemptError(att, "remote worker reported a retryable failure"))
 	case outcomeFailedPermanent:

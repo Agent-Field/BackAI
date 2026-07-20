@@ -40,7 +40,9 @@ func (c *realStripeClient) GetSubscription(_ context.Context, customerID string)
 	}
 	params.Limit = stripe.Int64(1)
 	it := stripesub.List(params)
-	for it.Next() {
+	// Limit=1: only the most-recent subscription matters, so take the
+	// first item rather than looping.
+	if it.Next() {
 		sub := it.Subscription()
 		out := RemoteSubscription{
 			StripeCustomerID: customerID,

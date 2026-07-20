@@ -83,10 +83,10 @@ func runBackupRestoreTest(ctx context.Context, log *slog.Logger) error {
 	return nil
 }
 
-// tailOutput returns the last max bytes of command output for a bounded log.
-func tailOutput(b []byte, max int) string {
-	if len(b) <= max {
+// tailOutput returns the last limit bytes of command output for a bounded log.
+func tailOutput(b []byte, limit int) string {
+	if len(b) <= limit {
 		return string(b)
 	}
-	return "…" + string(b[len(b)-max:])
+	return "…" + string(b[len(b)-limit:])
 }

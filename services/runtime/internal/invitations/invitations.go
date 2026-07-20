@@ -90,8 +90,9 @@ func CanAccept(inv Invitation, now time.Time) error {
 		return nil
 	case StatusExpired:
 		return ErrExpired
+	case StatusAccepted, StatusRevoked:
+		return ErrNotPending
 	default:
-		// accepted or revoked — no longer actionable.
 		return ErrNotPending
 	}
 }
@@ -99,10 +100,12 @@ func CanAccept(inv Invitation, now time.Time) error {
 // CanRevoke reports whether inv may transition pending → revoked at `now`.
 // An expired-but-still-pending invitation is revocable (it lets the inviter
 // clean up), but an already-accepted or already-revoked one is not.
-func CanRevoke(inv Invitation, now time.Time) error {
+func CanRevoke(inv Invitation, _ time.Time) error {
 	switch inv.Status {
 	case StatusPending:
 		return nil
+	case StatusAccepted, StatusRevoked, StatusExpired:
+		return ErrNotPending
 	default:
 		return ErrNotPending
 	}

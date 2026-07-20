@@ -65,6 +65,8 @@ func (s AttemptState) Terminal() bool {
 	switch s {
 	case AttemptCompleted, AttemptFailed, AttemptSuperseded:
 		return true
+	case AttemptReady, AttemptLeased:
+		return false
 	default:
 		return false
 	}
