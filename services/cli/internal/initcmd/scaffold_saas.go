@@ -530,50 +530,50 @@ name: Notes
 version: 0.1.0
 description: Per-tenant Markdown notes for the customer app.
 
-# Platform features this module needs. Boot fails fast if any are off.
-requires:
-  - multi-tenancy
-  - llm-gateway
+# Served out of the box in the scaffold. Flip to false to park the module
+# (routes disappear on the next boot; the table and its data stay).
+enabled: true
+migrations: migrations
 
-# Routes mount under /workload/notes/ and inherit the tenant resolver + auth.
-routes:
-  - method: GET
-    path: /notes
-    handler: notes.List
-  - method: POST
-    path: /notes
-    handler: notes.Create
-
-# Usage this module meters through the billing subsystem.
-meters:
-  - name: notes_created
-    unit: count
-    description: One per POST /workload/notes.
+# Declarative resources: the runtime auto-generates tenant-scoped CRUD at
+# /api/v1/workload/notes/notes from this block plus the SQL under
+# migrations/. The backing table follows the <module>_<resource>
+# convention (notes_notes); id, tenant_id, created_at and updated_at are
+# managed by the runtime and must not be declared as fields.
+resources:
+  - name: notes
+    fields:
+      - name: title
+        type: string
+        required: true
+      - name: body
+        type: string
 `
 
-const saasNotesMigration = `-- +goose Up
--- Per-tenant notes. Tenant-owned tables MUST carry tenant_id and be guarded
--- by FORCE row level security, so isolation holds even for the migration/
--- owner role. Policy reads app.tenant_id, bound per-connection by the runtime.
--- +goose StatementBegin
-create table if not exists notes_entries (
-  id uuid primary key default gen_random_uuid(),
-  tenant_id uuid not null
-    default '00000000-0000-0000-0000-000000000000'
-    references suite_tenants(id) on delete cascade,
-  title text not null,
-  body text not null default '',
-  created_at timestamptz not null default now()
+const saasNotesMigration = `-- Module migrations are plain SQL applied forward-only by the runtime's
+-- module runner (NOT goose — a Down section here would execute during
+-- apply). Roll back by shipping a new forward migration.
+--
+-- Tenant-owned tables MUST carry tenant_id and be guarded by FORCE row
+-- level security, so isolation holds even for the migration/owner role.
+-- The policy reads app.tenant_id, bound per-connection by the runtime.
+-- Table name follows the <module>_<resource> convention: notes_notes.
+create table if not exists notes_notes (
+  id         uuid        primary key default gen_random_uuid(),
+  tenant_id  uuid        not null,
+  title      text        not null,
+  body       text        not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
--- +goose StatementEnd
 
-create index if not exists notes_entries_tenant_idx on notes_entries (tenant_id, created_at desc);
+create index if not exists notes_notes_tenant_idx
+  on notes_notes (tenant_id, created_at desc);
 
-alter table notes_entries enable row level security;
-alter table notes_entries force row level security;
+alter table notes_notes enable row level security;
+alter table notes_notes force row level security;
 
--- +goose StatementBegin
-create policy tenant_isolation on notes_entries
+create policy tenant_isolation on notes_notes
   using (
     current_setting('app.bypass_rls', true) = 'on'
     or tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
@@ -582,23 +582,17 @@ create policy tenant_isolation on notes_entries
     current_setting('app.bypass_rls', true) = 'on'
     or tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
   );
--- +goose StatementEnd
-
--- +goose Down
-drop policy if exists tenant_isolation on notes_entries;
-alter table notes_entries no force row level security;
-alter table notes_entries disable row level security;
-drop index if exists notes_entries_tenant_idx;
-drop table if exists notes_entries;
 `
 
 const saasNotesModuleReadme = `# notes module
 
 Per-tenant notes for the customer app.
 
-- ` + "`backai.module.yaml`" + ` — manifest (routes mount under ` + "`/workload/notes/`" + `).
-- ` + "`migrations/00001_init.sql`" + ` — the ` + "`notes_entries`" + ` table with
-  ` + "`tenant_id`" + ` + FORCE row level security.
+- ` + "`backai.module.yaml`" + ` — declarative manifest; the runtime generates
+  tenant-scoped CRUD at ` + "`/api/v1/workload/notes/notes`" + ` from it.
+- ` + "`migrations/00001_init.sql`" + ` — the ` + "`notes_notes`" + ` table with
+  ` + "`tenant_id`" + ` + FORCE row level security (plain SQL, forward-only —
+  module migrations are not goose files).
 
 Validate it offline: ` + "`af-stack module validate notes`" + `.
 `

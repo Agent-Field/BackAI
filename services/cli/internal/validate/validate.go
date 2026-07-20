@@ -47,41 +47,53 @@ func (r *Result) add(level, format string, args ...any) {
 // first one present wins.
 var ManifestFileNames = []string{"backai.module.yaml", "manifest.yaml"}
 
-// knownFeatures is the set of platform features a module may declare in
-// requires:. An unknown feature is a warning, not an error, so forks can
-// name features this CLI version predates.
-var knownFeatures = map[string]bool{
-	"multi-tenancy": true, "llm-gateway": true, "memory": true,
-	"storage": true, "billing": true, "jobs": true, "crons": true,
-	"webhooks": true, "secrets": true, "auth": true, "sandbox": true,
-	"vector": true, "search": true,
-}
-
+// The manifest schema below mirrors the runtime's declarative contract
+// (services/runtime/internal/modules/manifest.go) field for field. The
+// runtime parses with strict field checking, so a manifest carrying keys
+// outside this shape (e.g. the pre-PRD imperative routes:/meters: form)
+// will not load — the validator errors on those with a pointer to the
+// declarative shape rather than silently passing them.
 var (
-	slugRE    = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
-	versionRE = regexp.MustCompile(`^\d+\.\d+\.\d+`)
-	methodSet = map[string]bool{"GET": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true}
+	// slugRE matches the runtime's module-id rule: lowercase alphanumeric
+	// segments joined by - or _.
+	slugRE = regexp.MustCompile(`^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$`)
+	// identRE matches resource + field names (lowercase identifiers).
+	identRE = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	// versionRE is the runtime's lenient semver-ish check.
+	versionRE = regexp.MustCompile(`^\d+(\.\d+){0,2}([-+][0-9A-Za-z.-]+)?$`)
 )
 
-type manifestRoute struct {
-	Method  string `yaml:"method"`
-	Path    string `yaml:"path"`
-	Handler string `yaml:"handler"`
+// reservedColumns are auto-managed by the runtime on every resource table
+// and must not be redeclared as fields.
+var reservedColumns = map[string]bool{
+	"id": true, "tenant_id": true, "created_at": true, "updated_at": true,
 }
 
-type manifestMeter struct {
-	Name string `yaml:"name"`
-	Unit string `yaml:"unit"`
+// fieldTypes is the set of declarable resource-field types.
+var fieldTypes = map[string]bool{
+	"string": true, "int": true, "bool": true, "timestamp": true, "json": true,
+}
+
+type manifestField struct {
+	Name     string `yaml:"name"`
+	Type     string `yaml:"type"`
+	Required bool   `yaml:"required"`
+	Default  any    `yaml:"default"`
+}
+
+type manifestResource struct {
+	Name   string          `yaml:"name"`
+	Fields []manifestField `yaml:"fields"`
 }
 
 type moduleManifest struct {
-	ID          string          `yaml:"id"`
-	Name        string          `yaml:"name"`
-	Version     string          `yaml:"version"`
-	Description string          `yaml:"description"`
-	Requires    []string        `yaml:"requires"`
-	Routes      []manifestRoute `yaml:"routes"`
-	Meters      []manifestMeter `yaml:"meters"`
+	ID          string             `yaml:"id"`
+	Name        string             `yaml:"name"`
+	Version     string             `yaml:"version"`
+	Description string             `yaml:"description"`
+	Enabled     bool               `yaml:"enabled"`
+	Migrations  string             `yaml:"migrations"`
+	Resources   []manifestResource `yaml:"resources"`
 }
 
 // ModuleDir validates one workload-module directory end to end: the
@@ -127,8 +139,19 @@ func Manifest(dir string) *Result {
 		return res
 	}
 	var m moduleManifest
-	if err := yaml.Unmarshal(raw, &m); err != nil {
-		res.add("error", "%s is not valid YAML: %v", filepath.Base(manifestPath), err)
+	dec := yaml.NewDecoder(strings.NewReader(string(raw)))
+	dec.KnownFields(true)
+	if err := dec.Decode(&m); err != nil {
+		// The runtime refuses unknown keys the same way; call out the
+		// legacy imperative shape specifically so the fix is obvious.
+		if strings.Contains(err.Error(), "not found in type") &&
+			(strings.Contains(string(raw), "routes:") || strings.Contains(string(raw), "meters:")) {
+			res.add("error", "%s uses the legacy imperative manifest shape (routes:/meters:); "+
+				"the runtime loads declarative manifests — declare resources: with typed fields "+
+				"(see workload-modules/notes/backai.module.yaml)", filepath.Base(manifestPath))
+			return res
+		}
+		res.add("error", "%s does not parse as a module manifest: %v", filepath.Base(manifestPath), err)
 		return res
 	}
 	validateManifest(&m, res)
@@ -147,42 +170,57 @@ func validateManifest(m *moduleManifest, res *Result) {
 	if strings.TrimSpace(m.ID) == "" {
 		res.add("error", "manifest: id is required")
 	} else if !slugRE.MatchString(m.ID) {
-		res.add("error", "manifest: id %q must match [a-z][a-z0-9-]* (a slug)", m.ID)
+		res.add("error", "manifest: id %q must be lowercase alphanumeric with - or _ separators", m.ID)
 	}
 	if strings.TrimSpace(m.Name) == "" {
 		res.add("error", "manifest: name is required")
 	}
 	if strings.TrimSpace(m.Version) == "" {
 		res.add("error", "manifest: version is required")
-	} else if !versionRE.MatchString(m.Version) {
-		res.add("error", "manifest: version %q must be semver (MAJOR.MINOR.PATCH)", m.Version)
+	} else if !versionRE.MatchString(strings.TrimSpace(m.Version)) {
+		res.add("error", "manifest: version %q is not a valid semver", m.Version)
 	}
-	for _, feat := range m.Requires {
-		if !knownFeatures[feat] {
-			res.add("warn", "manifest: requires %q is not a platform feature this CLI knows", feat)
-		}
+	if len(m.Resources) == 0 {
+		res.add("error", "manifest: at least one resource is required (declarative modules serve resources)")
 	}
-	seen := map[string]bool{}
-	for i, r := range m.Routes {
-		method := strings.ToUpper(strings.TrimSpace(r.Method))
-		if !methodSet[method] {
-			res.add("error", "manifest: route[%d] method %q is not a valid HTTP method", i, r.Method)
+	seenRes := map[string]bool{}
+	for _, r := range m.Resources {
+		name := strings.TrimSpace(r.Name)
+		if name == "" {
+			res.add("error", "manifest: resource name is required")
+			continue
 		}
-		if !strings.HasPrefix(r.Path, "/") {
-			res.add("error", "manifest: route[%d] path %q must start with /", i, r.Path)
+		if !identRE.MatchString(name) {
+			res.add("error", "manifest: resource name %q must be a lowercase identifier", name)
 		}
-		if strings.TrimSpace(r.Handler) == "" {
-			res.add("error", "manifest: route[%d] (%s %s) is missing a handler", i, method, r.Path)
+		if seenRes[name] {
+			res.add("error", "manifest: duplicate resource %q", name)
 		}
-		key := method + " " + r.Path
-		if seen[key] {
-			res.add("error", "manifest: duplicate route %s", key)
+		seenRes[name] = true
+		if len(r.Fields) == 0 {
+			res.add("error", "manifest: resource %q declares no fields", name)
 		}
-		seen[key] = true
-	}
-	for i, mt := range m.Meters {
-		if strings.TrimSpace(mt.Name) == "" {
-			res.add("error", "manifest: meter[%d] name is required", i)
+		seenField := map[string]bool{}
+		for _, f := range r.Fields {
+			fname := strings.TrimSpace(f.Name)
+			ftype := strings.ToLower(strings.TrimSpace(f.Type))
+			if fname == "" {
+				res.add("error", "manifest: resource %q has an unnamed field", name)
+				continue
+			}
+			if !identRE.MatchString(fname) {
+				res.add("error", "manifest: field %q must be a lowercase identifier", fname)
+			}
+			if reservedColumns[fname] {
+				res.add("error", "manifest: field %q is reserved (managed by the runtime)", fname)
+			}
+			if seenField[fname] {
+				res.add("error", "manifest: resource %q duplicate field %q", name, fname)
+			}
+			seenField[fname] = true
+			if !fieldTypes[ftype] {
+				res.add("error", "manifest: field %q has invalid type %q (want string|int|bool|timestamp|json)", fname, f.Type)
+			}
 		}
 	}
 	if res.OK {

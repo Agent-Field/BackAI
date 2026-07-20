@@ -24,16 +24,16 @@ const goodManifest = `id: notes
 name: Notes
 version: 0.1.0
 description: Per-tenant notes.
-requires:
-  - multi-tenancy
-  - llm-gateway
-routes:
-  - method: POST
-    path: /notes
-    handler: notes.Create
-meters:
-  - name: notes_created
-    unit: count
+enabled: true
+migrations: migrations
+resources:
+  - name: notes
+    fields:
+      - name: title
+        type: string
+        required: true
+      - name: body
+        type: string
 `
 
 const goodMigration = `-- +goose Up
@@ -124,26 +124,64 @@ create table if not exists global_lookup (
 	}
 }
 
-// Contract: manifest shape errors (bad method, missing handler, bad id) are
-// reported.
+// Contract: manifest shape errors (bad id, bad version, reserved/typo'd
+// fields, no resources) are reported.
 func TestModuleDir_BadManifest(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "backai.module.yaml", `id: Bad_ID
 name: ""
 version: not-semver
-routes:
-  - method: FETCH
-    path: notes
-    handler: ""
+resources:
+  - name: notes
+    fields:
+      - name: tenant_id
+        type: string
+      - name: body
+        type: markdown
 `)
 	res := ModuleDir(dir)
 	if res.OK {
 		t.Fatal("expected malformed manifest to fail")
 	}
-	for _, want := range []string{"id", "name is required", "semver", "not a valid HTTP method", "must start with /", "missing a handler"} {
+	for _, want := range []string{"id", "name is required", "semver", "reserved", "invalid type"} {
 		if !hasFindingContains(res, want) {
 			t.Fatalf("missing finding %q in %+v", want, res.Findings)
 		}
+	}
+}
+
+// Contract: the pre-PRD imperative manifest shape (routes:/meters:) is
+// called out explicitly — the runtime cannot load it.
+func TestModuleDir_ImperativeShapeRejected(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "backai.module.yaml", `id: notes
+name: Notes
+version: 0.1.0
+routes:
+  - method: POST
+    path: /notes
+    handler: notes.Create
+`)
+	res := ModuleDir(dir)
+	if res.OK {
+		t.Fatal("expected imperative manifest to fail")
+	}
+	if !hasFindingContains(res, "declarative") {
+		t.Fatalf("expected a declarative-shape pointer, got: %+v", res.Findings)
+	}
+}
+
+// Contract: a resource-less manifest fails — declarative modules serve
+// resources.
+func TestModuleDir_NoResourcesFails(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "backai.module.yaml", `id: notes
+name: Notes
+version: 0.1.0
+`)
+	res := ModuleDir(dir)
+	if res.OK || !hasFindingContains(res, "at least one resource") {
+		t.Fatalf("expected no-resources error, got OK=%v findings=%+v", res.OK, res.Findings)
 	}
 }
 
