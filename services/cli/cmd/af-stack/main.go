@@ -252,7 +252,7 @@ func run(args []string) error {
 		return nil
 	default:
 		writeUsage(os.Stderr)
-		return fmt.Errorf("unknown command %q", cmd)
+		return output.Usage("unknown command %q", cmd)
 	}
 }
 

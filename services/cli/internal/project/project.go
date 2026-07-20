@@ -25,6 +25,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Agent-Field/backai/services/cli/internal/client"
+	"github.com/Agent-Field/backai/services/cli/internal/output"
+	"github.com/Agent-Field/backai/services/cli/internal/validate"
 )
 
 type commandRunner func(ctx context.Context, dir string, name string, args []string, stdout, stderr io.Writer) error
@@ -135,8 +137,10 @@ func RunAgent(args []string, stdout, stderr io.Writer) error {
 	switch args[0] {
 	case "new":
 		return runAgentNew(args[1:], stdout, stderr)
+	case "validate":
+		return runAgentValidate(args[1:], stdout)
 	default:
-		return fmt.Errorf("agent: unknown subcommand %q", args[0])
+		return output.Usage("agent: unknown subcommand %q", args[0])
 	}
 }
 
@@ -147,9 +151,87 @@ func RunModule(args []string, stdout, stderr io.Writer) error {
 	switch args[0] {
 	case "new":
 		return runModuleNew(args[1:], stdout, stderr)
+	case "validate":
+		return runModuleValidate(args[1:], stdout)
 	default:
-		return fmt.Errorf("module: unknown subcommand %q", args[0])
+		return output.Usage("module: unknown subcommand %q", args[0])
 	}
+}
+
+// runModuleValidate validates a workload-module directory offline: manifest
+// shape + the migration RLS lint. It backs `af-stack module validate <dir>`
+// and shares the validate package with `af-stack test`, so the standalone
+// command and the gate can never disagree.
+func runModuleValidate(args []string, stdout io.Writer) error {
+	fs := flag.NewFlagSet("module validate", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	asJSON := fs.Bool("json", false, "emit the result as JSON")
+	pos, err := output.ParseArgs(fs, args)
+	if err != nil {
+		return output.Usage("module validate: %v", err)
+	}
+	if len(pos) != 1 {
+		return output.Usage("module validate: exactly one module directory is required")
+	}
+	dir := pos[0]
+	if !exists(dir) {
+		return output.NotFound("module validate: %s does not exist", filepath.ToSlash(dir))
+	}
+	res := validate.ModuleDir(dir)
+	if err := output.Result(stdout, *asJSON, res, func(w io.Writer) error {
+		return renderValidateResult(w, res)
+	}); err != nil {
+		return err
+	}
+	if !res.OK {
+		return output.Invalid("module validate: %s failed validation", filepath.ToSlash(dir))
+	}
+	return nil
+}
+
+// runAgentValidate validates an agent scaffold directory offline.
+func runAgentValidate(args []string, stdout io.Writer) error {
+	fs := flag.NewFlagSet("agent validate", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	asJSON := fs.Bool("json", false, "emit the result as JSON")
+	pos, err := output.ParseArgs(fs, args)
+	if err != nil {
+		return output.Usage("agent validate: %v", err)
+	}
+	if len(pos) != 1 {
+		return output.Usage("agent validate: exactly one agent directory is required")
+	}
+	dir := pos[0]
+	if !exists(dir) {
+		return output.NotFound("agent validate: %s does not exist", filepath.ToSlash(dir))
+	}
+	res := validate.AgentDir(dir)
+	if err := output.Result(stdout, *asJSON, res, func(w io.Writer) error {
+		return renderValidateResult(w, res)
+	}); err != nil {
+		return err
+	}
+	if !res.OK {
+		return output.Invalid("agent validate: %s failed validation", filepath.ToSlash(dir))
+	}
+	return nil
+}
+
+// renderValidateResult prints a validate.Result as an aligned human table.
+func renderValidateResult(w io.Writer, res *validate.Result) error {
+	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
+	for _, f := range res.Findings {
+		fmt.Fprintf(tw, "  %s\t%s\n", f.Level, f.Message)
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	if res.OK {
+		fmt.Fprintln(w, "\nOK")
+	} else {
+		fmt.Fprintln(w, "\nFAIL")
+	}
+	return nil
 }
 
 func RunPlugin(args []string, stdout, stderr io.Writer) error {

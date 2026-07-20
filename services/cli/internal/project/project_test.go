@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/Agent-Field/backai/services/cli/internal/client"
+	"github.com/Agent-Field/backai/services/cli/internal/output"
 )
 
 func TestScaffoldCommands(t *testing.T) {
@@ -52,6 +53,65 @@ func TestScaffoldCommands(t *testing.T) {
 	}
 	if got := read(t, root, "apps/dashboard/plugins/tenant-health/plugin.ts"); !strings.Contains(got, `id: "tenant-health"`) {
 		t.Fatalf("unexpected plugin manifest:\n%s", got)
+	}
+
+	// module validate accepts the module just scaffolded (the scaffold and
+	// the validator share the runtime's declarative contract).
+	if err := RunModule([]string{"validate", "workload-modules/notes"}, &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatalf("module validate on a scaffolded module failed: %v", err)
+	}
+	// agent validate accepts the scaffolded agent.
+	if err := RunAgent([]string{"validate", "apps/backend/agents/research-agent"}, &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatalf("agent validate on a scaffolded agent failed: %v", err)
+	}
+}
+
+// Contract: module/agent validate carry the documented exit codes — a
+// missing directory is ExitNotFound, a bad flag/arity is ExitUsage, and an
+// invalid module is ExitValidation.
+func TestValidateSubcommandExitCodes(t *testing.T) {
+	root := fakeRepo(t)
+	restore := chdir(t, root)
+	defer restore()
+
+	cases := []struct {
+		name string
+		run  func() error
+		want int
+	}{
+		{"missing module dir", func() error {
+			return RunModule([]string{"validate", "does-not-exist"}, io.Discard, io.Discard)
+		}, output.ExitNotFound},
+		{"module validate no arg", func() error {
+			return RunModule([]string{"validate"}, io.Discard, io.Discard)
+		}, output.ExitUsage},
+		{"unknown module subcommand", func() error {
+			return RunModule([]string{"frob"}, io.Discard, io.Discard)
+		}, output.ExitUsage},
+		{"missing agent dir", func() error {
+			return RunAgent([]string{"validate", "does-not-exist"}, io.Discard, io.Discard)
+		}, output.ExitNotFound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := output.ExitCode(tc.run()); got != tc.want {
+				t.Fatalf("exit code = %d, want %d", got, tc.want)
+			}
+		})
+	}
+
+	// An invalid module (imperative manifest the runtime can't load) is
+	// ExitValidation, not a generic failure.
+	badDir := filepath.Join(root, "workload-modules", "bad")
+	if err := os.MkdirAll(badDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(badDir, "backai.module.yaml"),
+		[]byte("id: bad\nname: Bad\nversion: 0.1.0\nroutes:\n  - method: GET\n    path: /x\n    handler: x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := output.ExitCode(RunModule([]string{"validate", "workload-modules/bad"}, io.Discard, io.Discard)); got != output.ExitValidation {
+		t.Fatalf("invalid module exit = %d, want %d", got, output.ExitValidation)
 	}
 }
 
