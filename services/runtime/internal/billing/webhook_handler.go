@@ -102,10 +102,35 @@ func (s *Service) dispatchEvent(ctx context.Context, ev *stripe.Event) error {
 		return s.handleSubscriptionDeleted(ctx, ev)
 	case "invoice.payment_succeeded":
 		return s.handleInvoicePaymentSucceeded(ctx, ev)
+	case "invoice.payment_failed":
+		return s.handleInvoicePaymentFailed(ctx, ev)
 	default:
 		s.log.Debug("billing: webhook event ignored", "type", ev.Type)
 		return nil
 	}
+}
+
+// firstIngest records the event id for idempotency and reports whether this
+// is the first time we've seen it for the tenant. A replayed event (Stripe
+// retries, at-least-once delivery) returns false so the caller skips
+// re-applying. Fails open (returns true) when there's no store or the record
+// write errors — the applied state is idempotent regardless, and dropping a
+// real event is worse than re-applying one.
+func (s *Service) firstIngest(ctx context.Context, tenantID, eventID, eventType string) bool {
+	if s.store == nil || !s.store.HasPool() {
+		return true
+	}
+	first, err := s.store.RecordBillingEvent(ctx, tenantID, eventID, eventType)
+	if err != nil {
+		s.log.Warn("billing: idempotency record failed",
+			"event_id", eventID, "type", eventType, "error", err)
+		return true
+	}
+	if !first {
+		s.log.Debug("billing: skipping already-processed event",
+			"event_id", eventID, "type", eventType)
+	}
+	return first
 }
 
 // subscriptionEvent is the minimal subset of stripe.Subscription we
@@ -148,30 +173,33 @@ func (s *Service) handleSubscriptionUpdated(ctx context.Context, ev *stripe.Even
 	if s.store == nil || !s.store.HasPool() {
 		return nil
 	}
+	if !s.firstIngest(ctx, tenantID, ev.ID, string(ev.Type)) {
+		return nil
+	}
 	stripeID := sub.Customer
 	// Resolve the catalog plan from the subscription's Stripe Price id —
 	// that binding is what the operator configured on the plans page. The
 	// price nickname is only a fallback for uncatalogued prices.
-	plan := ""
-	var catalogPlan *Plan
+	subscribedPlan := ""
 	if len(sub.Items.Data) > 0 {
 		if priceID := strings.TrimSpace(sub.Items.Data[0].Price.ID); priceID != "" {
 			if p, perr := s.store.PlanByStripePrice(ctx, priceID); perr == nil {
-				catalogPlan = &p
-				plan = p.ID
+				subscribedPlan = p.ID
 			}
 		}
-		if plan == "" {
-			plan = strings.TrimSpace(sub.Items.Data[0].Plan.Nickname)
+		if subscribedPlan == "" {
+			subscribedPlan = strings.TrimSpace(sub.Items.Data[0].Plan.Nickname)
 		}
 	}
-	if plan == "" {
-		plan = "free"
-	}
+	// Entitlement follows the subscription status: active/trialing/past_due
+	// keep the subscribed plan (past_due is the dunning grace window);
+	// terminal states (canceled/unpaid/incomplete_expired/…) degrade to the
+	// default plan so entitlements drop the moment Stripe gives up on payment.
+	entitlementPlan := EntitlementPlan(sub.Status, subscribedPlan, DefaultPlan)
 	c := Customer{
 		TenantID:         tenantID,
 		StripeCustomerID: &stripeID,
-		Plan:             plan,
+		Plan:             entitlementPlan,
 	}
 	if sub.Status != "" {
 		st := sub.Status
@@ -189,9 +217,11 @@ func (s *Service) handleSubscriptionUpdated(ctx context.Context, ev *stripe.Even
 		return fmt.Errorf("billing: upsert from subscription: %w", err)
 	}
 	// Close the loop: applying a plan is more than recording it — the
-	// server-side hook pushes the plan's enforced LLM budget etc.
-	if catalogPlan != nil {
-		s.firePlanApplied(ctx, tenantID, *catalogPlan)
+	// server-side hook pushes the plan's enforced LLM budget etc. Fire with
+	// the plan whose entitlements now hold (the free plan's low budget on a
+	// terminal-failure degrade), so enforcement tracks reality.
+	if applied, perr := s.GetPlan(ctx, entitlementPlan); perr == nil {
+		s.firePlanApplied(ctx, tenantID, applied)
 	}
 	return nil
 }
@@ -205,16 +235,23 @@ func (s *Service) handleSubscriptionDeleted(ctx context.Context, ev *stripe.Even
 	if tenantID == "" || s.store == nil || !s.store.HasPool() {
 		return nil
 	}
+	if !s.firstIngest(ctx, tenantID, ev.ID, string(ev.Type)) {
+		return nil
+	}
 	stripeID := sub.Customer
-	canceled := "canceled"
+	canceled := StatusCanceled
 	c := Customer{
 		TenantID:           tenantID,
 		StripeCustomerID:   &stripeID,
-		Plan:               "free",
+		Plan:               DefaultPlan,
 		SubscriptionStatus: &canceled,
 	}
 	if _, err := s.store.UpsertCustomer(ctx, c); err != nil {
 		return fmt.Errorf("billing: upsert from subscription delete: %w", err)
+	}
+	// Degrade entitlements to the default plan's budget.
+	if applied, perr := s.GetPlan(ctx, DefaultPlan); perr == nil {
+		s.firePlanApplied(ctx, tenantID, applied)
 	}
 	return nil
 }
@@ -241,16 +278,56 @@ func (s *Service) handleInvoicePaymentSucceeded(ctx context.Context, ev *stripe.
 	if inv.PeriodEnd == 0 {
 		return nil
 	}
+	if !s.firstIngest(ctx, tenantID, ev.ID, string(ev.Type)) {
+		return nil
+	}
 	stripeID := inv.Customer
 	t := time.Unix(inv.PeriodEnd, 0).UTC().Format(time.RFC3339Nano)
+	// A successful payment clears any dunning state. Plan is left empty so
+	// the store's coalesce preserves the paid plan (a renewal must never
+	// downgrade); status flips back to active.
+	active := StatusActive
 	c := Customer{
-		TenantID:         tenantID,
-		StripeCustomerID: &stripeID,
-		Plan:             "", // empty -> default applies on insert; on update plan stays put via the coalesce
-		CurrentPeriodEnd: &t,
+		TenantID:           tenantID,
+		StripeCustomerID:   &stripeID,
+		Plan:               "", // empty -> preserved on update, default on insert
+		CurrentPeriodEnd:   &t,
+		SubscriptionStatus: &active,
 	}
 	if _, err := s.store.UpsertCustomer(ctx, c); err != nil {
 		return fmt.Errorf("billing: upsert from invoice: %w", err)
+	}
+	return nil
+}
+
+// handleInvoicePaymentFailed records a dunning event: the tenant's
+// subscription enters past_due. Entitlements are RETAINED during this grace
+// window (Stripe keeps retrying) — the plan is left empty so the store
+// preserves it. If retries are ultimately exhausted, Stripe transitions the
+// subscription to unpaid/canceled and handleSubscriptionUpdated /
+// handleSubscriptionDeleted degrade entitlements to the default plan.
+func (s *Service) handleInvoicePaymentFailed(ctx context.Context, ev *stripe.Event) error {
+	var inv invoiceEvent
+	if err := json.Unmarshal(ev.Data.Raw, &inv); err != nil {
+		return fmt.Errorf("billing: decode invoice event: %w", err)
+	}
+	tenantID := tenantIDFromMetadata(inv.Metadata)
+	if tenantID == "" || s.store == nil || !s.store.HasPool() {
+		return nil
+	}
+	if !s.firstIngest(ctx, tenantID, ev.ID, string(ev.Type)) {
+		return nil
+	}
+	stripeID := inv.Customer
+	pastDue := StatusPastDue
+	c := Customer{
+		TenantID:           tenantID,
+		StripeCustomerID:   &stripeID,
+		Plan:               "", // preserve the plan through the dunning grace window
+		SubscriptionStatus: &pastDue,
+	}
+	if _, err := s.store.UpsertCustomer(ctx, c); err != nil {
+		return fmt.Errorf("billing: upsert from invoice failure: %w", err)
 	}
 	return nil
 }
