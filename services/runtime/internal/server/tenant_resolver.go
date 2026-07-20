@@ -122,6 +122,13 @@ var publicPrefixes = []string{
 	// HMAC-signed state (which carries the tenant) instead. Note this does
 	// NOT match /api/v1/connections/* — those go through the resolver.
 	"/connections/callback",
+	// R8 invitation accept (/api/v1/invitations/accept). Bypasses the tenant
+	// resolver because the invitee has no membership yet (the resolver would
+	// 403 them). The handler self-authenticates via the invite token
+	// (capability) + the session user id, and looks the row up under
+	// bypass_rls. NOTE: /api/v1/me/* is deliberately NOT here — those routes
+	// must go through the resolver so tenant + user are bound for RBAC.
+	"/api/v1/invitations",
 	// Billing dashboard surface (Phase 10.4). Same auth shape as
 	// admin/* — the dashboard's session gates it.
 	"/api/v1/billing",
@@ -235,8 +242,7 @@ func (s *Server) tenantResolver(next http.Handler) http.Handler {
 			token := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
 			k, err := s.resolveBearer(ctx, token)
 			if err != nil {
-				writeAuthError(w, http.StatusUnauthorized, "INVALID_API_KEY",
-					"invalid API key")
+				writeBearerError(w, err)
 				return
 			}
 			// Per-route scope enforcement. A key with empty/["*"]/"admin"
@@ -272,8 +278,7 @@ func (s *Server) tenantResolver(next http.Handler) http.Handler {
 			if token := strings.TrimSpace(r.URL.Query().Get("api_key")); token != "" {
 				k, err := s.resolveBearer(ctx, token)
 				if err != nil {
-					writeAuthError(w, http.StatusUnauthorized, "INVALID_API_KEY",
-						"invalid API key")
+					writeBearerError(w, err)
 					return
 				}
 				if s.scopeDenied(w, r, k.Scopes) {
@@ -378,6 +383,22 @@ func (s *Server) resolveBearer(ctx context.Context, token string) (tenancy.APIKe
 		return tenancy.APIKey{}, vErr
 	}
 	return k, nil
+}
+
+// writeBearerError maps a resolveBearer failure to the response envelope.
+// Expired keys get a distinct 401 KEY_EXPIRED so a caller who legitimately
+// holds the key (the secret matched — expiry is only checked AFTER bcrypt
+// succeeds, so this never leaks whether an arbitrary key exists) can tell an
+// expired credential from a wrong one and rotate it. Every other failure
+// mode collapses to INVALID_API_KEY to avoid an existence oracle.
+func writeBearerError(w http.ResponseWriter, err error) {
+	if errors.Is(err, tenancy.ErrKeyExpired) {
+		writeAuthError(w, http.StatusUnauthorized, "KEY_EXPIRED",
+			"API key has expired")
+		return
+	}
+	writeAuthError(w, http.StatusUnauthorized, "INVALID_API_KEY",
+		"invalid API key")
 }
 
 // errNoSession is returned by resolveSession when the request has no

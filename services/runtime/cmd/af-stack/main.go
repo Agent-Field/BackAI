@@ -43,6 +43,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/guardrails"
 	"github.com/Agent-Field/backai/services/runtime/internal/harnesses"
 	"github.com/Agent-Field/backai/services/runtime/internal/hooks"
+	"github.com/Agent-Field/backai/services/runtime/internal/invitations"
 	"github.com/Agent-Field/backai/services/runtime/internal/jobs"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmcache"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmgateway"
@@ -1682,6 +1683,82 @@ func main() {
 			}
 			// Plan catalog -> in-process plan budget registry (HasBudget).
 			billingSvc.SyncPlanBudgets(ctx)
+		}
+	}
+
+	// R8 lifecycle platform crons. These run on a dedicated system scheduler
+	// (separate from the retention scheduler above, which is scoped inside the
+	// DB block that runs before tenancy + billing exist):
+	//
+	//   - lifecycle.tenant_purge   — hard-delete tenants soft-deleted beyond
+	//     the grace window (cascades members/keys/invitations/billing away).
+	//   - billing.reconcile        — re-sync live Stripe subscription state to
+	//     correct drift from missed/out-of-order webhooks.
+	//   - lifecycle.invitation_expire — flip pending invitations past their
+	//     expires_at to 'expired'.
+	if database != nil && database.Pool != nil {
+		lifecycleCrons := crons.NewSystemScheduler(log)
+		registered := false
+
+		if tenancyMgr != nil {
+			graceDays := 30
+			if v := strings.TrimSpace(os.Getenv("AF_STACK_TENANT_PURGE_GRACE_DAYS")); v != "" {
+				if n, perr := strconv.Atoi(v); perr == nil && n > 0 {
+					graceDays = n
+				}
+			}
+			if err := lifecycleCrons.RegisterSystem("lifecycle.tenant_purge", "0 4 * * *", func(runCtx context.Context) error {
+				c, cancel := context.WithTimeout(runCtx, 5*time.Minute)
+				defer cancel()
+				n, perr := tenancyMgr.PurgeSoftDeletedTenants(c, graceDays)
+				if perr != nil {
+					return perr
+				}
+				if n > 0 {
+					log.Info("lifecycle: purged soft-deleted tenants", "count", n, "grace_days", graceDays)
+				}
+				return nil
+			}); err != nil {
+				log.Warn("lifecycle: tenant-purge cron registration failed", "error", err)
+			} else {
+				registered = true
+			}
+
+			invStore := invitations.NewStore(database.Pool, log)
+			if err := lifecycleCrons.RegisterSystem("lifecycle.invitation_expire", "0 * * * *", func(runCtx context.Context) error {
+				c, cancel := context.WithTimeout(runCtx, 2*time.Minute)
+				defer cancel()
+				n, eerr := invStore.ExpireStale(c)
+				if eerr != nil {
+					return eerr
+				}
+				if n > 0 {
+					log.Info("lifecycle: expired stale invitations", "count", n)
+				}
+				return nil
+			}); err != nil {
+				log.Warn("lifecycle: invitation-expire cron registration failed", "error", err)
+			} else {
+				registered = true
+			}
+		}
+
+		if billingSvc != nil && cfg.BillingEnabled() {
+			if err := lifecycleCrons.RegisterSystem("billing.reconcile", "0 */6 * * *", func(runCtx context.Context) error {
+				c, cancel := context.WithTimeout(runCtx, 10*time.Minute)
+				defer cancel()
+				_, rerr := billingSvc.ReconcileSubscriptions(c)
+				return rerr
+			}); err != nil {
+				log.Warn("lifecycle: billing-reconcile cron registration failed", "error", err)
+			} else {
+				registered = true
+			}
+		}
+
+		if registered {
+			go lifecycleCrons.Run(ctx)
+			log.Info("lifecycle: platform crons started")
 		}
 	}
 

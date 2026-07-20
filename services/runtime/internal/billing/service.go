@@ -515,6 +515,96 @@ func (s *Service) ReconcilePlanPrices(ctx context.Context) ([]string, error) {
 	return reconciled, nil
 }
 
+// ReconcileReport summarises a subscription-drift reconciliation pass.
+type ReconcileReport struct {
+	// Checked is the number of Stripe-backed tenants whose live subscription
+	// was fetched and compared.
+	Checked int `json:"checked"`
+	// Updated is how many local rows were corrected to match Stripe.
+	Updated int `json:"updated"`
+	// Degraded is how many of those updates dropped entitlements to the
+	// default plan because of a terminal failure.
+	Degraded int `json:"degraded"`
+}
+
+// ReconcileSubscriptions re-syncs every Stripe-backed tenant's local billing
+// row against the live subscription state in Stripe, correcting drift that a
+// missed or out-of-order webhook could have left behind. It is the platform
+// cron the PRD calls for.
+//
+// Drift correction is Stripe-specific: the active client is type-asserted to
+// subscriptionReader and the pass is a no-op for stub/lago/remote adapters
+// (they either apply plans directly or have no subscription read). Each
+// tenant is reconciled through the SAME pure Reconcile decision the webhook
+// uses, so the two paths can never diverge. On a terminal-failure degrade
+// the plan-applied hook fires so the enforced LLM budget follows.
+func (s *Service) ReconcileSubscriptions(ctx context.Context) (ReconcileReport, error) {
+	rep := ReconcileReport{}
+	if s == nil || s.store == nil || !s.store.HasPool() {
+		return rep, nil
+	}
+	reader, ok := s.Client().(subscriptionReader)
+	if !ok {
+		return rep, nil // adapter doesn't support drift reconciliation
+	}
+	customers, err := s.store.ListCustomers(ctx)
+	if err != nil {
+		return rep, err
+	}
+	for _, cust := range customers {
+		if cust.StripeCustomerID == nil || strings.TrimSpace(*cust.StripeCustomerID) == "" {
+			continue // free tenants have no Stripe subscription to reconcile
+		}
+		remote, found, rerr := reader.GetSubscription(ctx, *cust.StripeCustomerID)
+		if rerr != nil {
+			s.log.Warn("billing: reconcile fetch failed",
+				"tenant", cust.TenantID, "error", rerr)
+			continue
+		}
+		rep.Checked++
+		if !found {
+			// A customer with no live subscription is effectively canceled.
+			remote = RemoteSubscription{StripeCustomerID: *cust.StripeCustomerID, Status: StatusCanceled}
+		}
+		// Map the live price back to a catalog plan for the entitlement rule.
+		if remote.StripePriceID != "" {
+			if p, perr := s.store.PlanByStripePrice(ctx, remote.StripePriceID); perr == nil {
+				remote.Plan = p.ID
+			}
+		}
+		dec := Reconcile(cust, remote, DefaultPlan)
+		if !dec.Changed {
+			continue
+		}
+		upd := Customer{TenantID: cust.TenantID, Plan: dec.Plan}
+		if dec.Status != "" {
+			st := dec.Status
+			upd.SubscriptionStatus = &st
+		}
+		if remote.CurrentPeriodEnd != "" {
+			pe := remote.CurrentPeriodEnd
+			upd.CurrentPeriodEnd = &pe
+		}
+		if _, uerr := s.store.UpsertCustomer(ctx, upd); uerr != nil {
+			s.log.Warn("billing: reconcile upsert failed",
+				"tenant", cust.TenantID, "error", uerr)
+			continue
+		}
+		rep.Updated++
+		if dec.Degraded {
+			rep.Degraded++
+		}
+		if applied, perr := s.GetPlan(ctx, dec.Plan); perr == nil {
+			s.firePlanApplied(ctx, cust.TenantID, applied)
+		}
+	}
+	if rep.Updated > 0 {
+		s.log.Info("billing: subscription reconciliation corrected drift",
+			"checked", rep.Checked, "updated", rep.Updated, "degraded", rep.Degraded)
+	}
+	return rep, nil
+}
+
 // DeletePlan removes a catalog row (the default plan is protected).
 func (s *Service) DeletePlan(ctx context.Context, id string) error {
 	if s == nil || s.store == nil {

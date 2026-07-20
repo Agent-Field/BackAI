@@ -146,10 +146,13 @@ func (s *Store) UpsertCustomer(ctx context.Context, c Customer) (Customer, error
 	// Bind tenant so the RLS force policy permits the upsert on
 	// suite_billing_customers. "" apiKeyID is safe.
 	ctx = tenantctx.WithTenant(ctx, c.TenantID, "")
+	// An empty plan means "don't change the plan": default it to free on a
+	// fresh insert, but PRESERVE the existing plan on update. Callers that
+	// only touch subscription_status / current_period_end (e.g. the
+	// invoice.payment_succeeded and dunning webhook paths) pass "" here — the
+	// SQL below coalesces so those events never clobber a paid plan back to
+	// free. An explicit plan (checkout, subscription.updated) still wins.
 	plan := strings.TrimSpace(c.Plan)
-	if plan == "" {
-		plan = "free"
-	}
 
 	var (
 		trialEndsPtr, periodEndPtr *time.Time
@@ -169,11 +172,11 @@ func (s *Store) UpsertCustomer(ctx context.Context, c Customer) (Customer, error
 		insert into suite_billing_customers
 			(tenant_id, stripe_customer_id, email, plan,
 			 trial_ends_at, current_period_end, subscription_status)
-		values ($1, $2, $3, $4, $5, $6, $7)
+		values ($1, $2, $3, coalesce(nullif($4, ''), 'free'), $5, $6, $7)
 		on conflict (tenant_id) do update set
 			stripe_customer_id  = coalesce(excluded.stripe_customer_id,  suite_billing_customers.stripe_customer_id),
 			email               = coalesce(excluded.email,               suite_billing_customers.email),
-			plan                = excluded.plan,
+			plan                = coalesce(nullif($4, ''),               suite_billing_customers.plan),
 			trial_ends_at       = coalesce(excluded.trial_ends_at,       suite_billing_customers.trial_ends_at),
 			current_period_end  = coalesce(excluded.current_period_end,  suite_billing_customers.current_period_end),
 			subscription_status = coalesce(excluded.subscription_status, suite_billing_customers.subscription_status),
@@ -197,6 +200,34 @@ func (s *Store) UpsertCustomer(ctx context.Context, c Customer) (Customer, error
 		return Customer{}, ErrNotFound
 	}
 	return scanCustomer(rows)
+}
+
+// RecordBillingEvent records an ingested billing event id for idempotency
+// (webhook + reconciliation). Returns firstTime=true when this
+// (tenant, event_id) pair was newly inserted, false when it was already
+// present — a replay the caller should skip re-applying. Binds the tenant so
+// the FORCE-RLS WITH CHECK on suite_billing_events passes.
+//
+// Fails open: with no pool, or an empty tenant/event id, it returns
+// firstTime=true so ingestion is never blocked by a missing idempotency
+// ledger (correctness of the applied state is idempotent anyway).
+func (s *Store) RecordBillingEvent(ctx context.Context, tenantID, eventID, eventType string) (bool, error) {
+	if !s.HasPool() {
+		return true, nil
+	}
+	if strings.TrimSpace(tenantID) == "" || strings.TrimSpace(eventID) == "" {
+		return true, nil
+	}
+	ctx = tenantctx.WithTenant(ctx, tenantID, "")
+	tag, err := s.pool.Exec(ctx, `
+		insert into suite_billing_events (tenant_id, event_id, event_type)
+		values ($1, $2, $3)
+		on conflict (tenant_id, event_id) do nothing
+	`, tenantID, eventID, eventType)
+	if err != nil {
+		return false, fmt.Errorf("billing: record event: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 // ─── Meters ───────────────────────────────────────────────────────────────

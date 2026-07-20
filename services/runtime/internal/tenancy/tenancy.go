@@ -144,16 +144,21 @@ type Membership struct {
 // non-null budget/limits as "enforced upstream by LiteLLM". See
 // migration 00022_api_keys_litellm.sql.
 type APIKey struct {
-	ID         string     `json:"id"`
-	TenantID   string     `json:"tenant_id"`
-	Prefix     string     `json:"prefix"`
-	Name       *string    `json:"name"`
-	Scopes     []string   `json:"scopes"`
-	CreatedBy  *string    `json:"created_by"`
-	CreatedAt  time.Time  `json:"created_at"`
-	LastUsedAt *time.Time `json:"last_used_at"`
-	ExpiresAt  *time.Time `json:"expires_at"`
-	RevokedAt  *time.Time `json:"revoked_at"`
+	ID       string  `json:"id"`
+	TenantID string  `json:"tenant_id"`
+	Prefix   string  `json:"prefix"`
+	Name     *string `json:"name"`
+	// ServiceAccountName labels a key as belonging to a named non-human
+	// service account (distinct from the human-facing Name). nil for
+	// ordinary user-minted keys. Backed by suite_api_keys.service_account_name
+	// (migration 00035_lifecycle.sql).
+	ServiceAccountName *string    `json:"service_account_name"`
+	Scopes             []string   `json:"scopes"`
+	CreatedBy          *string    `json:"created_by"`
+	CreatedAt          time.Time  `json:"created_at"`
+	LastUsedAt         *time.Time `json:"last_used_at"`
+	ExpiresAt          *time.Time `json:"expires_at"`
+	RevokedAt          *time.Time `json:"revoked_at"`
 	// LiteLLMKeyAlias is the alias we sent to LiteLLM at issuance time.
 	// We never store the plaintext LiteLLM secret on this row — the
 	// secrets vault holds it under "litellm/key/{api_key_id}". nil
@@ -330,10 +335,13 @@ type UpdateTenantInput struct {
 
 // IssueAPIKeyInput matches IssueAPIKeyInputSchema.
 type IssueAPIKeyInput struct {
-	TenantID  string     `json:"tenant_id"`
-	Name      string     `json:"name,omitempty"`
-	Scopes    []string   `json:"scopes"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	TenantID string `json:"tenant_id"`
+	Name     string `json:"name,omitempty"`
+	// ServiceAccountName, when set, marks the key as a service-account
+	// credential (persisted to suite_api_keys.service_account_name).
+	ServiceAccountName string     `json:"service_account_name,omitempty"`
+	Scopes             []string   `json:"scopes"`
+	ExpiresAt          *time.Time `json:"expires_at,omitempty"`
 	// CreatedBy is the user id to record on the row. Optional — the
 	// admin handlers don't yet wire a principal but the SDK will.
 	CreatedBy string `json:"-"`

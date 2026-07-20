@@ -58,10 +58,11 @@ const tracerName = "af-stack/tenancy"
 // enforces. Kept here so AddMembership can reject bad input before the
 // round-trip.
 var validRoles = map[string]struct{}{
-	"owner":  {},
-	"admin":  {},
-	"member": {},
-	"viewer": {},
+	"owner":   {},
+	"admin":   {},
+	"member":  {},
+	"billing": {},
+	"viewer":  {},
 }
 
 // slugRegexp matches the same charset the dashboard's
@@ -775,15 +776,30 @@ func (m *Manager) UpdateTenant(ctx context.Context, id string, in UpdateTenantIn
 	return t, nil
 }
 
-// DeleteTenant soft-deletes by setting deleted_at = now(). Hard delete
-// is intentionally not exposed.
+// DeleteTenant soft-deletes a tenant: it sets deleted_at = now() AND
+// revokes every one of the tenant's still-active API keys, atomically. Data
+// is retained (soft delete) so the tenant can be restored or purged after a
+// grace period (see PurgeSoftDeletedTenants), but access is cut immediately —
+// a soft-deleted tenant's keys must stop authenticating the moment the
+// deletion lands. Hard delete is intentionally not exposed here.
+//
+// Upstream LiteLLM virtual keys are NOT torn down per-key here (bulk revoke
+// would fan out one upstream call per key); the local revocation is what
+// gates auth, and a subsequent purge cascades the rows away.
 func (m *Manager) DeleteTenant(ctx context.Context, id string) error {
 	ctx, span := m.tracer.Start(ctx, "tenancy.delete_tenant",
 		trace.WithAttributes(attribute.String("tenancy.tenant_id", id)),
 	)
 	defer span.End()
 
-	tag, err := m.pool.Exec(ctx, `
+	tx, err := m.pool.Begin(ctx)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("tenancy: delete tenant begin: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // best-effort on the error path
+
+	tag, err := tx.Exec(ctx, `
 		update suite_tenants
 		set deleted_at = now()
 		where id = $1 and deleted_at is null
@@ -794,6 +810,117 @@ func (m *Manager) DeleteTenant(ctx context.Context, id string) error {
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrTenantNotFound
+	}
+
+	// Revoke every active key for the tenant so credentials stop working
+	// immediately. Idempotent: only rows not already revoked are touched.
+	if _, err := tx.Exec(ctx, `
+		update suite_api_keys
+		set revoked_at = now()
+		where tenant_id = $1 and revoked_at is null
+	`, id); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("tenancy: revoke keys on delete: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("tenancy: delete tenant commit: %w", err)
+	}
+	return nil
+}
+
+// PurgeSoftDeletedTenants hard-deletes tenants whose deleted_at is older than
+// graceDays, permanently removing their rows. FK ON DELETE CASCADE tears
+// down memberships, api keys, invitations, billing rows, etc. This is the
+// terminal half of the soft-delete lifecycle, run by a platform cron.
+// Returns the number of tenants purged. The seeded default tenant is never
+// eligible (its deleted_at is never set). graceDays <= 0 is rejected so a
+// misconfiguration can't purge freshly-deleted tenants.
+func (m *Manager) PurgeSoftDeletedTenants(ctx context.Context, graceDays int) (int64, error) {
+	ctx, span := m.tracer.Start(ctx, "tenancy.purge_soft_deleted_tenants",
+		trace.WithAttributes(attribute.Int("tenancy.grace_days", graceDays)),
+	)
+	defer span.End()
+	if graceDays <= 0 {
+		return 0, wrappedErr{base: ErrInvalid, msg: "tenancy: grace days must be positive"}
+	}
+	cutoff := time.Now().UTC().AddDate(0, 0, -graceDays)
+	tag, err := m.pool.Exec(ctx, `
+		delete from suite_tenants
+		where deleted_at is not null and deleted_at < $1
+	`, cutoff)
+	if err != nil {
+		span.RecordError(err)
+		return 0, fmt.Errorf("tenancy: purge soft-deleted tenants: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// MembershipRole returns the caller's role on a tenant, or
+// ErrMembershipNotFound when the user has no membership there. The
+// tenant-management REST handlers use it to gate on tenantrole capabilities.
+func (m *Manager) MembershipRole(ctx context.Context, tenantID, userID string) (string, error) {
+	var role string
+	err := m.pool.QueryRow(ctx, `
+		select role from suite_memberships
+		where tenant_id = $1 and user_id = $2
+	`, tenantID, userID).Scan(&role)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrMembershipNotFound
+		}
+		return "", fmt.Errorf("tenancy: membership role: %w", err)
+	}
+	return role, nil
+}
+
+// TransferOwnership moves the owner role from the current owner(s) to
+// newOwnerUserID within a tenant. The new owner must already be a member;
+// the previous owner(s) are demoted to admin (never left without access).
+// Runs in one transaction so the tenant is never left ownerless or with two
+// owners. Returns ErrUserNotFound when newOwnerUserID has no membership.
+func (m *Manager) TransferOwnership(ctx context.Context, tenantID, newOwnerUserID string) error {
+	ctx, span := m.tracer.Start(ctx, "tenancy.transfer_ownership",
+		trace.WithAttributes(
+			attribute.String("tenancy.tenant_id", tenantID),
+			attribute.String("tenancy.new_owner", newOwnerUserID),
+		),
+	)
+	defer span.End()
+
+	tx, err := m.pool.Begin(ctx)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("tenancy: transfer ownership begin: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // best-effort on the error path
+
+	// Promote the new owner. RowsAffected==0 means they aren't a member.
+	tag, err := tx.Exec(ctx, `
+		update suite_memberships set role = 'owner'
+		where tenant_id = $1 and user_id = $2
+	`, tenantID, newOwnerUserID)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("tenancy: promote new owner: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrUserNotFound
+	}
+
+	// Demote every OTHER owner to admin so exactly one owner remains.
+	if _, err := tx.Exec(ctx, `
+		update suite_memberships set role = 'admin'
+		where tenant_id = $1 and user_id <> $2 and role = 'owner'
+	`, tenantID, newOwnerUserID); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("tenancy: demote prior owner: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("tenancy: transfer ownership commit: %w", err)
 	}
 	return nil
 }
@@ -1070,15 +1197,20 @@ func (m *Manager) IssueKey(ctx context.Context, in IssueAPIKeyInput) (IssuedAPIK
 		c := in.CreatedBy
 		createdByPtr = &c
 	}
+	var serviceAcctPtr *string
+	if strings.TrimSpace(in.ServiceAccountName) != "" {
+		sa := in.ServiceAccountName
+		serviceAcctPtr = &sa
+	}
 
 	err = m.pool.QueryRow(ctx, `
 		insert into suite_api_keys
-			(tenant_id, prefix, hashed_secret, name, scopes, created_by, expires_at,
+			(tenant_id, prefix, hashed_secret, name, service_account_name, scopes, created_by, expires_at,
 			 budget_max_usd, rate_limit_rpm, rate_limit_tpm)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		returning id::text, created_at
 	`,
-		in.TenantID, prefix, string(hash), namePtr, in.Scopes, createdByPtr, in.ExpiresAt,
+		in.TenantID, prefix, string(hash), namePtr, serviceAcctPtr, in.Scopes, createdByPtr, in.ExpiresAt,
 		in.BudgetMaxUSD, in.RateLimitRPM, in.RateLimitTPM,
 	).Scan(&id, &createdAt)
 	if err != nil {
@@ -1131,17 +1263,18 @@ func (m *Manager) IssueKey(ctx context.Context, in IssueAPIKeyInput) (IssuedAPIK
 	}
 
 	pub := APIKey{
-		ID:           id,
-		TenantID:     in.TenantID,
-		Prefix:       prefix,
-		Name:         namePtr,
-		Scopes:       append([]string{}, in.Scopes...),
-		CreatedBy:    createdByPtr,
-		CreatedAt:    createdAt,
-		ExpiresAt:    in.ExpiresAt,
-		BudgetMaxUSD: in.BudgetMaxUSD,
-		RateLimitRPM: in.RateLimitRPM,
-		RateLimitTPM: in.RateLimitTPM,
+		ID:                 id,
+		TenantID:           in.TenantID,
+		Prefix:             prefix,
+		Name:               namePtr,
+		ServiceAccountName: serviceAcctPtr,
+		Scopes:             append([]string{}, in.Scopes...),
+		CreatedBy:          createdByPtr,
+		CreatedAt:          createdAt,
+		ExpiresAt:          in.ExpiresAt,
+		BudgetMaxUSD:       in.BudgetMaxUSD,
+		RateLimitRPM:       in.RateLimitRPM,
+		RateLimitTPM:       in.RateLimitTPM,
 	}
 	if litellmAlias != "" {
 		a := litellmAlias
@@ -1196,15 +1329,20 @@ func (m *Manager) issueLocalKeyWith(ctx context.Context, writer keyWriter, in Is
 		c := in.CreatedBy
 		createdByPtr = &c
 	}
+	var serviceAcctPtr *string
+	if strings.TrimSpace(in.ServiceAccountName) != "" {
+		sa := in.ServiceAccountName
+		serviceAcctPtr = &sa
+	}
 
 	err = writer.QueryRow(ctx, `
 		insert into suite_api_keys
-			(tenant_id, prefix, hashed_secret, name, scopes, created_by, expires_at,
+			(tenant_id, prefix, hashed_secret, name, service_account_name, scopes, created_by, expires_at,
 			 budget_max_usd, rate_limit_rpm, rate_limit_tpm)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		returning id::text, created_at
 	`,
-		in.TenantID, prefix, string(hash), namePtr, in.Scopes, createdByPtr, in.ExpiresAt,
+		in.TenantID, prefix, string(hash), namePtr, serviceAcctPtr, in.Scopes, createdByPtr, in.ExpiresAt,
 		in.BudgetMaxUSD, in.RateLimitRPM, in.RateLimitTPM,
 	).Scan(&id, &createdAt)
 	if err != nil {
@@ -1217,17 +1355,18 @@ func (m *Manager) issueLocalKeyWith(ctx context.Context, writer keyWriter, in Is
 
 	return IssuedAPIKey{
 		APIKey: APIKey{
-			ID:           id,
-			TenantID:     in.TenantID,
-			Prefix:       prefix,
-			Name:         namePtr,
-			Scopes:       append([]string{}, in.Scopes...),
-			CreatedBy:    createdByPtr,
-			CreatedAt:    createdAt,
-			ExpiresAt:    in.ExpiresAt,
-			BudgetMaxUSD: in.BudgetMaxUSD,
-			RateLimitRPM: in.RateLimitRPM,
-			RateLimitTPM: in.RateLimitTPM,
+			ID:                 id,
+			TenantID:           in.TenantID,
+			Prefix:             prefix,
+			Name:               namePtr,
+			ServiceAccountName: serviceAcctPtr,
+			Scopes:             append([]string{}, in.Scopes...),
+			CreatedBy:          createdByPtr,
+			CreatedAt:          createdAt,
+			ExpiresAt:          in.ExpiresAt,
+			BudgetMaxUSD:       in.BudgetMaxUSD,
+			RateLimitRPM:       in.RateLimitRPM,
+			RateLimitTPM:       in.RateLimitTPM,
 		},
 		Value: keyTokenPrefix + prefix + "_" + secret,
 	}, nil
@@ -1264,7 +1403,7 @@ func (m *Manager) listKeysImpl(ctx context.Context, opts ListKeysOpts) ([]APIKey
 	if len(conds) > 0 {
 		where = " where " + strings.Join(conds, " and ")
 	}
-	q := `select id::text, tenant_id::text, prefix, name, scopes, created_by::text,
+	q := `select id::text, tenant_id::text, prefix, name, service_account_name, scopes, created_by::text,
 		         created_at, last_used_at, expires_at, revoked_at,
 		         litellm_key_alias, budget_max_usd, rate_limit_rpm, rate_limit_tpm
 		  from suite_api_keys ` + where + ` order by created_at desc`
@@ -1395,7 +1534,7 @@ func (m *Manager) RotateKey(ctx context.Context, id string) (IssuedAPIKey, error
 	}()
 
 	row := tx.QueryRow(ctx, `
-		select id::text, tenant_id::text, prefix, name, scopes, created_by::text,
+		select id::text, tenant_id::text, prefix, name, service_account_name, scopes, created_by::text,
 		       created_at, last_used_at, expires_at, revoked_at,
 		       litellm_key_alias, budget_max_usd, rate_limit_rpm, rate_limit_tpm
 		  from suite_api_keys
@@ -1422,15 +1561,20 @@ func (m *Manager) RotateKey(ctx context.Context, id string) (IssuedAPIKey, error
 	if oldVal.CreatedBy != nil {
 		createdBy = *oldVal.CreatedBy
 	}
+	serviceAcct := ""
+	if oldVal.ServiceAccountName != nil {
+		serviceAcct = *oldVal.ServiceAccountName
+	}
 	in := IssueAPIKeyInput{
-		TenantID:     oldVal.TenantID,
-		Name:         name,
-		Scopes:       append([]string{}, oldVal.Scopes...),
-		ExpiresAt:    oldVal.ExpiresAt,
-		CreatedBy:    createdBy,
-		BudgetMaxUSD: oldVal.BudgetMaxUSD,
-		RateLimitRPM: oldVal.RateLimitRPM,
-		RateLimitTPM: oldVal.RateLimitTPM,
+		TenantID:           oldVal.TenantID,
+		Name:               name,
+		ServiceAccountName: serviceAcct,
+		Scopes:             append([]string{}, oldVal.Scopes...),
+		ExpiresAt:          oldVal.ExpiresAt,
+		CreatedBy:          createdBy,
+		BudgetMaxUSD:       oldVal.BudgetMaxUSD,
+		RateLimitRPM:       oldVal.RateLimitRPM,
+		RateLimitTPM:       oldVal.RateLimitTPM,
 	}
 	issued, err := m.issueLocalKeyWith(ctx, tx, in)
 	if err != nil {
@@ -1756,7 +1900,7 @@ func scanTenant(r rowScanner) (Tenant, error) {
 // of this helper.
 func scanAPIKey(r rowScanner) (APIKey, error) {
 	var k APIKey
-	if err := r.Scan(&k.ID, &k.TenantID, &k.Prefix, &k.Name, &k.Scopes, &k.CreatedBy,
+	if err := r.Scan(&k.ID, &k.TenantID, &k.Prefix, &k.Name, &k.ServiceAccountName, &k.Scopes, &k.CreatedBy,
 		&k.CreatedAt, &k.LastUsedAt, &k.ExpiresAt, &k.RevokedAt,
 		&k.LiteLLMKeyAlias, &k.BudgetMaxUSD, &k.RateLimitRPM, &k.RateLimitTPM); err != nil {
 		return APIKey{}, err
