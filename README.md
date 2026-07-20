@@ -26,6 +26,8 @@ explicit, auditable boundaries. Own the code, data, and deployment.
 
 ## Quickstart
 
+Prerequisite: Docker with Compose.
+
 ```bash
 git clone https://github.com/Agent-Field/backai.git
 cd backai
@@ -34,6 +36,9 @@ cd backai
 curl -fsSL https://raw.githubusercontent.com/Agent-Field/backai/main/scripts/install.sh | bash
 af-stack dev
 ```
+
+Prefer not to pipe an installer into a shell? [Inspect it first](scripts/install.sh)
+or run `go install github.com/Agent-Field/backai/services/cli/cmd/af-stack@latest`.
 
 Open the customer app first at `http://localhost:34000`, then inspect what it
 did in the operator console at `http://localhost:33000`.
@@ -47,10 +52,13 @@ Prefer raw Compose? Run `node scripts/preflight.mjs --fix` and then
 `docker compose up`. Preflight resolves local port conflicts and prints every
 service URL.
 
+> **Pre-alpha:** the golden path works, but workload auto-mounting and remote
+> Python/TypeScript durable-job handlers are not wired yet. [See current limits](#project-status).
+
 ## What you get
 
-The priority order is deliberate: establish identity and tenant policy, execute
-AI work, account for cost, then make the whole path observable and operable.
+An AI product is not a model call. It needs identity and tenant policy before
+execution, cost controls during execution, and observability after execution.
 
 | Primitive            | Wired into BackAI                                                                                                                             |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -66,22 +74,35 @@ AI work, account for cost, then make the whole path observable and operable.
 
 These are one system, not a catalog of disconnected containers. Tenant identity
 flows through model calls, jobs, storage, billing, audit, and cost so builders do
-not have to recreate those connections for every product.
+not have to recreate those connections for every product. Model and agent
+engines remain replaceable; the product is the secure wiring around them.
 
-<div align="center">
-  <img src="docs/assets/readme/operator-overview.png" alt="BackAI operator console showing API setup, cost, runs, activity, and service health" width="1000" />
-  <br />
-  <sub>One console for the backend behind your AI product.</sub>
-</div>
+### Operate what you ship
+
+Cost, latency, failures, queues, tenants, and audit are first-class backend
+state—not separate dashboards developers must assemble later.
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="docs/assets/dashboard-screenshots/cost-live.png" alt="Operator dashboard showing model, agent, and tenant cost with budgets and forecasts" />
+      <br />
+      <sub>Spend, budgets, forecasts, and cost by model, agent, or tenant.</sub>
+    </td>
+    <td width="50%">
+      <img src="docs/assets/dashboard-screenshots/metrics.png" alt="Operator dashboard showing request volume, latency, runtime resources, routes, and errors" />
+      <br />
+      <sub>Request volume, latency, runtime resources, routes, and errors.</sub>
+    </td>
+  </tr>
+</table>
 
 ## What can you build?
 
-- Multi-tenant AI SaaS and copilots
-- Customer support, operations, and back-office agents
-- Research, extraction, enrichment, and document workflows
-- Coding-agent and long-running agent products
-- AI features inside an existing web, mobile, or backend application
-- A private AI backend in your cloud or VPC
+- Multi-tenant copilots with per-customer identity, usage, and budgets
+- Support, operations, research, extraction, and document products
+- Long-running coding-agent and approval-driven workflows
+- AI features attached to an existing web, mobile, or backend application
 
 Start from the neutral [`examples/starter/`](examples/starter/), the bundled
 SupportDesk product, or a focused example: [LLM gateway](examples/03-llm-gateway-only/),
@@ -222,6 +243,10 @@ dependency list.
 stack can run in your cloud or VPC without a mandatory hosted control plane.
 Use your own model keys, Postgres, object storage, secrets, backups, and network
 policy. See the [OSS audit](docs/oss-audit.md) for what is included and why.
+
+> The development Compose file mounts the Docker socket for local code
+> sandboxes. Do not expose it as a production deployment. Use the production
+> Compose/Helm path and a gVisor, Firecracker, or remote sandbox adapter.
 
 Choose the target that matches your operations posture:
 
