@@ -1659,6 +1659,13 @@ func withLogging(log *slog.Logger, ring *metricsRing, next http.Handler) http.Ha
 		// populateLineField routes a "trace_id" attr into the log line's
 		// trace column, which the dashboard Logs view surfaces + filters.
 		traceID := requestTraceID(r)
+		// Stamp the canonical correlation id onto the REQUEST too, so every
+		// downstream handler that reads X-Request-ID (the LLM gateway →
+		// cost_events.request_id, webhook emit) uses the SAME id that appears
+		// in the logs, the response header, and the error envelope. Without
+		// this the cost event's request_id diverged from the request's id and
+		// the request → cost-event → webhook chain couldn't be joined.
+		r.Header.Set("X-Request-ID", traceID)
 		// Expose the correlation id on every response (success and error)
 		// and stash it on the writer so writeError can stamp it into the
 		// envelope's error.request_id — the id AGENTS.md promises on every
