@@ -303,10 +303,9 @@ func (b *Budgets) HasKeyBudget(ctx context.Context, apiKeyID string, estimatedUS
 	if err != nil {
 		return false, err
 	}
-	if spent+estimatedUSD > *capUSD {
-		return false, nil
-	}
-	return true, nil
+	// keyBudgetDecision is the pure core (see enforce.go): the committed spend
+	// comes from the shared ledger, so every replica decides identically.
+	return keyBudgetDecision(*capUSD, spent, estimatedUSD), nil
 }
 
 // HasBudget is the gateway pre-call gate.
@@ -371,10 +370,9 @@ func (b *Budgets) HasBudget(ctx context.Context, tenantID string, estimatedUSD f
 	if err != nil {
 		return false, err
 	}
-	if spent+estimatedUSD > monthlyUSD {
-		return false, nil
-	}
-	return true, nil
+	// budgetDecision is the pure core (see enforce.go): spent is read from the
+	// shared ledger, so two replicas enforce against identical committed spend.
+	return budgetDecision(monthlyUSD, spent, estimatedUSD), nil
 }
 
 // currentMonthStartUTC returns midnight UTC on the first of the current
