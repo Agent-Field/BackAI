@@ -10,9 +10,15 @@
 // helper works in Node, Bun, Deno, and edge runtimes.
 
 import { z } from "zod"
-import { rawRequest, request, SuiteError, type HttpOptions } from "./_http.js"
+import {
+  rawRequest,
+  request,
+  resolveApiKey,
+  resolveBaseUrl,
+  SuiteError,
+  type HttpOptions,
+} from "./_http.js"
 
-const DEFAULT_BASE_URL = "http://localhost:8080"
 const PATH_PREFIX = "/api/v1"
 
 // ---------- shared schemas (mirror lib/api.ts) ----------
@@ -128,12 +134,7 @@ export async function download(
   if (format !== undefined) qs.set("format", format)
   const headers = { ...(opts.headers ?? {}), accept: "application/octet-stream" }
   const path = `/storage/${encodeURIComponent(key)}${qs.size > 0 ? `?${qs.toString()}` : ""}`
-  const response = await rawRequest(
-    "GET",
-    path,
-    null,
-    { ...http, headers },
-  )
+  const response = await rawRequest("GET", path, null, { ...http, headers })
   const buf = await response.arrayBuffer()
   return new Uint8Array(buf)
 }
@@ -151,12 +152,7 @@ export async function signedURL(
     throw new Error("ttlSeconds must be a positive integer")
   }
   const qs = new URLSearchParams({ key, ttl: String(ttlSeconds) })
-  const raw = await request<unknown>(
-    "GET",
-    `/storage/signed-url?${qs.toString()}`,
-    null,
-    opts,
-  )
+  const raw = await request<unknown>("GET", `/storage/signed-url?${qs.toString()}`, null, opts)
   return SignedURLSchema.parse(camelizeSignedURL(raw))
 }
 
@@ -164,10 +160,7 @@ export async function signedURL(
 export const signed_url = signedURL
 
 /** Delete the object at `key`. Returns true on success. */
-async function deleteObject(
-  key: string,
-  opts: HttpOptions = {},
-): Promise<boolean> {
+async function deleteObject(key: string, opts: HttpOptions = {}): Promise<boolean> {
   if (typeof key !== "string" || key.length === 0) {
     throw new Error("storage key must be a non-empty string")
   }
@@ -185,28 +178,18 @@ async function deleteObject(
 export { deleteObject as delete }
 
 /** List objects, optionally restricted to `prefix`. */
-export async function list(
-  opts: ListStorageOptions = {},
-): Promise<StorageList> {
+export async function list(opts: ListStorageOptions = {}): Promise<StorageList> {
   const { prefix, limit = 100, ...http } = opts
   const qs = new URLSearchParams()
   if (prefix !== undefined && prefix !== "") qs.set("prefix", prefix)
   qs.set("limit", String(limit))
-  const raw = await request<unknown>(
-    "GET",
-    `/storage?${qs.toString()}`,
-    null,
-    http,
-  )
+  const raw = await request<unknown>("GET", `/storage?${qs.toString()}`, null, http)
   return StorageListSchema.parse(camelizeStorageList(raw))
 }
 
 // ---------- helpers ----------
 
-function toBlob(
-  data: Uint8Array | ArrayBuffer | Blob | string,
-  contentType: string,
-): Blob {
+function toBlob(data: Uint8Array | ArrayBuffer | Blob | string, contentType: string): Blob {
   if (data instanceof Blob) return data
   if (typeof data === "string") return new Blob([data], { type: contentType })
   if (data instanceof ArrayBuffer) return new Blob([data], { type: contentType })
@@ -216,25 +199,6 @@ function toBlob(
   const copy = new Uint8Array(data.byteLength)
   copy.set(data)
   return new Blob([copy.buffer], { type: contentType })
-}
-
-function envVar(name: string): string | undefined {
-  const g = globalThis as { process?: { env?: Record<string, string | undefined> } }
-  return g.process?.env?.[name]
-}
-
-function resolveBaseUrl(override?: string): string {
-  if (override !== undefined && override !== "") return override.replace(/\/+$/, "")
-  const fromEnv = envVar("AF_STACK_URL")
-  if (fromEnv !== undefined && fromEnv !== "") return fromEnv.replace(/\/+$/, "")
-  return DEFAULT_BASE_URL
-}
-
-function resolveApiKey(override?: string): string | undefined {
-  if (override !== undefined && override !== "") return override
-  const fromEnv = envVar("AF_STACK_API_KEY")
-  if (fromEnv !== undefined && fromEnv !== "") return fromEnv
-  return undefined
 }
 
 function generateRequestId(): string {
@@ -261,7 +225,9 @@ function buildUploadHeaders(opts: HttpOptions): Record<string, string> {
 }
 
 async function parseError(response: Response, requestId: string): Promise<SuiteError> {
-  let body: { error?: { code?: string; message?: string; request_id?: string; details?: unknown } } = {}
+  let body: {
+    error?: { code?: string; message?: string; request_id?: string; details?: unknown }
+  } = {}
   try {
     body = (await response.json()) as typeof body
   } catch {
@@ -292,9 +258,7 @@ function camelizeStorageObject(raw: unknown): unknown {
 function camelizeStorageList(raw: unknown): unknown {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw
   const src = raw as Record<string, unknown>
-  const objects = Array.isArray(src.objects)
-    ? src.objects.map(camelizeStorageObject)
-    : src.objects
+  const objects = Array.isArray(src.objects) ? src.objects.map(camelizeStorageObject) : src.objects
   return {
     objects,
     prefix: src.prefix,

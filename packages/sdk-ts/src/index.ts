@@ -38,7 +38,27 @@ export {
   type ApproveOptions,
   type DenyOptions,
 } from "./agents.js"
-export { SuiteError, type HttpOptions, type SseEvent } from "./_http.js"
+export {
+  SuiteError,
+  SUPPORTED_RUNTIME,
+  SUPPORTED_RUNTIME_MAJOR,
+  DEFAULT_TIMEOUT_MS,
+  DEFAULT_MAX_RETRIES,
+  checkRuntimeCompat,
+  type HttpOptions,
+  type SseEvent,
+  type ClientConfig,
+} from "./_http.js"
+
+// ─── Explicit client + pagination (PRD R6: SDK DX) ───────────────────────
+//
+// `BackAI` is the explicit, configurable counterpart to the env-configured
+// `suite` singleton; `paginate` auto-iterates offset/cursor list endpoints.
+// Both mirror `af_stack` 1:1 (see packages/sdk-parity.json). The privileged
+// pull-worker lives at `@af-stack/sdk/server`; a browser-safe subset (no
+// admin, no worker) lives at `@af-stack/sdk/browser`.
+export { BackAI, GOVERNED_NAMESPACES, type BackAIOptions } from "./client.js"
+export { AsyncPaginator, paginate, type PageFetcher } from "./pagination.js"
 export {
   realtime,
   subscribe as subscribeRealtime,
@@ -526,11 +546,11 @@ import { auth } from "./auth.js"
 
 /** Top-level namespace: `suite.agents.*`, `suite.approvals.*`, `suite.shipwright.*`, `suite.search(...)`, `suite.searchIndex.*`, `suite.activity.*`, `suite.flags.*`, `suite.runs.*`, `suite.jobs.*`, `suite.secrets.*`, `suite.storage.*`, `suite.llm.*`, `suite.cost.*`, `suite.memory.*`, `suite.sandbox.*`, `suite.notifications.*`, `suite.webhooks.*`, `suite.billing.*`, `suite.tools.*`, `suite.admin.*`. */
 export const suite = {
-	agents,
-	approvals,
-	auth,
-	shipwright,
-	search,
+  agents,
+  approvals,
+  auth,
+  shipwright,
+  search,
   searchIndex,
   activity,
   flags,
