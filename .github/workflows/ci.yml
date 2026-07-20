@@ -112,7 +112,16 @@ jobs:
           # v2.5.0's release binary is built with go1.25.1; older v2 binaries
           # (e.g. v2.1.6, built with go1.24) refuse a config targeting go 1.25.
           version: v2.5.0
-          only-new-issues: true
+          # Compute NEW issues from git, not the GitHub diff API. The action's
+          # only-new-issues path fetches the PR patch from the API, which has a
+          # hard 20k-line ceiling ("diff too large") — a large PR then trips it
+          # and the action falls back to reporting the entire ~106-issue
+          # backlog. `--new-from-merge-base` does the identical filtering via
+          # git (fetch-depth: 0 above provides origin/main), with no ceiling:
+          # only issues on lines this PR changed relative to the merge base
+          # fail the build. Same gate, robust to PR size.
+          only-new-issues: false
+          args: --new-from-merge-base=origin/main
 
   test-go:
     name: Test (Go)
