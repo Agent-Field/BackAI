@@ -56,6 +56,11 @@ var (
 		Help: "Total LLM gateway calls rejected by budget enforcement (402), by tenant and reason.",
 	}, []string{"tenant", "reason"})
 
+	webhookDeliveriesTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "backai_webhook_deliveries_total",
+		Help: "Total outbound webhook delivery attempts by terminal result (succeeded|failed).",
+	}, []string{"result"})
+
 	jobsQueueOldestAgeSeconds = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "backai_jobs_queue_oldest_age_seconds",
 		Help: "Age in seconds of the oldest not-yet-completed background job (0 when the queue is empty or unsampled).",
@@ -91,6 +96,7 @@ func Register(reg *prometheus.Registry) error {
 		sandboxRunsTotal,
 		runsTotal,
 		budgetRejectionsTotal,
+		webhookDeliveriesTotal,
 		jobsQueueOldestAgeSeconds,
 		dbPoolAcquiredConnections,
 		dbPoolMaxConnections,
@@ -139,6 +145,12 @@ func ObserveBudgetRejection(tenant, reason string) {
 	budgetRejectionsTotal.WithLabelValues(normalizeTenant(tenant), normalizeLabel(reason, "unknown")).Inc()
 }
 
+// ObserveWebhookDelivery records one terminal outbound webhook delivery
+// attempt. result is "succeeded" or "failed".
+func ObserveWebhookDelivery(result string) {
+	webhookDeliveriesTotal.WithLabelValues(normalizeLabel(result, "unknown")).Inc()
+}
+
 // SetJobsQueueOldestAge sets the age (seconds) of the oldest not-yet-completed
 // background job. Sampled periodically by the runtime.
 func SetJobsQueueOldestAge(seconds float64) {
@@ -171,6 +183,8 @@ func initZeroSeries() {
 	runsTotal.WithLabelValues(defaultAgent, "failed").Add(0)
 	budgetRejectionsTotal.WithLabelValues(defaultTenant, "tenant").Add(0)
 	budgetRejectionsTotal.WithLabelValues(defaultTenant, "key").Add(0)
+	webhookDeliveriesTotal.WithLabelValues("succeeded").Add(0)
+	webhookDeliveriesTotal.WithLabelValues("failed").Add(0)
 	jobsQueueOldestAgeSeconds.Set(0)
 	dbPoolAcquiredConnections.Set(0)
 	dbPoolMaxConnections.Set(0)
@@ -203,5 +217,6 @@ func ResetForTest() {
 	sandboxRunsTotal.Reset()
 	runsTotal.Reset()
 	budgetRejectionsTotal.Reset()
+	webhookDeliveriesTotal.Reset()
 	initZeroSeries()
 }

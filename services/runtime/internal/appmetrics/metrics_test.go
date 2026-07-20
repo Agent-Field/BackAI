@@ -21,6 +21,7 @@ func TestRegisterAndObserve(t *testing.T) {
 	ObserveSandboxRun("docker", "done")
 	ObserveRun("sample.echo", "succeeded")
 	ObserveBudgetRejection("tenant-1", "tenant")
+	ObserveWebhookDelivery("failed")
 	SetJobsQueueOldestAge(42)
 	SetDBPoolStats(3, 25)
 	SetBackupTestLastSuccess(1_700_000_000)
@@ -51,6 +52,7 @@ func TestRegisterAndObserve(t *testing.T) {
 		"backai_sandbox_runs_total",
 		"backai_runs_total",
 		"backai_budget_rejections_total",
+		"backai_webhook_deliveries_total",
 		"backai_jobs_queue_oldest_age_seconds",
 		"backai_db_pool_acquired_connections",
 		"backai_db_pool_max_connections",

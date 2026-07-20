@@ -1,0 +1,104 @@
+# BackAI default Prometheus alert rules (R7 production operating contract).
+#
+# Load these into Prometheus via `rule_files:` (see deploy/prometheus/README.md).
+# Every `backai_*` metric referenced here is registered by the runtime
+# (services/runtime/internal/appmetrics) and asserted to exist by
+# TestAlertsReferenceOnlyExistingMetrics — an alert can never reference a metric
+# the runtime doesn't export.
+#
+# The `up` series is synthesised by Prometheus per scrape target. The selector
+# `job="backai-runtime"` is the assumed scrape-job name for the runtime's
+# /metrics endpoint — adjust it to match your scrape config / ServiceMonitor.
+groups:
+  - name: backai-readiness
+    rules:
+      - alert: BackAIRuntimeDown
+        expr: up{job="backai-runtime"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "BackAI runtime target is down"
+          description: "The runtime /metrics target {{ $labels.instance }} has been unscrapeable for 2m."
+      - alert: BackAIReadinessFlapping
+        expr: changes(up{job="backai-runtime"}[10m]) > 4
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "BackAI runtime readiness is flapping"
+          description: "Target {{ $labels.instance }} changed up/down state more than 4 times in 10m — readiness is unstable (check /ready envelope for a prodcheck_code or db_unavailable)."
+
+  - name: backai-llm
+    rules:
+      - alert: BackAILLMProviderFailureRateHigh
+        expr: |
+          sum(rate(backai_llm_requests_total{status="error"}[5m]))
+            / clamp_min(sum(rate(backai_llm_requests_total[5m])), 1) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "BackAI LLM gateway error rate above 20%"
+          description: "More than 20% of LLM gateway requests have failed over the last 5m — a provider or the LiteLLM proxy is likely degraded."
+
+  - name: backai-jobs
+    rules:
+      - alert: BackAIJobsQueueBacklog
+        expr: backai_jobs_queue_oldest_age_seconds > 900
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "BackAI background job queue is backed up"
+          description: "The oldest past-due background job has waited over 15m for a worker — the jobs manager may be stalled or under-provisioned."
+
+  - name: backai-budget
+    rules:
+      - alert: BackAIBudgetRejectionsSpike
+        expr: sum(rate(backai_budget_rejections_total[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "BackAI budget-enforcement rejections spiking"
+          description: "Budget enforcement is rejecting more than 1 LLM call/s (402) over 5m — a tenant or key has hit its cap, or a budget is misconfigured."
+
+  - name: backai-webhooks
+    rules:
+      - alert: BackAIWebhookDeliveryFailureRateHigh
+        expr: |
+          sum(rate(backai_webhook_deliveries_total{result="failed"}[10m]))
+            / clamp_min(sum(rate(backai_webhook_deliveries_total[10m])), 1) > 0.5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "BackAI outbound webhook delivery failure rate above 50%"
+          description: "More than half of outbound webhook deliveries have failed over 10m — subscriber endpoints may be down or misconfigured."
+
+  - name: backai-db
+    rules:
+      - alert: BackAIDBConnectionSaturation
+        expr: |
+          backai_db_pool_acquired_connections
+            / clamp_min(backai_db_pool_max_connections, 1) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "BackAI Postgres pool near saturation"
+          description: "The runtime Postgres pool has been over 90% of max connections for 5m — queries may start queueing; raise AF_STACK_DATABASE_MAX_CONNECTIONS or investigate slow queries."
+
+  - name: backai-backup
+    rules:
+      - alert: BackAIBackupTestStale
+        expr: |
+          backai_backup_test_last_success_timestamp > 0
+            and (time() - backai_backup_test_last_success_timestamp) > 129600
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "BackAI backup/restore verification is stale"
+          description: "No successful backup/restore test has completed in over 36h — restore integrity is unverified. Check the backup-test cron (BACKUP_TEST_ENABLED)."
