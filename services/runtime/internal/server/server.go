@@ -5,6 +5,7 @@ package server
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -36,6 +37,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/guardrails"
 	"github.com/Agent-Field/backai/services/runtime/internal/harnesses"
 	"github.com/Agent-Field/backai/services/runtime/internal/hooks"
+	"github.com/Agent-Field/backai/services/runtime/internal/idempotency"
 	"github.com/Agent-Field/backai/services/runtime/internal/jobs"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmcache"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmgateway"
@@ -240,6 +242,11 @@ type Server struct {
 	// admin mutation. Always non-nil; falls back to no-op when no DB
 	// pool is wired.
 	audit *audit.Writer
+	// idem backs the inbound idempotency middleware (PRD R1). nil ⇒ the
+	// middleware is not installed and every request passes through
+	// unchanged. Constructed from the DB pool at New() time, or injected
+	// via Deps.Idempotency for tests.
+	idem idempotency.Store
 }
 
 // Health aggregates dependency health for the /health endpoint.
@@ -413,6 +420,10 @@ type Deps struct {
 	// cmd/af-stack.assertTenantSafeRole; false in personal mode or when a
 	// NOBYPASSRLS serving role is in use.
 	RLSUnsafe bool
+	// Idempotency backs the inbound idempotency middleware (PRD R1). When
+	// nil, New() constructs a PgStore from DB when a pool is present;
+	// tests inject a fake to exercise the middleware without a database.
+	Idempotency idempotency.Store
 }
 
 // New constructs a Server with the given config + logger + dependencies.
@@ -512,6 +523,15 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 	} else {
 		s.audit = audit.New(nil, log)
 	}
+	// Inbound idempotency (PRD R1). Prefer an injected store (tests); else
+	// build a PgStore over the DB pool. nil ⇒ middleware not installed.
+	if deps.Idempotency != nil {
+		s.idem = deps.Idempotency
+	} else if deps.DB != nil {
+		if st, err := idempotency.New(deps.DB.Pool); err == nil {
+			s.idem = st
+		}
+	}
 	// OAuth provider credentials resolve vault-first (operator-entered
 	// integration slots) with an env fallback owned by the factory. Wiring
 	// the resolver here — rather than at factory construction in main — is
@@ -527,6 +547,12 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 	// so logs include final status code. CORS wraps last so OPTIONS preflights
 	// short-circuit before hitting the routes.
 	handler := http.Handler(mux)
+	// Inbound idempotency (PRD R1) wraps the mux so it runs INSIDE the
+	// tenant resolver (needs the resolved tenant) but around every handler.
+	// nil store ⇒ not installed, zero overhead. See idempotency_mw.go.
+	if s.idem != nil {
+		handler = s.idempotencyMiddleware(handler)
+	}
 	// Per-tenant request throttling is enforced upstream by LiteLLM via
 	// the virtual-key rpm_limit / tpm_limit issued by tenancy.IssueAPIKey
 	// (see internal/llmgateway/litellm_admin.go). When LiteLLM returns
@@ -1742,6 +1768,15 @@ type statusWriter struct {
 	// panic-recovery middleware knows not to write a second (superfluous)
 	// header after a handler already started responding.
 	wrote bool
+	// captureBuf, when non-nil, tees written response bytes so the
+	// idempotency middleware can persist the response for replay. Writes
+	// still pass through to the client immediately (streaming is
+	// unaffected). captureLimit caps the tee; on overflow captureOver is
+	// set, the buffer is discarded, and teeing stops — the response is
+	// then treated as too large to store. See idempotency_mw.go.
+	captureBuf   *bytes.Buffer
+	captureLimit int
+	captureOver  bool
 }
 
 func (s *statusWriter) WriteHeader(code int) {
@@ -1752,7 +1787,35 @@ func (s *statusWriter) WriteHeader(code int) {
 
 func (s *statusWriter) Write(b []byte) (int, error) {
 	s.wrote = true
+	if s.captureBuf != nil && !s.captureOver {
+		if s.captureBuf.Len()+len(b) > s.captureLimit {
+			// Response exceeds the replay cap — stop teeing and drop what
+			// we buffered so oversized responses don't pin memory.
+			s.captureOver = true
+			s.captureBuf.Reset()
+		} else {
+			s.captureBuf.Write(b)
+		}
+	}
 	return s.ResponseWriter.Write(b)
+}
+
+// beginCapture arms the response tee with the given byte cap. Called by
+// the idempotency middleware only after it has claimed the key.
+func (s *statusWriter) beginCapture(limit int) {
+	s.captureBuf = new(bytes.Buffer)
+	s.captureLimit = limit
+	s.captureOver = false
+}
+
+// captured returns the teed response bytes and whether the response
+// overflowed the cap (in which case the bytes are empty and the response
+// must not be stored).
+func (s *statusWriter) captured() (body []byte, overflowed bool) {
+	if s.captureBuf == nil {
+		return nil, s.captureOver
+	}
+	return s.captureBuf.Bytes(), s.captureOver
 }
 
 // withRecover converts an unrecovered handler panic into a logged error
