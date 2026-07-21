@@ -2,548 +2,328 @@
 
 # BackAI
 
-### The open-source AI app template with the backend already wired.
+### The backend for agent-built, agent-powered SaaS.
 
-_Start with SupportDesk AI, then replace the app with your own product._
+**Think Supabase for agentic SaaS—with the AI runtime and operating plane
+included.** Auth, Postgres, model routing, agent execution, sandboxed execution,
+browser automation, durable jobs, billing, cost controls, and observability are
+wired together in one open-source, self-hosted stack.
 
-[![Status: planning](https://img.shields.io/badge/status-pre--alpha-orange)](#)
+Give a coding agent (Codex, Claude Code, Gemini CLI, OpenCode, or another coding
+harness) a backend, not a blank repo. Build the product without assembling the
+AI infrastructure. Own the code, data, and deployment.
+
+[Quickstart](#quickstart) · [What you get](#what-you-get) · [Build with coding agents](#built-for-coding-agents) · [Docs](docs/dx/README.md)
+
+[![CI](https://github.com/Agent-Field/backai/actions/workflows/ci.yml/badge.svg)](https://github.com/Agent-Field/backai/actions/workflows/ci.yml)
+[![Status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange)](#project-status)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
-[![AI substrate: AgentField](https://img.shields.io/badge/AI%20substrate-AgentField-0A66C2)](https://github.com/Agent-Field/agentfield)
 
 </div>
-
-> **Working name**. The brand is configured in [`brand.yaml`](brand.yaml).
-
-## What this is
-
-BackAI is a fork-friendly AI app template. You clone one repo and get a
-customer app, admin dashboard, API runtime, auth, tenants, API keys, LLM
-gateway, cost tracking, billing stubs, storage, jobs, agents, and deploy
-targets.
-
-The default app is **SupportDesk AI**: a customer-facing support portal
-with sign-up, help center, support chat, request history, billing, and
-account pages. Admin and platform evidence stay in the operator console,
-where builders can inspect usage, cost, runs, and service links after
-using the app. Replace the customer app with your own product when you
-fork.
-
-The category is the AI backend: the substrate behind AI SaaS apps where
-model calls, cost, tenant isolation, jobs, storage, billing, and agent
-execution all live together.
-
-## Canonical DX
-
-The front door is **CLI-first** — scaffold a new app that consumes the
-backend, the way `create-next-app` scaffolds a frontend.
-
-Install the `af-stack` CLI (single static binary — pick one):
-
-```bash
-# Linux / macOS — download the latest release binary + verify checksum
-curl -fsSL https://raw.githubusercontent.com/Agent-Field/backai/main/scripts/install.sh | bash
-
-# or, with a Go toolchain (≥ 1.25):
-go install github.com/Agent-Field/backai/services/cli/cmd/af-stack@latest
-```
-
-Windows binaries and more detail (version pinning, direct download) are in
-[`docs/cli-distribution.md`](docs/cli-distribution.md). Then:
-
-```bash
-af-stack init my-app      # scaffold a project that talks to the backend
-cd my-app
-cp .env.example .env      # point AF_STACK_URL at your backend
-npm install && npm start
-```
-
-Your product code lives in *your* project and talks to one backend behind
-one base URL (`AF_STACK_URL`) with Supabase-shaped namespaces —
-`suite.agents`, `suite.llm`, `suite.storage`, `suite.billing`, … — and AI
-as a first-class primitive. Run a backend locally with `af-stack dev`.
-
-**Fork and edit** remains fully supported as the power-user / self-host
-path — the repo is the product, closer to Cal.com or Plane than a hosted
-BaaS. Inside a checkout, `af-stack init` re-themes the fork and `af-stack
-upgrade --check` dry-runs a platform upgrade (incoming commits, DB
-migrations, predicted conflicts) before anything changes:
-
-```bash
-git clone https://github.com/Agent-Field/backai supportdesk-ai
-cd supportdesk-ai
-af-stack init --name "DocuChat" --color "#0A66C2" --logo ./logo.png
-docker compose up
-```
-
-The CLI is the measurable front door: `af-stack` emits **anonymous,
-opt-out** usage telemetry (off unless a collection endpoint is
-configured) so adoption is visible without tracking who you are — see
-[`TELEMETRY.md`](TELEMETRY.md).
-
-## Developer Experience
-
-Everything about building on BackAI — the four edit surfaces, running
-locally, jobs & crons, webhooks, and the SDK — lives in one hub:
-
-**→ [`docs/dx/`](docs/dx/README.md) — the Developer Experience hub.**
-
-| Page | Covers |
-| --- | --- |
-| [build-app.md](docs/dx/build-app.md) | The four edit surfaces + attaching an existing app |
-| [run.md](docs/dx/run.md) | Run locally, ports, `.env`, personal vs saas mode |
-| [jobs.md](docs/dx/jobs.md) | Jobs + crons (and the Go-only-handler limitation) |
-| [webhooks.md](docs/dx/webhooks.md) | Inbound receiver, outbound outbox, tenant pub-sub |
-| [sdk.md](docs/dx/sdk.md) | `app.*` vs `suite.*`, namespace reference, language parity |
-
-## What You Edit
-
-| Surface           | Path                           | What belongs there                                                  |
-| ----------------- | ------------------------------ | ------------------------------------------------------------------- |
-| Customer product  | `apps/customer-app/`           | Your end-user UI, flows, pages, and brand-specific app logic.       |
-| Agents            | `apps/backend/agents/<name>/`  | Python AgentField agents, reasoners, MCP config, and harness setup. |
-| Workload modules  | `workload-modules/<id>/`       | Domain backend routes, migrations, jobs, and crons.                 |
-| Dashboard plugins | `apps/dashboard/plugins/<id>/` | Operator-console tabs for your domain metrics and controls.         |
-
-Agents, the customer app, and dashboard plugins are live surfaces today.
-Workload modules scaffold with `af-stack module new <id>`, but runtime
-auto-mounting of their routes is still on the roadmap — treat the module
-loader as design-stage. Full authoring detail for all four surfaces is in
-[`docs/dx/build-app.md`](docs/dx/build-app.md).
-
-Start with the bundled SupportDesk AI customer app when you want a
-polished product-shaped baseline. Use [`examples/starter/`](examples/starter/)
-when you want the smallest neutral fork: one agent, one customer-app
-flow, one workload module, and one dashboard plugin.
-
-The rest of the repo is organized by ownership: `services/` is platform
-runtime code, `packages/` is shared SDK/library code, `deploy/` is
-deployment targets, `docs/` is durable product/operator documentation,
-`development/` is planning evidence for this branch, and `docs/archive/`
-is historical design material. See [`docs/repo-map.md`](docs/repo-map.md).
-
-## Pre-Wired vs Configurable
-
-| Area        | Pre-wired default                             | Configurable by you                                              |
-| ----------- | --------------------------------------------- | ---------------------------------------------------------------- |
-| Data        | Postgres 16 + pgvector                        | External Postgres, RLS policy shape, workload tables.            |
-| Storage     | MinIO in dev, S3 contract in prod             | Any S3-compatible store (S3, R2, Tigris, GCS interop) via endpoint/env; other backends via a custom adapter. |
-| Identity    | better-auth, seeded default operator          | OAuth providers, trusted origins, default operator credentials.  |
-| LLM routing | AgentField path + LiteLLM sidecar             | Provider keys, model map, budgets, virtual-key strategy.         |
-| Sandboxes   | Docker in dev, e2b/gVisor/Firecracker options | Adapter choice, limits, provider credentials.                    |
-| Delivery    | Native in-process outbound outbox (HMAC signing, retry/backoff, delivery ledger), log notifications | Resend/Postmark/etc. notifications, billing adapter.             |
-| Deploy      | Docker Compose, Helm, Fly, Railway, Render    | Your domains, secrets, scaling, managed services.                |
-
-For the layered architecture and OSS placement, read
-[`docs/stack.md`](docs/stack.md). For repo ownership and integration
-paths, read [`docs/repo-map.md`](docs/repo-map.md) and
-[`docs/attach-existing-app.md`](docs/attach-existing-app.md).
-
-## Why This Exists
-
-Building an AI-native product today means assembling 10+ services: auth,
-db, storage, queue, gateway, agent runtime, sandboxes, webhooks, billing,
-observability. Each integration costs weeks. Each vendor adds lock-in.
-
-Supabase-shaped backends don't include AI primitives. AI platforms don't
-include backend primitives. Builders rebuild the same plumbing for every
-project.
-
-BackAI ships both halves. The app template gives you the product
-surface. The backend gives you the operational substrate for AI calls,
-agents, costs, tenants, jobs, storage, and billing.
-
-## The invariant
-
-**Every app-level model call goes through the BackAI gateway.** No
-bypass. The OpenAI-compatible endpoint at `/api/v1/llm/*` preserves
-tenant identity, cost, policy, and audit metadata before routing to the
-configured provider layer.
-
-## SDK Boundary
-
-> **`app.*` defines agents. `suite.*` calls them and runs everything else.**
-
-| SDK                      | Use inside                                                |
-| ------------------------ | --------------------------------------------------------- |
-| **AgentField** (`app.*`) | Agent processes                                           |
-| **Suite** (`suite.*`)    | App handlers, jobs, dashboard — anywhere outside an agent |
-
-Language parity, stated honestly: **Python** (`af-stack`) is the full,
-canonical surface; **TypeScript** (`@af-stack/sdk`) tracks it at parity;
-**Go** (`packages/sdk-go`) is **planned** — a version stub today, not a
-usable SDK. Plus a REST + OpenAPI surface so any language works. Namespace
-reference and cross-language asymmetries: [`docs/dx/sdk.md`](docs/dx/sdk.md).
-
-## The operator console
 
 <div align="center">
-
-<img src="docs/assets/dashboard-screenshots/home.png" alt="BackAI Home — KPI strip, recent runs, cost" width="900" />
-
-<sub>Home: requests/min · error rate · cost today · queue depth · live runs</sub>
-
-<img src="docs/assets/dashboard-screenshots/runs.png" alt="BackAI Runs — execution list with link-out trace" width="900" />
-
-<sub>Operate → Runs: filter by agent / tenant / status, link out to full trace</sub>
-
-<img src="docs/assets/dashboard-screenshots/cost.png" alt="BackAI Cost dashboard" width="900" />
-
-<sub>Operate → Cost: spend by model · agent · tenant · day, with budgets and forecast</sub>
-
-<img src="docs/assets/dashboard-screenshots/customers-tenants.png" alt="BackAI Customers — tenant list with detail drawer" width="900" />
-<sub>Customers → Tenants: per-customer drilldown with usage, members, audit</sub>
-
-<img src="docs/assets/dashboard-screenshots/customers-api-keys.png" alt="BackAI Customers — API key issuance" width="900" />
-<sub>Customers → API Keys: issue / rotate / revoke with one-time-reveal</sub>
-
+  <img src="docs/assets/readme/hero-control-plane.png" alt="A product and coding agent connect to a complete backend control plane containing the application backend, AI runtime, sandbox, browser, billing, security, and operations" width="1000" />
+  <br />
+  <sub>Included and wired: auth, data, AI runtime, jobs, billing, sandbox, browser, security, and operations.</sub>
 </div>
 
-## Quickstart (under 60 seconds)
+## Quickstart
+
+Prerequisite: Docker with Compose.
 
 ```bash
-git clone https://github.com/Agent-Field/backai supportdesk-ai
-cd supportdesk-ai
-cp .env.example .env
-# Optional: set OPENROUTER_API_KEY for live model calls.
-node scripts/preflight.mjs --fix   # allocate conflict-free ports; prints every service URL
-docker compose up
+git clone https://github.com/Agent-Field/backai.git
+cd backai
+
+# Install the CLI, then start the complete local stack.
+curl -fsSL https://raw.githubusercontent.com/Agent-Field/backai/main/scripts/install.sh | bash
+af-stack dev
 ```
 
-> Or just run **`af-stack dev`**, which does the preflight (auto port
-> allocation + a "what runs where" map) and starts Docker in one step.
+Prefer not to pipe an installer into a shell? [Inspect it first](scripts/install.sh)
+or run `go install github.com/Agent-Field/backai/services/cli/cmd/af-stack@latest`.
 
-Open the customer app first:
+Open the customer app first at `http://localhost:34000`, then inspect what it
+did in the operator console at `http://localhost:33000`.
 
-- Customer app: `http://localhost:34000`
-- Admin dashboard: `http://localhost:33000` — sign in with the default operator account
-- API runtime: `http://localhost:8080/api/v1/`
-- Health + metrics: `http://localhost:8080/health` · `/ready` · `/metrics`
-- AgentField control plane: `http://localhost:8081/`
-- MinIO console: `http://localhost:9001/`
+No model key is required. The first run uses a deterministic demo provider but
+still exercises the real gateway, tenant context, cost ledger, customer app,
+and dashboard. Add an OpenRouter, OpenAI, Anthropic, Gemini, or other supported
+provider key when you want live model calls through LiteLLM.
 
-As a secondary touchpoint, the API runtime is callable directly with the
-same agent the customer app uses internally:
+Prefer raw Compose? Run `node scripts/preflight.mjs --fix` and then
+`docker compose up`. Preflight resolves local port conflicts and prints every
+service URL.
+
+> **Pre-alpha:** the golden path works, but workload auto-mounting and remote
+> Python/TypeScript durable-job handlers are not wired yet. [See current limits](#project-status).
+
+## What you get
+
+In the AI era, auth and a database are no longer a complete backend. Products
+also need controlled model and agent execution, durable work, cost enforcement,
+and observability.
+
+| Primitive            | Wired into BackAI                                                                                                                             |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Identity**         | Users, sessions, tenants, memberships, roles, OAuth, scoped API keys, and row-level tenant isolation                                          |
+| **Data**             | Postgres, pgvector, tenant-aware memory, search, realtime, migrations, storage, and an operator database browser                              |
+| **Models**           | OpenAI-compatible gateway, provider routing, streaming, embeddings, cache, guardrails, budgets, and model-level cost records                  |
+| **Agents**           | Multi-reasoner execution, streaming, approvals, cancellation, durable jobs, crons, webhooks, and run traces                                   |
+| **Agent tools**      | Isolated sandboxes, browser adapters, MCP servers, native tools, skills, secrets, and coding-harness discovery                                |
+| **Commercial layer** | Usage metering, cost ledger, per-tenant budgets, plan entitlements, and Stripe-shaped billing                                                 |
+| **Operations**       | Admin dashboard for traffic, errors, spend, budgets, queues, runs, traces, logs, webhooks, customers, audit, integrations, and service health |
+| **Product shell**    | A customer-facing Next.js app and SupportDesk AI flow that can be replaced with your product                                                  |
+| **Delivery**         | One CLI-managed Compose stack plus production recipes for Helm, Fly.io, Railway, Render, and a private VM or VPC                              |
+
+These are one system, not a catalog of disconnected containers. Tenant identity
+flows through model calls, jobs, storage, billing, audit, and cost so builders do
+not have to recreate those connections for every product. Model and agent
+engines remain replaceable; the product is the secure wiring around them.
+
+### Operate what you ship
+
+Cost, latency, failures, queues, tenants, and audit are first-class backend
+state—not separate dashboards developers must assemble later.
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="docs/assets/dashboard-screenshots/cost-live.png" alt="Operator dashboard showing model, agent, and tenant cost with budgets and forecasts" />
+      <br />
+      <sub>Spend, budgets, forecasts, and cost by model, agent, or tenant.</sub>
+    </td>
+    <td width="50%">
+      <img src="docs/assets/dashboard-screenshots/metrics.png" alt="Operator dashboard showing request volume, latency, runtime resources, routes, and errors" />
+      <br />
+      <sub>Request volume, latency, runtime resources, routes, and errors.</sub>
+    </td>
+  </tr>
+</table>
+
+## What can you build?
+
+- Multi-tenant copilots with per-customer identity, usage, and budgets
+- Support, operations, research, extraction, and document products
+- Long-running coding-agent and approval-driven workflows
+- AI features attached to an existing web, mobile, or backend application
+
+Start from the neutral [`examples/starter/`](examples/starter/), the bundled
+SupportDesk product, or a focused example: [LLM gateway](examples/03-llm-gateway-only/),
+[multi-tenant notes](examples/01-notable/),
+[deep research](examples/06-deep-research/), or
+[coding agents](examples/02-shipwright/).
+
+## Built for coding agents
+
+BackAI is designed to be handed to coding agents (Codex, Claude Code, Gemini
+CLI, OpenCode, and others) after initialization. The repo includes `AGENTS.md`,
+`CLAUDE.md`, and a versioned BackAI skill that explain the architecture, safe
+edit boundaries, SDKs, and verification workflow.
+
+Repo access is not runtime authority. Scoped keys, tenant policy, budgets,
+approvals, sandbox limits, and audit records keep build and live operations
+inside explicit boundaries.
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/agents/supportdesk.echo \
-  -H "Content-Type: application/json" \
-  -d '{"input":{"payload":{"message":"hello world"}}}'
-# → {"status":"succeeded","result":{"echoed":{"message":"hello world"}}, ...}
+# Scaffold a small app that consumes a BackAI deployment.
+af-stack init my-ai-product
+
+# Or customize a full fork and give it to your coding agent.
+af-stack init --name "Acme AI" --color "#2563EB" --logo ./logo.png
+af-stack agent new researcher
 ```
 
-### Personal mode (no auth, no billing)
+Inside a fork, builders and agents usually edit only four surfaces:
 
-Just running BackAI for yourself? Turn off login and billing with one
-switch — the app then boots straight into the product, no sign-in and no
-paywall:
+| Surface          | Path                           | Purpose                                    |
+| ---------------- | ------------------------------ | ------------------------------------------ |
+| Customer product | `apps/customer-app/`           | End-user UI and product flows              |
+| Agent            | `apps/backend/agents/<name>/`  | AgentField reasoners and agent logic       |
+| Workload module  | `workload-modules/<id>/`       | Domain routes, jobs, crons, and migrations |
+| Dashboard plugin | `apps/dashboard/plugins/<id>/` | Product-specific operator views            |
 
-```bash
-af-stack mode personal   # or set AF_STACK_MODE=personal in .env
-docker compose up -d      # restart to apply
-```
+The platform runtime stays behind those boundaries. Existing apps can skip the
+customer shell and [attach BackAI as a backend](docs/attach-existing-app.md).
 
-Flip back to the multi-tenant SaaS defaults any time with `af-stack mode
-saas`. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md#deployment-mode-saas-vs-personal)
-for exactly what each mode changes (and the default-tenant data caveat).
+<div align="center">
+  <img src="docs/assets/readme/agent-lifecycle.png" alt="A coding agent builds in the repository, passes changes through tests and policy, and uses live product signals to propose reviewed improvements" width="1000" />
+</div>
 
-### Operator login
+### Build, operate, improve
 
-> Skip this section if you're running in **personal mode** — there is no
-> login.
+BackAI records backend signals such as usage, latency, errors, model cost, and
+tenant activity. Connect product analytics such as PostHog through APIs,
+webhooks, MCP servers, or a custom integration instead of duplicating an
+analytics platform inside this stack.
 
-A default operator account is **seeded on first boot**, so the admin
-dashboard is usable immediately — there is no signup wizard.
+A coding agent can correlate those signals and propose changes to prompts,
+model routing, UI, onboarding, traffic allocation, entitlements, or pricing
+logic. Tests, scoped credentials, budgets, approvals, and audit remain between
+a proposal and production. Automate only inside explicit policy boundaries.
+High-impact changes such as pricing or traffic shifts should require approval.
 
-| Field    | Default                   |
-| -------- | ------------------------- |
-| Email    | `operator@af-stack.local` |
-| Password | `changeme123`             |
+## One URL, two compatible interfaces
 
-**Change the password from the console after your first login.** Override the
-defaults before the first `docker compose up` with
-`AF_STACK_DEFAULT_OPERATOR_EMAIL` / `AF_STACK_DEFAULT_OPERATOR_PASSWORD` in
-`.env` (see [`.env.example`](.env.example)). Seeding only runs while no
-operator exists yet, so changing those values later — or changing the
-password in the console — is never overwritten on restart. To provision
-operators another way, set `AF_STACK_DEFAULT_OPERATOR_DISABLED=true`.
+Use the standard OpenAI SDK by changing its base URL:
 
-### Ports & running multiple apps side by side
-
-Every BackAI app defaults to the same host ports (`33000` admin, `34000`
-customer app, `8080` API, …), so running two at once collides. **`af-stack
-dev` handles this for you** — its preflight reassigns any busy port to the
-next free one, writes stable overrides to `.env`, sets a unique
-`COMPOSE_PROJECT_NAME`, and prints a "what runs where" map. Driving Docker
-directly? Run `node scripts/preflight.mjs --fix` first (or without `--fix`
-for a read-only conflict check). Opt out with `af-stack dev --no-preflight`.
-Full port/`.env` reference: [`docs/dx/run.md`](docs/dx/run.md).
-
-To enable multi-tenancy: set `modules.multi-tenancy.enabled: true` in
-`apps/backend/config.yaml`. See [`docs/multi-tenancy.md`](docs/multi-tenancy.md)
-for the full guide, including how to run the end-to-end isolation test
-(`scripts/test-multi-tenancy.sh`).
-
-Sign up in SupportDesk AI. BackAI provisions the account, membership,
-billing record, and internal request credentials. The first-run product
-tour then walks you through one normal customer support flow:
-
-1. Open the Help Center and pick a realistic support topic.
-2. Start Support Chat. The customer sees route/check progress while the
-   app prepares an answer.
-3. Open Requests to see the customer-facing history created by the chat.
-4. Open the admin dashboard separately to inspect the platform evidence:
-   cost event, run metadata, registered agent, and local/open-source service
-   UIs that back the action.
-
-No provider key is required for the first run. BackAI starts in demo mode
-when no key is present, and switches to LiteLLM when you add
-`OPENROUTER_API_KEY` or another provider key. The same flow works in both
-modes: demo mode proves the wiring without external credentials, while live
-provider mode records provider, model, token, and cost evidence in
-Operate -> Cost. See
-[`docs/demo-mode.md`](docs/demo-mode.md).
-
-## Deploy
-
-Railway is the fastest hosted first run:
-
-```bash
-railway init --template ./deploy/railway/railway.json
-railway up
-```
-
-The Railway template deploys customer app, admin dashboard, runtime, LiteLLM,
-AgentField, and Postgres. Leave provider keys blank for no-key SupportDesk
-demo mode, or set `OPENROUTER_API_KEY` on the `litellm` service for real
-model calls. It keeps the same first-run path as local compose: customer app
-first, Support Chat and Requests second, admin evidence third. See
-[`deploy/railway/README.md`](deploy/railway/README.md).
-
-You can also call the LLM gateway directly with the official OpenAI SDK
-by changing only the base URL:
-
-```js
+```ts
 import OpenAI from "openai"
 
-const client = new OpenAI({
-  baseURL: "http://localhost:8080/api/v1/llm",
+const ai = new OpenAI({
+  baseURL: "https://backai.example.com/api/v1/llm",
   apiKey: process.env.BACKAI_API_KEY,
 })
 
-const completion = await client.chat.completions.create({
+const answer = await ai.chat.completions.create({
   model: "qwen/qwen-2.5-72b-instruct",
-  messages: [{ role: "user", content: "Help me understand a billing issue." }],
+  messages: [{ role: "user", content: "Summarize this support request." }],
 })
 ```
 
-For deeper platform integration, use the Suite SDK for agents, memory,
-jobs, costs, tenants, and admin APIs.
-
-Existing apps do not need to adopt the bundled customer app. Keep your
-mobile app, web app, or backend API and attach BackAI as the AI backend
-through the OpenAI-compatible gateway plus tenant API keys. See
-[`docs/attach-existing-app.md`](docs/attach-existing-app.md).
-
-## AgentField-backed SupportDesk graph
-
-The default first run also registers a SupportDesk AgentField agent. It stays
-out of the customer-facing guide, but is explicit in the architecture and
-admin evidence: SupportDesk uses AgentField as the AI substrate, not as a
-separate destination product.
-
-The graph currently registers 10 reasoners:
-
-- `reply_plan`
-- `classify_issue`
-- `extract_customer_facts`
-- `billing_policy_review`
-- `support_policy_review`
-- `refund_guardrail`
-- `billing_evidence_check`
-- `resolution_guardrail`
-- `response_risk_check`
-- `compose_reply_brief`
-
-The customer app calls the same path you can call directly. It classifies the
-ticket and extracts facts in parallel, chooses a policy branch, then runs
-nested guardrail/evidence reasoners before the final BackAI gateway call:
-
-```bash
-curl -X POST http://localhost:8080/api/v1/agents/supportdesk.reply_plan \
-  -H "Content-Type: application/json" \
-  -d '{"input":{"ticket":"A customer says their invoice is wrong and wants a refund.","tenant_id":"demo"}}'
-```
-
-The response includes graph depth and reasoner-path metadata so the admin UI
-can show what actually ran. In local compose, the admin Agents view links out
-to the AgentField control plane at `http://localhost:8081/` for the registered
-SupportDesk agent, and other admin surfaces link to service UIs when a backing
-component has one.
-
-The heavier sample agent remains available for agent/harness development
-under the `advanced` compose profile.
-
-## LLM Gateway
-
-Every LLM call in the suite goes through the gateway at `/api/v1/llm/*`.
-The wire shape is OpenAI-compatible, so any OpenAI-shaped client works
-by changing one line: the base URL.
-
-<div align="center">
-<img src="docs/assets/dashboard-screenshots/cost-live.png" alt="BackAI Cost dashboard with live LLM traffic" width="900" />
-<sub>Operate → Cost: live cost events, model mix, per-tenant spend, budget meters</sub>
-</div>
-
-**One-line OpenAI SDK config** (works with the official `openai` package
-on every language):
-
-```js
-import OpenAI from "openai"
-
-const client = new OpenAI({
-  baseURL: "http://localhost:8080/api/v1/llm",
-  apiKey: process.env.AF_STACK_TENANT_KEY,
-})
-
-const completion = await client.chat.completions.create({
-  model: "qwen/qwen-2.5-72b-instruct",
-  messages: [{ role: "user", content: "Hello!" }],
-})
-```
-
-**Or use the Suite SDK** — same gateway, ergonomic helpers, typed
-responses, plus access to the cost log and budgets:
+Use the Suite SDK when you need the rest of the backend:
 
 ```python
 from af_stack import suite
 
-response = await suite.llm.chat(
-    model="qwen/qwen-2.5-72b-instruct",
-    messages=[{"role": "user", "content": "Hello!"}],
-)
-print(response["choices"][0]["message"]["content"])
+result = await suite.agents.call("researcher.run", {"topic": "AI backends"})
+await suite.memory.put("latest-report", result)
+await suite.billing.meter("reports_created", quantity=1)
 ```
 
-Streaming, the cost log (`suite.cost.events`), and per-tenant budgets
-(`suite.admin.budgets.set`) round out the surface — the full `suite.*`
-namespace reference is in [`docs/dx/sdk.md`](docs/dx/sdk.md).
+The rule is simple:
 
-Every call is recorded with tenant, agent, model, tokens, cost, and
-cache-hit flag. Budgets are per-tenant; when a tenant exceeds its
-monthly cap, subsequent calls fail with `HTTP 402 BUDGET_EXCEEDED`.
-Gateway guardrails are on by default: regex PII redaction runs before
-and after provider calls, and optional moderation regexes can block
-requests or responses. See [`docs/guardrails.md`](docs/guardrails.md)
-for Presidio sidecar configuration.
+- **`app.*` defines reasoners inside an AgentField agent.**
+- **`suite.*` calls agents and every other BackAI primitive.**
 
-End-to-end tests:
+Python is the canonical full SDK. TypeScript is near parity with documented
+differences. REST and OpenAPI work from any language. The Go SDK is a version
+stub today, not a usable client. See the [SDK reference](docs/dx/sdk.md).
 
-```bash
-# Real openai npm package against a live runtime
-node scripts/test-openai-sdk.mjs
+## Security is a system property
 
-# Budget enforcement (creates tiny budget, verifies 402 on overrun)
-./scripts/test-budget-enforcement.sh
-```
+BackAI wires the controls that are easy to omit when teams assemble an AI
+backend service by service:
 
-## Database Studio And Memory
+- Postgres row-level tenant isolation and scoped serving roles
+- short-lived sessions plus issue, rotate, and revoke flows for API keys
+- one LLM gateway for tenant, policy, budget, and audit enforcement
+- encrypted secret storage with KMS adapter support
+- PII redaction and configurable request/response moderation
+- sandbox limits for CPU, memory, timeout, filesystem, and egress
+- signed webhooks, replay protection, idempotency, retry, and delivery logs
+- audit records for security-sensitive operator mutations
+- separate health, readiness, metrics, backup, and restore paths
 
-Every BackAI deployment ships a full Postgres browser in the operator
-dashboard. Inspect tables, view row-level security policies, run
-read-only SQL, and manage the per-scope memory store — all from the same
-console. The `Build → Database` tab covers the four operator workflows
-that previously required `psql`: browsing data, reading schema +
-indexes, auditing RLS, and ad-hoc queries.
+These defaults remove repeated integration work; they do not make an arbitrary
+deployment automatically compliant or secure. Before production, replace all
+development secrets, use external Postgres and object storage, choose a
+production sandbox adapter, configure backups, TLS, provider keys, monitoring,
+and your own threat model. Start with [deployment guidance](docs/deploy.md),
+[configuration](docs/CONFIGURATION.md), and [the security policy](SECURITY.md).
 
-Per-scope KV with vector search out of the box — store agent context
-across runs, search semantically.
-
-<div align="center">
-<img src="docs/assets/dashboard-screenshots/database.png" alt="BackAI Database studio — table browser + SQL runner + RLS policies + memory" width="900" />
-<sub>Build → Database: tables sidebar, row browser, structure / policies / SQL / memory tabs</sub>
-</div>
-
-## Sandboxes
-
-Every BackAI deployment ships a managed code-execution sandbox so
-agents and jobs can run arbitrary commands, build artifacts, or test
-generated code. Pluggable adapters (`docker` for local dev, `gvisor`,
-`firecracker`, `e2b`, plus a `remote` sidecar adapter) share one API;
-each tenant gets its own pool with isolated filesystems, egress controls,
-and CPU/memory/timeout caps. Every run is cost-tracked per-tenant
-alongside LLM spend, so one monthly budget covers both inference and
-compute. Call it with `suite.sandbox.run(...)` (Python + TypeScript) — see
-[`docs/dx/sdk.md`](docs/dx/sdk.md#suite-namespaces).
+## How it fits together
 
 <div align="center">
-<img src="docs/assets/dashboard-screenshots/sandbox-activity.png" alt="BackAI Sandbox Activity — recent runs, pool stats, cost today" width="900" />
-<sub>Operate → Sandbox Activity: recent runs · adapter pool (warm / active / queued) · CPU-seconds and cost today</sub>
+  <img src="docs/assets/readme/architecture.png" alt="A self-hosted backend control plane includes product interfaces, identity, data, model gateway, agent runtime, jobs, billing, sandbox, browser, and observability services" width="1000" />
 </div>
 
-## Jobs & background work
+Every app-level model call should go through `/api/v1/llm/*`. Direct provider
+calls bypass BackAI's tenant identity, budgets, cost records, and guardrails.
 
-Durable background jobs run on a River-backed Postgres queue (no Redis),
-enqueued with `suite.jobs.*` and scheduled with crons. One honest caveat:
-only **Go (in-process) job handlers execute today** — remote Python/TS job
-handlers return an explicit "not yet implemented" error and are on the
-roadmap. Details: [`docs/dx/jobs.md`](docs/dx/jobs.md).
+## Open-source layers
 
-## Make it your own
+The repository is Apache 2.0 and assembles the stack around open-source
+components. Optional model, email, billing, and remote-sandbox providers remain
+adapters; they are not a required hosted control plane.
 
-Replace the sample agent with your own at `apps/backend/agents/<name>/` —
-each subfolder is its own container that registers with AgentField on
-startup. Edit `apps/backend/config.yaml` to enable / disable suite
-modules. Customize as you like; everything in this repo is yours after
-the fork.
+| Layer                | Responsibility                                                             | Current implementation                                                     |
+| -------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| **1. Interfaces**    | Customer app, admin dashboard, API explorer, docs, SDKs, and CLI           | Next.js, React, shadcn/ui, Scalar, Astro Starlight, Python, TypeScript, Go |
+| **2. Edge**          | TLS termination and routing                                                | Caddy                                                                      |
+| **3. Control plane** | HTTP/OpenAPI, identity, tenancy, authorization, policy, audit, and secrets | Go runtime, better-auth, Postgres RLS, AES-GCM                             |
+| **4. AI runtime**    | Model routing, agent execution, memory, tools, and coding harnesses        | LiteLLM, AgentField, MCP, pluggable harnesses                              |
+| **5. Execution**     | Durable jobs, crons, webhooks, and isolated code execution                 | River, robfig/cron, Docker, gVisor, Firecracker; optional e2b adapter      |
+| **6. Delivery**      | Signed outbound events, notifications, and billing                         | Native Postgres outbox, Lago; optional Resend and Stripe adapters          |
+| **7. Observability** | Traces, metrics, structured logs, cost, queues, and service health         | OpenTelemetry, Prometheus, slog, and the admin dashboard                   |
+| **8. Data**          | Relational data, vectors, full-text search, queues, and objects            | Postgres 16, pgvector, MinIO or S3-compatible storage                      |
 
-## Status
+The value is the wiring between layers, not the number of logos. If you use
+another open-source package, implement its existing adapter contract where one
+exists. If the capability or contract is missing, [open an issue](https://github.com/Agent-Field/backai/issues)
+with the use case, project, license, deployment model, and expected interface.
+We add maintained OSS when it removes platform work, not merely to grow the
+dependency list.
 
-Pre-alpha public template. The SupportDesk AI first run, no-key demo
-mode, OpenAI-compatible gateway, cost ledger, customer app, admin
-dashboard, Docker Compose path, and Railway template are the current
-golden path. Heavier examples are available under [`examples/`](examples/)
-and declare their required capabilities in `capabilities.yaml`.
+## Self-host it
 
-For the full layered stack diagram, see [`docs/stack.md`](docs/stack.md).
+`af-stack dev` starts the complete local composition. The same open-source
+stack can run in your cloud or VPC without a mandatory hosted control plane.
+Use your own model keys, Postgres, object storage, secrets, backups, and network
+policy. See the [OSS audit](docs/oss-audit.md) for what is included and why.
+
+> The development Compose file mounts the Docker socket for local code
+> sandboxes. Do not expose it as a production deployment. Use the production
+> Compose/Helm path and a gVisor, Firecracker, or remote sandbox adapter.
+
+Choose the target that matches your operations posture:
+
+| Target           | Best for                                           |
+| ---------------- | -------------------------------------------------- |
+| Docker Compose   | Local development or one controlled VM             |
+| Railway / Render | Fast hosted evaluation and small deployments       |
+| Fly.io           | A compact regional deployment                      |
+| Helm             | Kubernetes, external state, and production scaling |
+
+See [`deploy/`](deploy/) for the maintained artifacts and
+[`docs/deploy.md`](docs/deploy.md) for required secrets, external services,
+backups, and production caveats.
+
+## Where it fits
+
+The closest overlap is [InsForge](https://github.com/InsForge/insforge). This
+comparison describes each category's primary system boundary, not checkbox
+parity; these products evolve quickly.
+
+| Category                                                                                                                                                                                                                            | Primarily owns                                             | This project's boundary                                                                                                                                                      |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Agent-native BaaS** — [InsForge](https://github.com/InsForge/insforge)                                                                                                                                                            | Backend resources that coding agents provision and operate | Closest comparison. This repo adds a deeper runtime and operating plane around tenant-aware agent calls, jobs, billing, cost, audit, sandboxes, and customer/admin surfaces. |
+| **General and reactive BaaS** — [Supabase](https://github.com/supabase/supabase), [Appwrite](https://github.com/appwrite/appwrite), [Convex](https://www.convex.dev/)                                                               | Data, auth, storage, functions, and realtime               | Starts with the application foundation, then makes models, agents, jobs, policy, and cost part of the same tenant-aware system.                                              |
+| **Agent runtimes and workflow platforms** — [Cloudflare Agents](https://developers.cloudflare.com/agents/), [Xians](https://xians.ai/), [Dify](https://github.com/langgenius/dify), [Flowise](https://github.com/FlowiseAI/Flowise) | Agent execution, state, tools, or visual authoring         | Includes the surrounding SaaS backend, commercial layer, customer shell, and operator plane; the agent runtime is one layer rather than the product boundary.                |
+| **Gateways and observability** — [LiteLLM](https://github.com/BerriAI/litellm), [Langfuse](https://github.com/langfuse/langfuse), [Helicone](https://github.com/Helicone/helicone)                                                  | Model routing, traces, evaluations, and cost visibility    | Treats gateway and observability as layers behind identity, tenancy, jobs, billing, audit, and product operations.                                                           |
+
+The bet is not that every component is novel. It is that an agentic SaaS should
+not have to assemble and secure these categories independently before it can
+ship.
+
+## Project status
+
+BackAI is **pre-alpha**. The current golden path is the SupportDesk first run,
+no-key demo mode, OpenAI-compatible gateway, Python/TypeScript SDKs, cost
+ledger, customer app, operator console, and self-hosted deployment artifacts.
+
+Two important limits are explicit:
+
+- Workload modules scaffold today, but automatic runtime mounting is not wired.
+- Durable jobs execute Go in-process handlers today; remote Python and
+  TypeScript job handlers are not implemented yet.
+
+Track shipped behavior in [`docs/product.md`](docs/product.md) and extension
+contracts in [`docs/architecture.md`](docs/architecture.md).
 
 ## Documentation
 
-Architecture and product docs live in this repo:
+- [Developer experience](docs/dx/README.md) — build surfaces, local run, SDK, jobs, and webhooks
+- [Architecture](docs/stack.md) — layers, ownership, and OSS composition
+- [Repository map](docs/repo-map.md) — what belongs where
+- [Attach an existing app](docs/attach-existing-app.md) — gateway and tenant-key integration
+- [OSS audit](docs/oss-audit.md) — what BackAI uses and why
+- [Examples](examples/) — capability-declared product shapes
 
-- [`docs/dx/`](docs/dx/README.md) — **Developer Experience hub**: build surfaces, run, jobs, webhooks, SDK
-- [`docs/stack.md`](docs/stack.md) — Layered architecture (Supabase-shaped, 8 bands)
-- [`docs/product.md`](docs/product.md) — What it is, what it isn't, the DX
-- [`docs/architecture.md`](docs/architecture.md) — Extension points + adapter contracts
-- [`docs/repo-map.md`](docs/repo-map.md) — Where code belongs in a fork
-- [`docs/attach-existing-app.md`](docs/attach-existing-app.md) — Use BackAI behind an existing app
-- [`docs/oss-audit.md`](docs/oss-audit.md) — Every OSS we vendor + rationale
-- [`docs/realtime.md`](docs/realtime.md) — Postgres NOTIFY → WebSocket bridge
-- [`docs/search.md`](docs/search.md) — Postgres FTS + pgvector app-data search
-- [`docs/activity.md`](docs/activity.md) — tenant-scoped customer activity log
-- [`docs/feature-flags.md`](docs/feature-flags.md) — runtime feature flags
-- [`docs/storage-transforms.md`](docs/storage-transforms.md) — resize and thumbnail images on storage GETs
-- [`docs/embeddings.md`](docs/embeddings.md) — OpenAI-compatible embeddings through LiteLLM
-- [`docs/multimodal.md`](docs/multimodal.md) — image generation, speech, and transcription
-- [`docs/run-subscriptions.md`](docs/run-subscriptions.md) — live AgentField run events over WebSocket
-- [`docs/tool-adapters.md`](docs/tool-adapters.md) — built-in browser-use, SearXNG, fs, exec, HTTP, and SQL adapters
-- [`docs/oauth.md`](docs/oauth.md) — OAuth grants for backend agents acting as a user
-- [`docs/`](docs/) — Per-area guides
-- [`docs/archive/`](docs/archive/) — Historical Phase 0-16 planning
+## Community
 
-## Architecture Substrate
-
-AgentField is the agent runtime inside BackAI. It provides agent
-execution, harness calls, run traces, memory, and identity primitives.
-BackAI wraps it with the product/backend surfaces an AI SaaS needs:
-customer app, admin dashboard, tenant API keys, cost ledger, billing
-hooks, storage, jobs, deployment targets, and app-specific modules.
-
-[AgentField repo →](https://github.com/Agent-Field/agentfield)
-
-## License
+Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening a change and use GitHub
+Issues for bugs and product proposals. Security reports belong in the private
+channel described in [`SECURITY.md`](SECURITY.md).
 
 Apache 2.0. See [`LICENSE`](LICENSE).
-
-## Contributing
-
-Read [`CONTRIBUTING.md`](CONTRIBUTING.md). Issues and PRs welcome.
