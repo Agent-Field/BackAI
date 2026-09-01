@@ -29,15 +29,18 @@ updates:
       - dependencies
       - go
 
-  # ─── npm: dashboard ─────────────────────────────────────────────────────
+  # ─── npm: pnpm workspace (dashboard, customer-app, sdk-ts) ─────────────
+  # Update from the repo root. Per-package directories fail with
+  # "Updating workspaces from inside a workspace subdirectory is not
+  # supported" and show up as a red Dependabot check on main.
   - package-ecosystem: npm
-    directory: /apps/dashboard
+    directory: /
     schedule:
       interval: weekly
       day: tuesday
     open-pull-requests-limit: 5
     groups:
-      dashboard-deps:
+      js-workspace:
         patterns:
           - "*"
         update-types:
@@ -49,51 +52,6 @@ updates:
     labels:
       - dependencies
       - npm
-      - dashboard
-
-  # ─── npm: customer app ──────────────────────────────────────────────────
-  - package-ecosystem: npm
-    directory: /apps/customer-app
-    schedule:
-      interval: weekly
-      day: tuesday
-    open-pull-requests-limit: 5
-    groups:
-      customer-app-deps:
-        patterns:
-          - "*"
-        update-types:
-          - minor
-          - patch
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
-    labels:
-      - dependencies
-      - npm
-      - customer-app
-
-  # ─── npm: TypeScript SDK ────────────────────────────────────────────────
-  - package-ecosystem: npm
-    directory: /packages/sdk-ts
-    schedule:
-      interval: weekly
-      day: tuesday
-    open-pull-requests-limit: 3
-    groups:
-      sdk-ts-deps:
-        patterns:
-          - "*"
-        update-types:
-          - minor
-          - patch
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
-    labels:
-      - dependencies
-      - npm
-      - sdk-ts
 
   # ─── npm: docs site ─────────────────────────────────────────────────────
   - package-ecosystem: npm
