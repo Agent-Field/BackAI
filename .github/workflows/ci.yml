@@ -183,11 +183,9 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
-        continue-on-error: true # OK before lockfile exists
-      - run: pnpm install
       - run: pnpm -r lint || echo "no TS lint scripts yet"
       - run: pnpm exec prettier --check "**/*.{ts,tsx,js,jsx,json,md,yaml,yml}" || true
 
@@ -201,10 +199,25 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "pnpm"
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
       - run: pnpm -r test || echo "no TS tests yet"
+
+  dco:
+    name: DCO
+    # PR-only: GitHub merge commits on main are not DCO-signed. The
+    # required check is the PR range against origin/main.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Verify Signed-off-by on PR commits
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+        run: scripts/check-dco.sh "$BASE_REF"
 
   validate-compose:
     name: Validate docker-compose
@@ -357,6 +370,7 @@ jobs:
         prod-compose-smoke,
         docs-lint,
         build-docs-site,
+        dco,
       ]
     if: always()
     runs-on: ubuntu-latest
