@@ -70,6 +70,16 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # These four fail Dependabot's npm peer resolver
+      # ("Error while updating peer dependency") and mark the
+      # commit red even when a docs-site PR was created. Bump
+      # them by hand with the Astro/React line.
+      - dependency-name: "@astrojs/mdx"
+      - dependency-name: "@scalar/api-reference-react"
+      - dependency-name: "react"
+      - dependency-name: "react-dom"
+      - dependency-name: "@types/react"
+      - dependency-name: "@types/react-dom"
     labels:
       - dependencies
       - npm
