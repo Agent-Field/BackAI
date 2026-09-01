@@ -12,9 +12,10 @@ wired together in one open-source, self-hosted stack.
 Give a coding agent (Codex, Claude Code, Gemini CLI, OpenCode, or another coding
 harness) a backend, not a blank repo. Build the product without assembling the
 AI infrastructure. Own the code, data, and deployment.
-> [!NOTE]
-> **BackAI is in beta and under active development.**
-> Expect rapid improvements and the occasional rough edge. If something breaks, feels unclear, or doesn't work as expected, please [open an issue](https://github.com/Agent-Field/backai/issues). Bug reports and feedback help us make BackAI better.
+
+### ⚠️ Beta
+
+BackAI is currently in beta and under active development. Expect rapid improvements and the occasional rough edge. If something breaks, feels unclear, or doesn't work as expected, please [open an issue](https://github.com/Agent-Field/backai/issues).
 
 [Quickstart](#quickstart) · [What you get](#what-you-get) · [Build with coding agents](#built-for-coding-agents) · [Docs](docs/dx/README.md)
 
