@@ -38,6 +38,7 @@ jobs:
       docs_site: ${{ steps.filter.outputs.docs_site }}
       compose: ${{ steps.filter.outputs.compose }}
       deploy: ${{ steps.filter.outputs.deploy }}
+      images: ${{ steps.filter.outputs.images }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -61,6 +62,8 @@ jobs:
               - 'pnpm-workspace.yaml'
               - 'packages/sdk-ts/**'
               - 'apps/dashboard/**'
+              - 'scripts/generate-brand.mjs'
+              - 'brand.yaml'
             docs:
               - '**/*.md'
               - 'docs/**'
@@ -78,6 +81,13 @@ jobs:
               - 'scripts/test-helm-kind.sh'
               - 'scripts/test-fly-staging.sh'
               - 'scripts/test-prod-compose-smoke.sh'
+            images:
+              - 'apps/dashboard/Dockerfile'
+              - 'apps/customer-app/Dockerfile'
+              - 'scripts/generate-brand.mjs'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
 
   lint-go:
     name: Lint (Go)
@@ -185,6 +195,8 @@ jobs:
           node-version: "22"
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
+      - name: Brand codegen (js-yaml ESM import)
+        run: node scripts/generate-brand.mjs
       - run: pnpm -r lint || echo "no TS lint scripts yet"
       - run: pnpm exec prettier --check "**/*.{ts,tsx,js,jsx,json,md,yaml,yml}" || true
 
@@ -244,6 +256,35 @@ jobs:
       - uses: azure/setup-helm@v4
       - name: Validate Helm, Fly, Railway, Render, and prod compose
         run: scripts/validate-deploy-targets.py
+
+  build-app-images:
+    name: Build app images
+    needs: changes
+    # Catch release-image breakage (brand codegen, lockfile, Dockerfile)
+    # before workflow_run/Release tries to push to GHCR.
+    if: needs.changes.outputs.images == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: dashboard
+            dockerfile: apps/dashboard/Dockerfile
+          - name: customer-app
+            dockerfile: apps/customer-app/Dockerfile
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v3
+      - name: Build ${{ matrix.name }} (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: false
+          tags: af-stack-${{ matrix.name }}:ci
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          provenance: false
 
   helm-kind-smoke:
     name: Helm kind smoke
@@ -370,6 +411,7 @@ jobs:
         docs-lint,
         build-docs-site,
         dco,
+        build-app-images,
       ]
     if: always()
     runs-on: ubuntu-latest

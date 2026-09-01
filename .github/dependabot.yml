@@ -33,15 +33,18 @@ updates:
       - type:chore
       - area:runtime
 
-  # ─── npm: dashboard ─────────────────────────────────────────────────────
+  # ─── npm: pnpm workspace (dashboard, customer-app, sdk-ts) ─────────────
+  # Update from the repo root. Per-package directories fail with
+  # "Updating workspaces from inside a workspace subdirectory is not
+  # supported" and show up as a red Dependabot check on main.
   - package-ecosystem: npm
-    directory: /apps/dashboard
+    directory: /
     schedule:
       interval: weekly
       day: tuesday
     open-pull-requests-limit: 5
     groups:
-      dashboard-deps:
+      js-workspace:
         patterns:
           - "*"
         update-types:
@@ -53,47 +56,6 @@ updates:
     labels:
       - type:chore
       - area:dashboard
-
-  # ─── npm: customer app ──────────────────────────────────────────────────
-  - package-ecosystem: npm
-    directory: /apps/customer-app
-    schedule:
-      interval: weekly
-      day: tuesday
-    open-pull-requests-limit: 5
-    groups:
-      customer-app-deps:
-        patterns:
-          - "*"
-        update-types:
-          - minor
-          - patch
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
-    labels:
-      - type:chore
-
-  # ─── npm: TypeScript SDK ────────────────────────────────────────────────
-  - package-ecosystem: npm
-    directory: /packages/sdk-ts
-    schedule:
-      interval: weekly
-      day: tuesday
-    open-pull-requests-limit: 3
-    groups:
-      sdk-ts-deps:
-        patterns:
-          - "*"
-        update-types:
-          - minor
-          - patch
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
-    labels:
-      - type:chore
-      - area:sdk-ts
 
   # ─── npm: docs site ─────────────────────────────────────────────────────
   - package-ecosystem: npm
@@ -112,6 +74,16 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # These four fail Dependabot's npm peer resolver
+      # ("Error while updating peer dependency") and mark the
+      # commit red even when a docs-site PR was created. Bump
+      # them by hand with the Astro/React line.
+      - dependency-name: "@astrojs/mdx"
+      - dependency-name: "@scalar/api-reference-react"
+      - dependency-name: "react"
+      - dependency-name: "react-dom"
+      - dependency-name: "@types/react"
+      - dependency-name: "@types/react-dom"
     labels:
       - type:chore
       - area:docs
