@@ -32,6 +32,20 @@ Run formatters before pushing. Configs already in repo are the source of truth.
   get extra scrutiny — bring a reason.
 - Integration tests use `docker compose up`. Don't break the 60-second quickstart.
 
+## Merging to `main`
+
+`main` is protected for the public release. Do not push to it directly.
+
+- Open a PR targeting `main`.
+- `CI Success` and `Security Success` must be green.
+- One approving review; resolve review threads before merge.
+- Prefer squash merge. Re-sign the squash commit (`git commit -s`) if
+  GitHub does not add the DCO trailer automatically.
+
+A repo admin applies or updates the GitHub ruleset with
+`scripts/apply-branch-protection.sh`. Details:
+[`docs/branch-protection.md`](docs/branch-protection.md).
+
 ## Commits
 
 - **DCO sign-off required.** Every commit must carry `Signed-off-by: Your Name <you@example.com>`.

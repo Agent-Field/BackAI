@@ -1,0 +1,4 @@
+# Default reviewers. CODEOWNER review is advisory until the main
+# ruleset sets `require_code_owner_review: true` (see
+# docs/branch-protection.md). Swap in an org team when one exists.
+* @santoshkumarradha

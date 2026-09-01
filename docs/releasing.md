@@ -6,7 +6,11 @@ Releases are **automatic on merge to `main`**. You never hand-cut a version.
 
 1. You merge a PR into `main`.
 2. CI (`.github/workflows/ci.yml`) runs the full gate suite (lint + test across
-   Go / Python / TypeScript, compose + deploy validation, docs).
+   Go / Python / TypeScript, DCO, compose + deploy validation, docs). The
+   security workflow (`.github/workflows/security.yml`) runs in parallel
+   (`pnpm`/`npm`/`pip` audit, gosec, trivy, CodeQL on the public repo).
+   Branch protection requires both **CI Success** and **Security Success**
+   before merge — see [`docs/branch-protection.md`](branch-protection.md).
 3. When CI succeeds, `.github/workflows/release.yml` fires and:
    - **Computes the next version** from the merged commit messages
      (Conventional Commits — see below). If nothing release-worthy changed, it

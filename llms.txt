@@ -46,6 +46,7 @@
 ## Deploy
 - [Deploy](docs/deploy.md): Docker Compose, Helm, Fly, Railway, Render
 - [Releasing](docs/releasing.md): how versions and images are cut
+- [Branch protection](docs/branch-protection.md): required checks and the main ruleset
 
 ## Optional
 - [Starter example](examples/starter/README.md): the smallest neutral fork

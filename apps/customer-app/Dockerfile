@@ -4,7 +4,7 @@
 # This is the CUSTOMER-FACING app. Sister image is the operator dashboard at
 # apps/dashboard/Dockerfile. Both share the same Postgres + better-auth instance.
 
-FROM node:20-alpine AS deps
+FROM node:22-alpine AS deps
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
@@ -18,7 +18,7 @@ COPY apps/backend/pyproject.toml apps/backend/
 
 RUN pnpm install --frozen-lockfile --filter=customer-app...
 
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
@@ -36,7 +36,7 @@ WORKDIR /app/apps/customer-app
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm build
 
-FROM node:20-alpine AS runtime
+FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

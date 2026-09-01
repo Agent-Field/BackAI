@@ -1,26 +1,33 @@
 name: security
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
     branches: [main]
   schedule:
     # 03:00 UTC every Monday so security issues surface before a workweek.
-    - cron: '0 3 * * 1'
+    - cron: "0 3 * * 1"
 
-# This repo is currently PRIVATE without GitHub Advanced Security, so the
-# code-scanning SARIF upload API (github/codeql-action/upload-sarif) returns
-# 403 "Resource not accessible by integration". To keep this workflow green and
-# useful without GHAS:
-#   - gosec / trivy run as scanners and publish their SARIF as downloadable
-#     build artifacts + a job summary (no code-scanning upload).
-#   - npm audit / pip-audit remain hard, blocking dependency gates.
-#   - CodeQL only runs when the repo is public (it inherently uploads to
-#     code-scanning), so it auto-activates at open-source launch.
+# Public-repo security gate.
+#
+# Hard, blocking jobs (npm/pnpm audit, pip-audit) fail the workflow on
+# high/critical advisories. gosec / trivy stay report-only (artifacts +
+# job summary) and, when the repo is public, also upload SARIF to GitHub
+# code scanning. CodeQL is public-only and report-oriented — it is not
+# part of the required "Security Success" aggregator so a first-time
+# CodeQL config issue cannot wedge every PR.
+#
+# Branch protection should require the single "Security Success" check.
 permissions:
   contents: read
   security-events: write
+  actions: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   gosec:
@@ -30,7 +37,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: "1.25"
           cache: true
       - name: Run gosec
         uses: securego/gosec@master
@@ -38,12 +45,12 @@ jobs:
           # Standard rule set; the high-noise rules (G104 for unchecked
           # errors) are excluded so the report is meaningful. -no-fail keeps
           # this report-only — the SARIF artifact below carries the findings.
-          args: '-fmt sarif -out gosec.sarif -no-fail -exclude G104 ./services/...'
+          args: "-fmt sarif -out gosec.sarif -no-fail -exclude G104 ./services/..."
       - name: Summarize high-severity findings
         if: always()
         run: |
           if [ -f gosec.sarif ]; then
-            high=$(python3 -c "import json;d=json.load(open('gosec.sarif'));r=d['runs'][0];rules={x['id']:x for x in r['tool']['driver'].get('rules',[])};print(sum(1 for x in r['results'] if (x.get('level')=='error')))" 2>/dev/null || echo '?')
+            high=$(python3 -c "import json;d=json.load(open('gosec.sarif'));r=d['runs'][0];print(sum(1 for x in r['results'] if (x.get('level')=='error')))" 2>/dev/null || echo '?')
             echo "### gosec — $high error-level finding(s)" >> "$GITHUB_STEP_SUMMARY"
             echo "Full SARIF is attached as the \`gosec-sarif\` artifact." >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -54,29 +61,47 @@ jobs:
           name: gosec-sarif
           path: gosec.sarif
           if-no-files-found: ignore
+      - name: Upload SARIF to code scanning
+        if: always() && github.event.repository.private != true
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: gosec.sarif
+          category: gosec
 
-  npm-audit:
-    name: npm audit
+  pnpm-audit:
+    name: pnpm audit (workspace)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        workspace:
-          - apps/dashboard
-          - packages/sdk-ts
-          - docs-site
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Audit production dependencies
+        # --audit-level=high gates on high/critical only; moderate +
+        # below flow through Dependabot rather than blocking the build.
+        # --prod matches what we ship (dashboard, customer-app, sdk-ts).
+        run: pnpm audit --audit-level=high --prod
+
+  npm-audit-docs:
+    name: npm audit (docs-site)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: docs-site/package-lock.json
       - name: Install
-        working-directory: ${{ matrix.workspace }}
-        run: npm install --omit=dev
+        working-directory: docs-site
+        run: npm ci --omit=dev
       - name: Audit
-        working-directory: ${{ matrix.workspace }}
-        # --audit-level=high gates on high/critical only; moderate +
-        # below flow through Dependabot rather than blocking the build.
+        working-directory: docs-site
         run: npm audit --audit-level=high --omit=dev
 
   pip-audit:
@@ -86,7 +111,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: "3.12"
       - name: Install pip-audit
         run: pip install pip-audit
       - name: Audit
@@ -105,7 +130,7 @@ jobs:
         with:
           scan-type: fs
           scan-ref: .
-          severity: 'HIGH,CRITICAL'
+          severity: "HIGH,CRITICAL"
           scanners: vuln
           format: table
           ignore-unfixed: true
@@ -115,7 +140,7 @@ jobs:
         with:
           scan-type: fs
           scan-ref: .
-          severity: 'HIGH,CRITICAL'
+          severity: "HIGH,CRITICAL"
           scanners: vuln
           format: sarif
           ignore-unfixed: true
@@ -137,18 +162,24 @@ jobs:
           name: trivy-sarif
           path: trivy.sarif
           if-no-files-found: ignore
+      - name: Upload SARIF to code scanning
+        if: always() && github.event.repository.private != true
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy.sarif
+          category: trivy
 
   codeql:
     name: CodeQL
-    # CodeQL inherently uploads to GitHub code-scanning, which needs Advanced
-    # Security on a private repo. Run it only once the repo is public, where
-    # code scanning is free — so it auto-activates at open-source launch.
-    if: ${{ github.event.repository.private == false }}
+    # Code scanning is free on public repos. Skip on private checkouts
+    # without GitHub Advanced Security so the upload API cannot 403.
+    if: ${{ github.event.repository.private != true }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        language: ['go', 'javascript', 'python']
+        language: ["go", "javascript", "python"]
     steps:
       - uses: actions/checkout@v7
       - uses: github/codeql-action/init@v4
@@ -157,4 +188,19 @@ jobs:
       - uses: github/codeql-action/autobuild@v4
       - uses: github/codeql-action/analyze@v4
         with:
-          category: '/language:${{ matrix.language }}'
+          category: "/language:${{ matrix.language }}"
+
+  security-success:
+    name: Security Success
+    needs:
+      [gosec, pnpm-audit, npm-audit-docs, pip-audit, trivy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check required security jobs
+        run: |
+          # Aggregator so branch protection can require one check.
+          # CodeQL is intentionally omitted — it is report-only.
+          results='${{ toJSON(needs) }}'
+          echo "Job results: $results"
+          echo "$results" | jq -e 'all(.[]; .result == "success" or .result == "skipped")'
