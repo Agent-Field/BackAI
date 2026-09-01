@@ -1,0 +1,64 @@
+{
+  "_comment": "Worker-protocol conformance vectors for the BackAI pull-worker (PRD R3). A reference worker (ref_worker.py / ref_worker.ts) registers a handler for each `kind` keyed by `behavior`; run.sh enqueues each vector's job and asserts the job reaches `expect_state` via the jobs API. PREREQUISITE: each `kind` below MUST be registered as a REMOTE job definition on the target stack (the runtime rejects enqueue of unknown kinds) — see README.md. `worker` tunes the reference worker's lease/heartbeat cadence so the heartbeat vector actually exercises lease renewal.",
+  "version": 1,
+  "worker": {
+    "lease_ttl": 6,
+    "heartbeat_interval": 2,
+    "poll_wait": 5
+  },
+  "poll_timeout_seconds": 45,
+  "vectors": [
+    {
+      "name": "success",
+      "kind": "conf-success",
+      "behavior": "complete",
+      "payload": { "hello": "world" },
+      "max_attempts": 1,
+      "expect_state": "completed",
+      "description": "handler returns normally -> job COMPLETES"
+    },
+    {
+      "name": "retryable_then_success",
+      "kind": "conf-retry",
+      "behavior": "retry_then_complete",
+      "payload": { "note": "fails on attempt 1, succeeds on attempt 2" },
+      "max_attempts": 3,
+      "expect_state": "completed",
+      "description": "handler throws (retryable) on attempt 1 -> River RETRIES -> attempt 2 completes"
+    },
+    {
+      "name": "permanent_failure",
+      "kind": "conf-permanent",
+      "behavior": "permanent",
+      "payload": {},
+      "max_attempts": 3,
+      "expect_state": "cancelled",
+      "description": "handler raises PermanentError -> terminal without retry. Maps to river.JobCancel: 'cancelled' is River's terminal state for explicitly-non-retryable failures; 'discarded' is reserved for exhausted-retry dead-letter."
+    },
+    {
+      "name": "payload_roundtrip",
+      "kind": "conf-roundtrip",
+      "behavior": "roundtrip",
+      "payload": {
+        "str": "héllo — round trip",
+        "int": 42,
+        "float": 3.14159,
+        "bool": true,
+        "null": null,
+        "nested": { "a": [1, 2, 3], "b": { "c": "d" } }
+      },
+      "max_attempts": 1,
+      "expect_state": "completed",
+      "description": "handler asserts the payload it received deep-equals what was enqueued; COMPLETES only if byte-for-byte identical, else raises PermanentError -> discarded"
+    },
+    {
+      "name": "heartbeat_keeps_long_job_alive",
+      "kind": "conf-slow",
+      "behavior": "slow_complete",
+      "payload": { "sleep_ms": 9000 },
+      "max_attempts": 1,
+      "expect_state": "completed",
+      "description": "handler runs (9s) far longer than the 6s lease TTL; the worker's 2s heartbeats renew the lease so the job COMPLETES rather than expiring + being re-leased"
+    }
+  ]
+}

@@ -34,6 +34,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/approvals"
 	"github.com/Agent-Field/backai/services/runtime/internal/billing"
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
+	"github.com/Agent-Field/backai/services/runtime/internal/connections"
 	"github.com/Agent-Field/backai/services/runtime/internal/cost"
 	"github.com/Agent-Field/backai/services/runtime/internal/crons"
 	"github.com/Agent-Field/backai/services/runtime/internal/db"
@@ -42,6 +43,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/guardrails"
 	"github.com/Agent-Field/backai/services/runtime/internal/harnesses"
 	"github.com/Agent-Field/backai/services/runtime/internal/hooks"
+	"github.com/Agent-Field/backai/services/runtime/internal/invitations"
 	"github.com/Agent-Field/backai/services/runtime/internal/jobs"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmcache"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmgateway"
@@ -55,6 +57,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/logger"
 	"github.com/Agent-Field/backai/services/runtime/internal/mcp"
 	"github.com/Agent-Field/backai/services/runtime/internal/memory"
+	"github.com/Agent-Field/backai/services/runtime/internal/modules"
 	"github.com/Agent-Field/backai/services/runtime/internal/notifications"
 	notificationslog "github.com/Agent-Field/backai/services/runtime/internal/notifications/adapters/log"
 	notificationspush "github.com/Agent-Field/backai/services/runtime/internal/notifications/adapters/push"
@@ -74,6 +77,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/observability/traces/traceselect"
 	"github.com/Agent-Field/backai/services/runtime/internal/probe"
 	"github.com/Agent-Field/backai/services/runtime/internal/retention"
+	"github.com/Agent-Field/backai/services/runtime/internal/safehttp"
 	"github.com/Agent-Field/backai/services/runtime/internal/sandbox"
 	dockersandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/docker"
 	e2bsandbox "github.com/Agent-Field/backai/services/runtime/internal/sandbox/adapters/e2b"
@@ -866,6 +870,11 @@ func main() {
 	// Optional: connect to Postgres. If DATABASE_URL is empty, the runtime
 	// still boots — it just reports the DB as not-configured in /health.
 	var database *db.DB
+	// rlsUnsafe is set when the runtime intends to enforce per-tenant
+	// isolation but the serving DB role can bypass RLS (only reachable via
+	// the AF_STACK_ALLOW_INSECURE_DB override — the no-override case exits
+	// at boot). It is handed to server.Deps so /ready reports "rls_unsafe".
+	var rlsUnsafe bool
 	if cfg.Database.URL != "" {
 		dbCtx, dbCancel := context.WithTimeout(ctx, 30*time.Second)
 		database, err = db.Open(dbCtx, db.Config{
@@ -893,7 +902,7 @@ func main() {
 			// serving role can bypass RLS (superuser or BYPASSRLS). Refuse to
 			// start in that state when multi-tenancy is enabled; warn otherwise.
 			assertCtx, assertCancel := context.WithTimeout(ctx, 5*time.Second)
-			assertTenantSafeRole(assertCtx, cfg, database, log)
+			rlsUnsafe = assertTenantSafeRole(assertCtx, cfg, database, log)
 			assertCancel()
 			statsCtx, statsCancel := context.WithTimeout(ctx, 5*time.Second)
 			warnIfPGStatsRoleMissing(statsCtx, database.Pool, log)
@@ -944,6 +953,7 @@ func main() {
 	// envelope vault regardless of selection.
 	var vault *secrets.Vault
 	var billingSettingsStore *billing.SettingsStore
+	var connectionsSvc *connections.Service
 	secretsRemoteName := ""
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("AF_STACK_SECRETS_ADAPTER"))) {
 	case "remote":
@@ -1011,6 +1021,10 @@ func main() {
 						"key_id", cipher.KeyID(),
 						"dev_mode", cipher.DevMode(),
 					)
+					// R5 connections: credentials ride the same KMS-backed
+					// cipher; the store persists refs + FORCE-RLS rows in
+					// suite_connections. Requires DB + vault, so it lives here.
+					connectionsSvc = buildConnectionsService(database.Pool, cipher, vault, log)
 				}
 			}
 		} else {
@@ -1174,6 +1188,9 @@ func main() {
 		})
 		sqlDB := stdlib.OpenDBFromPool(database.Pool)
 		systemCrons := crons.NewSystemScheduler(log)
+		// R7: opt-in backup/restore verification cron (no-op unless
+		// BACKUP_TEST_ENABLED). Registered before Run() starts below.
+		registerBackupTestCron(systemCrons, log)
 		if err := systemCrons.RegisterSystem("retention.daily", "0 3 * * *", func(runCtx context.Context) error {
 			retentionCtx, cancel := context.WithTimeout(runCtx, 5*time.Minute)
 			defer cancel()
@@ -1670,6 +1687,82 @@ func main() {
 		}
 	}
 
+	// R8 lifecycle platform crons. These run on a dedicated system scheduler
+	// (separate from the retention scheduler above, which is scoped inside the
+	// DB block that runs before tenancy + billing exist):
+	//
+	//   - lifecycle.tenant_purge   — hard-delete tenants soft-deleted beyond
+	//     the grace window (cascades members/keys/invitations/billing away).
+	//   - billing.reconcile        — re-sync live Stripe subscription state to
+	//     correct drift from missed/out-of-order webhooks.
+	//   - lifecycle.invitation_expire — flip pending invitations past their
+	//     expires_at to 'expired'.
+	if database != nil && database.Pool != nil {
+		lifecycleCrons := crons.NewSystemScheduler(log)
+		registered := false
+
+		if tenancyMgr != nil {
+			graceDays := 30
+			if v := strings.TrimSpace(os.Getenv("AF_STACK_TENANT_PURGE_GRACE_DAYS")); v != "" {
+				if n, perr := strconv.Atoi(v); perr == nil && n > 0 {
+					graceDays = n
+				}
+			}
+			if err := lifecycleCrons.RegisterSystem("lifecycle.tenant_purge", "0 4 * * *", func(runCtx context.Context) error {
+				c, cancel := context.WithTimeout(runCtx, 5*time.Minute)
+				defer cancel()
+				n, perr := tenancyMgr.PurgeSoftDeletedTenants(c, graceDays)
+				if perr != nil {
+					return perr
+				}
+				if n > 0 {
+					log.Info("lifecycle: purged soft-deleted tenants", "count", n, "grace_days", graceDays)
+				}
+				return nil
+			}); err != nil {
+				log.Warn("lifecycle: tenant-purge cron registration failed", "error", err)
+			} else {
+				registered = true
+			}
+
+			invStore := invitations.NewStore(database.Pool, log)
+			if err := lifecycleCrons.RegisterSystem("lifecycle.invitation_expire", "0 * * * *", func(runCtx context.Context) error {
+				c, cancel := context.WithTimeout(runCtx, 2*time.Minute)
+				defer cancel()
+				n, eerr := invStore.ExpireStale(c)
+				if eerr != nil {
+					return eerr
+				}
+				if n > 0 {
+					log.Info("lifecycle: expired stale invitations", "count", n)
+				}
+				return nil
+			}); err != nil {
+				log.Warn("lifecycle: invitation-expire cron registration failed", "error", err)
+			} else {
+				registered = true
+			}
+		}
+
+		if billingSvc != nil && cfg.BillingEnabled() {
+			if err := lifecycleCrons.RegisterSystem("billing.reconcile", "0 */6 * * *", func(runCtx context.Context) error {
+				c, cancel := context.WithTimeout(runCtx, 10*time.Minute)
+				defer cancel()
+				_, rerr := billingSvc.ReconcileSubscriptions(c)
+				return rerr
+			}); err != nil {
+				log.Warn("lifecycle: billing-reconcile cron registration failed", "error", err)
+			} else {
+				registered = true
+			}
+		}
+
+		if registered {
+			go lifecycleCrons.Run(ctx)
+			log.Info("lifecycle: platform crons started")
+		}
+	}
+
 	// Skills (Phase 11.3). The Store + Installer are independent: the
 	// Store needs a DB (no pool → mutating endpoints return 503 and
 	// reads return an empty list), the Installer is stateless and is
@@ -1799,6 +1892,36 @@ func main() {
 
 	probeReg.WithAdapterRegistry(adapterRegistry)
 
+	// R7 production operating contract: refuse to boot a mis-hardened
+	// saas+production deployment (RLS, KMS, CORS, storage, sandbox posture).
+	// No-op outside AF_STACK_ENV=production. See prodpreflight.go.
+	runProductionPreflight(ctx, cfg, database, store != nil, log)
+
+	// R2 workload modules: discover declarative manifests, apply their
+	// migrations (DDL — needs the privileged migrate connection when the
+	// serving role is restricted), and hand the manager to the server so
+	// /api/v1/workload/<id>/ routes mount. A module whose manifest or
+	// migrations fail is logged and excluded; boot continues.
+	var workloadModules *modules.Manager
+	if database != nil && database.Pool != nil {
+		workloadModules = modules.Load(cfg.Modules.WorkloadModulesPath, cfg.Modules.WorkloadModules, log)
+		migPool := database.Pool
+		if cfg.Database.MigrateURL != "" && cfg.Database.MigrateURL != cfg.Database.URL {
+			if privDB, err := db.Open(ctx, db.Config{URL: cfg.Database.MigrateURL}); err != nil {
+				log.Error("workload modules: privileged migrate connection failed; module migrations skipped", "error", err)
+				migPool = nil
+			} else {
+				defer privDB.Close()
+				migPool = privDB.Pool
+			}
+		}
+		if migPool != nil {
+			if err := workloadModules.ApplyMigrations(ctx, migPool); err != nil {
+				log.Error("workload modules: some migrations failed", "error", err)
+			}
+		}
+	}
+
 	srv := server.New(cfg, log, server.Deps{
 		DB:              database,
 		AF:              afClient,
@@ -1814,6 +1937,7 @@ func main() {
 		Guardrails:      guardrailsSvc,
 		DBStudio:        studioSvc,
 		Memory:          memoryStore,
+		Modules:         workloadModules,
 		Search:          searchStore,
 		Activity:        activityStore,
 		FeatureFlags:    featureFlagStore,
@@ -1838,6 +1962,7 @@ func main() {
 		ToolsRegistry:   toolsRegistry,
 		OAuthManager:    oauthManager,
 		OAuthFactory:    oauthFactory,
+		Connections:     connectionsSvc,
 		Shipwright:      shipwrightStore,
 		Approvals:       approvalsStore,
 		LogRing:         logRing,
@@ -1846,6 +1971,7 @@ func main() {
 		MetricsStore:    metricsStore,
 		ErrorsStore:     errorsStore,
 		Version:         version,
+		RLSUnsafe:       rlsUnsafe,
 	})
 
 	// Phase 14.3: ordered graceful shutdown.
@@ -1890,6 +2016,10 @@ func main() {
 			}
 		}()
 	}
+
+	// R7: background sampler for the pool-saturation + jobs-queue-age gauges
+	// the default Prometheus alerts watch. No-op without a database.
+	startProductionMetricsSampler(ctx, database, log)
 
 	// Start listener.
 	listenerErr := make(chan error, 1)
@@ -1981,6 +2111,54 @@ func main() {
 		return
 	}
 	log.Info("af-stack exited cleanly")
+}
+
+// buildConnectionsService constructs the R5 connections subsystem. Connection
+// credentials ride the same KMS-backed cipher as the secrets vault; the
+// outbound provider HTTP client is SSRF-guarded (safehttp). Platform OAuth
+// client creds resolve from each descriptor's env vars
+// (CONNECTIONS_<PROVIDER>_CLIENT_ID / _CLIENT_SECRET). Returns nil on a
+// construction failure so /api/v1/connections degrades to 503 rather than
+// crashing boot.
+func buildConnectionsService(pool *pgxpool.Pool, cipher connections.Cipher, vault *secrets.Vault, log *slog.Logger) *connections.Service {
+	store, err := connections.NewStore(pool, cipher, vault, log)
+	if err != nil {
+		log.Error("connections: store init failed", "error", err)
+		return nil
+	}
+	reg := connections.DefaultRegistry()
+	svc, err := connections.New(connections.Config{
+		Store:       store,
+		Registry:    reg,
+		HTTPClient:  safehttp.New(safehttp.Options{}),
+		ClientCreds: connectionsClientCreds(reg),
+		StateSecret: strings.TrimSpace(os.Getenv("AF_STACK_AUTH_SECRET")),
+		Log:         log,
+	})
+	if err != nil {
+		log.Error("connections: service init failed", "error", err)
+		return nil
+	}
+	log.Info("connections ready", "providers", reg.Names())
+	return svc
+}
+
+// connectionsClientCreds resolves a provider's platform OAuth app credentials
+// from the env vars named on its descriptor. ok=false leaves the provider
+// unconfigured for OAuth (api_key connections still work).
+func connectionsClientCreds(reg *connections.Registry) connections.ClientCredsResolver {
+	return connections.ClientCredsFunc(func(_ context.Context, provider string) (connections.ClientCreds, bool) {
+		d, err := reg.Get(provider)
+		if err != nil || d.ClientIDEnv == "" || d.ClientSecretEnv == "" {
+			return connections.ClientCreds{}, false
+		}
+		id := strings.TrimSpace(os.Getenv(d.ClientIDEnv))
+		secret := strings.TrimSpace(os.Getenv(d.ClientSecretEnv))
+		if id == "" || secret == "" {
+			return connections.ClientCreds{}, false
+		}
+		return connections.ClientCreds{ClientID: id, ClientSecret: secret}, true
+	})
 }
 
 // newStorage constructs the storage adapter selected by cfg.Adapter.
@@ -2572,29 +2750,57 @@ func kmsBootDecision(loadErr error, kmsConfigured bool) kmsDecision {
 	return kmsDegrade
 }
 
-func assertTenantSafeRole(ctx context.Context, cfg config.Config, database *db.DB, log *slog.Logger) {
+// effectiveMTEnabled reports whether the runtime is actually enforcing
+// per-tenant isolation: multi-tenancy is enabled AND the deployment is not
+// in personal mode (personal mode forces auth off and runs everything under
+// the default tenant, so RLS is intentionally relaxed). This mirrors the
+// resolver's multiTenancyEnabled() so the boot gate and request-time
+// behaviour can never disagree.
+func effectiveMTEnabled(cfg config.Config) bool {
+	if cfg.PersonalMode() {
+		return false
+	}
+	return cfg.Modules.Enabled["multi-tenancy"]
+}
+
+// rlsUnsafeForReady reports whether the runtime should advertise itself as
+// not-ready due to unenforceable tenant isolation: isolation is intended
+// (mtEnabled) but the serving role can bypass RLS. Personal mode / a
+// NOBYPASSRLS role both make this false.
+func rlsUnsafeForReady(canBypass, mtEnabled bool) bool {
+	return canBypass && mtEnabled
+}
+
+// assertTenantSafeRole enforces that the serving DB role cannot bypass RLS
+// when the runtime intends to isolate tenants. In SaaS mode with
+// multi-tenancy on, a superuser / BYPASSRLS serving role is fatal (unless
+// explicitly overridden with AF_STACK_ALLOW_INSECURE_DB); personal mode and
+// single-tenant dev warn and boot. It returns whether the runtime is in the
+// unsafe-but-booting state so /ready can report "rls_unsafe".
+func assertTenantSafeRole(ctx context.Context, cfg config.Config, database *db.DB, log *slog.Logger) bool {
 	rs, err := database.ConnRoleSecurity(ctx)
 	if err != nil {
 		log.Warn("could not verify DB role RLS safety", "error", err)
-		return
+		return false
 	}
-	mtOn := cfg.Modules.Enabled["multi-tenancy"]
+	mtOn := effectiveMTEnabled(cfg)
 	override := envBool("AF_STACK_ALLOW_INSECURE_DB", false)
 	switch rlsBootDecision(rs.CanBypassRLS(), mtOn, override) {
 	case rlsOK:
 		log.Info("tenant isolation: serving DB role is RLS-safe", "role", rs.Name)
 	case rlsFatal:
 		log.Error("refusing to start: the serving DB role can bypass row-level security, so multi-tenant isolation is unenforceable",
-			"role", rs.Name, "superuser", rs.IsSuperuser, "bypassrls", rs.BypassRLS,
+			"role", rs.Name, "superuser", rs.IsSuperuser, "bypassrls", rs.BypassRLS, "mode", cfg.Mode,
 			"fix", "point AF_STACK_DATABASE_URL at a NOSUPERUSER NOBYPASSRLS role and run migrations via AF_STACK_MIGRATE_DATABASE_URL, or set AF_STACK_ALLOW_INSECURE_DB=true to override")
 		database.Close()
 		os.Exit(1)
 	case rlsWarn:
 		log.Warn("serving DB role can bypass row-level security; per-tenant isolation is NOT enforced",
 			"role", rs.Name, "superuser", rs.IsSuperuser, "bypassrls", rs.BypassRLS,
-			"multi_tenancy_enabled", mtOn, "override", override,
+			"multi_tenancy_enabled", mtOn, "override", override, "mode", cfg.Mode,
 			"recommendation", "use a NOSUPERUSER NOBYPASSRLS serving role before enabling multi-tenancy")
 	}
+	return rlsUnsafeForReady(rs.CanBypassRLS(), mtOn)
 }
 
 // tenancySecretSink adapts *secrets.Vault to the tenancy.SecretSink
@@ -2672,6 +2878,29 @@ func startJobsManager(ctx context.Context, log *slog.Logger, pool *pgxpool.Pool,
 	if err := mgr.RegisterSampleJob(); err != nil {
 		log.Error("sample job registration failed", "error", err)
 		// non-fatal — manager is still usable
+	}
+	// Remote (Python/TypeScript) job kinds, R3. Enqueue requires a
+	// definition, and remote handlers live outside this binary, so the
+	// deployment declares them: AF_STACK_REMOTE_JOB_KINDS is a comma list
+	// of <kind>[:<language>] pairs (language defaults to python).
+	for _, spec := range strings.Split(os.Getenv("AF_STACK_REMOTE_JOB_KINDS"), ",") {
+		if spec = strings.TrimSpace(spec); spec == "" {
+			continue
+		}
+		kind, lang := spec, string(jobs.LanguagePython)
+		if i := strings.IndexByte(spec, ':'); i >= 0 {
+			kind, lang = strings.TrimSpace(spec[:i]), strings.TrimSpace(spec[i+1:])
+		}
+		def := jobs.Definition{
+			Name:        kind,
+			Language:    jobs.Language(lang),
+			Description: "Remote worker job kind (declared via AF_STACK_REMOTE_JOB_KINDS).",
+			MaxAttempts: 3,
+		}
+		if err := mgr.Registry().RegisterRemote(def); err != nil {
+			log.Error("remote job kind registration failed", "kind", kind, "error", err)
+			// non-fatal — the remaining kinds still register
+		}
 	}
 	startCtx, startCancel := context.WithTimeout(ctx, 15*time.Second)
 	defer startCancel()

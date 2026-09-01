@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: Apache-2.0
+
+"""resize-image — a pull-based background job worker.
+
+Run it with a tenant API key that carries the `jobs:work` scope:
+
+    export AF_STACK_URL=http://localhost:8080
+    export AF_STACK_API_KEY=af_live_...      # a key with the jobs:work scope
+    python jobs/resize-image.py
+"""
+
+from __future__ import annotations
+
+import os
+
+from af_stack.worker import PermanentError, Worker
+
+worker = Worker(
+    os.environ.get("AF_STACK_URL", "http://localhost:8080"),
+    os.environ["AF_STACK_API_KEY"],
+)
+
+
+@worker.register("resize-image")
+def handle(payload, ctx):
+    """Handle one "resize-image" job.
+
+    Return a JSON-serialisable value to COMPLETE the job. Raise
+    PermanentError to fail WITHOUT a retry (dead-letter); raise any other
+    exception to fail retryably (River retries with backoff).
+    """
+    ctx.log("processing resize-image", job_id=ctx.job_id)
+    if ctx.is_canceled():
+        return None
+    if not payload:
+        raise PermanentError("empty payload — nothing to do")
+    # TODO: do the work here.
+    return {"ok": True, "echo": payload}
+
+
+if __name__ == "__main__":
+    worker.run()

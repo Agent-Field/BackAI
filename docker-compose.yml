@@ -120,6 +120,14 @@ services:
       AF_STACK_DATABASE_URL: postgres://afstack_app:${AF_STACK_APP_DB_PASSWORD:-afstack_app}@postgres:5432/afstack?sslmode=disable
       AF_STACK_MIGRATE_DATABASE_URL: postgres://afstack:afstack@postgres:5432/afstack?sslmode=disable
       AF_STACK_AGENTFIELD_URL: http://agentfield:8080
+      # Workload modules (PRD R2). The path matches the ro mount below;
+      # the enabled list is empty by default — the shipped notes module
+      # is a reference, opt in with AF_STACK_WORKLOAD_MODULES=notes.
+      WORKLOAD_MODULES_PATH: /app/workload-modules
+      AF_STACK_WORKLOAD_MODULES: ${AF_STACK_WORKLOAD_MODULES:-}
+      # Remote (Python/TS) job kinds served by external pull-workers (R3):
+      # comma list of <kind>[:<language>], e.g. "index-document:python".
+      AF_STACK_REMOTE_JOB_KINDS: ${AF_STACK_REMOTE_JOB_KINDS:-}
       # KMS for the secrets vault (envelope encryption). Override in
       # production with `openssl rand -hex 32`.
       AF_STACK_AUTH_SECRET: ${AF_STACK_AUTH_SECRET:-dev-secret-change-me-in-prod}
@@ -216,6 +224,12 @@ services:
       # at the runtime's expected lookup path. Optional — when missing
       # the runtime falls back to defaults + env overrides.
       - ./apps/backend/config.yaml:/config.yaml:ro
+      # Declarative workload modules (PRD R2): the runtime discovers
+      # backai.module.yaml manifests here, applies their migrations and
+      # serves tenant-scoped CRUD under /api/v1/workload/<id>/. Enable a
+      # discovered module with AF_STACK_WORKLOAD_MODULES=<id>[,<id>...]
+      # (or enabled: true in its manifest).
+      - ./workload-modules:/app/workload-modules:ro
       # Docker socket for the sandbox adapter. Without this mount the
       # sandbox falls back to "unconfigured" and run endpoints return 503.
       # In production, prefer gVisor or e2b for stronger isolation.

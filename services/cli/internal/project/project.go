@@ -25,6 +25,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Agent-Field/backai/services/cli/internal/client"
+	"github.com/Agent-Field/backai/services/cli/internal/output"
+	"github.com/Agent-Field/backai/services/cli/internal/validate"
 )
 
 type commandRunner func(ctx context.Context, dir string, name string, args []string, stdout, stderr io.Writer) error
@@ -135,8 +137,10 @@ func RunAgent(args []string, stdout, stderr io.Writer) error {
 	switch args[0] {
 	case "new":
 		return runAgentNew(args[1:], stdout, stderr)
+	case "validate":
+		return runAgentValidate(args[1:], stdout)
 	default:
-		return fmt.Errorf("agent: unknown subcommand %q", args[0])
+		return output.Usage("agent: unknown subcommand %q", args[0])
 	}
 }
 
@@ -147,9 +151,87 @@ func RunModule(args []string, stdout, stderr io.Writer) error {
 	switch args[0] {
 	case "new":
 		return runModuleNew(args[1:], stdout, stderr)
+	case "validate":
+		return runModuleValidate(args[1:], stdout)
 	default:
-		return fmt.Errorf("module: unknown subcommand %q", args[0])
+		return output.Usage("module: unknown subcommand %q", args[0])
 	}
+}
+
+// runModuleValidate validates a workload-module directory offline: manifest
+// shape + the migration RLS lint. It backs `af-stack module validate <dir>`
+// and shares the validate package with `af-stack test`, so the standalone
+// command and the gate can never disagree.
+func runModuleValidate(args []string, stdout io.Writer) error {
+	fs := flag.NewFlagSet("module validate", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	asJSON := fs.Bool("json", false, "emit the result as JSON")
+	pos, err := output.ParseArgs(fs, args)
+	if err != nil {
+		return output.Usage("module validate: %v", err)
+	}
+	if len(pos) != 1 {
+		return output.Usage("module validate: exactly one module directory is required")
+	}
+	dir := pos[0]
+	if !exists(dir) {
+		return output.NotFound("module validate: %s does not exist", filepath.ToSlash(dir))
+	}
+	res := validate.ModuleDir(dir)
+	if err := output.Result(stdout, *asJSON, res, func(w io.Writer) error {
+		return renderValidateResult(w, res)
+	}); err != nil {
+		return err
+	}
+	if !res.OK {
+		return output.Invalid("module validate: %s failed validation", filepath.ToSlash(dir))
+	}
+	return nil
+}
+
+// runAgentValidate validates an agent scaffold directory offline.
+func runAgentValidate(args []string, stdout io.Writer) error {
+	fs := flag.NewFlagSet("agent validate", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	asJSON := fs.Bool("json", false, "emit the result as JSON")
+	pos, err := output.ParseArgs(fs, args)
+	if err != nil {
+		return output.Usage("agent validate: %v", err)
+	}
+	if len(pos) != 1 {
+		return output.Usage("agent validate: exactly one agent directory is required")
+	}
+	dir := pos[0]
+	if !exists(dir) {
+		return output.NotFound("agent validate: %s does not exist", filepath.ToSlash(dir))
+	}
+	res := validate.AgentDir(dir)
+	if err := output.Result(stdout, *asJSON, res, func(w io.Writer) error {
+		return renderValidateResult(w, res)
+	}); err != nil {
+		return err
+	}
+	if !res.OK {
+		return output.Invalid("agent validate: %s failed validation", filepath.ToSlash(dir))
+	}
+	return nil
+}
+
+// renderValidateResult prints a validate.Result as an aligned human table.
+func renderValidateResult(w io.Writer, res *validate.Result) error {
+	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
+	for _, f := range res.Findings {
+		fmt.Fprintf(tw, "  %s\t%s\n", f.Level, f.Message)
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	if res.OK {
+		fmt.Fprintln(w, "\nOK")
+	} else {
+		fmt.Fprintln(w, "\nFAIL")
+	}
+	return nil
 }
 
 func RunPlugin(args []string, stdout, stderr io.Writer) error {
@@ -361,10 +443,9 @@ func runModuleNew(args []string, stdout, _ io.Writer) error {
 		return fmt.Errorf("module new: %s already exists", filepath.ToSlash(dir))
 	}
 	files := map[string]string{
-		"manifest.yaml":              moduleManifestTemplate(id),
-		"migrations/00001_init.sql":  moduleMigrationTemplate(id),
-		"handlers/routes.go.example": moduleHandlerTemplate(id),
-		"README.md":                  fmt.Sprintf("# %s workload module\n\nRoutes mount under `/workload/%s`.\n", title(id), id),
+		"backai.module.yaml":        moduleManifestTemplate(id),
+		"migrations/00001_init.sql": moduleMigrationTemplate(id),
+		"README.md":                 moduleReadmeTemplate(id),
 	}
 	if err := writeFiles(dir, files); err != nil {
 		return err
@@ -759,41 +840,96 @@ CMD ["python", "main.py"]
 }
 
 func moduleManifestTemplate(id string) string {
-	return fmt.Sprintf(`id: %s
-name: %s
+	return fmt.Sprintf(`# %[2]s workload module (declarative — PRD R2).
+#
+# The runtime discovers this file at
+# <WORKLOAD_MODULES_PATH>/%[1]s/backai.module.yaml and auto-generates
+# tenant-scoped CRUD from the resources below — no handler code required.
+# enabled: false so the scaffold never auto-serves; add %[1]q to
+# modules.workload_modules (the enabled list) and restart to turn it on.
+id: %[1]s
+name: %[2]s
 version: 0.1.0
-description: %s workload module.
+description: %[2]s workload module.
+enabled: false
+migrations: migrations
 
-routes:
-  - method: POST
-    path: /events
-    handler: %s.CreateEvent
-`, id, title(id), title(id), id)
+resources:
+  # Backing table follows the <module>_<resource> convention: %[3]s_items.
+  # The migration under migrations/ must create it with id + tenant_id +
+  # created_at + updated_at plus these fields, and enable/force RLS with a
+  # tenant-isolation policy (statically enforced at load).
+  - name: items
+    fields:
+      - name: title
+        type: string
+        required: true
+      - name: done
+        type: bool
+        default: false
+`, id, title(id), strings.ReplaceAll(id, "-", "_"))
 }
 
 func moduleMigrationTemplate(id string) string {
-	table := strings.ReplaceAll(id, "-", "_") + "_events"
-	return fmt.Sprintf(`-- SPDX-License-Identifier: Apache-2.0
+	table := strings.ReplaceAll(id, "-", "_") + "_items"
+	return fmt.Sprintf(`-- %[2]s workload module migration.
+--
+-- The runtime lints this file before applying it: every CREATE TABLE must
+-- carry a tenant_id column and be followed by ENABLE + FORCE ROW LEVEL
+-- SECURITY and a CREATE POLICY. A tenantless table is refused (the module
+-- is disabled; the runtime keeps serving everything else).
 
-CREATE TABLE IF NOT EXISTS %s (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id uuid NOT NULL,
-  kind text NOT NULL,
-  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
-  created_at timestamptz NOT NULL DEFAULT now()
+create table if not exists %[1]s (
+  id         uuid        primary key default gen_random_uuid(),
+  tenant_id  uuid        not null,
+  title      text        not null,
+  done       boolean     not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
-`, table)
+
+create index if not exists %[1]s_tenant_idx on %[1]s (tenant_id, created_at desc);
+
+alter table %[1]s enable row level security;
+alter table %[1]s force row level security;
+
+create policy tenant_isolation on %[1]s
+  using (
+    current_setting('app.bypass_rls', true) = 'on'
+    or tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
+  )
+  with check (
+    current_setting('app.bypass_rls', true) = 'on'
+    or tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
+  );
+`, table, title(id))
 }
 
-func moduleHandlerTemplate(id string) string {
-	return fmt.Sprintf(`// SPDX-License-Identifier: Apache-2.0
+func moduleReadmeTemplate(id string) string {
+	return fmt.Sprintf(`# %[2]s workload module
 
-// Rename this file to routes.go when the workload handler package is enabled
-// in your fork.
-package %s
+Declarative workload module (PRD R2). The manifest (%[3]s) plus the versioned
+SQL under `+"`migrations/`"+` is all the runtime needs to auto-generate
+tenant-scoped CRUD — no handler code.
 
-// Route: POST /workload/%s/events
-`, strings.ReplaceAll(id, "-", "_"), id)
+## Routes (once enabled)
+
+Add %[1]q to the enabled workload list (`+"`modules.workload_modules`"+`) and
+restart. The `+"`items`"+` resource is backed by table `+"`%[4]s_items`"+`:
+
+| Method   | Path                                   | Action |
+| -------- | -------------------------------------- | ------ |
+| GET      | /api/v1/workload/%[1]s/items         | list   |
+| POST     | /api/v1/workload/%[1]s/items         | create |
+| GET      | /api/v1/workload/%[1]s/items/{id}    | get    |
+| PATCH    | /api/v1/workload/%[1]s/items/{id}    | update |
+| DELETE   | /api/v1/workload/%[1]s/items/{id}    | delete |
+
+Every query is filtered by the resolver-bound tenant; a client can never set
+`+"`tenant_id`"+` or reach another tenant's rows. Inspect discovery + migration
+state at `+"`GET /api/v1/admin/modules`"+`. See `+"`workload-modules/notes/`"+`
+for a fully-worked reference.
+`, id, title(id), "backai.module.yaml", strings.ReplaceAll(id, "-", "_"))
 }
 
 func pluginManifestTemplate(id string) string {

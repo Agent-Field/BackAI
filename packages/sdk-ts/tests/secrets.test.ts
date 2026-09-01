@@ -25,7 +25,10 @@ function enqueue(response: Response): void {
   responseQueue.push(response)
 }
 
-interface MockCall { url: string; init: RequestInit }
+interface MockCall {
+  url: string
+  init: RequestInit
+}
 function nthCall(idx: number): MockCall {
   const args = fetchMock.mock.calls[idx]
   if (args === undefined) throw new Error(`no fetch call at idx ${idx}`)
@@ -47,12 +50,12 @@ afterEach(() => {
 })
 
 describe("secrets.get", () => {
-  it("POSTs to /secrets/{key}/reveal and returns plaintext", async () => {
+  it("POSTs to /vault/secrets/{key}/reveal and returns plaintext", async () => {
     enqueue(jsonResponse({ key: "OPENAI_API_KEY", value: "sk-very-secret" }))
     const v = await secrets.get("OPENAI_API_KEY")
     expect(v).toBe("sk-very-secret")
     const c = nthCall(0)
-    expect(c.url).toBe("http://test.local/api/v1/secrets/OPENAI_API_KEY/reveal")
+    expect(c.url).toBe("http://test.local/api/v1/vault/secrets/OPENAI_API_KEY/reveal")
     expect(c.init.method).toBe("POST")
   })
 
@@ -60,9 +63,7 @@ describe("secrets.get", () => {
     enqueue(jsonResponse({ key: "team/deploy-token", value: "v" }))
     const v = await secrets.get("team/deploy-token")
     expect(v).toBe("v")
-    expect(nthCall(0).url).toBe(
-      "http://test.local/api/v1/secrets/team%2Fdeploy-token/reveal",
-    )
+    expect(nthCall(0).url).toBe("http://test.local/api/v1/vault/secrets/team%2Fdeploy-token/reveal")
   })
 
   it("throws SuiteError on unauthorised reveal", async () => {

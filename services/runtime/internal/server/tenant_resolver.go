@@ -116,6 +116,19 @@ var publicPrefixes = []string{
 	// OAuth provider callbacks validate their own signed state because
 	// providers may not return the same app session cookie shape.
 	"/oauth/callback",
+	// R5 connection OAuth callbacks (/connections/callback/{provider}).
+	// Same rationale as /oauth/callback: the browser redirect from the
+	// provider carries no reliable app session, so the callback trusts the
+	// HMAC-signed state (which carries the tenant) instead. Note this does
+	// NOT match /api/v1/connections/* — those go through the resolver.
+	"/connections/callback",
+	// R8 invitation accept (/api/v1/invitations/accept). Bypasses the tenant
+	// resolver because the invitee has no membership yet (the resolver would
+	// 403 them). The handler self-authenticates via the invite token
+	// (capability) + the session user id, and looks the row up under
+	// bypass_rls. NOTE: /api/v1/me/* is deliberately NOT here — those routes
+	// must go through the resolver so tenant + user are bound for RBAC.
+	"/api/v1/invitations",
 	// Billing dashboard surface (Phase 10.4). Same auth shape as
 	// admin/* — the dashboard's session gates it.
 	"/api/v1/billing",
@@ -227,20 +240,30 @@ func (s *Server) tenantResolver(next http.Handler) http.Handler {
 		// precedence over the session cookie when both are present.
 		if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
 			token := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
-			tenantID, apiKeyID, err := s.resolveBearer(ctx, token)
+			k, err := s.resolveBearer(ctx, token)
 			if err != nil {
-				writeAuthError(w, http.StatusUnauthorized, "INVALID_API_KEY",
-					"invalid API key")
+				writeBearerError(w, err)
 				return
 			}
-			ctx = tenantctx.WithTenantAndUser(ctx, tenantID, apiKeyID, "")
-			s.firePostAuth(ctx, preAuthPayload, tenantID, apiKeyID, "", srcAPIKey)
-			// Best-effort touch — we don't block on the write.
-			go func(id string) {
-				touchCtx, cancel := context.WithTimeout(context.Background(), 2_000_000_000)
-				defer cancel()
-				s.tenancy.TouchKey(touchCtx, id)
-			}(apiKeyID)
+			// Per-route scope enforcement. A key with empty/["*"]/"admin"
+			// scopes has full tenant access (legacy default); a narrow key
+			// is fail-closed with 403 SCOPE_DENIED. Session/default
+			// principals below are never scope-gated.
+			if s.scopeDenied(w, r, k.Scopes) {
+				return
+			}
+			ctx = tenantctx.WithTenantAndUser(ctx, k.TenantID, k.ID, "")
+			s.firePostAuth(ctx, preAuthPayload, k.TenantID, k.ID, "", srcAPIKey)
+			// Best-effort touch — we don't block on the write. Guarded on a
+			// live manager: the keyVerifier seam can resolve a key without a
+			// tenancy.Manager (tests), and a nil manager must not panic.
+			if s.tenancy != nil {
+				go func(id string) {
+					touchCtx, cancel := context.WithTimeout(context.Background(), 2_000_000_000)
+					defer cancel()
+					s.tenancy.TouchKey(touchCtx, id)
+				}(k.ID)
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
@@ -253,14 +276,16 @@ func (s *Server) tenantResolver(next http.Handler) http.Handler {
 		// both SDKs authenticate them via ?api_key=.
 		if path == "/api/v1/realtime" || path == "/api/v1/realtime/runs" {
 			if token := strings.TrimSpace(r.URL.Query().Get("api_key")); token != "" {
-				tenantID, apiKeyID, err := s.resolveBearer(ctx, token)
+				k, err := s.resolveBearer(ctx, token)
 				if err != nil {
-					writeAuthError(w, http.StatusUnauthorized, "INVALID_API_KEY",
-						"invalid API key")
+					writeBearerError(w, err)
 					return
 				}
-				ctx = tenantctx.WithTenantAndUser(ctx, tenantID, apiKeyID, "")
-				s.firePostAuth(ctx, preAuthPayload, tenantID, apiKeyID, "", srcAPIKey)
+				if s.scopeDenied(w, r, k.Scopes) {
+					return
+				}
+				ctx = tenantctx.WithTenantAndUser(ctx, k.TenantID, k.ID, "")
+				s.firePostAuth(ctx, preAuthPayload, k.TenantID, k.ID, "", srcAPIKey)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
@@ -323,14 +348,22 @@ func (s *Server) firePostAuth(
 }
 
 // resolveBearer validates `token` against suite_api_keys via the
-// tenancy manager. Returns the tenant id and api-key id on success.
-// All error modes collapse to a single sentinel so callers can't tell
-// invalid format from revoked key from missing key.
-func (s *Server) resolveBearer(ctx context.Context, token string) (tenantID, apiKeyID string, err error) {
-	if s.tenancy == nil {
-		return "", "", errors.New("tenancy manager not configured")
+// tenancy manager. Returns the full key row (tenant id, api-key id, and
+// scopes) on success. All error modes collapse to a single sentinel so
+// callers can't tell invalid format from revoked key from missing key.
+//
+// The verification call is indirected through s.keyVerifier so tests can
+// inject a fake without a Postgres round-trip (the same seam pattern as
+// s.operatorResolver). When unset it falls back to s.tenancy.VerifyKey.
+func (s *Server) resolveBearer(ctx context.Context, token string) (tenancy.APIKey, error) {
+	verify := s.keyVerifier
+	if verify == nil {
+		if s.tenancy == nil {
+			return tenancy.APIKey{}, errors.New("tenancy manager not configured")
+		}
+		verify = s.tenancy.VerifyKey
 	}
-	k, vErr := s.tenancy.VerifyKey(ctx, token)
+	k, vErr := verify(ctx, token)
 	if vErr != nil {
 		// Differentiate in logs only — never in the 401 envelope.
 		switch {
@@ -347,9 +380,25 @@ func (s *Server) resolveBearer(ctx context.Context, token string) (tenantID, api
 		default:
 			s.log.Warn("bearer: verify failed", "error", vErr)
 		}
-		return "", "", vErr
+		return tenancy.APIKey{}, vErr
 	}
-	return k.TenantID, k.ID, nil
+	return k, nil
+}
+
+// writeBearerError maps a resolveBearer failure to the response envelope.
+// Expired keys get a distinct 401 KEY_EXPIRED so a caller who legitimately
+// holds the key (the secret matched — expiry is only checked AFTER bcrypt
+// succeeds, so this never leaks whether an arbitrary key exists) can tell an
+// expired credential from a wrong one and rotate it. Every other failure
+// mode collapses to INVALID_API_KEY to avoid an existence oracle.
+func writeBearerError(w http.ResponseWriter, err error) {
+	if errors.Is(err, tenancy.ErrKeyExpired) {
+		writeAuthError(w, http.StatusUnauthorized, "KEY_EXPIRED",
+			"API key has expired")
+		return
+	}
+	writeAuthError(w, http.StatusUnauthorized, "INVALID_API_KEY",
+		"invalid API key")
 }
 
 // errNoSession is returned by resolveSession when the request has no

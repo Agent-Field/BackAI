@@ -40,6 +40,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Agent-Field/backai/services/runtime/internal/appmetrics"
 	"github.com/Agent-Field/backai/services/runtime/internal/safehttp"
 )
 
@@ -329,8 +330,10 @@ func (n *NativeOutbound) deliverOne(ctx context.Context, d *Delivery) {
 		upd.Status = StatusSucceeded
 		now := time.Now().UTC()
 		upd.DeliveredAt = &now
+		appmetrics.ObserveWebhookDelivery("succeeded")
 	} else {
 		upd.Status = StatusFailed
+		appmetrics.ObserveWebhookDelivery("failed")
 		msg := "delivery failed"
 		if deliverErr != nil {
 			msg = deliverErr.Error()

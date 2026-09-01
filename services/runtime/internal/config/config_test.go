@@ -326,3 +326,62 @@ func TestBillingEnabledMatrix(t *testing.T) {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+func TestProductionHardeningMatrix(t *testing.T) {
+	cases := []struct {
+		name string
+		mode string
+		env  string
+		want bool
+	}{
+		{"saas + production => armed", ModeSaaS, "production", true},
+		{"empty mode (=saas) + production => armed", "", "production", true},
+		{"saas + dev => off", ModeSaaS, "dev", false},
+		{"saas + empty env => off", ModeSaaS, "", false},
+		{"personal + production => off", ModePersonal, "production", false},
+		{"saas + PRODUCTION (case) => armed", ModeSaaS, "PRODUCTION", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.Mode = tc.mode
+			cfg.Env = tc.env
+			if got := cfg.ProductionHardening(); got != tc.want {
+				t.Errorf("ProductionHardening() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEnvOverrideAFStackEnv(t *testing.T) {
+	t.Setenv("AF_STACK_ENV", "Production")
+	cfg := Default()
+	applyEnvOverrides(&cfg)
+	if !cfg.ProductionEnv() {
+		t.Errorf("AF_STACK_ENV=Production should set ProductionEnv, Env=%q", cfg.Env)
+	}
+}
+
+func TestSandboxNetworkPolicyDefaultsIsolated(t *testing.T) {
+	cfg := Default()
+	if cfg.SandboxNetworkPolicy() != NetworkPolicyIsolated {
+		t.Errorf("default sandbox network policy = %q, want isolated", cfg.SandboxNetworkPolicy())
+	}
+	cfg.Sandbox.NetworkPolicy = ""
+	if cfg.SandboxNetworkPolicy() != NetworkPolicyIsolated {
+		t.Errorf("empty sandbox network policy should normalise to isolated, got %q", cfg.SandboxNetworkPolicy())
+	}
+	cfg.Sandbox.NetworkPolicy = "OPEN"
+	if cfg.SandboxNetworkPolicy() != "open" {
+		t.Errorf("sandbox network policy should lowercase, got %q", cfg.SandboxNetworkPolicy())
+	}
+}
+
+func TestSandboxNetworkPolicyEnvOverride(t *testing.T) {
+	t.Setenv("AF_STACK_SANDBOX_NETWORK_POLICY", "open")
+	cfg := Default()
+	applyEnvOverrides(&cfg)
+	if cfg.SandboxNetworkPolicy() != "open" {
+		t.Errorf("AF_STACK_SANDBOX_NETWORK_POLICY=open should override, got %q", cfg.SandboxNetworkPolicy())
+	}
+}

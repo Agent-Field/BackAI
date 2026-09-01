@@ -53,8 +53,19 @@ from . import (
     tools,
     webhooks,
 )
+from ._http import (
+    SUPPORTED_RUNTIME_RANGE as SUPPORTED_RUNTIME,
+)
+from ._http import (
+    AFStackError,
+    Transport,
+    check_runtime_compat,
+)
+from .client import BackAI
 from .ctx import RequestContext, bind, ctx, current, reset, scope
+from .pagination import AsyncPaginator, paginate
 from .tools import Tools  # noqa: F401 — backward-compat re-export
+from .worker import JobContext, PermanentError, Worker  # noqa: F401 — pull-worker SDK
 
 __version__ = "0.0.1"
 
@@ -99,8 +110,16 @@ suite = SimpleNamespace(
 
 
 __all__ = [
+    "SUPPORTED_RUNTIME",
+    "AFStackError",
+    "AsyncPaginator",
+    "BackAI",
+    "JobContext",
+    "PermanentError",
     "RequestContext",
     "Tools",
+    "Transport",
+    "Worker",
     "__version__",
     "admin",
     "agents",
@@ -109,6 +128,7 @@ __all__ = [
     "auth",
     "billing",
     "bind",
+    "check_runtime_compat",
     "cost",
     "crons",
     "ctx",
@@ -120,6 +140,7 @@ __all__ = [
     "memory",
     "notifications",
     "oauth",
+    "paginate",
     "realtime",
     "reset",
     "runs",
@@ -132,4 +153,5 @@ __all__ = [
     "suite",
     "tools",
     "webhooks",
+    "worker",
 ]

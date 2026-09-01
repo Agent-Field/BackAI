@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// resize-image — a pull-based background job worker.
+//
+// Run it with a tenant API key that carries the `jobs:work` scope:
+//
+//   export AF_STACK_URL=http://localhost:8080
+//   export AF_STACK_API_KEY=af_live_...   # a key with the jobs:work scope
+//   npx tsx jobs/resize-image.ts
+
+import { PermanentError, Worker } from "@af-stack/sdk/server";
+
+const worker = new Worker(
+  process.env.AF_STACK_URL ?? "http://localhost:8080",
+  process.env.AF_STACK_API_KEY ?? "",
+);
+
+// Handle one "resize-image" job. Return a JSON-serialisable value to COMPLETE
+// the job. Throw PermanentError to fail WITHOUT a retry (dead-letter); throw
+// anything else to fail retryably (the runtime retries with backoff).
+worker.register("resize-image", async (payload, ctx) => {
+  ctx.log("processing resize-image", { jobId: ctx.jobId });
+  if (ctx.isCanceled()) return;
+  if (payload == null) {
+    throw new PermanentError("empty payload — nothing to do");
+  }
+  // TODO: do the work here.
+  return { ok: true, echo: payload };
+});
+
+worker.run();

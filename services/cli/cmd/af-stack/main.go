@@ -22,6 +22,11 @@
 //	af-stack mcp add <name> --transport ...          Register a new MCP server
 //	af-stack mcp remove <name>                       Remove an MCP server
 //	af-stack mcp call <server> <tool> [--json ...]   Invoke an MCP tool
+//	af-stack job new <name> --lang py|ts             Scaffold a background-worker job
+//	af-stack connection add|list|remove              Manage external-service connections
+//	af-stack secrets set <key> | list                Manage the per-tenant secrets vault
+//	af-stack db diff|push|generate|reset             Runtime + module migrations (goose)
+//	af-stack doctor | status | test                  Environment + runtime diagnostics
 //
 // Operator REST surface (require AF_STACK_API_KEY set to an operator key):
 //
@@ -55,10 +60,16 @@ import (
 	"github.com/Agent-Field/backai/services/cli/internal/admincmd"
 	"github.com/Agent-Field/backai/services/cli/internal/billingcmd"
 	"github.com/Agent-Field/backai/services/cli/internal/client"
+	"github.com/Agent-Field/backai/services/cli/internal/conncmd"
+	"github.com/Agent-Field/backai/services/cli/internal/dbcmd"
+	"github.com/Agent-Field/backai/services/cli/internal/diag"
 	"github.com/Agent-Field/backai/services/cli/internal/initcmd"
+	"github.com/Agent-Field/backai/services/cli/internal/jobcmd"
 	"github.com/Agent-Field/backai/services/cli/internal/mcp"
 	"github.com/Agent-Field/backai/services/cli/internal/modecmd"
+	"github.com/Agent-Field/backai/services/cli/internal/output"
 	"github.com/Agent-Field/backai/services/cli/internal/project"
+	"github.com/Agent-Field/backai/services/cli/internal/secretcmd"
 	"github.com/Agent-Field/backai/services/cli/internal/telemetry"
 	"github.com/Agent-Field/backai/services/cli/internal/upgradecmd"
 )
@@ -91,7 +102,9 @@ func main() {
 		} else {
 			fmt.Fprintln(os.Stderr, "af-stack:", err)
 		}
-		os.Exit(1)
+		// Exit with the stable code the error maps to (see internal/output):
+		// scripts and agents branch on *why* a command failed, not just 1.
+		os.Exit(output.ExitCode(err))
 	}
 }
 
@@ -171,6 +184,41 @@ func run(args []string) error {
 		defer cancel()
 		c := client.New()
 		return billingcmd.Run(ctx, c, rest, os.Stdout, os.Stderr)
+	case "job":
+		// Pure local scaffold — no runtime, no key.
+		return jobcmd.Run(rest, os.Stdout, os.Stderr)
+	case "connection", "connections":
+		ctx, cancel := signal.NotifyContext(
+			context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		c := client.New()
+		return conncmd.Run(ctx, c, rest, os.Stdin, os.Stdout, os.Stderr)
+	case "secrets", "secret":
+		ctx, cancel := signal.NotifyContext(
+			context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		c := client.New()
+		return secretcmd.Run(ctx, c, rest, os.Stdin, os.Stdout, os.Stderr)
+	case "db":
+		ctx, cancel := signal.NotifyContext(
+			context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		return dbcmd.Run(ctx, rest, os.Stdout, os.Stderr)
+	case "doctor":
+		ctx, cancel := signal.NotifyContext(
+			context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		return diag.RunDoctor(ctx, client.New(), rest, os.Stdout, os.Stderr)
+	case "status":
+		ctx, cancel := signal.NotifyContext(
+			context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		return diag.RunStatus(ctx, client.New(), rest, os.Stdout, os.Stderr)
+	case "test":
+		ctx, cancel := signal.NotifyContext(
+			context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		return diag.RunTest(ctx, client.New(), rest, os.Stdout, os.Stderr)
 	case "keys", "agents", "reasoners", "logs", "errors", "audit",
 		"sessions", "runs", "tenants", "activity":
 		// Operator REST surface. Requires AF_STACK_API_KEY set to an
@@ -204,7 +252,7 @@ func run(args []string) error {
 		return nil
 	default:
 		writeUsage(os.Stderr)
-		return fmt.Errorf("unknown command %q", cmd)
+		return output.Usage("unknown command %q", cmd)
 	}
 }
 
@@ -227,6 +275,13 @@ Commands:
   operator   Operator bootstrap commands (create, key)
   mcp        Model Context Protocol server + tool management
   billing    Set up Stripe billing: plans + pricing (agent-first)
+  job        Scaffold a background-worker job (af-stack job new <name> --lang py|ts)
+  connection External-service connections: add | list | remove
+  secrets    Per-tenant secrets vault: set | list
+  db         Migrations (goose): diff | push | generate | reset
+  doctor     Environment + runtime health checks
+  status     Compact "is the stack up and how is it configured" snapshot
+  test       Shippable-fork gates (manifests, migrations, ...)
   version    Print the CLI version
 
 Operator commands (need AF_STACK_API_KEY = operator key; mint one with
@@ -257,7 +312,11 @@ Examples:
   af-stack operator create --email founder@example.com
   af-stack operator key --owner        # mint an operator API key (needs DATABASE_URL)
   af-stack keys issue --tenant <uuid> --name ci
-  af-stack logs --level error --limit 100
+  af-stack job new resize-image --lang py           # scaffold jobs/resize-image.py
+  af-stack connection add --provider github --kind api_key --name ci
+  echo -n "$STRIPE_KEY" | af-stack secrets set stripe --value-stdin
+  af-stack status --json                            # machine-readable stack snapshot
+  af-stack logs --level error --tail 100 --json
   af-stack reasoners --limit 20
   af-stack sessions list
   af-stack mcp call github search_repos --json '{"q":"agentfield"}'

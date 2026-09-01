@@ -5,6 +5,7 @@ package server
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -28,6 +29,7 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/audit"
 	"github.com/Agent-Field/backai/services/runtime/internal/billing"
 	"github.com/Agent-Field/backai/services/runtime/internal/config"
+	"github.com/Agent-Field/backai/services/runtime/internal/connections"
 	"github.com/Agent-Field/backai/services/runtime/internal/cost"
 	"github.com/Agent-Field/backai/services/runtime/internal/crons"
 	"github.com/Agent-Field/backai/services/runtime/internal/db"
@@ -36,12 +38,14 @@ import (
 	"github.com/Agent-Field/backai/services/runtime/internal/guardrails"
 	"github.com/Agent-Field/backai/services/runtime/internal/harnesses"
 	"github.com/Agent-Field/backai/services/runtime/internal/hooks"
+	"github.com/Agent-Field/backai/services/runtime/internal/idempotency"
 	"github.com/Agent-Field/backai/services/runtime/internal/jobs"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmcache"
 	"github.com/Agent-Field/backai/services/runtime/internal/llmgateway"
 	"github.com/Agent-Field/backai/services/runtime/internal/logger"
 	"github.com/Agent-Field/backai/services/runtime/internal/mcp"
 	"github.com/Agent-Field/backai/services/runtime/internal/memory"
+	"github.com/Agent-Field/backai/services/runtime/internal/modules"
 	"github.com/Agent-Field/backai/services/runtime/internal/notifications"
 	"github.com/Agent-Field/backai/services/runtime/internal/oauth"
 	"github.com/Agent-Field/backai/services/runtime/internal/observability"
@@ -88,7 +92,11 @@ type Server struct {
 	// ready is set to true by MarkReady() once main.go has finished
 	// startup (migrations applied, workers spawned). Until then
 	// /ready returns 503 {"status":"booting"}.
-	ready         atomic.Bool
+	ready atomic.Bool
+	// prodReady caches the R7 production-posture evaluation so /ready can fold
+	// it in without re-querying pg_catalog on every probe. Zero value is ready
+	// to use. See prodready.go.
+	prodReady     prodReadyCache
 	db            *db.DB
 	af            *agentfield.Client
 	tel           *observability.Telemetry
@@ -96,11 +104,16 @@ type Server struct {
 	storage       storage.Storage
 	storagePrefix string // tenant key-prefix when multi-tenancy is on; "" otherwise
 	secrets       *secrets.Vault
-	jobs          *jobs.Manager
-	tenancy       *tenancy.Manager
-	openapi       *openapi.Builder
-	llmCache      *llmcache.Cache
-	llmGateway    *llmgateway.Gateway
+	// secretStore is a test-only override for the tenant secrets backend
+	// used by the /api/v1/vault/secrets/* handlers. Production leaves it
+	// nil and tenantSecretStore() falls back to the concrete vault
+	// (s.secrets), so the nil-vault 503 path is preserved.
+	secretStore secrets.Store
+	jobs        *jobs.Manager
+	tenancy     *tenancy.Manager
+	openapi     *openapi.Builder
+	llmCache    *llmcache.Cache
+	llmGateway  *llmgateway.Gateway
 	// guardrails applies gateway-local PII redaction and moderation to
 	// LLM request/response text. It does not own AgentField state.
 	guardrails *guardrails.Service
@@ -110,6 +123,10 @@ type Server struct {
 	// search indexes tenant-scoped app/workload records. nil when no
 	// DB is wired; /api/v1/search returns 503 SEARCH_NOT_CONFIGURED.
 	search *search.Store
+	// modules is the filesystem-discovered workload-module manager (PRD
+	// R2). nil = no declarative modules mounted; the admin inventory
+	// endpoint serves an empty list. Route mounting happens in New().
+	modules *modules.Manager
 	// activity records tenant-scoped customer/product events. nil when
 	// no DB is wired; /api/v1/activity returns 503 ACTIVITY_NOT_CONFIGURED.
 	activity *activity.Store
@@ -134,6 +151,16 @@ type Server struct {
 	// better-auth session. It defaults to s.resolveOperatorPrincipal; tests
 	// inject a fake to exercise the operator-gated surfaces without a DB.
 	operatorResolver func(context.Context, *http.Request) (operatorPrincipal, error)
+	// keyVerifier verifies a tenant API key token. It defaults to
+	// s.tenancy.VerifyKey (see resolveBearer); tests inject a fake to
+	// exercise per-route scope enforcement without a Postgres round-trip.
+	keyVerifier func(context.Context, string) (tenancy.APIKey, error)
+	// rlsUnsafe is set at boot when the runtime intends to enforce
+	// per-tenant isolation (SaaS mode + multi-tenancy) but the serving DB
+	// role can bypass row-level security. /ready reports "rls_unsafe" so a
+	// load balancer never routes tenant traffic to a pod that cannot
+	// isolate it. See cmd/af-stack.assertTenantSafeRole.
+	rlsUnsafe bool
 	// sandbox powers /api/v1/sandbox/*. nil = endpoints either return
 	// 503 SANDBOX_NOT_CONFIGURED (mutating) or tolerant empty
 	// responses (reads).
@@ -196,6 +223,9 @@ type Server struct {
 	// retrieves plaintext from the secrets vault for backend agents.
 	oauthManager *oauth.Manager
 	oauthFactory *oauth.Factory
+	// connections is the R5 external-service connection subsystem. nil ⇒
+	// the /api/v1/connections endpoints return 503 CONNECTIONS_NOT_CONFIGURED.
+	connections *connections.Service
 	// shipwright stores only task/patch metadata for the Shipwright
 	// coding-agent factory. AgentField owns the execution graph, harness
 	// calls, logs, spans, traces, and memory.
@@ -230,6 +260,11 @@ type Server struct {
 	// admin mutation. Always non-nil; falls back to no-op when no DB
 	// pool is wired.
 	audit *audit.Writer
+	// idem backs the inbound idempotency middleware (PRD R1). nil ⇒ the
+	// middleware is not installed and every request passes through
+	// unchanged. Constructed from the DB pool at New() time, or injected
+	// via Deps.Idempotency for tests.
+	idem idempotency.Store
 }
 
 // Health aggregates dependency health for the /health endpoint.
@@ -287,6 +322,12 @@ type Deps struct {
 	// memory/runs/traces and from suite memory; apps/workload modules
 	// index product records here for FTS/vector/hybrid lookup.
 	Search *search.Store
+	// Modules is the workload-module manager (PRD R2). main.go constructs
+	// it via modules.Load(cfg.Modules.WorkloadModulesPath,
+	// cfg.Modules.WorkloadModules, log) and calls ApplyMigrations before
+	// New() so migrations land before module traffic is served. nil = no
+	// declarative workload modules.
+	Modules *modules.Manager
 	// Activity is the customer/user activity log store. It is separate
 	// from admin audit and AgentField state.
 	Activity *activity.Store
@@ -373,6 +414,9 @@ type Deps struct {
 	// connect/token/disconnect return 503.
 	OAuthManager *oauth.Manager
 	OAuthFactory *oauth.Factory
+	// Connections is the R5 external-service connection subsystem. nil ⇒
+	// /api/v1/connections returns 503 CONNECTIONS_NOT_CONFIGURED.
+	Connections *connections.Service
 	// Shipwright stores task + patch metadata for the autonomous
 	// coding-agent factory. nil means /api/v1/shipwright/* returns 503.
 	Shipwright ShipwrightStore
@@ -397,6 +441,16 @@ type Deps struct {
 	// Version is the runtime version string surfaced via
 	// /api/v1/metrics/summary. Defaults to "dev".
 	Version string
+	// RLSUnsafe marks that the runtime intends to enforce per-tenant
+	// isolation but the serving DB role can bypass row-level security.
+	// When true, /ready reports "rls_unsafe" (503). Computed at boot by
+	// cmd/af-stack.assertTenantSafeRole; false in personal mode or when a
+	// NOBYPASSRLS serving role is in use.
+	RLSUnsafe bool
+	// Idempotency backs the inbound idempotency middleware (PRD R1). When
+	// nil, New() constructs a PgStore from DB when a pool is present;
+	// tests inject a fake to exercise the middleware without a database.
+	Idempotency idempotency.Store
 }
 
 // New constructs a Server with the given config + logger + dependencies.
@@ -445,6 +499,7 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		guardrails:      deps.Guardrails,
 		memory:          deps.Memory,
 		search:          deps.Search,
+		modules:         deps.Modules,
 		activity:        deps.Activity,
 		featureFlags:    deps.FeatureFlags,
 		dbStudio:        deps.DBStudio,
@@ -470,6 +525,7 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		toolsRegistry:   deps.ToolsRegistry,
 		oauthManager:    deps.OAuthManager,
 		oauthFactory:    deps.OAuthFactory,
+		connections:     deps.Connections,
 		shipwright:      deps.Shipwright,
 		approvals:       deps.Approvals,
 		metricsRing:     newMetricsRing(MetricsRingSize),
@@ -479,6 +535,7 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 		metricsStore:    deps.MetricsStore,
 		errorsStore:     deps.ErrorsStore,
 		version:         deps.Version,
+		rlsUnsafe:       deps.RLSUnsafe,
 	}
 	if s.billing != nil {
 		// Close the billing loop: plan applied (webhook or stub
@@ -495,6 +552,15 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 	} else {
 		s.audit = audit.New(nil, log)
 	}
+	// Inbound idempotency (PRD R1). Prefer an injected store (tests); else
+	// build a PgStore over the DB pool. nil ⇒ middleware not installed.
+	if deps.Idempotency != nil {
+		s.idem = deps.Idempotency
+	} else if deps.DB != nil {
+		if st, err := idempotency.New(deps.DB.Pool); err == nil {
+			s.idem = st
+		}
+	}
 	// OAuth provider credentials resolve vault-first (operator-entered
 	// integration slots) with an env fallback owned by the factory. Wiring
 	// the resolver here — rather than at factory construction in main — is
@@ -510,6 +576,12 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *Server {
 	// so logs include final status code. CORS wraps last so OPTIONS preflights
 	// short-circuit before hitting the routes.
 	handler := http.Handler(mux)
+	// Inbound idempotency (PRD R1) wraps the mux so it runs INSIDE the
+	// tenant resolver (needs the resolved tenant) but around every handler.
+	// nil store ⇒ not installed, zero overhead. See idempotency_mw.go.
+	if s.idem != nil {
+		handler = s.idempotencyMiddleware(handler)
+	}
 	// Per-tenant request throttling is enforced upstream by LiteLLM via
 	// the virtual-key rpm_limit / tpm_limit issued by tenancy.IssueAPIKey
 	// (see internal/llmgateway/litellm_admin.go). When LiteLLM returns
@@ -723,6 +795,12 @@ func (s *Server) registerRoutes() {
 	s.registerSecretsRoutes()
 	s.registerSecretsOpenAPI()
 
+	// Tenant-scoped secrets vault (PRD R1). The operator surface above is
+	// operator-gated on the hardcoded default tenant; this surface rides
+	// the tenant resolver so an API-key / session caller manages its own
+	// tenant's secrets (/api/v1/vault/secrets/*).
+	s.registerTenantSecretsRoutes()
+
 	// Jobs queue (Phase 5). Endpoints return tolerant empty responses when
 	// no manager is wired (no DB present at boot time).
 	s.mux.HandleFunc("POST /api/v1/jobs", s.handleEnqueueJob)
@@ -745,6 +823,9 @@ func (s *Server) registerRoutes() {
 	s.openapi.Register("POST", "/api/v1/jobs/{id}/retry", openapi.RouteMeta{
 		Summary: "Mark a job retryable", Tags: []string{"jobs"},
 	})
+	// Pull-based remote worker protocol (PRD R3). Out-of-process python/ts
+	// workers lease + execute remote job kinds. Registered in jobs_worker.go.
+	s.registerJobsWorkerRoutes()
 
 	// LLM gateway (Phase 7.1). Endpoints return 503 when no
 	// llmgateway.Gateway is wired (main.go constructs one from the
@@ -762,6 +843,12 @@ func (s *Server) registerRoutes() {
 	// AgentField stateful primitives and suite memory.
 	s.registerSearchRoutes()
 	s.registerSearchOpenAPI()
+
+	// Workload modules (PRD R2). Filesystem-discovered declarative modules
+	// mount tenant-scoped CRUD under /api/v1/workload/*; the admin
+	// inventory lives at GET /api/v1/admin/modules. No-op mounting when no
+	// manager is wired.
+	s.registerWorkloadModuleRoutes()
 
 	// User activity log (Phase 2 completeness). Product/customer events
 	// live here; admin mutations stay in suite_audit_log.
@@ -835,6 +922,10 @@ func (s *Server) registerRoutes() {
 	s.registerWebhookSubscriptionRoutes()
 	s.registerWebhooksOpenAPI()
 
+	// R8 lifecycle — customer-facing tenant self-management (keys,
+	// invitations, ownership, deletion, audit).
+	s.registerLifecycleRoutes()
+
 	// Billing (Phase 10.4). Read endpoints serve empty / synthesised
 	// rows when no service is wired; the portal-link mutation returns
 	// 503 BILLING_NOT_CONFIGURED. Also registers the Stripe webhook
@@ -897,6 +988,10 @@ func (s *Server) registerRoutes() {
 	s.registerOAuthRoutes()
 	s.registerOAuthOpenAPI()
 
+	// R5 external-service connections (/api/v1/connections).
+	s.registerConnectionsRoutes()
+	s.registerConnectionsOpenAPI()
+
 	// Shipwright (Phase 3 Tier 1). AF Stack owns task/patch metadata;
 	// AgentField owns the coding-agent execution state.
 	s.registerShipwrightRoutes()
@@ -952,6 +1047,13 @@ func (s *Server) registerRoutes() {
 			})
 		}
 	}
+
+	// Declare each scoped route's required API-key scope + accepted
+	// principal types on its OpenAPI operation (x-required-scope /
+	// x-principals). The scope registry in scopes.go is the single source
+	// of truth for both enforcement and this annotation, so the spec can
+	// never drift from what the resolver enforces.
+	s.openapi.AnnotateSecurityFunc(scopeAndPrincipalsFor)
 }
 
 // Start runs the HTTP server. Blocks until ctx is cancelled, then
@@ -1098,6 +1200,21 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// RLS enforcement check — the runtime intends to isolate tenants
+	// (SaaS mode + multi-tenancy) but the serving DB role can bypass
+	// row-level security, so per-tenant isolation is not actually
+	// enforceable. Report not-ready so a load balancer never routes
+	// tenant traffic to a pod that cannot isolate it. In personal mode or
+	// with a NOBYPASSRLS serving role this flag is false and readiness
+	// proceeds normally.
+	if s.rlsUnsafe {
+		w.Header().Set("Retry-After", "5")
+		writeReadyError(w, "rls_unsafe",
+			"tenant isolation is not enforceable: the serving database role can bypass row-level security",
+			map[string]any{})
+		return
+	}
+
 	// DB check — uses a short timeout via db.Health (2s internal).
 	// We DON'T check AF here because /ready is about whether THIS
 	// pod can serve traffic; AF unreachability is degraded service,
@@ -1111,6 +1228,18 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+	}
+
+	// R7 production operating contract: when armed (saas + AF_STACK_ENV=
+	// production), a drift in the production posture (e.g. an operator ALTERs
+	// a tenant table's RLS) turns the pod un-ready. No-op otherwise. Cached
+	// with a short TTL so probe traffic never hammers pg_catalog.
+	if code, ok := s.productionReady(r.Context()); !ok {
+		w.Header().Set("Retry-After", "15")
+		writeReadyError(w, "not_production_ready", "production posture check failed: "+code, map[string]any{
+			"prodcheck_code": code,
+		})
+		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -1643,6 +1772,13 @@ func withLogging(log *slog.Logger, ring *metricsRing, next http.Handler) http.Ha
 		// populateLineField routes a "trace_id" attr into the log line's
 		// trace column, which the dashboard Logs view surfaces + filters.
 		traceID := requestTraceID(r)
+		// Stamp the canonical correlation id onto the REQUEST too, so every
+		// downstream handler that reads X-Request-ID (the LLM gateway →
+		// cost_events.request_id, webhook emit) uses the SAME id that appears
+		// in the logs, the response header, and the error envelope. Without
+		// this the cost event's request_id diverged from the request's id and
+		// the request → cost-event → webhook chain couldn't be joined.
+		r.Header.Set("X-Request-ID", traceID)
 		// Expose the correlation id on every response (success and error)
 		// and stash it on the writer so writeError can stamp it into the
 		// envelope's error.request_id — the id AGENTS.md promises on every
@@ -1703,6 +1839,15 @@ type statusWriter struct {
 	// panic-recovery middleware knows not to write a second (superfluous)
 	// header after a handler already started responding.
 	wrote bool
+	// captureBuf, when non-nil, tees written response bytes so the
+	// idempotency middleware can persist the response for replay. Writes
+	// still pass through to the client immediately (streaming is
+	// unaffected). captureLimit caps the tee; on overflow captureOver is
+	// set, the buffer is discarded, and teeing stops — the response is
+	// then treated as too large to store. See idempotency_mw.go.
+	captureBuf   *bytes.Buffer
+	captureLimit int
+	captureOver  bool
 }
 
 func (s *statusWriter) WriteHeader(code int) {
@@ -1713,7 +1858,35 @@ func (s *statusWriter) WriteHeader(code int) {
 
 func (s *statusWriter) Write(b []byte) (int, error) {
 	s.wrote = true
+	if s.captureBuf != nil && !s.captureOver {
+		if s.captureBuf.Len()+len(b) > s.captureLimit {
+			// Response exceeds the replay cap — stop teeing and drop what
+			// we buffered so oversized responses don't pin memory.
+			s.captureOver = true
+			s.captureBuf.Reset()
+		} else {
+			s.captureBuf.Write(b)
+		}
+	}
 	return s.ResponseWriter.Write(b)
+}
+
+// beginCapture arms the response tee with the given byte cap. Called by
+// the idempotency middleware only after it has claimed the key.
+func (s *statusWriter) beginCapture(limit int) {
+	s.captureBuf = new(bytes.Buffer)
+	s.captureLimit = limit
+	s.captureOver = false
+}
+
+// captured returns the teed response bytes and whether the response
+// overflowed the cap (in which case the bytes are empty and the response
+// must not be stored).
+func (s *statusWriter) captured() (body []byte, overflowed bool) {
+	if s.captureBuf == nil {
+		return nil, s.captureOver
+	}
+	return s.captureBuf.Bytes(), s.captureOver
 }
 
 // withRecover converts an unrecovered handler panic into a logged error

@@ -26,19 +26,34 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from . import _http
 
 
 class CallResult(BaseModel):
-    """Synchronous ``agents.call`` response."""
+    """Synchronous ``agents.call`` response.
+
+    The runtime returns the agent's return value under ``result`` with a
+    terminal ``status`` of ``"succeeded"``. ``output`` is a back-compat
+    alias that mirrors ``result`` when the response omits it.
+    """
 
     model_config = ConfigDict(extra="allow")
 
     execution_id: str = Field(..., description="AF execution id")
-    output: Any = Field(default=None, description="Agent return value")
+    result: Any = Field(default=None, description="Agent return value")
+    output: Any = Field(default=None, description="Deprecated alias for result")
     status: str = Field(default="done")
+
+    @model_validator(mode="after")
+    def _mirror_result(self) -> CallResult:
+        # Keep result/output in lockstep so callers on either name work.
+        if self.result is None and self.output is not None:
+            self.result = self.output
+        elif self.output is None and self.result is not None:
+            self.output = self.result
+        return self
 
 
 class AsyncHandle(BaseModel):
@@ -97,10 +112,13 @@ async def call(
     *,
     timeout_s: float | None = None,
     metadata: dict[str, Any] | None = None,
+    idempotency_key: str | None = None,
 ) -> CallResult:
     """Synchronously call an AgentField agent and return its result.
 
-    ``name`` must be of the form ``"namespace.function"``.
+    ``name`` must be of the form ``"namespace.function"``. Passing
+    ``idempotency_key`` sends the ``Idempotency-Key`` header so the runtime can
+    dedupe and so the SDK may safely retry this otherwise non-idempotent call.
     """
     path = f"/agents/{_agent_path(name)}"
     payload: dict[str, Any] = {"input": input or {}}
@@ -113,6 +131,7 @@ async def call(
         path,
         json=payload,
         timeout=timeout_s,
+        idempotency_key=idempotency_key,
     )
     return CallResult.model_validate(body or {})
 
@@ -123,15 +142,20 @@ async def call_async(
     *,
     webhook_url: str | None = None,
     metadata: dict[str, Any] | None = None,
+    idempotency_key: str | None = None,
 ) -> AsyncHandle:
-    """Enqueue an agent execution and return immediately with a handle."""
+    """Enqueue an agent execution and return immediately with a handle.
+
+    Passing ``idempotency_key`` sends the ``Idempotency-Key`` header (dedupe +
+    safe retry).
+    """
     path = f"/agents/async/{_agent_path(name)}"
     payload: dict[str, Any] = {"input": input or {}}
     if webhook_url is not None:
         payload["webhook_url"] = webhook_url
     if metadata is not None:
         payload["metadata"] = metadata
-    body = await _http.request_json("POST", path, json=payload)
+    body = await _http.request_json("POST", path, json=payload, idempotency_key=idempotency_key)
     return AsyncHandle.model_validate(body or {})
 
 

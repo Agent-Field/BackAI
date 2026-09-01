@@ -2,9 +2,7 @@
 
 // suite.realtime.* — Postgres LISTEN/NOTIFY backed realtime subscriptions.
 
-import { type HttpOptions } from "./_http.js"
-
-const DEFAULT_BASE_URL = "http://localhost:8080"
+import { resolveApiKey, resolveBaseUrl, type HttpOptions } from "./_http.js"
 
 export type RealtimeFilter = Record<string, string | number | boolean | null>
 
@@ -24,25 +22,6 @@ export interface SubscribeOptions extends HttpOptions {
    * WebSocket. Browsers and most edge runtimes do not need this.
    */
   WebSocket?: typeof WebSocket
-}
-
-function envVar(name: string): string | undefined {
-  const g = globalThis as { process?: { env?: Record<string, string | undefined> } }
-  return g.process?.env?.[name]
-}
-
-function resolveBaseUrl(override?: string): string {
-  if (override !== undefined && override !== "") return override.replace(/\/+$/, "")
-  const fromEnv = envVar("AF_STACK_URL")
-  if (fromEnv !== undefined && fromEnv !== "") return fromEnv.replace(/\/+$/, "")
-  return DEFAULT_BASE_URL
-}
-
-function resolveApiKey(override?: string): string | undefined {
-  if (override !== undefined && override !== "") return override
-  const fromEnv = envVar("AF_STACK_API_KEY")
-  if (fromEnv !== undefined && fromEnv !== "") return fromEnv
-  return undefined
 }
 
 function websocketBase(baseUrl: string): string {

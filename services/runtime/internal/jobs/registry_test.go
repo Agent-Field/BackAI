@@ -241,12 +241,14 @@ func nowRecent() (t time.Time) {
 	return time.Now().Add(-1 * time.Hour)
 }
 
-// TestEnqueueRejectsRemoteLanguageJobs asserts the enqueue path fails fast
-// with ErrRemoteJobsNotSupported for a python/typescript definition (which
-// has no in-process handler) instead of silently accepting and dropping the
-// job, while a Go definition passes the language gate. Uses a bare Manager
-// with no started River client so it needs no Postgres.
-func TestEnqueueRejectsRemoteLanguageJobs(t *testing.T) {
+// TestEnqueueAcceptsRemoteLanguageJobs asserts the enqueue path treats a
+// remote (python/typescript) definition the same as a Go one: it is NOT
+// rejected up front (remote jobs are now executed by out-of-process pull
+// workers via the DB-backed rendezvous). On a bare Manager with no started
+// River client both kinds fail later with "manager not started" — but
+// neither is rejected as a remote job. Uses a bare Manager so it needs no
+// Postgres.
+func TestEnqueueAcceptsRemoteLanguageJobs(t *testing.T) {
 	mgr := &Manager{registry: NewRegistry(nil)}
 	if err := mgr.registry.RegisterGo(Definition{
 		Name:        "go-job",
@@ -263,14 +265,14 @@ func TestEnqueueRejectsRemoteLanguageJobs(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Remote-language enqueue → typed rejection.
-	if _, err := mgr.Enqueue(ctx, "py-job", json.RawMessage(`{}`), EnqueueOpts{}); !errors.Is(err, ErrRemoteJobsNotSupported) {
-		t.Fatalf("remote enqueue error = %v, want ErrRemoteJobsNotSupported", err)
+	// Remote-language enqueue must pass the language gate (no up-front
+	// rejection). This bare Manager has no started River client, so it fails
+	// later with "manager not started" — but NOT with ErrRemoteJobsNotSupported.
+	if _, err := mgr.Enqueue(ctx, "py-job", json.RawMessage(`{}`), EnqueueOpts{}); errors.Is(err, ErrRemoteJobsNotSupported) {
+		t.Fatalf("py-job was wrongly rejected as remote: %v", err)
 	}
 
-	// A Go definition must pass the language gate. This bare Manager has no
-	// started River client, so it fails later with "manager not started" —
-	// but it must NOT be rejected as a remote job.
+	// A Go definition behaves identically on a bare Manager.
 	if _, err := mgr.Enqueue(ctx, "go-job", json.RawMessage(`{}`), EnqueueOpts{}); errors.Is(err, ErrRemoteJobsNotSupported) {
 		t.Fatalf("go-job was wrongly rejected as remote: %v", err)
 	}

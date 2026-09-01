@@ -1536,6 +1536,14 @@ func (s *Server) writeHookRejection(
 	start time.Time,
 ) {
 	code, msg, status := classifyHookError(err)
+	// Budget-enforcement rejections (402) feed the rejections-spike alert.
+	if status == http.StatusPaymentRequired && code == llmgateway.ErrCodeBudgetExceeded {
+		reason := "tenant"
+		if errors.Is(err, cost.ErrKeyBudgetExceeded) {
+			reason = "key"
+		}
+		appmetrics.ObserveBudgetRejection(pre.TenantID, reason)
+	}
 	writeOpenAIError(w, status, code, msg, nil)
 	post := LLMPostCallPayload{
 		TenantID:   pre.TenantID,

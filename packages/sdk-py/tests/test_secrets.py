@@ -34,7 +34,7 @@ async def reset_http_client(monkeypatch: pytest.MonkeyPatch) -> None:
 
 async def test_get_returns_plaintext_value() -> None:
     with respx.mock(assert_all_called=True) as router:
-        route = router.post(f"{BASE}/secrets/OPENAI_API_KEY/reveal").mock(
+        route = router.post(f"{BASE}/vault/secrets/OPENAI_API_KEY/reveal").mock(
             return_value=httpx.Response(
                 200,
                 json={"key": "OPENAI_API_KEY", "value": "sk-very-secret"},
@@ -50,7 +50,7 @@ async def test_get_url_encodes_key() -> None:
     # Keys can contain characters that need percent-encoding in URL paths
     # (e.g. slashes for namespaced names).
     with respx.mock(assert_all_called=True) as router:
-        route = router.post(f"{BASE}/secrets/team%2Fdeploy-token/reveal").mock(
+        route = router.post(f"{BASE}/vault/secrets/team%2Fdeploy-token/reveal").mock(
             return_value=httpx.Response(200, json={"key": "team/deploy-token", "value": "v"})
         )
         value = await secrets.get("team/deploy-token")
@@ -67,7 +67,7 @@ async def test_get_raises_on_unauthorised() -> None:
         }
     }
     with respx.mock(assert_all_called=True) as router:
-        router.post(f"{BASE}/secrets/SOME_KEY/reveal").mock(
+        router.post(f"{BASE}/vault/secrets/SOME_KEY/reveal").mock(
             return_value=httpx.Response(403, json=error_body)
         )
         with pytest.raises(AFStackError) as exc:
@@ -78,7 +78,7 @@ async def test_get_raises_on_unauthorised() -> None:
 
 async def test_get_raises_on_missing_value_field() -> None:
     with respx.mock(assert_all_called=True) as router:
-        router.post(f"{BASE}/secrets/KEY/reveal").mock(
+        router.post(f"{BASE}/vault/secrets/KEY/reveal").mock(
             return_value=httpx.Response(200, json={"key": "KEY"})
         )
         with pytest.raises(AFStackError) as exc:
@@ -101,7 +101,7 @@ async def test_suite_secrets_namespace_matches_module() -> None:
 
 async def test_reveal_matches_get() -> None:
     with respx.mock(assert_all_called=True) as router:
-        router.post(f"{BASE}/secrets/KEY/reveal").mock(
+        router.post(f"{BASE}/vault/secrets/KEY/reveal").mock(
             return_value=httpx.Response(200, json={"key": "KEY", "value": "v"})
         )
         assert await secrets.reveal("KEY") == "v"
@@ -132,7 +132,7 @@ async def test_list_returns_metadata_rows() -> None:
         ]
     }
     with respx.mock(assert_all_called=True) as router:
-        router.get(f"{BASE}/secrets").mock(return_value=httpx.Response(200, json=payload))
+        router.get(f"{BASE}/vault/secrets").mock(return_value=httpx.Response(200, json=payload))
         result = await secrets.list()
     assert isinstance(result, SecretList)
     assert [row.key for row in result.secrets] == ["OPENAI_API_KEY", "STRIPE_API_KEY"]
@@ -154,7 +154,7 @@ async def test_put_sends_value_and_returns_metadata() -> None:
         "updated_at": "2026-06-01T00:00:00Z",
     }
     with respx.mock(assert_all_called=True) as router:
-        route = router.put(f"{BASE}/secrets/NEW_KEY").mock(
+        route = router.put(f"{BASE}/vault/secrets/NEW_KEY").mock(
             return_value=httpx.Response(200, json=response)
         )
         meta = await secrets.put("NEW_KEY", "plaintext-value", description="test")
@@ -176,7 +176,7 @@ async def test_put_rejects_empty_value() -> None:
 
 async def test_delete_returns_true_on_success() -> None:
     with respx.mock(assert_all_called=True) as router:
-        router.delete(f"{BASE}/secrets/KEY").mock(
+        router.delete(f"{BASE}/vault/secrets/KEY").mock(
             return_value=httpx.Response(200, json={"deleted": True})
         )
         assert await secrets.delete("KEY") is True
@@ -184,7 +184,7 @@ async def test_delete_returns_true_on_success() -> None:
 
 async def test_delete_returns_false_when_runtime_reports_no_op() -> None:
     with respx.mock(assert_all_called=True) as router:
-        router.delete(f"{BASE}/secrets/MISSING").mock(
+        router.delete(f"{BASE}/vault/secrets/MISSING").mock(
             return_value=httpx.Response(200, json={"deleted": False})
         )
         assert await secrets.delete("MISSING") is False
@@ -203,7 +203,7 @@ async def test_rotate_posts_new_value_and_returns_metadata() -> None:
         "updated_at": "2026-06-01T00:00:00Z",
     }
     with respx.mock(assert_all_called=True) as router:
-        route = router.post(f"{BASE}/secrets/KEY/rotate").mock(
+        route = router.post(f"{BASE}/vault/secrets/KEY/rotate").mock(
             return_value=httpx.Response(200, json=response)
         )
         meta = await secrets.rotate("KEY", "new-plaintext")
