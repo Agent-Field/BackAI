@@ -53,6 +53,10 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # 1.7 removed genericOAuthClient and signIn.oauth2. Stay on 1.6
+      # until the dashboard/customer-app auth clients are migrated.
+      - dependency-name: "better-auth"
+        versions: [">=1.7.0"]
     labels:
       - type:chore
       - area:dashboard
