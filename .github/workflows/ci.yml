@@ -91,7 +91,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
-          # Match the toolchain go.mod requires (go 1.25.x). Pinning an older
+          # Match the toolchain go.mod requires (go 1.26.x). Pinning an older
           # version forced a GOTOOLCHAIN auto-download whose tool set was
           # missing `covdata`, breaking `go test -cover` on no-test packages.
           go-version-file: go.mod
@@ -100,18 +100,17 @@ jobs:
         run: go vet ./...
       - name: go build
         run: go build ./...
-      # golangci-lint v2 (S7): the config was migrated from the v1 schema so it
-      # analyzes the go 1.25 toolchain cleanly again. It is restored as a
-      # blocking gate in only-new-issues mode — the ~106-issue pre-existing
-      # backlog is not gated, but any NEW issue a PR introduces fails the build,
-      # so the debt burns down as files are touched. Run ENFORCE via
-      # `golangci-lint run` locally to see the full backlog.
+      # golangci-lint v2 (S7): restored as a blocking gate in only-new-issues
+      # mode — the pre-existing backlog is not gated, but any NEW issue a PR
+      # introduces fails the build. Run ENFORCE via `golangci-lint run`
+      # locally to see the full backlog.
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
-          # v2.5.0's release binary is built with go1.25.1; older v2 binaries
-          # (e.g. v2.1.6, built with go1.24) refuse a config targeting go 1.25.
-          version: v2.5.0
+          # v2.13.1 is built with go1.27 and is the first release that can
+          # typecheck a go 1.26 module. v2.5.0 (go1.25) panics with
+          # "package requires newer Go version go1.26".
+          version: v2.13.1
           # Compute NEW issues from git, not the GitHub diff API. The action's
           # only-new-issues path fetches the PR patch from the API, which has a
           # hard 20k-line ceiling ("diff too large") — a large PR then trips it
@@ -132,7 +131,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with:
-          # Match the toolchain go.mod requires (go 1.25.x). Pinning an older
+          # Match the toolchain go.mod requires (go 1.26.x). Pinning an older
           # version forced a GOTOOLCHAIN auto-download whose tool set was
           # missing `covdata`, breaking `go test -cover` on no-test packages.
           go-version-file: go.mod

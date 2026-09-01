@@ -6,6 +6,10 @@ version: 2
 # Group runtime + dashboard + SDK by ecosystem to avoid a flood of
 # individual PRs. Ignore major version bumps by default — those need
 # human review.
+#
+# Labels must already exist on the repo. Dependabot comments on every
+# PR if a configured label is missing, so these map to the existing
+# type:* / area:* set rather than inventing `dependencies` / `npm`.
 
 updates:
   # ─── Go: the runtime + CLI ──────────────────────────────────────────────
@@ -26,8 +30,8 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
     labels:
-      - dependencies
-      - go
+      - type:chore
+      - area:runtime
 
   # ─── npm: dashboard ─────────────────────────────────────────────────────
   - package-ecosystem: npm
@@ -47,9 +51,8 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
     labels:
-      - dependencies
-      - npm
-      - dashboard
+      - type:chore
+      - area:dashboard
 
   # ─── npm: customer app ──────────────────────────────────────────────────
   - package-ecosystem: npm
@@ -69,9 +72,7 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
     labels:
-      - dependencies
-      - npm
-      - customer-app
+      - type:chore
 
   # ─── npm: TypeScript SDK ────────────────────────────────────────────────
   - package-ecosystem: npm
@@ -91,9 +92,8 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
     labels:
-      - dependencies
-      - npm
-      - sdk-ts
+      - type:chore
+      - area:sdk-ts
 
   # ─── npm: docs site ─────────────────────────────────────────────────────
   - package-ecosystem: npm
@@ -113,9 +113,8 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
     labels:
-      - dependencies
-      - npm
-      - docs-site
+      - type:chore
+      - area:docs
 
   # ─── pip: Python SDK ────────────────────────────────────────────────────
   - package-ecosystem: pip
@@ -135,9 +134,8 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
     labels:
-      - dependencies
-      - pip
-      - sdk-py
+      - type:chore
+      - area:sdk-py
 
   # ─── docker: base images ───────────────────────────────────────────────
   - package-ecosystem: docker
@@ -149,8 +147,8 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
     labels:
-      - dependencies
-      - docker
+      - type:chore
+      - area:deploy
 
   - package-ecosystem: docker
     directory: /apps/dashboard
@@ -161,8 +159,8 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
     labels:
-      - dependencies
-      - docker
+      - type:chore
+      - area:deploy
 
   - package-ecosystem: docker
     directory: /apps/customer-app
@@ -173,8 +171,8 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
     labels:
-      - dependencies
-      - docker
+      - type:chore
+      - area:deploy
 
   # ─── github-actions: workflow files ────────────────────────────────────
   - package-ecosystem: github-actions
@@ -186,5 +184,5 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
     labels:
-      - dependencies
-      - ci
+      - type:chore
+      - area:ci
