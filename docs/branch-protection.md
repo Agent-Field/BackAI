@@ -32,8 +32,8 @@ ruleset**, targeting `main`, with the same rules as below.
 | Required checks | `CI Success`, `Security Success` |
 
 `CI Success` (`.github/workflows/ci.yml`) aggregates lint, test,
-compose/deploy validation, docs, and the DCO job. Path-filtered jobs
-that skip still count as success.
+compose/deploy validation, the install-script gate, docs, and the DCO
+job. Path-filtered jobs that skip still count as success.
 
 `Security Success` (`.github/workflows/security.yml`) aggregates
 pnpm/npm audit, pip-audit, gosec, and trivy. CodeQL uploads results
