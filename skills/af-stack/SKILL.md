@@ -11,29 +11,33 @@ platform for AI products. Architecture is Supabase-shape (Postgres + auth
 forkable — the repo IS the product. AgentField is the AI runtime that
 ships at one of the layers, peer to LiteLLM and Postgres.
 
-**The primary path is the CLI.** `af-stack init --template <t>` scaffolds a
-branded, batteries-included app; `af-stack dev` runs the whole stack locally;
-the `deploy/` targets ship it. Your job is to help the user build on top of
-that scaffold — never to rebuild what the platform already gives them.
+**The primary path is the CLI inside a clone of the repo.** `af-stack init
+--name <n> --template <t>` brands the clone and drops in a batteries-included
+app; `af-stack dev` runs the whole stack locally; the `deploy/` targets ship
+it. Your job is to help the user build on top of that — never to rebuild what
+the platform already gives them.
 
-Working directly in a raw fork of the repo (clone → brand → edit in-tree) is
-the **fallback** for deep platform customization; reach for it only when the
-CLI scaffold + the four edit surfaces below don't cover the need.
+Editing platform code outside the four surfaces (`services/`, `packages/`) is
+the **fallback** for deep customization; reach for it only when the branded
+clone + the four edit surfaces below don't cover the need.
 
 ## Start here — the CLI (primary path)
 
 ```bash
-af-stack init acme-coder --template coding-agent  # scaffold a branded app
-cd acme-coder
-af-stack dev                                       # whole backend + apps up
-af-stack mcp add github --transport stdio \        # register tool servers
+git clone https://github.com/Agent-Field/backai acme-coder && cd acme-coder
+af-stack init --name "Acme Coder" --template coding-agent  # brand + a real coding agent
+af-stack dev                                                # whole backend + apps up
+af-stack mcp add github --transport stdio \                 # register tool servers
   --command "uvx mcp-server-github" --env GITHUB_TOKEN=secret:github_token
 # edit the four surfaces below, then ship via deploy/ (Helm/Fly/Railway/Render/compose)
 ```
 
-`af-stack init` writes the app under your cwd (a coding agent, customer-app,
-multi-tenancy ON, a GH_TOKEN secret slot). Everything after is editing the four
-surfaces. Prefer these commands over hand-copying files.
+`af-stack init --template coding-agent` brands the checkout and adds a real
+coding agent (multi-tenancy ON, a GH_TOKEN secret slot). Everything after is
+editing the four surfaces. Prefer these commands over hand-copying files.
+`af-stack init <name>` with a positional name is different: it scaffolds a
+small standalone app that calls a running BackAI, in any directory, with no
+surfaces to brand or extend.
 
 ## Read these first
 

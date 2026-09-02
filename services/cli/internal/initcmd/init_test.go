@@ -55,9 +55,15 @@ surfaces:
 		t.Fatal(err)
 	}
 
+	// Deps present, so the brand generator is expected to run.
+	write(t, root, "node_modules/.keep", "")
+	stubPnpm(t, true)
+	generatorRan := false
+
 	restoreCwd := chdir(t, root)
 	defer restoreCwd()
 	restoreGenerator := stubGenerator(t, func(gotRoot string) error {
+		generatorRan = true
 		wantRoot, err := filepath.EvalSymlinks(root)
 		if err != nil {
 			t.Fatal(err)
@@ -104,6 +110,12 @@ surfaces:
 	}
 	if !strings.Contains(stdout.String(), "default agent node_id set to docuchat") {
 		t.Fatalf("unexpected stdout:\n%s", stdout.String())
+	}
+	if !generatorRan {
+		t.Fatal("brand generator should run when node_modules and pnpm are present")
+	}
+	if !strings.Contains(stdout.String(), "brand CSS/modules regenerated") {
+		t.Fatalf("stdout should report regeneration:\n%s", stdout.String())
 	}
 }
 

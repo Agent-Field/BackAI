@@ -23,6 +23,8 @@ import (
 	"unicode"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/Agent-Field/backai/services/cli/internal/checkout"
 )
 
 type brandFile struct {
@@ -131,9 +133,9 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	}
 	primaryColor = strings.ToUpper(primaryColor)
 
-	root, err := findRepoRoot()
+	root, err := checkout.Find()
 	if err != nil {
-		return err
+		return fmt.Errorf("init: %w", err)
 	}
 
 	brand, err := readBrand(filepath.Join(root, "brand.yaml"))
@@ -181,16 +183,28 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if err := updateDefaultAgentName(root, slug); err != nil {
 		return err
 	}
-	brandRegenerated := true
-	if err := runBrandGenerator(root); err != nil {
-		// Brand CSS/modules are also regenerated at build time, so a missing
-		// pnpm / node_modules (e.g. a fresh clone that hasn't run `pnpm
-		// install` yet) must NOT abort the scaffold: brand.yaml — the source
-		// of truth — is already written above. Warn and carry on so the
-		// hero flow (`init --template coding-agent`) still scaffolds.
-		brandRegenerated = false
-		fmt.Fprintf(stderr, "warning: skipped brand asset regeneration (%v)\n", err)
-		fmt.Fprintf(stderr, "         run `pnpm install && pnpm run generate:brand` once Node deps are present\n")
+	// Brand CSS/modules are also regenerated at build time, so a missing
+	// pnpm / node_modules (e.g. a fresh clone that hasn't run `pnpm install`
+	// yet) must NOT abort the scaffold: brand.yaml — the source of truth —
+	// is already written above. Warn and carry on so the hero flow
+	// (`init --template coding-agent`) still scaffolds.
+	//
+	// Don't even try when the deps are not there: on a fresh clone that is
+	// the common case, and running the generator anyway prints a Node
+	// stack trace as the first thing the user sees.
+	brandRegenerated := false
+	switch {
+	case !exists(filepath.Join(root, "node_modules")):
+		fmt.Fprintf(stderr, "warning: brand CSS/modules not regenerated — Node deps are not installed yet; run `pnpm install && pnpm run generate:brand`\n")
+	case !pnpmOnPath():
+		fmt.Fprintf(stderr, "warning: brand CSS/modules not regenerated — pnpm is not on PATH; run `pnpm install && pnpm run generate:brand`\n")
+	default:
+		if err := runBrandGenerator(root); err != nil {
+			fmt.Fprintf(stderr, "warning: skipped brand asset regeneration (%v)\n", err)
+			fmt.Fprintf(stderr, "         run `pnpm run generate:brand` to see the full output\n")
+		} else {
+			brandRegenerated = true
+		}
 	}
 
 	var templateSummary string
@@ -237,25 +251,6 @@ func prompt(stdin io.Reader, stdout io.Writer, label string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(line), nil
-}
-
-func findRepoRoot() (string, error) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		if exists(filepath.Join(wd, "package.json")) &&
-			exists(filepath.Join(wd, "apps", "dashboard")) &&
-			exists(filepath.Join(wd, "apps", "customer-app")) {
-			return wd, nil
-		}
-		next := filepath.Dir(wd)
-		if next == wd {
-			return "", errors.New("init: must run from inside an AF Stack checkout")
-		}
-		wd = next
-	}
 }
 
 func readBrand(path string) (brandFile, error) {
@@ -411,6 +406,11 @@ func exists(path string) bool {
 	return err == nil
 }
 
+var pnpmOnPath = func() bool {
+	_, err := exec.LookPath("pnpm")
+	return err == nil
+}
+
 var runBrandGenerator = func(root string) error {
 	cmd := exec.Command("pnpm", "run", "generate:brand")
 	cmd.Dir = root
@@ -418,7 +418,17 @@ var runBrandGenerator = func(root string) error {
 	cmd.Stdout = &output
 	cmd.Stderr = &output
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("init: generate brand: %w\n%s", err, output.String())
+		return fmt.Errorf("init: generate brand: %w\n%s", err, lastLines(output.String(), 8))
 	}
 	return nil
+}
+
+// lastLines keeps a failure readable: the tail of a tool's output carries
+// the actual error, the head is usually a stack trace.
+func lastLines(s string, n int) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) > n {
+		lines = append([]string{"…"}, lines[len(lines)-n:]...)
+	}
+	return strings.Join(lines, "\n")
 }

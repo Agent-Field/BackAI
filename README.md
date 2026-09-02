@@ -132,10 +132,12 @@ approvals, sandbox limits, and audit records keep build and live operations
 inside explicit boundaries.
 
 ```bash
-# Scaffold a small app that consumes a BackAI deployment.
+# A standalone app that calls a running BackAI. Works in any directory.
 af-stack init my-ai-product
 
-# Or customize a full fork and give it to your coding agent.
+# Or brand a full fork and hand it to your coding agent. These run inside
+# a clone of this repo; that clone is where the four surfaces below live.
+git clone https://github.com/Agent-Field/backai acme-ai && cd acme-ai
 af-stack init --name "Acme AI" --color "#2563EB" --logo ./logo.png
 af-stack agent new researcher
 ```

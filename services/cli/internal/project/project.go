@@ -24,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/Agent-Field/backai/services/cli/internal/checkout"
 	"github.com/Agent-Field/backai/services/cli/internal/client"
 	"github.com/Agent-Field/backai/services/cli/internal/output"
 	"github.com/Agent-Field/backai/services/cli/internal/validate"
@@ -49,7 +50,7 @@ func RunDev(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	root, err := findRepoRoot()
+	root, err := checkout.Find()
 	if err != nil {
 		return err
 	}
@@ -274,7 +275,7 @@ func RunDeploy(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	if target == "" {
 		return errors.New("deploy: target is required")
 	}
-	root, err := findRepoRoot()
+	root, err := checkout.Find()
 	if err != nil {
 		return err
 	}
@@ -408,7 +409,7 @@ func runAgentNew(args []string, stdout, _ io.Writer) error {
 	if err != nil {
 		return err
 	}
-	root, err := findRepoRoot()
+	root, err := checkout.Find()
 	if err != nil {
 		return err
 	}
@@ -434,7 +435,7 @@ func runModuleNew(args []string, stdout, _ io.Writer) error {
 	if err != nil {
 		return err
 	}
-	root, err := findRepoRoot()
+	root, err := checkout.Find()
 	if err != nil {
 		return err
 	}
@@ -459,7 +460,7 @@ func runPluginNew(args []string, stdout, _ io.Writer) error {
 	if err != nil {
 		return err
 	}
-	root, err := findRepoRoot()
+	root, err := checkout.Find()
 	if err != nil {
 		return err
 	}
@@ -697,25 +698,6 @@ func writeFiles(root string, files map[string]string) error {
 		}
 	}
 	return nil
-}
-
-func findRepoRoot() (string, error) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		if exists(filepath.Join(wd, "package.json")) &&
-			exists(filepath.Join(wd, "apps", "dashboard")) &&
-			exists(filepath.Join(wd, "apps", "customer-app")) {
-			return wd, nil
-		}
-		next := filepath.Dir(wd)
-		if next == wd {
-			return "", errors.New("must run from inside an AF Stack checkout")
-		}
-		wd = next
-	}
 }
 
 func exists(path string) bool {

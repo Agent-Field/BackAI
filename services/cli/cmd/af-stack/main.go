@@ -9,7 +9,7 @@
 // Currently shipped subcommands:
 //
 //	af-stack init my-app                              Scaffold a new app on the stack
-//	af-stack init --brand --name "DocuChat"           Re-theme a fork (power-user path)
+//	af-stack init --name "DocuChat"                   Re-theme a fork (run inside a clone)
 //	af-stack dev                                      Start local compose dev loop
 //	af-stack agent new <name>                         Scaffold an AgentField agent
 //	af-stack module new <id>                          Scaffold a workload module
