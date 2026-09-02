@@ -65,11 +65,9 @@ dashboard, the dev is "in."
 
 ### Install CLI for power features
 
-```bash
-curl -fsSL https://backai.dev/install.sh | bash
-```
-
-One line. Same as AF. Sets up `af-stack` on PATH.
+One line — the install script from
+[Install (available now)](#install-available-now) above. It puts `af-stack`
+on your PATH.
 
 ## Distribution channels
 
@@ -109,23 +107,39 @@ Every command below exists in the current binary (see
 
 ```bash
 # Fork bootstrap + dev loop (run inside a clone of this repo)
-af-stack init --name "DocuChat" --color "#0A66C2" --logo ./logo.png
+af-stack init --name "DocuChat" --color "#0A66C2"
+# optional: --logo ./your-logo.svg sets the light+dark mark in brand.yaml
 af-stack dev --detach
 af-stack mode personal|saas                  # auth+billing off ⇄ multi-tenant SaaS
 af-stack upgrade [--check]                   # pull latest upstream into this fork
 
-# Scaffolds
+# Scaffolds (run inside a clone of this repo)
 af-stack agent new <name>
 af-stack module new <id>
 af-stack plugin new <id>
+af-stack adapter new <slot> [name] [--dir <parent>]   # remote-adapter sidecar (no checkout needed)
+
+# Validate a scaffold — offline, no runtime and no key
+# (exit 0 valid, 5 failed validation, 4 directory missing, 2 bad args)
+af-stack module validate <dir> [--json]      # e.g. workload-modules/notes
+af-stack agent validate <dir> [--json]       # e.g. apps/backend/agents/supportdesk
 
 # Tools
 af-stack mcp list/add/remove/call <name>
 af-stack adapter list
 
+# Tenant secrets vault (AF_STACK_API_KEY = tenant key)
+af-stack secrets set <key> [--value-stdin] [--description]
+af-stack secrets list [--json]               # metadata + secret:<key> refs only
+
+# Migrations (goose; needs DATABASE_URL or AF_STACK_DATABASE_URL, and a checkout or --dir)
+af-stack db diff|push|generate|reset         # `status` aliases `diff`, `push` aliases goose up
+
 # Identity + multi-tenancy (operator/keys/tenants/sessions)
+# Both operator commands talk to Postgres directly, so both need
+# DATABASE_URL (or AF_STACK_DATABASE_URL) — not a running runtime.
 af-stack operator create --email <email>     # allow a dashboard operator
-af-stack operator key [--owner]              # mint an operator API key (needs DATABASE_URL)
+af-stack operator key [--owner]              # mint an operator API key
 af-stack keys list/issue/rotate/revoke/spend
 af-stack tenants list
 af-stack sessions list/revoke
@@ -142,12 +156,16 @@ af-stack agents list
 af-stack reasoners
 af-stack activity --tenant <id>
 
-# Deploy
+# Deploy (run inside a clone of this repo)
 af-stack deploy helm|fly|railway|render
 ```
 
 Every *shipped* CLI command maps to a documented REST endpoint or admin
-SDK call. Operators can script via CLI; programmers can script via SDK.
+SDK call. Operators can script via CLI; programmers can script via SDK. Flags,
+REST endpoints and exit codes live in
+[`docs/cli-admin.md`](cli-admin.md) — see [Secrets](cli-admin.md#secrets) and
+[Diagnostics & migrations](cli-admin.md#diagnostics--migrations) for the two
+groups above.
 
 > **Fork upgrade gotcha.** The compiled `bin/af-stack` committed in an
 > older fork predates newer subcommands. Rebuild the CLI before running
@@ -163,8 +181,8 @@ roadmap. Don't assume they exist.
 
 ```bash
 af-stack user create/list/disable            # planned
-af-stack secrets set/get/list/delete/rotate  # planned — secrets are managed via API / dashboard today
-af-stack db migrate/rollback/status          # planned — migrations run automatically at runtime boot
+af-stack secrets get/delete/rotate           # planned — set/list ship today; the runtime exposes metadata GET, DELETE and /rotate over REST
+af-stack db down <n>                         # planned — `af-stack db reset` rolls all the way back today
 af-stack import-module <github-url>          # planned
 af-stack self-update                         # planned — use `af-stack upgrade` to pull upstream into a fork
 ```
@@ -200,7 +218,7 @@ Trigger on git tag push.
 | bunx                                      | Niche audience                                                 |
 | pipx                                      | Wrong tool for cross-language CLI                              |
 | Auto-update daemon                        | User-explicit only                                             |
-| Multiple binaries (CLI + server separate) | Single binary, modal commands (`af-stack serve` is the server) |
+| A CLI Docker image                        | The CLI is a single static Go binary from Releases; the runtime, dashboard and customer-app ship as their own images (`ghcr.io/agent-field/af-stack-*`) |
 
 ## Reference
 
