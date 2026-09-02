@@ -39,6 +39,7 @@ jobs:
       compose: ${{ steps.filter.outputs.compose }}
       deploy: ${{ steps.filter.outputs.deploy }}
       images: ${{ steps.filter.outputs.images }}
+      install_script: ${{ steps.filter.outputs.install_script }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -50,6 +51,9 @@ jobs:
               - 'go.mod'
               - 'go.sum'
               - '.golangci.yml'
+              # secrets.TestEnvExampleBootsKMS pins the quickstart contract
+              # that the committed example env boots the runtime.
+              - '.env.example'
             python:
               - '**/*.py'
               - 'pyproject.toml'
@@ -88,6 +92,9 @@ jobs:
               - 'package.json'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
+            install_script:
+              - 'scripts/install.sh'
+              - '.github/workflows/ci.yml'
 
   lint-go:
     name: Lint (Go)
@@ -257,6 +264,90 @@ jobs:
       - name: Validate Helm, Fly, Railway, Render, and prod compose
         run: scripts/validate-deploy-targets.py
 
+  install-script:
+    # The first line of the README quickstart is `curl … install.sh | bash`.
+    # Lint it and actually run it — against the real latest release in the
+    # shapes users hit (piped from stdin, from a file, pinned with and
+    # without the v prefix), and against a local fake release to prove the
+    # checksum gate fails closed. Version assertions are exact: a resolver
+    # that silently picks the wrong tag must go red here.
+    name: Install script
+    needs: changes
+    if: needs.changes.outputs.install_script == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MIRROR: http://127.0.0.1:8765
+    steps:
+      - uses: actions/checkout@v7
+      - name: Lint
+        run: |
+          bash -n scripts/install.sh
+          shellcheck scripts/install.sh
+      - name: Resolve the two newest releases
+        # Via gh (authenticated), deliberately NOT via the same redirect the
+        # script uses, so the assertions below are independent of it.
+        run: |
+          latest="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)"
+          prev="$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 10 --json tagName -q '.[1].tagName')"
+          [ -n "$latest" ] || { echo "could not resolve the latest release" >&2; exit 1; }
+          echo "latest=$latest prev=${prev:-<none>}"
+          { echo "LATEST=$latest"; echo "PREV=$prev"; } >> "$GITHUB_ENV"
+      - name: Install latest (piped, like the README one-liner)
+        run: |
+          AF_STACK_INSTALL_DIR="$RUNNER_TEMP/piped" bash -c 'cat scripts/install.sh | bash'
+          "$RUNNER_TEMP/piped/af-stack" version | grep -Fx "af-stack ${LATEST#v}"
+      - name: Install latest (from file)
+        run: |
+          AF_STACK_INSTALL_DIR="$RUNNER_TEMP/file" bash scripts/install.sh
+          "$RUNNER_TEMP/file/af-stack" version | grep -Fx "af-stack ${LATEST#v}"
+      - name: Install the previous release, pinned (v-prefixed and bare)
+        # Pinning the *previous* release means ignoring the pin can never
+        # pass, and the step never needs a hand-bumped version.
+        run: |
+          if [ -z "$PREV" ]; then echo "only one release exists; nothing to pin"; exit 0; fi
+          AF_STACK_VERSION="$PREV" AF_STACK_INSTALL_DIR="$RUNNER_TEMP/pinned" bash scripts/install.sh
+          "$RUNNER_TEMP/pinned/af-stack" version | grep -Fx "af-stack ${PREV#v}"
+          AF_STACK_VERSION="${PREV#v}" AF_STACK_INSTALL_DIR="$RUNNER_TEMP/pinned-bare" bash scripts/install.sh
+          "$RUNNER_TEMP/pinned-bare/af-stack" version | grep -Fx "af-stack ${PREV#v}"
+      - name: Serve a local fake release
+        run: |
+          mkdir -p "$RUNNER_TEMP/release" && cd "$RUNNER_TEMP/release"
+          gh release download "$LATEST" --repo "$GITHUB_REPOSITORY" --pattern '*_linux_amd64.tar.gz' --pattern 'checksums.txt'
+          cp checksums.txt checksums.good
+          nohup python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 &
+          for _ in $(seq 1 40); do curl -fs "$MIRROR/checksums.txt" >/dev/null && break; sleep 0.25; done
+          curl -fs "$MIRROR/checksums.txt" >/dev/null
+      - name: Reject a tampered checksums.txt (real script, nothing installed)
+        run: |
+          cd "$RUNNER_TEMP/release"
+          sed -E 's/^[0-9a-f]{64}/0000000000000000000000000000000000000000000000000000000000000000/' checksums.good > checksums.txt
+          if AF_STACK_VERSION="$LATEST" AF_STACK_DOWNLOAD_BASE="$MIRROR" AF_STACK_INSTALL_DIR="$RUNNER_TEMP/tampered" \
+               bash "$GITHUB_WORKSPACE/scripts/install.sh" 2>err.txt; then
+            echo "installer accepted a tampered checksum" >&2; cat err.txt; exit 1
+          fi
+          grep -q 'checksum verification failed' err.txt
+          [ ! -e "$RUNNER_TEMP/tampered/af-stack" ]
+      - name: Refuse to install when checksums.txt is unreachable, unless overridden
+        run: |
+          cd "$RUNNER_TEMP/release" && rm -f checksums.txt
+          if AF_STACK_VERSION="$LATEST" AF_STACK_DOWNLOAD_BASE="$MIRROR" AF_STACK_INSTALL_DIR="$RUNNER_TEMP/nochecksums" \
+               bash "$GITHUB_WORKSPACE/scripts/install.sh" 2>err.txt; then
+            echo "installer proceeded without checksums.txt" >&2; cat err.txt; exit 1
+          fi
+          grep -q 'HTTP 404' err.txt
+          [ ! -e "$RUNNER_TEMP/nochecksums/af-stack" ]
+          AF_STACK_SKIP_CHECKSUM=1 AF_STACK_VERSION="$LATEST" AF_STACK_DOWNLOAD_BASE="$MIRROR" AF_STACK_INSTALL_DIR="$RUNNER_TEMP/skipped" \
+            bash "$GITHUB_WORKSPACE/scripts/install.sh"
+          "$RUNNER_TEMP/skipped/af-stack" version | grep -Fx "af-stack ${LATEST#v}"
+      - name: Accept the correct checksums.txt from the mirror
+        run: |
+          cd "$RUNNER_TEMP/release" && cp checksums.good checksums.txt
+          AF_STACK_VERSION="$LATEST" AF_STACK_DOWNLOAD_BASE="$MIRROR" AF_STACK_INSTALL_DIR="$RUNNER_TEMP/mirror" \
+            bash "$GITHUB_WORKSPACE/scripts/install.sh"
+          "$RUNNER_TEMP/mirror/af-stack" version | grep -Fx "af-stack ${LATEST#v}"
+
   build-app-images:
     name: Build app images
     needs: changes
@@ -405,6 +496,7 @@ jobs:
         test-typescript,
         validate-compose,
         validate-deploy-targets,
+        install-script,
         helm-kind-smoke,
         fly-staging-smoke,
         prod-compose-smoke,

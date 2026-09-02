@@ -173,8 +173,8 @@ create tenant → issue API key → set budget → open customer app.
 
 - **Dev `docker.sock` mounting in production** — use gVisor or
   Firecracker for sandboxes.
-- **`AF_STACK_KMS_KEY=dev-secret-change-me-in-prod`** — replace with a
-  real 32-byte hex value.
+- **`AF_STACK_KMS_KEY=dev-secret-change-me`** (the dev sentinel) — replace
+  with a real 32-byte hex value.
 - **Default better-auth signing key** — `AF_STACK_AUTH_SECRET` must be a
   real random value.
 

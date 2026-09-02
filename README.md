@@ -33,7 +33,9 @@ BackAI is currently in beta and under active development. Expect rapid improveme
 
 ## Quickstart
 
-Prerequisite: Docker with Compose.
+Prerequisite: Docker with Compose. Node 18+ is optional: `af-stack dev`
+uses it to auto-allocate conflict-free ports and falls back to the
+defaults without it.
 
 ```bash
 git clone https://github.com/Agent-Field/backai.git

@@ -21,8 +21,11 @@ Open `.env` and set one provider key:
 
 ```bash
 OPENROUTER_API_KEY=sk-or-v1-...
-# Optional: a 64-char hex KMS key. dev-secret-change-me works for local.
-AF_STACK_KMS_KEY=$(openssl rand -hex 32)
+# Optional. The default `dev-secret-change-me` boots with a dev key. For a
+# real key, paste the OUTPUT of `openssl rand -hex 32` — a .env file does
+# not run shell commands, and anything that is not 64 hex characters makes
+# the runtime refuse to start.
+AF_STACK_KMS_KEY=dev-secret-change-me
 ```
 
 ## 2. Boot the stack

@@ -12,9 +12,15 @@ verifies its checksum, and puts it on your PATH:
 curl -fsSL https://raw.githubusercontent.com/Agent-Field/backai/main/scripts/install.sh | bash
 ```
 
-Pin a version or install dir with env: `AF_STACK_VERSION=v0.6.0`,
-`AF_STACK_INSTALL_DIR="$HOME/.local/bin"`. Source:
-[`scripts/install.sh`](../scripts/install.sh).
+Pin a version or install dir with env: `AF_STACK_VERSION=v0.12.4` (bare
+`0.12.4` works too), `AF_STACK_INSTALL_DIR="$HOME/.local/bin"`. The
+script resolves the latest tag from the `releases/latest` redirect (no
+GitHub API rate limit), verifies the archive against the release's
+`checksums.txt` and refuses to install if that file cannot be fetched
+(`AF_STACK_SKIP_CHECKSUM=1` overrides), and can pull both files from a
+mirror instead of GitHub with `AF_STACK_DOWNLOAD_BASE=https://…`. When the
+install dir is not on your PATH it prints the `export PATH=…` line to run.
+Source: [`scripts/install.sh`](../scripts/install.sh).
 
 **2. `go install`** (any platform with Go ≥ 1.25):
 
