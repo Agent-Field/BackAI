@@ -13,27 +13,33 @@ Each command's section states which key it wants.
 
 ## Setup
 
-Two environment variables control every admin call:
+Two environment variables control every admin call over REST; a third,
+`DATABASE_URL`, is what the handful of commands that bypass REST and talk to
+Postgres directly need:
 
 | Env var            | Purpose                                                     | Default                  |
 | ------------------ | ----------------------------------------------------------- | ------------------------ |
 | `AF_STACK_URL`     | Runtime base URL. The CLI appends `/api/v1` to it.          | `http://localhost:8080`  |
 | `AF_STACK_API_KEY` | Bearer token — must be an **operator** key for admin cmds.  | (unset)                  |
+| `DATABASE_URL`     | Postgres DSN for the commands that go straight to the DB: `operator create`, `operator key`, `db *`. `AF_STACK_DATABASE_URL` is accepted as an alias. | (unset) |
 
 Requests go to `${AF_STACK_URL}/api/v1<endpoint>` with
 `Authorization: Bearer ${AF_STACK_API_KEY}`.
 
 ### Minting an operator key
 
-Operator keys are minted directly against the database, so the bootstrap
+Operator keys are minted directly against the database, so **both** bootstrap
 commands need `DATABASE_URL` set (they do **not** go through the REST API):
 
 ```bash
+# 0. Point the bootstrap commands at Postgres (they talk to the DB directly,
+#    not the REST API). AF_STACK_DATABASE_URL is accepted as an alias.
+export DATABASE_URL=postgres://...
+
 # 1. Allow an operator (records the email as operator-eligible)
 af-stack operator create --email founder@example.com
 
-# 2. Mint an operator API key (needs DATABASE_URL for direct DB access)
-export DATABASE_URL=postgres://...
+# 2. Mint an operator API key
 af-stack operator key --owner        # --owner grants the operator:owner scope
 
 # 3. Use the printed key for every admin command
@@ -333,18 +339,30 @@ spell this out. `--json` emits `{ "created": ["jobs/<name>.<ext>"] }`.
 
 ## Diagnostics & migrations
 
-These app-developer commands round out the CLI; each has its own `--json`
-schema where it reports state.
+These app-developer commands round out the CLI. `status`, `doctor` and `test`
+each emit a stable `--json` report; `db` streams goose output instead and takes
+`--dry-run` to preview the invocation.
 
 | Command            | What it does                                                  | Key |
 | ------------------ | ------------------------------------------------------------ | --- |
 | `status [--json]`  | Compact "is the stack up and how is it configured" snapshot  | optional |
 | `doctor [--json]`  | Environment + runtime health checks                          | optional |
 | `test [--json]`    | Shippable-fork gates (module manifests, migration RLS lint)  | none |
-| `db diff\|push\|generate\|reset` | Runtime + workload-module migrations via goose | `DATABASE_URL` |
+| `db diff\|push\|generate\|reset` | Runtime + workload-module migrations via goose | `DATABASE_URL` (or `AF_STACK_DATABASE_URL`) + in-checkout |
+
+`db` resolves migration directories relative to a BackAI checkout, so run it
+from inside your clone — outside one it exits `2` with `db: must run from
+inside a BackAI checkout (or pass --dir <migrations>)`, before `DATABASE_URL`
+is even consulted. The only escape hatch is `--dir <migrations>`; `--module
+<id>` and `--all` are resolved under the repo root and still require the
+checkout. `diff`, `push` and `reset` take `--dir --module --all --dry-run`
+(and `reset` additionally requires `--yes` unless it is a `--dry-run`);
+`generate <name>` takes only `--dir --module --dry-run`. `db status` is an
+alias of `db diff`, and `db push` is goose `up`. Anything that actually runs
+also needs `goose` on your PATH.
 
 ```bash
 af-stack status --json
-af-stack db diff              # applied vs pending migrations
+af-stack db diff              # from inside your clone: applied vs pending migrations
 af-stack db reset --yes       # DESTRUCTIVE: roll every migration back
 ```

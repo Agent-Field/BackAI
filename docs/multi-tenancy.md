@@ -163,7 +163,11 @@ What it checks:
    API.
 3. Issuing an API key returns `value` exactly once; listing keys does
    not leak it.
-4. Both keys can invoke `supportdesk.echo` through the gateway.
+4. Both keys can invoke `supportdesk.echo` through the gateway. (The
+   script hardcodes that reasoner path; if you renamed the default
+   agent's node id — `af-stack init --name` rewrites `NODE_ID` on the
+   `supportdesk-agent` service in `docker-compose.yml` — point it at
+   `<node_id>.echo` instead.)
 5. `GET /admin/audit?tenant=<acme>` contains acme's key id and **never**
    globex's key id (audit scope is per-tenant).
 6. A secret written by acme is **not visible** when listed as globex

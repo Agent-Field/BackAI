@@ -32,7 +32,7 @@ func runScaffold(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("af-stack init <name>", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dir := fs.String("dir", ".", "parent directory to create the project in")
-	template := fs.String("template", "node", "starter template: node | saas")
+	template := fs.String("template", "node", "starter template: node | saas (the coding-agent template is checkout-only: run af-stack init --template coding-agent inside a BackAI checkout)")
 	force := fs.Bool("force", false, "scaffold into an existing non-empty directory")
 	asJSON := fs.Bool("json", false, "emit the created file list as JSON")
 	if err := fs.Parse(args); err != nil {

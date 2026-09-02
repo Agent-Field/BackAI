@@ -24,8 +24,8 @@ unmaintainable.
 
 **Why**: AgentField IS the AI runtime. Duplicating its primitives in
 af-stack creates two sources of truth, drifts on schema, and confuses
-which one the user should use. The platform boundary in `development/strategy.md`
-is the contract.
+which one the user should use. The platform boundary above is the
+contract.
 
 **The correct primitive**:
 
@@ -121,10 +121,10 @@ feature flags that toggle between "OSS edition" and "Enterprise edition."
 **Why**: AF Stack is Apache 2.0 and forkable. The repo the user clones
 IS the running product. No hosted version exists to compete with the
 fork. (This is the core differentiator from Supabase / Appwrite / Nhost —
-see `development/positioning.md`.)
+see `docs/product.md`.)
 
 **The correct primitive**: every feature is in the repo. Enterprise
-controls like SSO, RBAC, BYOK, and GDPR (planned, tracked in `development/strategy.md`) ship
+controls like SSO, RBAC, BYOK, and GDPR (planned) ship
 in-tree. Operator opts in via env / config.
 
 ## Other rules with similar weight
@@ -142,10 +142,12 @@ inside an audited operator route. See `rules/multi-tenancy.md`.
 
 ### B7 — Don't write to env from the UI
 
-The dashboard is read-only on tier-1 + tier-2 config (per
-`development/operator-console-inventory.md`). If the user wants to change adapters / providers /
-modules, they edit `.env` or `config.yaml` and restart. The dashboard
-shows what's active; it doesn't change it.
+The dashboard never rewrites `.env`. To change which adapter, provider, or
+module is active, the operator edits `.env` or `config.yaml` and restarts;
+the dashboard shows what's active. The one exception is adapter
+*credentials* — Platform → Integrations writes those into the vault
+server-side (never echoed back), so don't build a second settings UI for
+them either.
 
 ### B8 — Don't add tools to runtime handlers
 
@@ -158,8 +160,9 @@ runtime is the gateway, not the agent.
 
 `apps/customer-app/` already has: better-auth pages, dashboard layout,
 sign-up flow (auto-provisions tenant + membership + API key), brand
-theming via CSS variables. Edit pages under `(app)/`. Don't rewrite
-`(auth)/` or the layout.
+theming via CSS variables. Add pages as `src/app/<route>/page.tsx`
+(pattern: `src/app/dashboard/page.tsx`). Don't rewrite `(auth)/` or the
+root `app/layout.tsx`.
 
 ### B10 — Don't fork the agent SDK
 
@@ -190,6 +193,5 @@ Examples of common requests + the correct response:
 
 ## When in doubt
 
-Read `development/positioning.md` Part 1 (the strategic frame) and `development/strategy.md`
-("Ownership Boundary"). Those two are the source of truth for what
-belongs where.
+Read `docs/product.md` (what's real vs planned) and the ownership
+boundary above. Those are the source of truth for what belongs where.

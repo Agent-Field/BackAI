@@ -6,12 +6,18 @@
 
 ## TL;DR
 
-1. Pick a **slot** (`sandbox`, `storage`, `notifications`, `secrets`,
-   `billing`, or `multimodal`).
+1. Pick a **slot**. The CLI accepts ten: `sandbox`, `storage`,
+   `notifications`, `secrets`, `billing`, `multimodal`, `logs`, `traces`,
+   `metrics`, `errors`. (§1 below details the first six; the four
+   observability slots are covered in `protocols/`.)
 2. Read the **universal contract** ([`PROTOCOL.md`](PROTOCOL.md)) and
    the **per-slot specification** (`protocols/<slot>-v1.md`).
-3. Implement the HTTP protocol in **any language**. The protocol is
-   JSON over HTTP/1.1 with SSE for streaming endpoints.
+3. **Start from the scaffold**: `af-stack adapter new <slot> [name]`
+   writes a skeleton that already serves `/healthz`, `/v1/capabilities`
+   and `/v1/info` (FastAPI; `--dir <parent>` picks where it lands, and no
+   BackAI checkout is needed). Then implement the per-slot HTTP protocol
+   in **any language** — it is JSON over HTTP/1.1 with SSE for streaming
+   endpoints.
 4. Run the **conformance harness**:
    `backai-adapter-conformance --slot <slot> --url http://localhost:PORT`
 5. Ship a container image. Operators plug you in by setting env vars:
@@ -40,6 +46,12 @@ speaks the protocol to your sidecar.
 
 Pick the one that matches what you want to provide. Each slot has its
 own protocol spec; the universal contract applies to all of them.
+
+`af-stack adapter new` also scaffolds the four observability slots —
+`logs` (built-in: ring buffer, Loki), `traces` (Tempo), `metrics`
+(Prometheus) and `errors` (GlitchTip) — each of which takes
+`AF_STACK_<SLOT>_ADAPTER=remote` the same way. Slots the CLI does **not**
+accept include `llm-chat` and `auth`; both exit 1.
 
 If your service doesn't fit any slot, it's probably a **workload module**
 or a **dashboard plugin** — see

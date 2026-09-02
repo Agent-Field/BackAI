@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Restore the AF Stack runtime database from a pg_dump archive.
 #
-# Drops + recreates objects via pg_restore --clean. Re-runs migrations
-# after to catch any schema drift between the backup and the current
-# code.
+# Drops + recreates objects via pg_restore --clean. Restart the runtime
+# afterwards: it applies every pending migration on boot, catching any
+# schema drift between the backup and the current code.
 #
 # Usage:
 #   ./scripts/restore.sh --url postgres://... --from /backups/af.sql.gz
@@ -56,7 +56,11 @@ gunzip -c "$FROM" | pg_restore --clean --if-exists --no-owner \
     --no-privileges -d "$URL"
 
 yellow "==> Schema may have moved on since the backup vintage."
-yellow "    Run the runtime migrations now to catch up:"
-yellow "      docker compose run --rm runtime /usr/local/bin/af-stack migrate up"
+yellow "    Restart the runtime to apply pending migrations (core, workload"
+yellow "    modules and jobs). A failed core migration exits non-zero; a failed"
+yellow "    module or jobs migration is only logged and that module (or the jobs"
+yellow "    worker) is disabled. There is no 'af-stack migrate' subcommand."
+yellow "      docker compose up -d --force-recreate runtime"
+yellow "      docker compose logs runtime | grep -E 'migrations (applied|failed)'"
 
 green  "==> Restore complete. Validate with scripts/test-quickstart.sh."

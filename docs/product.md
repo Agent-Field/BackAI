@@ -46,12 +46,12 @@ another provider key when you want live model calls through LiteLLM:
 | **Audit log**                | Every admin mutation (tenant create/delete, api_key create/revoke, secret put/delete/reveal, budget set, membership change) writes a row with actor, IP, user agent, metadata.                                                                                          |
 | **MCP host**                 | stdio + SSE adapters with JSON-RPC framing, 5-minute tool catalogue refresh, per-tenant scoping, env from secrets vault via `secret:<key>` prefix.                                                                                                                      |
 | **Skills**                   | Install bundles, attach to agents, query installed list.                                                                                                                                                                                                                |
-| **Harnesses**                | Probe-only — detects whether claude-code/codex/gemini/opencode is available in the agent container and what auth it needs.                                                                                                                                              |
+| **Harnesses**                | Probe-only — detects whether claude-code/codex/gemini/opencode is available in the agent container and what auth it needs. Reachable over `GET /api/v1/harnesses`, `GET /api/v1/harnesses/{provider}` and `POST /api/v1/harnesses/{provider}/probe`; there is no operator-dashboard page and no `af-stack harness` command on the operator CLI.                                                                                                                                              |
 | **Operator dashboard**       | Cost charts, run inspector, sandbox activity, memory browser, audit log, tenant drilldown, plugin system, theming via CSS variables. Plus operator pages for Secrets (vault CRUD + reveal/rotate), Crons (roster + trigger/pause), Flags, Cache (gateway hit rate + flush), Notifications (outbox + channels), and OAuth connections.                                                                                                                                    |
 | **Customer-facing app**      | Sign-up → help center → Support Chat → request history → billing/account pages. Runtime credentials stay internal to the app. Separate brand, same auth DB.                                                                                                             |
 | **OpenAPI 3.1**              | Auto-generated at `/openapi.json` with 86+ routes, 21 routes with curl+Python+TS code samples.                                                                                                                                                                          |
 | **Python + TypeScript SDKs** | `suite.notifications.*`, `suite.webhooks.*`, `suite.billing.*`, `suite.sandbox.*`, `suite.memory.*`, `suite.tools.*` (MCP), `suite.admin.skills.*`, `suite.harnesses.*`. Pydantic + zod, close-but-not-identical parity: Python also ships `suite.crons.*`; TypeScript also ships `suite.activity.*` + `suite.flags.*`. The Go SDK is an empty stub (planned, not shipped).                                                                         |
-| **CLI**                      | `af-stack mcp list/add/remove/call`, `af-stack harness list/install`.                                                                                                                                                                                                   |
+| **CLI**                      | Scaffold + lifecycle (`init`, `dev`, `mode`, `upgrade`, `agent new`, `module new`, `plugin new`, `job new`, `deploy`), operator bootstrap (`operator create`, `operator key`), runtime admin (`keys`, `agents`, `reasoners`, `runs`, `logs`, `errors`, `audit`, `sessions`, `tenants`, `activity`, `adapter list`), plus `mcp list/add/remove/call`, `billing`, `connection`, `secrets`, `db`, `doctor`, `status`, `test`. `af-stack --help` prints the current list.                                                                                                                                                                                                   |
 | **Helm chart**               | Production-ready with HPA, NetworkPolicy, PDB, ServiceMonitor. Both `values-dev.yaml` (in-chart PG+MinIO) and `values-prod.yaml` (external everything). Helm lint passes both.                                                                                          |
 | **PaaS configs**             | Fly.io (2 apps via flycast), Railway template, Render Blueprint, `docker-compose.prod.yml`, Caddy with auto-TLS.                                                                                                                                                        |
 | **Graceful shutdown**        | `/health` is cheap liveness, `/ready` returns 503 during boot+drain+DB-down with proper `Retry-After`. SIGTERM triggers ordered shutdown: HTTP drain → workers cancel → DB close.                                                                                       |
@@ -148,22 +148,26 @@ done. No fork.
 ### Adding a workload module
 
 ```yaml
-# workload-modules/notes/manifest.yaml
+# workload-modules/notes/backai.module.yaml
 id: notes
 name: Notes
 version: 0.1.0
-requires: [multi-tenancy, llm-gateway]
-routes:
-  - { method: POST, path: /notes, handler: notes.Create }
-meters:
-  - { name: notes_created, unit: count }
+enabled: false
+resources:
+  - name: notes            # table: notes_notes
+    fields:
+      - { name: title, type: string, required: true }
+      - { name: done, type: bool, default: false }
 ```
 
-Go handler at `workload-modules/notes/handlers/notes.go`, migration at
-`workload-modules/notes/migrations/00001_init.sql`. `af-stack module new`
-scaffolds this layout today; the runtime-side dynamic loader that mounts
-routes at `/workload/notes/...` and applies per-module migrations is still
-being wired — see `docs/workload-modules.md` for the current status.
+Migration at `workload-modules/notes/migrations/00001_notes.sql` creates
+the table with `tenant_id` + forced RLS. At boot the runtime discovers the
+manifest, RLS-lints and applies the migrations, and serves tenant-scoped
+CRUD at `/api/v1/workload/notes/notes` — no handler code. Scaffolds ship
+`enabled: false`, so flip it to `true` or add the id to
+`modules.workload_modules` (env `AF_STACK_WORKLOAD_MODULES`) and restart.
+`af-stack module validate workload-modules/notes` checks it offline; see
+`docs/workload-modules.md` for the full contract.
 
 ### Swapping a default
 

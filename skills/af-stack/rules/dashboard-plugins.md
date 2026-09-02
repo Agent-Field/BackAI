@@ -41,7 +41,7 @@ export default definePlugin({
 | Group | When | Examples |
 |---|---|---|
 | `build` | Your product config: agents, modules, integrations | Future: a "module config" view |
-| `operate` | Live runtime state: charts, status, lists | The first-party `cost-explorer` plugin sits here |
+| `operate` | Live runtime state: charts, status, lists | Cost/usage charts, run status, queue depth |
 | `customers` | Per-tenant / per-end-user views | `notable` example plugin (per-tenant note counts) |
 
 If unsure: `operate` is the default for monitoring views.
@@ -101,8 +101,8 @@ is server-rendered each request so the operator sees fresh state.
 
 ## Charts
 
-`recharts` is already a dependency. The cost-explorer plugin
-(`apps/dashboard/plugins/cost-explorer/`) shows the pattern.
+`recharts` is already a dependency (`apps/dashboard/package.json`).
+Charts must be client components:
 
 ```tsx
 "use client"  // recharts needs the client

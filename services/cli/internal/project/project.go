@@ -45,7 +45,7 @@ func RunDev(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	fs := flag.NewFlagSet("af-stack dev", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	detach := fs.Bool("detach", false, "run docker compose in detached mode")
-	noOpen := fs.Bool("no-open", false, "do not open the dashboard URL")
+	noOpen := fs.Bool("no-open", false, "with --detach, do not open the customer app URL in a browser")
 	noPreflight := fs.Bool("no-preflight", false, "skip the port preflight/auto-allocation step")
 	if err := fs.Parse(args); err != nil {
 		return err

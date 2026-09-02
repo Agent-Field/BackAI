@@ -6,17 +6,18 @@ into your own backend.
 
 ## What you copy
 
-| Surface          | Starter path                         | Copy into your fork                                     |
-| ---------------- | ------------------------------------ | ------------------------------------------------------- |
-| Agent            | `agents/starter/`                    | `apps/backend/agents/<your-agent>/`                     |
-| Customer flow    | `customer-app/first-action/page.tsx` | `apps/customer-app/src/app/(app)/first-action/page.tsx` |
-| Dashboard plugin | `dashboard-plugin/`                  | `apps/dashboard/plugins/<your-plugin>/`                 |
-| Workload module  | `workload-module/`                   | `workload-modules/<your-module>/`                       |
+| Surface          | Starter path                         | Copy into your fork                               |
+| ---------------- | ------------------------------------ | ------------------------------------------------- |
+| Agent            | `agents/starter/`                    | `apps/backend/agents/<your-agent>/`               |
+| Customer flow    | `customer-app/first-action/page.tsx` | `apps/customer-app/src/app/first-action/page.tsx` |
+| Dashboard plugin | `dashboard-plugin/`                  | `apps/dashboard/plugins/<your-plugin>/`           |
+| Workload module  | `workload-module/`                   | `workload-modules/<your-module>/`                 |
 
 Start by branding the fork:
 
 ```bash
-af-stack init --name "DocuChat" --color "#0A66C2" --logo ./logo.png
+af-stack init --name "DocuChat" --color "#0A66C2"
+# optional: --logo ./your-logo.svg sets the light+dark mark in brand.yaml
 ```
 
 Then copy the starter pieces you want and rename `starter` to your

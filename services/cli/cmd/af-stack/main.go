@@ -14,7 +14,10 @@
 //	af-stack agent new <name>                         Scaffold an AgentField agent
 //	af-stack module new <id>                          Scaffold a workload module
 //	af-stack plugin new <id>                          Scaffold a dashboard plugin
-//	af-stack adapter list                             Show active adapter choices
+//	af-stack agent validate <dir>                     Validate an agent scaffold (offline, --json)
+//	af-stack module validate <dir>                    Validate a workload module (offline, --json)
+//	af-stack adapter new <slot> [name]                Scaffold a remote-adapter sidecar
+//	af-stack adapter list                             Show active adapter choices (operator)
 //	af-stack deploy <target>                          Deploy via helm/fly/railway/render
 //	af-stack operator create --email <email>          Allow an operator
 //	af-stack operator key [--owner]                   Mint an operator API key (direct DB)
@@ -267,13 +270,13 @@ Commands:
   upgrade    Pull the latest upstream AF Stack into this fork (--check for a dry run)
   dev        Start docker compose for local development
   mode       Switch personal (auth+billing off) ⇄ saas (af-stack mode [personal|saas])
-  agent      Agent scaffold commands
-  module     Workload module scaffold commands
+  agent      Agent commands: new | validate
+  module     Workload module commands: new | validate
   plugin     Dashboard plugin scaffold commands
-  adapter    Adapter discovery commands
+  adapter    Adapters: new <slot> scaffolds a remote sidecar (list is operator-only)
   deploy     Deploy wrappers for helm/fly/railway/render
   operator   Operator bootstrap commands (create, key)
-  mcp        Model Context Protocol server + tool management
+  mcp        Model Context Protocol servers + tools (needs a running runtime)
   billing    Set up Stripe billing: plans + pricing (agent-first)
   job        Scaffold a background-worker job (af-stack job new <name> --lang py|ts)
   connection External-service connections: add | list | remove
@@ -284,8 +287,9 @@ Commands:
   test       Shippable-fork gates (manifests, migrations, ...)
   version    Print the CLI version
 
-Operator commands (need AF_STACK_API_KEY = operator key; mint one with
-`+"`af-stack operator key`"+`):
+Operator commands (need a running runtime + AF_STACK_API_KEY = operator key;
+mint one with `+"`af-stack operator key`"+`):
+  adapter    Active adapter choices: adapter list
   keys       API keys: list | issue | rotate | revoke | spend
   agents     Registered agents: list
   reasoners  Per-reasoner cost/latency/error analytics
@@ -299,7 +303,7 @@ Operator commands (need AF_STACK_API_KEY = operator key; mint one with
 
 Examples:
   af-stack init my-app                              # scaffold a new project that consumes the stack
-  af-stack init --template coding-agent             # in-checkout: rebrand + scaffold the hero coding agent
+  af-stack init --name "Acme Coder" --template coding-agent   # in-checkout: rebrand + hero coding agent
   af-stack init --name "DocuChat" --color "#0A66C2" # in-checkout: re-theme this fork
   af-stack upgrade --check                          # what would an upgrade bring? (commits, migrations, conflicts)
   af-stack upgrade                                  # backup DB, merge upstream, print rebuild steps
@@ -307,11 +311,13 @@ Examples:
   af-stack mode personal                            # single-user app: no login, no billing
   af-stack mode saas                                # back to multi-tenant SaaS
   af-stack agent new researcher
-  af-stack adapter list
+  af-stack adapter new storage my-s3                # scaffold a remote-adapter sidecar (no checkout needed)
+  af-stack module validate workload-modules/notes   # offline manifest + RLS gate (--json for CI)
   af-stack deploy helm
   af-stack operator create --email founder@example.com
   af-stack operator key --owner        # mint an operator API key (needs DATABASE_URL)
   af-stack keys issue --tenant <uuid> --name ci
+  af-stack adapter list                             # active adapters (needs a running runtime + operator key)
   af-stack job new resize-image --lang py           # scaffold jobs/resize-image.py
   af-stack connection add --provider github --kind api_key --name ci
   echo -n "$STRIPE_KEY" | af-stack secrets set stripe --value-stdin

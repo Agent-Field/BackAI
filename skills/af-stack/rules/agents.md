@@ -19,6 +19,17 @@ The agent registers with the AgentField control plane on startup. The
 runtime gateway forwards `POST /api/v1/agents/<node_id>.<reasoner-name>`
 to the agent.
 
+Scaffold one with `af-stack agent new <name>`, then check it offline — no
+Docker, no runtime, no operator key:
+
+```bash
+af-stack agent validate apps/backend/agents/<name>   # add --json
+```
+
+It takes a **directory path** (a bare agent id exits 4) and checks the
+`main.py` entry point. Exit 0 = valid, 5 = validation failed, 4 = the
+directory doesn't exist, 2 = bad args.
+
 ## The Agent + reasoner pattern
 
 ```python

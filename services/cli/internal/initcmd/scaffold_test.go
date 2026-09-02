@@ -5,6 +5,8 @@ package initcmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,5 +111,41 @@ func TestScaffold_UnknownTemplate(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "coding-agent") {
 		t.Fatalf("unknown-template error should mention the in-checkout coding-agent path, got %v", err)
+	}
+}
+
+// TestInitHelpNamesBothModes pins the cross-references between init's two
+// flag sets. `af-stack init` (flags only) re-themes a checkout; `af-stack
+// init <name>` scaffolds a standalone app. Neither used to mention the
+// other, and the flag form advertised --template coding-agent to readers
+// standing outside a checkout, where the positional form rejects it.
+func TestInitHelpNamesBothModes(t *testing.T) {
+	var stderr bytes.Buffer
+	if err := Run([]string{"-h"}, strings.NewReader(""), &bytes.Buffer{}, &stderr); !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("Run(-h) error = %v, want flag.ErrHelp", err)
+	}
+	for _, want := range []string{
+		"in-checkout re-theme",
+		"af-stack init <name>",
+		"flag-form only; requires a BackAI checkout",
+		"brand/logo.<ext>",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("init --help missing %q:\n%s", want, stderr.String())
+		}
+	}
+
+	stderr.Reset()
+	if err := Run([]string{"acme", "-h"}, strings.NewReader(""), &bytes.Buffer{}, &stderr); err == nil {
+		t.Fatal("Run(<name> -h) should not succeed")
+	}
+	for _, want := range []string{
+		"af-stack init <name>",
+		"node | saas",
+		"checkout-only",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("init <name> --help missing %q:\n%s", want, stderr.String())
+		}
 	}
 }

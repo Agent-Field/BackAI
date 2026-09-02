@@ -168,3 +168,32 @@ func TestScaffoldSaaS_ClientTypechecks(t *testing.T) {
 		t.Fatalf("scaffold API client failed tsc:\n%s", out)
 	}
 }
+
+// TestScaffoldSaaS_ValidateCommandsUsePathForm pins that every generated
+// mention of `af-stack {module,agent} validate` names a directory. The bare
+// id form (`af-stack module validate notes`) exits 4 - the scaffold used to
+// ship it in three places.
+func TestScaffoldSaaS_ValidateCommandsUsePathForm(t *testing.T) {
+	files := SaaSTemplateFiles("Notes App", "notes-app")
+	for rel, contents := range files {
+		for _, bare := range []string{
+			"af-stack module validate notes",
+			"af-stack agent validate notes-assistant",
+		} {
+			if strings.Contains(contents, bare) {
+				t.Fatalf("%s ships the bare-id validate form %q (exits 4); use the path form", rel, bare)
+			}
+		}
+	}
+	for _, tc := range []struct{ rel, want string }{
+		{"README.md", "af-stack module validate modules/notes"},
+		{"README.md", "af-stack agent validate agents/notes-assistant"},
+		{"modules/notes/README.md", "af-stack module validate modules/notes"},
+		{"capabilities.json", "af-stack module validate modules/notes"},
+		{"capabilities.json", "af-stack agent validate agents/notes-assistant"},
+	} {
+		if !strings.Contains(files[tc.rel], tc.want) {
+			t.Fatalf("%s missing %q:\n%s", tc.rel, tc.want, files[tc.rel])
+		}
+	}
+}

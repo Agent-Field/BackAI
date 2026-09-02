@@ -50,7 +50,14 @@ Prefer not to pipe an installer into a shell? [Inspect it first](scripts/install
 or run `go install github.com/Agent-Field/backai/services/cli/cmd/af-stack@latest`.
 
 Open the customer app first at `http://localhost:34000`, then inspect what it
-did in the operator console at `http://localhost:33000`.
+did in the operator console at `http://localhost:33000` — sign in with
+`operator@af-stack.local` / `changeme123`. Set
+`AF_STACK_DEFAULT_OPERATOR_EMAIL` / `AF_STACK_DEFAULT_OPERATOR_PASSWORD` in
+`.env` _before_ the first boot to seed different credentials; the seed only
+runs while no operator exists; to change the seeded credentials later, reset
+the Postgres volume, or set `AF_STACK_DEFAULT_OPERATOR_DISABLED=true` and
+provision operators yourself. `af-stack mode personal` turns the login off
+entirely.
 
 No model key is required. The first run uses a deterministic demo provider but
 still exercises the real gateway, tenant context, cost ledger, customer app,
@@ -138,7 +145,8 @@ af-stack init my-ai-product
 # Or brand a full fork and hand it to your coding agent. These run inside
 # a clone of this repo; that clone is where the four surfaces below live.
 git clone https://github.com/Agent-Field/backai acme-ai && cd acme-ai
-af-stack init --name "Acme AI" --color "#2563EB" --logo ./logo.png
+af-stack init --name "Acme AI" --color "#2563EB"
+# optional: --logo ./your-logo.svg sets the light+dark mark in brand.yaml
 af-stack agent new researcher
 ```
 

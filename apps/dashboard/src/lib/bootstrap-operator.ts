@@ -14,7 +14,8 @@
 // every route (/login, /, …) bounced to /setup forever. Seeding a known
 // account removes that failure mode entirely.
 //
-// Credentials come from env and are documented in the README / .env.example:
+// Credentials come from env and are documented in the README quickstart,
+// AGENTS.md and .env.example:
 //   AF_STACK_DEFAULT_OPERATOR_EMAIL    (default: operator@af-stack.local)
 //   AF_STACK_DEFAULT_OPERATOR_PASSWORD (default: changeme123)
 //   AF_STACK_DEFAULT_OPERATOR_NAME     (default: Default Operator)

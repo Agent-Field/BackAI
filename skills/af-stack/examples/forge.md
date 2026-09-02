@@ -12,7 +12,7 @@ inline comments. Sold per-developer-seat.
 
 | Surface | Path | What you write |
 |---|---|---|
-| Customer App | `apps/customer-app/src/app/(app)/` | 3–5 pages: dashboard, repos, billing, settings |
+| Customer App | `apps/customer-app/src/app/<route>/page.tsx` | 3–5 pages: dashboard, repos, billing, settings |
 | Agent | `apps/backend/agents/forge/` | 1 reasoner: `review_pr` |
 | Workload Module | `examples/forge/handlers/` | 3 routes (webhook, list reviews, stats) + 1 job + 1 migration |
 | Dashboard Plugin | `apps/dashboard/plugins/forge/` | 1 page: cross-tenant stats |
@@ -340,7 +340,7 @@ export default async function ForgePage() {
 
 ## Surface 4 — Customer app
 
-`apps/customer-app/src/app/(app)/dashboard/page.tsx` (customer's view of
+`apps/customer-app/src/app/dashboard/page.tsx` (customer's view of
 their reviews):
 
 ```tsx
@@ -375,8 +375,9 @@ export default async function CustomerDashboard() {
 }
 ```
 
-Plus a `(app)/repos/page.tsx` to connect / disconnect repos, and the
-existing `(app)/billing/page.tsx` (pre-wired) for Stripe/Lago.
+Plus `src/app/repos/page.tsx` to connect / disconnect repos, and a
+`src/app/billing/page.tsx` you write for Stripe/Lago — there is no
+pre-wired customer billing page; the operator dashboard owns billing today.
 
 **~3–5 customer-app pages, ~300 lines total.**
 
@@ -386,7 +387,8 @@ existing `(app)/billing/page.tsx` (pre-wired) for Stripe/Lago.
 # Day 1
 git clone github.com/yourorg/forge   # their fork of AF Stack
 cd forge
-af-stack init --name "Forge" --color "#0066FF" --logo ./forge-logo.svg
+af-stack init --name "Forge" --color "#0066FF"
+# optional: --logo ./forge-logo.svg sets the light+dark mark in brand.yaml
 
 # Day 2–4: write the agent + workload module + dashboard plugin
 #          + tweak 4 customer-app pages

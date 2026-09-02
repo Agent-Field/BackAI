@@ -37,9 +37,13 @@ The default local URLs:
 | AgentField control plane | `http://localhost:8081/` | Agent registry + traces |
 | MinIO console | `http://localhost:9001/` | Dev object storage |
 
-Prove the wiring without any key (the default `supportdesk` agent ships a
-no-key `echo` reasoner for exactly this — the heavier `sample` agent lives
-behind the `advanced` compose profile):
+Prove the wiring without any key — the default agent ships a no-key `echo`
+reasoner for exactly this (the heavier `sample` agent lives behind the
+`advanced` compose profile). The reasoner path is `<node_id>.echo`, where
+`<node_id>` is the `NODE_ID` set on the `supportdesk-agent` service in
+`docker-compose.yml`. `af-stack init --name` rewrites that node id to your
+slug, so on a branded fork use the new one — a plain GET on
+`/api/v1/agents` (no key required) lists what is actually registered.
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/agents/supportdesk.echo \
@@ -104,19 +108,21 @@ The 10 critical rules live in
 for agents. Configure once with env (`AF_STACK_URL`, `AF_STACK_API_KEY`)
 and drive everything.
 
-- **Scaffold / lifecycle** (no key): `init`, `dev`, `mode`, `upgrade`
-  (`--check` for a dry run), `agent|module|plugin new`, `adapter list`,
+- **Scaffold / lifecycle** (no runtime, no key): `init`, `dev`, `mode`,
+  `upgrade` (`--check` for a dry run), `agent|module|plugin new`,
   `deploy <helm|fly|railway|render>`.
-- **Billing** (agent-first): `af-stack billing plan set --id pro --name Pro
-  --price 29 --budget 25 --entitlement seats=5 --default` auto-provisions
-  the Stripe Product + Price — no dashboard, no copy-pasted price IDs. See
-  [`docs/billing.md`](docs/billing.md).
-- **Operator surface** (needs an operator key — mint one with `af-stack
-  operator key`): `keys`, `agents`, `reasoners`, `runs`, `logs`, `errors`,
-  `audit`, `sessions`, `tenants`, `activity`. Reference:
+- **Billing** (agent-first; needs an operator key): `af-stack billing plan
+  set --id pro --name Pro --price 29 --budget 25 --entitlement seats=5
+  --default` auto-provisions the Stripe Product + Price — no dashboard, no
+  copy-pasted price IDs. See [`docs/billing.md`](docs/billing.md).
+- **Operator surface** (needs a running runtime + an operator key — mint one
+  with `af-stack operator key`; in `personal` mode the key is not
+  required): `keys`, `agents`, `reasoners`, `runs`, `logs`, `errors`,
+  `audit`, `sessions`, `tenants`, `activity`, `adapter list`. Reference:
   [`docs/cli-admin.md`](docs/cli-admin.md).
 - **MCP**: `af-stack mcp list|add|remove|call` manages MCP servers
-  registered with the runtime; `mcp call` takes/emits JSON.
+  registered with the runtime (it needs that runtime running); `mcp call`
+  takes/emits JSON.
 
 Errors are structured: every failure carries a stable `code`, a `message`,
 and a `request_id` (e.g. `[BUDGET_EXCEEDED] ...`). The machine-readable API

@@ -95,7 +95,10 @@ discovers the manifest, generates
 `apps/dashboard/src/lib/plugins.generated.ts`, and the sidebar nav
 adds your tab under its declared group.
 
-Working reference: [`apps/dashboard/plugins/cost-explorer/`](https://github.com/Agent-Field/backai/tree/main/apps/dashboard/plugins/cost-explorer).
+Working reference: [`examples/01-notable/dashboard-plugin/`](https://github.com/Agent-Field/backai/tree/main/examples/01-notable/dashboard-plugin)
+— a real `plugin.ts` + `page.tsx` pair you can copy into
+`apps/dashboard/plugins/<id>/`. No plugins ship enabled by default; the
+directory is created by `af-stack plugin new <id>`.
 Full guide: [Reference → Dashboard Plugins](/reference/dashboard-plugins/).
 
 ## What you DON'T need to fork for

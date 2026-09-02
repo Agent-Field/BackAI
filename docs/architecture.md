@@ -472,13 +472,14 @@ capabilities.
 Drop a directory under `workload-modules/<id>/`:
 
 ```
-manifest.yaml         # routes, migrations, jobs, crons
-handler.go            # Go HTTP handlers
-migrations/*.sql      # schema additions
+backai.module.yaml    # id, version, resources + fields (check with `af-stack module validate`)
+README.md
+migrations/*.sql      # schema additions (goose)
 ```
 
-The runtime's module loader mounts your routes at `/workload/<id>/...`
-on next start.
+The runtime's module loader mounts each resource at
+`/api/v1/workload/<id>/<resource>` on next start. There is no handler
+file and no jobs/crons field: modules are declarative.
 
 ### 10.5 A new dashboard plugin
 

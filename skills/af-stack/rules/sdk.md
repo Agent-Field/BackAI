@@ -144,8 +144,9 @@ When you need a specific call:
    `packages/sdk-py/af_stack/<module>.py` — these files have Sphinx
    docstrings that map every call to its REST endpoint.
 2. **OpenAPI**: `GET /openapi.json` on a running runtime. Live truth.
-3. **Existing code**: search how the cost-explorer plugin / Notable
-   example / sample agent use the SDK — those are tested patterns.
+3. **Existing code**: `scripts/sdk-conformance/run.ts` and `run.py` exercise
+   every SDK namespace against a live runtime — those are tested patterns.
+   (The example dashboard plugins use plain `fetch`, not the SDK.)
 
 ## LLM rate limits — 429 responses
 

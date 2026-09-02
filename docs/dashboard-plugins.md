@@ -131,10 +131,10 @@ Field reference:
 Default-export a React component. Server components can use `api.*`
 helpers directly; client components should hydrate from server-rendered
 data. The example
-[`apps/dashboard/plugins/cost-explorer/page.tsx`](../apps/dashboard/plugins/cost-explorer/page.tsx)
-shows the recommended pattern: fetch with `Promise.allSettled`, degrade
-gracefully when the runtime is unreachable, reuse the shared
-`formatCurrency` helper from `(admin)/operate/cost/_components/format.ts`.
+[`examples/01-notable/dashboard-plugin/page.tsx`](../examples/01-notable/dashboard-plugin/page.tsx)
+shows the recommended pattern: fetch server-side so no credential reaches
+the browser, and degrade gracefully to a calm empty state when the upstream
+service is unreachable.
 
 ### Run
 

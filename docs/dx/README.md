@@ -8,7 +8,7 @@ source — where this hub and older prose disagree, this hub wins.
 
 ```bash
 git clone https://github.com/Agent-Field/backai my-app && cd my-app
-af-stack init --name "My App" # brand the fork: brand.yaml, logos, default agent
+af-stack init --name "My App" # brand the fork: brand.yaml + default agent name (add --logo/--color to set those)
 af-stack dev                  # preflight ports + docker compose up
 # … edit one of the four surfaces (below) …
 af-stack deploy helm          # ship it (helm | fly | railway | render)
@@ -29,7 +29,7 @@ You build by editing one of four places. Everything else is platform.
 | --- | --- | --- |
 | **Agent** (AgentField reasoner) | `apps/backend/agents/<name>/` | `af-stack agent new <name>` |
 | **Customer app** (product UI) | `apps/customer-app/` | edit directly |
-| **Workload module** (backend routes/crons/migrations) — *scaffold today; runtime auto-mounting is roadmap* | `workload-modules/<id>/` | `af-stack module new <id>` |
+| **Workload module** (backend resources + migrations) — *scaffolds ship `enabled: false`; set `enabled: true` in `backai.module.yaml` (or list the id in `AF_STACK_WORKLOAD_MODULES`) and restart to mount it* | `workload-modules/<id>/` | `af-stack module new <id>` |
 | **Dashboard plugin** (operator UI) | `apps/dashboard/plugins/<id>/` | `af-stack plugin new <id>` |
 
 Or **don't build in the repo at all**: point your existing app at the
@@ -64,6 +64,7 @@ Full breakdown in [sdk.md](sdk.md).
 
 | Topic | Doc |
 | --- | --- |
+| Operator CLI + minting an operator key | [../cli-admin.md](../cli-admin.md) |
 | Deploying (helm/fly/railway/render) | [../deploy.md](../deploy.md) |
 | Multi-tenancy & RLS | [../multi-tenancy.md](../multi-tenancy.md) |
 | Workload modules (full contract) | [../workload-modules.md](../workload-modules.md) |

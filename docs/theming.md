@@ -4,12 +4,19 @@ BackAI branding starts in root [`brand.yaml`](../brand.yaml). For a
 new fork, prefer the CLI, run inside your clone of the repo:
 
 ```bash
-af-stack init --name "DocuChat" --color "#0A66C2" --logo ./logo.png
+af-stack init --name "DocuChat" --color "#0A66C2"
+# optional: --logo ./your-logo.svg sets the light+dark mark in brand.yaml
 ```
 
-That writes `brand.yaml`, copies the logo into the generated app public
-paths, and runs `pnpm run generate:brand`. If you edit `brand.yaml`
-manually later, run `pnpm run generate:brand` again.
+That writes `brand.yaml` and copies your logo to `brand/logo.<ext>` at the
+repo root. The per-app copies under `apps/*/public/brand/` and the
+generated `brand.css` / `lib/brand.ts` are produced by
+`pnpm run generate:brand`, which `af-stack init` runs only when Node deps
+are already installed — on a fresh clone it warns and skips. You usually
+do not need to run it by hand: each app's `predev`/`prebuild` runs it, so
+`af-stack dev` picks the branding up when it builds. To regenerate in your
+working tree after editing `brand.yaml`: `pnpm install && pnpm run
+generate:brand`.
 
 ## Where the variables live
 

@@ -101,6 +101,7 @@ async def check_agents_list() -> None:
 async def check_echo(client: BackAI) -> None:
     try:
         marker = uuid.uuid4().hex[:8]
+        # Assumes the stock node id; `af-stack init --name` renames it to <slug>.echo.
         res = await client.agents.call("supportdesk.echo", {"payload": {"message": marker}})
         status = getattr(res, "status", None) or (
             res.get("status") if isinstance(res, dict) else None

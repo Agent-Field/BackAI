@@ -1,27 +1,32 @@
 // Template: customer-app page (Next.js App Router).
 //
-// Drop into apps/customer-app/src/app/(app)/<your-route>/page.tsx.
-// Pages under (app)/ require the customer to be signed in — better-auth
-// middleware enforces this.
+// Drop into apps/customer-app/src/app/<your-route>/page.tsx (plain folder
+// under src/app/ — there is no (app)/ route group). Every route is
+// signed-in-only by default: src/middleware.ts is deny-by-default with a
+// PUBLIC_PREFIXES allowlist (/sign-in, /sign-up, /api/, /_next, /favicon).
 //
 // You GET for free (don't reinvent):
 //   - better-auth sign-up / sign-in (already wired; pages under (auth)/).
 //   - On sign-up, a tenant + membership + API key are auto-provisioned
 //     for the user. Their tenant_id is bound on every request to this
 //     page.
-//   - The customer-app layout shell (sidebar, header, theme).
+//   - The sidebar shell — mount <SidebarProvider> + <AppSidebar> yourself;
+//     copy src/app/dashboard/page.tsx as the pattern (there is no shared
+//     (app)/layout.tsx).
 //   - shadcn/ui components in @/components/ui/* and lucide-react icons.
-//   - The @af-stack/sdk suite SDK for typed runtime calls.
+//   - The app's own runtime proxy at src/app/api/v1/[...path]/route.ts.
+//     (@af-stack/sdk is NOT a dependency of apps/customer-app — call the
+//     runtime over that proxy, as fetchItems() below does.)
 //
 // What you WRITE:
-//   - Server-side data fetch via suite.* SDK helpers.
+//   - Server-side data fetch through the /api/v1 proxy.
 //   - The JSX. Match brand.yaml (Phase 1) / brand.css for theme.
 //
 // REMEMBER:
 //   - Don't talk to the database directly. Always go through a workload
-//     module (your code) or a suite.* SDK call.
-//   - Don't reach a model provider. Always go through suite.llm.* or an
-//     agent call.
+//     module (your code) or the runtime's REST surface.
+//   - Don't reach a model provider. Always go through the LLM gateway at
+//     /api/v1/llm/* or an agent call.
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
