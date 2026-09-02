@@ -26,6 +26,10 @@ Postgres directly need:
 Requests go to `${AF_STACK_URL}/api/v1<endpoint>` with
 `Authorization: Bearer ${AF_STACK_API_KEY}`.
 
+In an app scaffolded by `af-stack init <name>`, `af-stack dev` writes the
+resolved `AF_STACK_URL` into that app's `.env` — read it from there when the
+default port was busy.
+
 ### Minting an operator key
 
 Operator keys are minted directly against the database, so **both** bootstrap
