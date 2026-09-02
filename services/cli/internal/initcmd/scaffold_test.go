@@ -26,7 +26,8 @@ func TestScaffold_CreatesConsumingProject(t *testing.T) {
 	}
 
 	proj := filepath.Join(root, "docu-chat")
-	for _, rel := range []string{"package.json", "src/index.mjs", ".env.example", ".gitignore", "README.md", "CLAUDE.md"} {
+	for _, rel := range []string{"package.json", "src/index.mjs", ".env.example", ".gitignore", "README.md", "CLAUDE.md",
+		"docker-compose.yml", "backend/postgres-init.sh", "backend/litellm-config.yaml"} {
 		if _, err := os.Stat(filepath.Join(proj, filepath.FromSlash(rel))); err != nil {
 			t.Fatalf("expected scaffold file %s: %v", rel, err)
 		}
@@ -44,6 +45,20 @@ func TestScaffold_CreatesConsumingProject(t *testing.T) {
 	}
 	if _, hasDeps := pkg["dependencies"]; hasDeps {
 		t.Fatalf("starter must have zero runtime dependencies, got: %s", raw)
+	}
+	// `npm start` must boot the bundled backend first: the scaffold is
+	// self-contained, no separately started control plane.
+	scripts, _ := pkg["scripts"].(map[string]any)
+	if scripts["prestart"] != "af-stack dev" || scripts["backend:stop"] != "docker compose down" {
+		t.Fatalf("package.json scripts must boot/stop the bundled backend, got: %v", scripts)
+	}
+	// The compose stack is pinned to release images (a dev build pins :latest).
+	compose := read(t, proj, "docker-compose.yml")
+	if !strings.Contains(compose, "ghcr.io/agent-field/af-stack-runtime:${AF_STACK_VERSION:-latest}") {
+		t.Fatalf("scaffolded compose is not pinned to the release runtime image:\n%s", compose)
+	}
+	if !strings.Contains(stdout.String(), "npm install && npm start") || strings.Contains(stdout.String(), "from your BackAI clone") {
+		t.Fatalf("next steps must be the self-contained path:\n%s", stdout.String())
 	}
 
 	// The starter consumes the backend abstraction (single base URL + /api/v1),

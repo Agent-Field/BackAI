@@ -60,7 +60,10 @@ func saasPackageJSON(slug string) string {
   "type": "module",
   "description": "A SaaS app on the BackAI backend (customer app + notes module + agent).",
   "scripts": {
+    "predev": "af-stack dev",
     "dev": "vite",
+    "backend": "af-stack dev",
+    "backend:stop": "docker compose down",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
@@ -172,10 +175,17 @@ const saasTSConfigNode = `{
 }
 `
 
-const saasEnvExample = `# BackAI runtime base URL the app proxies /api/v1 to.
+const saasEnvExample = `# BackAI runtime base URL the app proxies /api/v1 to. ` + "`af-stack dev`" + ` (run by
+# ` + "`npm run dev`" + `) boots the bundled backend and writes the real value here.
 VITE_AF_STACK_URL=http://localhost:8080
 # Dev server port for the customer app.
 PORT=34000
+
+# The bundled backend (docker-compose.yml) reads this file too:
+#   AF_STACK_VERSION=<tag>        run another BackAI release
+#   OPENROUTER_API_KEY=...        (or OPENAI/ANTHROPIC/...) turns demo mode off
+#   AF_STACK_MODE=personal        no login, no paywall
+#   AF_STACK_PORT=..., AGENTFIELD_PORT=..., POSTGRES_PORT=...   host ports
 `
 
 const saasGitignore = `node_modules/
@@ -750,17 +760,20 @@ with auth, tenancy, and billing owned by the platform.
 
 ## Quickstart
 
-1. Boot a backend from your BackAI checkout: ` + "`af-stack dev`" + `
-2. Configure this app: ` + "`cp .env.example .env`" + ` and set
-   ` + "`VITE_AF_STACK_URL`" + `.
-3. Run it:
+Docker (with Compose) must be running. Then:
 
 ` + f + `sh
 npm install
-npm run dev        # customer app on http://localhost:34000
+npm run dev        # boots the bundled backend, then the customer app on http://localhost:34000
 npm test           # vitest: the API-client contract
 npm run typecheck  # tsc --noEmit
 ` + f + `
+
+` + "`npm run dev`" + ` first runs ` + "`af-stack dev`" + `, which boots the backend in
+` + "`docker-compose.yml`" + ` (Postgres, MinIO, LiteLLM, AgentField, the BackAI
+runtime, the operator dashboard on http://localhost:33000, and the
+` + "`supportdesk`" + ` demo agent), waits for it, and writes its URL into ` + "`.env`" + `
+as ` + "`VITE_AF_STACK_URL`" + `. Stop it with ` + "`npm run backend:stop`" + `.
 
 ## Layout
 
