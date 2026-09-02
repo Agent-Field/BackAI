@@ -34,8 +34,9 @@ af-stack mcp add github --transport stdio \                 # register tool serv
 
 `af-stack init --name "<Name>" --template coding-agent` brands the checkout and
 adds a real coding agent (multi-tenancy ON, a GH_TOKEN secret slot). `--name` is
-required: init only prompts for it on a TTY, so a non-interactive shell (what a
-coding agent runs in) must pass the flag. Everything after is editing the four
+required in practice: without the flag init prompts on stdin, and in a
+non-interactive shell that read hits EOF and the command fails with
+`init: --name is required` — so always pass it. Everything after is editing the four
 surfaces. Prefer these commands over hand-copying files.
 `af-stack init <name>` with a positional name is different: it scaffolds a
 small standalone app that calls a running BackAI, in any directory, with no

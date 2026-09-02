@@ -54,8 +54,10 @@ did in the operator console at `http://localhost:33000` — sign in with
 `operator@af-stack.local` / `changeme123`. Set
 `AF_STACK_DEFAULT_OPERATOR_EMAIL` / `AF_STACK_DEFAULT_OPERATOR_PASSWORD` in
 `.env` _before_ the first boot to seed different credentials; the seed only
-runs while no operator exists, so change the password from the console
-afterwards. `af-stack mode personal` turns the login off entirely.
+runs while no operator exists; to change the seeded credentials later, reset
+the Postgres volume, or set `AF_STACK_DEFAULT_OPERATOR_DISABLED=true` and
+provision operators yourself. `af-stack mode personal` turns the login off
+entirely.
 
 No model key is required. The first run uses a deterministic demo provider but
 still exercises the real gateway, tenant context, cost ledger, customer app,

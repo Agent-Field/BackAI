@@ -80,20 +80,25 @@ if [ -z "$REGISTERED" ]; then
     # Don't fail — agent discovery format may differ. We test invocation next.
 fi
 
-step "5/5  POST to supportdesk.echo via the gateway"
+# `af-stack init --name` rewrites the default agent's node id, so read it from
+# compose instead of assuming "supportdesk".
+NODE_ID="$(awk '/^  supportdesk-agent:/{f=1} f && /NODE_ID:/{print $2; exit}' docker-compose.yml)"
+NODE_ID="${NODE_ID:-supportdesk}"
+
+step "5/5  POST to ${NODE_ID}.echo via the gateway"
 # AgentField's REST shape: {"input": {<arg_name>: <arg_value>}}.
 # Our `echo` reasoner takes one arg `payload: dict`, so we send:
 ECHO_RESP="$(curl -s -X POST \
     -H "Content-Type: application/json" \
     -d '{"input":{"payload":{"message":"hello world"}}}' \
-    "http://localhost:${PORT}/api/v1/agents/supportdesk.echo")"
+    "http://localhost:${PORT}/api/v1/agents/${NODE_ID}.echo")"
 
 echo "  response: $ECHO_RESP"
 
 if echo "$ECHO_RESP" | grep -q 'hello world\|echoed'; then
-    green "  PASS  supportdesk.echo round-trip works"
+    green "  PASS  ${NODE_ID}.echo round-trip works"
 else
-    red "  FAIL  supportdesk.echo did not return expected payload"
+    red "  FAIL  ${NODE_ID}.echo did not return expected payload"
     docker compose logs supportdesk-agent --tail 30
     docker compose logs runtime --tail 30
     exit 1

@@ -7,10 +7,12 @@ mostly yours, with a few platform-owned edges.
 
 These are the normal product areas:
 
-- `src/app/(app)/*` pages and nested routes
+- `src/app/<route>/page.tsx` pages and nested routes (pattern:
+  `src/app/dashboard/page.tsx`; auth pages under `(auth)/` are off-limits)
 - `src/components/*` product components
 - `src/lib/api.ts` client helpers for customer-visible runtime calls
-- sidebar links in `src/components/layout/customer-sidebar.tsx`
+- sidebar links in `src/components/app-sidebar.tsx` (the inline `items` array
+  passed to `<NavMain>`)
 
 Start from `examples/starter/customer-app/first-action/page.tsx` when
 adding the first logged-in workflow.

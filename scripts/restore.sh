@@ -57,9 +57,10 @@ gunzip -c "$FROM" | pg_restore --clean --if-exists --no-owner \
 
 yellow "==> Schema may have moved on since the backup vintage."
 yellow "    Restart the runtime to apply pending migrations (core, workload"
-yellow "    modules and jobs) — it runs them on boot and exits non-zero on"
-yellow "    failure. There is no 'af-stack migrate' subcommand."
+yellow "    modules and jobs). A failed core migration exits non-zero; a failed"
+yellow "    module or jobs migration is only logged and that module (or the jobs"
+yellow "    worker) is disabled. There is no 'af-stack migrate' subcommand."
 yellow "      docker compose up -d --force-recreate runtime"
-yellow "      docker compose logs runtime | grep 'migrations applied'"
+yellow "      docker compose logs runtime | grep -E 'migrations (applied|failed)'"
 
 green  "==> Restore complete. Validate with scripts/test-quickstart.sh."

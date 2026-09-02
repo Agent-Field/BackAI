@@ -9,7 +9,9 @@ af-stack dev
 
 From inside the clone, that's the whole thing — see the
 [golden path](README.md) for the `git clone` line. Run it anywhere else and
-it exits 1 with `must run from inside an AF Stack checkout`. `af-stack dev`:
+it exits 1 with `must run from inside a BackAI checkout — a clone of
+https://github.com/Agent-Field/backai …`, followed by the clone command and
+the standalone-app alternative. `af-stack dev`:
 
 1. Runs a **port preflight** (`scripts/preflight.mjs --fix`) — finds a
    free host port for each service, writes the overrides into `.env`, and

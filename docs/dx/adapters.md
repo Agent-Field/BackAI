@@ -17,7 +17,8 @@ It is an operator command: it needs the runtime up (`af-stack dev`),
 `AF_STACK_URL` (default `http://localhost:8080`), and `AF_STACK_API_KEY`
 set to an operator key — mint one with
 [`af-stack operator key`](../cli-admin.md#minting-an-operator-key) (needs
-`DATABASE_URL`). The seeded operator in [run.md](run.md) is a dashboard
+`DATABASE_URL`) — in **personal** mode the operator gate is off and no key is
+required (see [run.md](run.md)). The seeded operator in [run.md](run.md) is a dashboard
 login, not an API key.
 
 ## The swappable slots

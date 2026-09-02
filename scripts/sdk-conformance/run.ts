@@ -87,6 +87,7 @@ async function checkAgentsList(): Promise<void> {
 async function checkEcho(client: BackAI): Promise<void> {
   try {
     const marker = uuid().slice(0, 8)
+    // Assumes the stock node id; `af-stack init --name` renames it to <slug>.echo.
     const res = await client.agents.call("supportdesk.echo", { payload: { message: marker } })
     // Runtime returns the agent value under `result` (`output` is a
     // back-compat alias mirrored by the SDK); accept either.

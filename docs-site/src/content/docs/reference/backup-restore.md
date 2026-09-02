@@ -106,8 +106,11 @@ gunzip -c "$FROM" | pg_restore --clean --if-exists --no-owner \
 
 After restore, **always** restart the runtime — it applies every
 pending core, workload-module and jobs migration on boot (over
-`AF_STACK_MIGRATE_DATABASE_URL` when that is set) and exits non-zero if
-they fail. Migrations are idempotent, so this also catches any schema
+`AF_STACK_MIGRATE_DATABASE_URL` when that is set). A failed _core_
+migration exits non-zero; a failed workload-module or jobs migration is
+logged and that module (or the jobs worker) is disabled while the runtime
+keeps serving — so also check the logs for `migrations failed`, not just
+`migrations applied`. Migrations are idempotent, so this also catches any schema
 drift between the backup vintage and the current code:
 
 ```bash

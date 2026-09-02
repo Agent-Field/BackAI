@@ -387,16 +387,6 @@ async function capture() {
     fullPage: false,
   })
 
-  // ── 26. Plugins → Cost Explorer (Phase 12.3)
-  console.log("→ Plugins → Cost Explorer")
-  await page.goto(`${DASHBOARD_URL}/plugins/cost-explorer`, {
-    waitUntil: "networkidle",
-  })
-  await page.waitForTimeout(2000)
-  await page.screenshot({
-    path: resolve(OUT_DIR, "plugin-cost-explorer.png"),
-    fullPage: false,
-  })
 
   await browser.close()
   console.log(`saved screenshots to ${OUT_DIR}`)
