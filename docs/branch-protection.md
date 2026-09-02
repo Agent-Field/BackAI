@@ -54,3 +54,10 @@ gh api repos/Agent-Field/BackAI/branches/main --jq '{name,protected,protection}'
 ```
 
 `protected` should be `true` (or a ruleset should list `main`).
+
+## GHCR packages (separate from branch rules)
+
+Branch protection does not make container images public. GHCR packages
+default to private; `af-stack init` pulls them anonymously. An org owner
+must set `af-stack-{runtime,dashboard,customer-app,supportdesk-agent}`
+to **Public** once — see [releasing.md](releasing.md#ghcr-package-visibility).
