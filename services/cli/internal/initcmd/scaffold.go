@@ -93,11 +93,12 @@ func runScaffold(args []string, stdout, stderr io.Writer) error {
 			fmt.Fprintln(w, "  npm install && npm run dev")
 			fmt.Fprintln(w, "  af-stack test           # run the fork gates")
 		} else {
-			fmt.Fprintln(w, "  cp .env.example .env    # set AF_STACK_URL / AF_STACK_API_KEY")
+			fmt.Fprintln(w, "  cp .env.example .env    # set AF_STACK_URL to the \"API runtime\" URL af-stack dev prints")
 			fmt.Fprintln(w, "  npm install && npm start")
 		}
 		fmt.Fprintln(w, "")
-		fmt.Fprintln(w, "No backend yet? Start one from your AF Stack checkout with: af-stack dev")
+		fmt.Fprintln(w, "No backend yet? Start one from your BackAI clone with: af-stack dev")
+		fmt.Fprintln(w, "(it prints the API runtime URL; when :8080 is busy it picks another port)")
 		return nil
 	})
 }
@@ -155,7 +156,24 @@ func nodeTemplate(displayName, slug string) map[string]string {
 // dependencies. For a typed client, install @af-stack/sdk and swap the api()
 // helper for ` + "`suite.agents.call(...)`" + `, ` + "`suite.llm.chat(...)`" + `, etc.
 
-const BASE_URL = process.env.AF_STACK_URL ?? "http://localhost:8080";
+import { readFileSync } from "node:fs";
+
+// Load ./.env (create it with ` + "`cp .env.example .env`" + `) without a dependency.
+// Real environment variables win over the file.
+try {
+  for (const line of readFileSync(new URL("../.env", import.meta.url), "utf8").split(/\r?\n/)) {
+    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+    if (m && !(m[1] in process.env)) process.env[m[1]] = m[2].replace(/^(['"])(.*)\1$/, "$2");
+  }
+} catch {
+  // no .env yet — defaults below apply
+}
+
+// The runtime's base URL: what ` + "`af-stack dev`" + ` prints as "API runtime". A pasted
+// ".../api/v1" suffix is tolerated.
+const BASE_URL = (process.env.AF_STACK_URL ?? "http://localhost:8080")
+  .replace(/\/+$/, "")
+  .replace(/\/api\/v1$/, "");
 const API_KEY = process.env.AF_STACK_API_KEY ?? "";
 
 async function api(path, { method = "GET", body } = {}) {
@@ -168,13 +186,48 @@ async function api(path, { method = "GET", body } = {}) {
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
-    throw new Error(method + " " + path + " -> " + res.status + " " + (await res.text()));
+    const err = new Error(method + " " + path + " -> " + res.status + " " + (await res.text()));
+    err.status = res.status;
+    throw err;
   }
   return res.status === 204 ? null : res.json();
 }
 
+function fail(what, detail) {
+  console.error("\n" + what);
+  if (detail) console.error("Details: " + detail);
+  console.error(` + "`" + `
+Start a backend from your BackAI clone with 'af-stack dev'. It prints the
+runtime's URL as "API runtime" — when :8080 is busy it picks another port —
+so put that URL in .env:   AF_STACK_URL=http://localhost:<port>
+(and AF_STACK_API_KEY if auth is on).` + "`" + `);
+  process.exit(1);
+}
+
+// Is there a BackAI runtime at BASE_URL? Its /health answers {"status":"alive"}.
+// Anything else on that port (an AgentField control plane, another dev server)
+// answers differently, and that is the usual failure when :8080 was busy.
+async function checkRuntime() {
+  let res;
+  try {
+    res = await fetch(BASE_URL + "/health");
+  } catch (err) {
+    const cause = err.cause;
+    fail("Nothing is listening at " + BASE_URL + ".",
+      cause?.code ?? cause?.errors?.[0]?.code ?? cause?.message ?? err.message);
+  }
+  const text = await res.text();
+  let body = null;
+  try { body = JSON.parse(text); } catch { /* not JSON */ }
+  if (!res.ok || !body || (body.status !== "alive" && body.status !== "ready")) {
+    fail("Something is listening at " + BASE_URL + ", but it is not a BackAI runtime.",
+      "GET /health -> " + res.status + " " + text.slice(0, 160));
+  }
+}
+
 async function main() {
-  console.log("Talking to AF Stack at " + BASE_URL);
+  console.log("Talking to BackAI at " + BASE_URL);
+  await checkRuntime();
   try {
     // The simplest call that proves the wiring: list available agents.
     const agents = await api("/agents");
@@ -187,17 +240,19 @@ async function main() {
     // }});
     // console.log(reply.choices?.[0]?.message?.content);
   } catch (err) {
-    console.error("\nCould not reach the backend. Start it with 'af-stack dev',");
-    console.error("then set AF_STACK_URL (and AF_STACK_API_KEY if auth is on).\n");
-    console.error("Details:", err.message);
-    process.exitCode = 1;
+    if (err.status === 401 || err.status === 403) {
+      fail("The runtime has auth on and rejected this app's key.",
+        err.message + "\nMint one with 'af-stack keys create' (operator key needed) and set AF_STACK_API_KEY in .env.");
+    }
+    fail("The runtime answered, but the call failed.", err.message);
   }
 }
 
 main();
 `
 
-	env := `# AF Stack runtime base URL
+	env := `# BackAI runtime base URL: the "API runtime" URL that ` + "`af-stack dev`" + ` prints.
+# The default is 8080, but af-stack dev picks another port when 8080 is busy.
 AF_STACK_URL=http://localhost:8080
 # Bearer token — required when the runtime has auth enabled
 AF_STACK_API_KEY=
@@ -215,9 +270,10 @@ first-class primitive.
 
 ## Quickstart
 
-1. Start a backend (from your AF Stack checkout): ` + "`af-stack dev`" + `
-2. Configure this app: ` + "`cp .env.example .env`" + ` and set ` + "`AF_STACK_URL`" + ` /
-   ` + "`AF_STACK_API_KEY`" + `.
+1. Start a backend from your BackAI clone: ` + "`af-stack dev`" + `. Note the URL it
+   prints as **API runtime** (8080 by default; another port if 8080 was busy).
+2. Configure this app: ` + "`cp .env.example .env`" + `, set ` + "`AF_STACK_URL`" + ` to that URL
+   and, if auth is on, ` + "`AF_STACK_API_KEY`" + `. ` + "`src/index.mjs`" + ` reads ` + "`.env`" + ` itself.
 3. Run it: ` + "`npm install && npm start`" + `
 
 ## What's here
