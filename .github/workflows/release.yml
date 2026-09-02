@@ -6,6 +6,13 @@ name: Release
 # Postgres so a broken build can't ship, then cut the GitHub Release with
 # cross-compiled CLI binaries and move the `latest` image tag.
 #
+# The image set is runtime, dashboard, customer-app and the bundled
+# supportdesk-agent — the last one is what `af-stack init` wires into a
+# scaffolded app's own docker-compose.yml.
+# The smoke job also scaffolds an app with the freshly built CLI and runs
+# `npm start` in it, proving the published images boot a bundled backend the
+# app can actually talk to before anything is tagged.
+#
 # Manual runs are supported via workflow_dispatch (e.g. to re-cut after a
 # transient failure). Use dry_run to compute the version without publishing.
 on:
@@ -112,10 +119,18 @@ jobs:
         include:
           - name: runtime
             dockerfile: services/runtime/Dockerfile
+            context: .
           - name: dashboard
             dockerfile: apps/dashboard/Dockerfile
+            context: .
           - name: customer-app
             dockerfile: apps/customer-app/Dockerfile
+            context: .
+          # The agent image's Dockerfile does `COPY requirements.txt ./`, so it
+          # needs its own directory as the build context, not the repo root.
+          - name: supportdesk-agent
+            dockerfile: apps/backend/agents/supportdesk/Dockerfile
+            context: apps/backend/agents/supportdesk
     steps:
       - uses: actions/checkout@v7
         with:
@@ -129,7 +144,7 @@ jobs:
       - name: Build and push ${{ matrix.name }}
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           push: true
           tags: ghcr.io/agent-field/af-stack-${{ matrix.name }}:${{ needs.prepare.outputs.version }}
@@ -175,6 +190,86 @@ jobs:
             exit 1
           fi
           curl -fsS http://localhost:8080/health >/dev/null && echo "health OK"
+      # Free host port 8080 before the scaffold smoke. `af-stack dev` would
+      # auto-allocate around a busy port, but the scaffolded app is supposed to
+      # come up on the default one — so prove that path, don't fall back to it.
+      - name: Tear down the runtime smoke
+        run: docker compose -f docker-compose.release-smoke.yml down -v || true
+
+      # Second smoke: the scaffolded-app path, end to end, against the images
+      # this release just pushed. `af-stack init` writes a docker-compose.yml
+      # pinned to ${{ needs.prepare.outputs.version }}, `npm start` runs
+      # `af-stack dev` via its prestart hook and then calls supportdesk.echo.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Put the CLI build dir on PATH
+        # `npm start`'s prestart hook shells out to `af-stack` by name.
+        run: echo /tmp >> "$GITHUB_PATH"
+      - name: Build the CLI pinned to the release version
+        env:
+          AF_STACK_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          go build -ldflags "-X main.version=${AF_STACK_VERSION}" \
+            -o /tmp/af-stack ./services/cli/cmd/af-stack
+          /tmp/af-stack version || true
+      - name: Assert the release images are publicly pullable
+        # `af-stack init` apps pull these with NO registry login, the way any
+        # user does. GHCR creates packages private by default, so a release
+        # whose images are private ships a CLI whose scaffolds cannot boot.
+        # Fix: github.com/orgs/Agent-Field/packages → the package → Package
+        # settings → Change visibility → Public, then re-run this job.
+        env:
+          AF_STACK_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          private=""
+          for svc in runtime dashboard customer-app supportdesk-agent; do
+            token="$(curl -fsS "https://ghcr.io/token?scope=repository:agent-field/af-stack-$svc:pull" | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')"
+            code="$(curl -s -o /dev/null -w '%{http_code}'               -H "Authorization: Bearer $token"               -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json'               "https://ghcr.io/v2/agent-field/af-stack-$svc/manifests/$AF_STACK_VERSION")"
+            echo "ghcr.io/agent-field/af-stack-$svc:$AF_STACK_VERSION anonymous pull: HTTP $code"
+            [ "$code" = "200" ] || private="$private af-stack-$svc"
+          done
+          if [ -n "$private" ]; then
+            echo "::error::these GHCR packages are not publicly pullable:$private — make each one Public under the org's package settings and re-run this job; until then apps from \`af-stack init\` cannot boot their bundled backend"
+            exit 1
+          fi
+      - name: Log out of GHCR so the scaffold pulls anonymously, like a user
+        run: docker logout ghcr.io || true
+      - name: Scaffold a standalone app
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/smoke-app
+          /tmp/af-stack init smoke-app --dir /tmp
+          echo "--- generated docker-compose.yml ---"
+          cat /tmp/smoke-app/docker-compose.yml
+      - name: npm start — scaffolded app boots its bundled backend
+        # The first `docker compose up -d` pulls ~6 images.
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          export PATH=/tmp:$PATH
+          cd /tmp/smoke-app
+          # No dependencies — this just validates the generated package.json.
+          npm install
+          status=0
+          npm start 2>&1 | tee /tmp/smoke-start.log || status=$?
+          if [ "$status" -ne 0 ] || ! grep -q '^Echo agent replied:' /tmp/smoke-start.log; then
+            echo "::error::the scaffolded app could not talk to its bundled backend — refusing to publish the release"
+            for svc in runtime agentfield supportdesk-agent; do
+              echo "--- docker compose logs $svc ---"
+              docker compose logs --tail 80 "$svc" || true
+            done
+            exit 1
+          fi
+          echo "scaffolded app talked to its bundled backend OK"
+      - name: Tear down the scaffolded app
+        if: always()
+        run: docker compose -f /tmp/smoke-app/docker-compose.yml --project-directory /tmp/smoke-app down -v || true
       - name: Tear down
         if: always()
         run: docker compose -f docker-compose.release-smoke.yml down -v || true
@@ -220,7 +315,7 @@ jobs:
         if: needs.prepare.outputs.prerelease != 'true'
         run: |
           set -euo pipefail
-          for svc in runtime dashboard customer-app; do
+          for svc in runtime dashboard customer-app supportdesk-agent; do
             docker buildx imagetools create \
               --tag "ghcr.io/agent-field/af-stack-$svc:latest" \
               "ghcr.io/agent-field/af-stack-$svc:${{ needs.prepare.outputs.version }}"
