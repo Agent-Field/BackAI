@@ -23,6 +23,8 @@ import (
 	"unicode"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/Agent-Field/backai/services/cli/internal/checkout"
 )
 
 type brandFile struct {
@@ -131,9 +133,9 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	}
 	primaryColor = strings.ToUpper(primaryColor)
 
-	root, err := findRepoRoot()
+	root, err := checkout.Find()
 	if err != nil {
-		return err
+		return fmt.Errorf("init: %w", err)
 	}
 
 	brand, err := readBrand(filepath.Join(root, "brand.yaml"))
@@ -237,25 +239,6 @@ func prompt(stdin io.Reader, stdout io.Writer, label string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(line), nil
-}
-
-func findRepoRoot() (string, error) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		if exists(filepath.Join(wd, "package.json")) &&
-			exists(filepath.Join(wd, "apps", "dashboard")) &&
-			exists(filepath.Join(wd, "apps", "customer-app")) {
-			return wd, nil
-		}
-		next := filepath.Dir(wd)
-		if next == wd {
-			return "", errors.New("init: must run from inside an AF Stack checkout")
-		}
-		wd = next
-	}
 }
 
 func readBrand(path string) (brandFile, error) {
