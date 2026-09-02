@@ -594,7 +594,7 @@ Per-tenant notes for the customer app.
   ` + "`tenant_id`" + ` + FORCE row level security (plain SQL, forward-only —
   module migrations are not goose files).
 
-Validate it offline: ` + "`af-stack module validate notes`" + `.
+Validate it offline: ` + "`af-stack module validate modules/notes`" + `.
 `
 
 const saasAgentMain = `"""notes-assistant — summarize + tag agent for the notes module."""
@@ -734,7 +734,7 @@ func saasCapabilitiesJSON(displayName, slug string) string {
   "agents": [
     { "node_id": "notes-assistant", "reasoners": ["echo", "summarize"], "path": "agents/notes-assistant" }
   ],
-  "validate": { "module": "af-stack module validate notes", "agent": "af-stack agent validate notes-assistant", "all": "af-stack test" }
+  "validate": { "module": "af-stack module validate modules/notes", "agent": "af-stack agent validate agents/notes-assistant", "all": "af-stack test" }
 }
 `
 }
@@ -774,8 +774,8 @@ npm run typecheck  # tsc --noEmit
 
 ` + f + `sh
 af-stack test                          # all gates (manifests, migrations, typecheck, sdk smoke)
-af-stack module validate notes         # just the notes module
-af-stack agent validate notes-assistant
+af-stack module validate modules/notes            # just the notes module
+af-stack agent validate agents/notes-assistant
 ` + f + `
 
 See ` + "`AGENTS.md`" + ` / ` + "`CLAUDE.md`" + ` for how to build on this scaffold.

@@ -5,6 +5,8 @@ package project
 import (
 	"bytes"
 	"context"
+	"errors"
+	"flag"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -462,5 +464,19 @@ func TestRunDevMissingPreflightScriptIsNonFatal(t *testing.T) {
 	}
 	if !composeRan {
 		t.Fatal("docker compose was not run when preflight script was absent")
+	}
+}
+
+// TestRunDevNoOpenHelpDescribesRealBehavior pins the --no-open help string.
+// RunDev only opens a browser under --detach, and the surface it opens is
+// the customer app - the flag used to advertise "the dashboard URL".
+func TestRunDevNoOpenHelpDescribesRealBehavior(t *testing.T) {
+	var stderr bytes.Buffer
+	if err := RunDev(context.Background(), []string{"-h"}, &bytes.Buffer{}, &stderr); !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("RunDev(-h) error = %v, want flag.ErrHelp", err)
+	}
+	want := "with --detach, do not open the customer app URL in a browser"
+	if !strings.Contains(stderr.String(), want) {
+		t.Fatalf("dev --help missing %q:\n%s", want, stderr.String())
 	}
 }

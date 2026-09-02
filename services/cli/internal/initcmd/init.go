@@ -89,13 +89,13 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return runScaffold(args, stdout, stderr)
 	}
 
-	fs := flag.NewFlagSet("af-stack init", flag.ContinueOnError)
+	fs := flag.NewFlagSet("af-stack init (in-checkout re-theme; for a new standalone app use: af-stack init <name>)", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	name := fs.String("name", "", "project display name, e.g. DocuChat")
 	color := fs.String("color", "", "primary brand color as #RRGGBB")
-	logo := fs.String("logo", "", "logo file to copy into both app public directories")
+	logo := fs.String("logo", "", "logo file to copy to brand/logo.<ext> and set as the light+dark mark in brand.yaml")
 	template := fs.String("template", TemplateNode,
-		"scaffold template: node (rebrand only) | coding-agent (rebrand + a real coding agent)")
+		"scaffold template: node (rebrand only) | coding-agent (rebrand + a real coding agent) — flag-form only; requires a BackAI checkout")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -341,6 +341,7 @@ func updateDefaultAgentName(root, next string) error {
 	}
 	targets := []string{
 		"docker-compose.yml",
+		"AGENTS.md",
 		"apps/backend/agents/sample/Dockerfile",
 		"apps/backend/agents/sample/main.py",
 		"apps/backend/agents/sample/README.md",

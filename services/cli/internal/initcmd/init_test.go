@@ -50,6 +50,7 @@ surfaces:
 `)
 	write(t, root, "apps/backend/agents/sample/README.md", "curl /agents/sample.echo\n")
 	write(t, root, "apps/backend/litellm-config.yaml", "# sample-agent points at this by default.\n")
+	write(t, root, "AGENTS.md", "curl -X POST http://localhost:8080/api/v1/agents/sample.echo\n")
 	logo := filepath.Join(root, "source-logo.png")
 	if err := os.WriteFile(logo, []byte("png"), 0o644); err != nil {
 		t.Fatal(err)
@@ -107,6 +108,12 @@ surfaces:
 	}
 	if got := read(t, root, "apps/backend/agents/sample/main.py"); !strings.Contains(got, `os.getenv("NODE_ID", "docuchat")`) {
 		t.Fatalf("agent source not updated:\n%s", got)
+	}
+	// AGENTS.md carries the no-key "prove the wiring" curl, so the rebrand has
+	// to rewrite the reasoner path there too — otherwise the front door hands
+	// every reader a node id their fork no longer registers.
+	if got := read(t, root, "AGENTS.md"); !strings.Contains(got, "docuchat.echo") {
+		t.Fatalf("AGENTS.md proof curl not updated:\n%s", got)
 	}
 	if !strings.Contains(stdout.String(), "default agent node_id set to docuchat") {
 		t.Fatalf("unexpected stdout:\n%s", stdout.String())
