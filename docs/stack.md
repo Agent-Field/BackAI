@@ -216,7 +216,7 @@ Five extension points, one per typical thing you'd add:
 |---|---|---|
 | Add an AI agent | ④ Intelligence | Drop `apps/backend/agents/<name>/` — agent registers with AgentField at startup, callable at `/api/v1/agents/<name>.<reasoner>` |
 | Add a dashboard tab | ① Client | Drop `apps/dashboard/plugins/<id>/plugin.ts` + `page.tsx` — sidebar picks it up at next build |
-| Add a workload module | ③ API + ⑧ Data | Drop `workload-modules/<id>/manifest.yaml` + Go handler + migrations — loader mounts at `/workload/<id>/...` |
+| Add a workload module | ③ API + ⑧ Data | Drop `workload-modules/<id>/backai.module.yaml` + migrations — the loader auto-generates tenant-scoped CRUD at `/api/v1/workload/<id>/<resource>` |
 | Swap an adapter | various | One env var (`AF_STACK_SANDBOX_ADAPTER=gvisor`, `AF_STACK_S3_ADAPTER=s3`, `AF_STACK_BILLING_ADAPTER=lago`, etc.) |
 | Theme it | ① Client | `apps/dashboard/src/app/brand.css` with CSS variable overrides — every shadcn primitive + chart inherits |
 

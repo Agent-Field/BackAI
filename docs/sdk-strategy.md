@@ -177,14 +177,21 @@ suite.admin.harness.run(prompt, provider, tools, max_budget_usd)
 
 ## Not in any SDK (CLI + dashboard + REST)
 
-- Schema migrations → `af-stack db migrate`
-- Module enable/disable → `af-stack module enable X`
+- Schema migrations → `af-stack db diff` (preview) / `af-stack db push`
+  (apply) / `af-stack db generate <name>`
+- Module enable/disable → set `enabled: true` in `backai.module.yaml` or
+  add the id to `modules.workload_modules` (env
+  `AF_STACK_WORKLOAD_MODULES`) and restart; the CLI only scaffolds
+  (`af-stack module new <id>`)
 - Adapter swap → edit `config.yaml`, restart
-- Log tailing → `af-stack logs tail` or dashboard
+- Recent-log reads → `af-stack logs --tail 100` or dashboard (nothing
+  follows the stream)
 - Live trace inspection → dashboard
 - Cost dashboards → dashboard
 - Stripe billing portal → embedded link
-- Plugin install → `af-stack plugin install <gh-repo>`
+- Plugin install → not shipped; dashboard plugins are scanned at build time
+  from `apps/dashboard/plugins/`, and `af-stack plugin new <id>` scaffolds
+  one in place
 
 Power users who need any of these in code can hit the REST endpoints.
 

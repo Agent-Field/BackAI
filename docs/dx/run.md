@@ -3,16 +3,22 @@
 ## Quick start
 
 ```bash
+# from inside your clone of the BackAI repo
 af-stack dev
 ```
 
-That's the whole thing. `af-stack dev`:
+From inside the clone, that's the whole thing — see the
+[golden path](README.md) for the `git clone` line. Run it anywhere else and
+it exits 1 with `must run from inside an AF Stack checkout`. `af-stack dev`:
 
 1. Runs a **port preflight** (`scripts/preflight.mjs --fix`) — finds a
    free host port for each service, writes the overrides into `.env`, and
    sets `COMPOSE_PROJECT_NAME`. Skip it with `--no-preflight`.
-2. Runs `docker compose up`. Add `--detach` to background it; add
-   `--no-open` to not pop the dashboard.
+2. Runs `docker compose up` and prints the local URL map. Add `--detach`
+   to background it — in detached mode it also opens the **customer app**
+   (`http://localhost:34000` by default) in your browser; `--no-open`
+   suppresses that. In the foreground nothing is opened, so `--no-open` on
+   its own does nothing.
 
 Prefer raw compose? `docker compose up` works too — but then you own port
 conflicts yourself.
