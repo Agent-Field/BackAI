@@ -9,7 +9,7 @@ touch. Or skip the repo entirely and
 | --- | --- |
 | [Agent](#1-agent) | An AI reasoner (multi-step LLM logic) |
 | [Customer app](#2-customer-app) | Product UI your end-users see |
-| [Workload module](#3-workload-module) | Backend routes / crons / migrations |
+| [Workload module](#3-workload-module) | Tenant-scoped CRUD resources + migrations |
 | [Dashboard plugin](#4-dashboard-plugin) | A page in the operator console |
 
 ---
@@ -57,16 +57,20 @@ in the Suite. Inside the agent, `app.*` gives you `app.reasoner` (define),
 
 **Lives in:** `apps/customer-app/` — a Next.js app. Edit it directly.
 
-This is *your* product surface. From it you call the runtime via the
-**`suite.*`** SDK (TypeScript). Full editing contract:
+This is *your* product surface. From it you call the runtime through the
+app's own same-origin proxy at `src/app/api/v1/[...path]/route.ts`, which
+forwards the customer's session so the runtime resolves the right tenant.
+Full editing contract:
 [`apps/customer-app/EDITING.md`](../../apps/customer-app/EDITING.md).
 
 **Edit freely:**
 
-- `src/app/(app)/*` — pages and routes
+- `src/app/<route>/page.tsx` — pages and routes (pattern:
+  `src/app/dashboard/page.tsx`; sign-in pages live under `src/app/(auth)/`)
 - `src/components/*` — product components
 - `src/lib/api.ts` — client helpers for runtime calls
-- `src/components/layout/customer-sidebar.tsx` — nav links
+- `src/components/app-sidebar.tsx` — nav links (the inline `items` array
+  passed to `<NavMain>`)
 
 Start a new logged-in workflow from
 `examples/starter/customer-app/first-action/page.tsx`.
@@ -75,9 +79,14 @@ Start a new logged-in workflow from
 generated from root `brand.yaml` by `pnpm run generate:brand`.
 
 ```ts
-import { suite } from "@af-stack/sdk"
-
-const out = await suite.agents.call("my-agent.summarize", { text })
+// `@af-stack/sdk` is not a dependency of apps/customer-app — call the
+// proxy, which is same-origin and carries the session cookie.
+const response = await fetch("/api/v1/agents/my-agent.summarize", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ input: { text } }),
+})
+const out = await response.json()
 ```
 
 ---
@@ -86,44 +95,64 @@ const out = await suite.agents.call("my-agent.summarize", { text })
 
 **Lives in:** `workload-modules/<id>/` · **Scaffold:** `af-stack module new <id>`
 
-A module is backend capability — HTTP routes, cron schedules, SQL
-migrations. Only `manifest.yaml` is required. Full contract:
-[../workload-modules.md](../workload-modules.md).
+A module is a *declarative* backend capability: a manifest naming typed
+resources, plus the versioned SQL that backs them. The runtime
+auto-generates tenant-scoped CRUD from it — no handler code. Full
+contract: [../workload-modules.md](../workload-modules.md).
 
-> **Status: scaffold today; runtime mounting is on the roadmap.**
-> `af-stack module new <id>` scaffolds the layout below (including a
-> `handlers/routes.go.example` placeholder), but the runtime does **not**
-> auto-load workload modules yet — there is no module loader and no
-> `/workload/<id>/` route mounting wired in. Treat the route/cron/migration
-> behavior described here as the design contract, not a live capability.
+The runtime discovers `<WORKLOAD_MODULES_PATH>/<id>/backai.module.yaml`
+(env `WORKLOAD_MODULES_PATH`, default `./workload-modules`), applies
+`migrations/` at boot, statically RLS-lints every resource table, and
+serves `/api/v1/workload/<id>/<resource>`. Inspect what it found at
+`GET /api/v1/admin/modules`.
+
+**Files the scaffold writes:**
 
 ```
 workload-modules/<id>/
-  manifest.yaml       # required — metadata + requires + routes
-  migrations/         # optional — versioned SQL applied at boot
-  handlers/           # optional — Go (routes.go) or Python (handler.py)
-  crons/seed.yaml     # optional — cron schedules seeded into suite_crons
-  config.schema.yaml  # optional — operator-tunable config
+  backai.module.yaml         # required — id, resources, typed fields
+  migrations/00001_init.sql  # the table your resources are backed by
+  README.md
 ```
 
-**Minimal `manifest.yaml`:**
+**Minimal `backai.module.yaml`:**
 
 ```yaml
 id: notes
 name: Notes
 version: 0.1.0
-requires:
-  - multi-tenancy
-  - llm-gateway
-routes:
-  - method: POST
-    path: /notes
-    handler: notes.Create   # -> mounted at /workload/notes/notes
+description: Per-tenant notes.
+enabled: false
+migrations: migrations
+
+resources:
+  - name: notes              # table: notes_notes (<module>_<resource>)
+    fields:
+      - name: title
+        type: string
+        required: true
+      - name: done
+        type: bool
+        default: false
 ```
 
-Routes are *designed* to be prepended with `/workload/<id>/` so modules
-never clash — this mounting is roadmap, not yet wired (see the status note
-above). Crons declared here are covered in [jobs.md](jobs.md#crons).
+Field types are `string | int | bool | timestamp | json`. `id`,
+`tenant_id`, `created_at` and `updated_at` are reserved — the runtime
+manages them, and your migration must create them alongside `ENABLE` +
+`FORCE ROW LEVEL SECURITY` and a tenant-isolation policy. A table without
+tenant isolation refuses to load and only that module is skipped; the
+runtime keeps serving everything else.
+
+**Enable it.** Scaffolds ship `enabled: false`. Either flip that to `true`
+in the manifest, or add the id to `modules.workload_modules` in
+`config.yaml` (env `AF_STACK_WORKLOAD_MODULES=<ids>`), then restart.
+
+**Check it first.** `af-stack module validate workload-modules/<id>`
+(`--json` for a machine-readable report) runs the same manifest and RLS
+gates offline, before you boot anything.
+
+The manifest has no cron field — schedule work through the crons API /
+SDK instead ([jobs.md](jobs.md#crons)).
 
 ---
 
