@@ -16,10 +16,13 @@ Releases are **automatic on merge to `main`**. You never hand-cut a version.
      (Conventional Commits — see below). If nothing release-worthy changed, it
      stops here (no release).
    - **Builds & pushes** the container images to
-     `ghcr.io/agent-field/af-stack-{runtime,dashboard,customer-app}:<version>`.
+     `ghcr.io/agent-field/af-stack-{runtime,dashboard,customer-app,supportdesk-agent}:<version>`
+     and tries to mark each GHCR package public (see
+     [GHCR package visibility](#ghcr-package-visibility)).
    - **Smoke-boots the runtime image** against a real Postgres + MinIO and waits
-     for `/ready`. If the image can't boot or migrate, the release is aborted
-     before anything is published — this is the regression gate.
+     for `/ready`. Then it asserts every image is anonymously pullable and
+     scaffolds an app with `af-stack init` + `npm start`. If any of those
+     fail, the release is aborted before anything is published.
    - **Tags** `vX.Y.Z`, cuts a **GitHub Release** with cross-compiled `af-stack`
      CLI binaries + a changelog (GoReleaser), and moves the `:latest` image tag.
 
@@ -64,3 +67,31 @@ The pipeline runs entirely on the built-in `GITHUB_TOKEN` (ghcr + releases) — 
 extra secrets are required. Images publish under the repository's own org
 (`ghcr.io/agent-field/…`). Multi-arch (arm64) images and Homebrew/Scoop taps are
 deferred follow-ups (see `docs/cli-distribution.md`).
+
+## GHCR package visibility
+
+`af-stack init` writes a `docker-compose.yml` that pulls the four images
+**without** a registry login. GHCR creates packages **private** on first
+push, even when this repo is public. A private image means every
+scaffolded app fails to boot.
+
+The Release workflow tries `scripts/publish-ghcr-packages.sh` after each
+push. The GitHub REST API often cannot change visibility for org-owned
+container packages (PATCH returns 404). When that happens, an org owner
+does this **once** (later releases reuse the same names and stay public):
+
+1. Open [github.com/orgs/Agent-Field/packages](https://github.com/orgs/Agent-Field/packages).
+2. For `af-stack-runtime`, `af-stack-dashboard`, `af-stack-customer-app`,
+   and `af-stack-supportdesk-agent`: **Package settings → Change
+   visibility → Public**.
+3. Re-run **Actions → Release → Run workflow**.
+
+Or, authenticated as an org owner / package admin:
+
+```bash
+scripts/publish-ghcr-packages.sh
+```
+
+`scripts/assert-ghcr-public.sh` is the smoke gate: it must list every
+private package (it must not crash on the first 401) and fail the
+release until they are public.

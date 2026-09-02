@@ -153,6 +153,15 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
           provenance: false
+      # GHCR packages are private on first push. af-stack init pulls with
+      # no login, so we try to flip visibility here (packages:write). The
+      # REST API 404s for some org-owned packages — continue, and let the
+      # anonymous-pull assert in smoke fail closed with the UI path.
+      - name: Make ghcr.io/agent-field/af-stack-${{ matrix.name }} public
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/publish-ghcr-packages.sh "af-stack-${{ matrix.name }}"
 
   smoke:
     name: Smoke — boot runtime image
@@ -218,26 +227,13 @@ jobs:
             -o /tmp/af-stack ./services/cli/cmd/af-stack
           /tmp/af-stack version || true
       - name: Assert the release images are publicly pullable
-        # `af-stack init` apps pull these with NO registry login, the way any
-        # user does. GHCR creates packages private by default, so a release
-        # whose images are private ships a CLI whose scaffolds cannot boot.
-        # Fix: github.com/orgs/Agent-Field/packages → the package → Package
-        # settings → Change visibility → Public, then re-run this job.
+        # `af-stack init` apps pull these with NO registry login. Private
+        # GHCR packages must fail this job — do not skip or warn. The
+        # script lists every private package (it must not die on the first
+        # 401) and prints the org package-settings URLs.
         env:
           AF_STACK_VERSION: ${{ needs.prepare.outputs.version }}
-        run: |
-          set -euo pipefail
-          private=""
-          for svc in runtime dashboard customer-app supportdesk-agent; do
-            token="$(curl -fsS "https://ghcr.io/token?scope=repository:agent-field/af-stack-$svc:pull" | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')"
-            code="$(curl -s -o /dev/null -w '%{http_code}'               -H "Authorization: Bearer $token"               -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json'               "https://ghcr.io/v2/agent-field/af-stack-$svc/manifests/$AF_STACK_VERSION")"
-            echo "ghcr.io/agent-field/af-stack-$svc:$AF_STACK_VERSION anonymous pull: HTTP $code"
-            [ "$code" = "200" ] || private="$private af-stack-$svc"
-          done
-          if [ -n "$private" ]; then
-            echo "::error::these GHCR packages are not publicly pullable:$private — make each one Public under the org's package settings and re-run this job; until then apps from \`af-stack init\` cannot boot their bundled backend"
-            exit 1
-          fi
+        run: scripts/assert-ghcr-public.sh
       - name: Log out of GHCR so the scaffold pulls anonymously, like a user
         run: docker logout ghcr.io || true
       - name: Scaffold a standalone app
