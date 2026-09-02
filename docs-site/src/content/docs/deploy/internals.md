@@ -196,11 +196,13 @@ go test ./services/runtime/internal/server/... -count=1
 go test ./services/runtime/... -count=1
 ```
 
-Manual smoke test (local Docker):
+Manual smoke test (local process):
 
 ```bash
-# Start the runtime
-af-stack &
+# Build and start the RUNTIME binary. NOT the `af-stack` operator CLI that
+# scripts/install.sh puts on PATH — different program, same name.
+make build-runtime          # -> bin/af-stack-runtime
+./bin/af-stack-runtime &
 PID=$!
 
 # Verify liveness + readiness
@@ -212,9 +214,18 @@ kill -TERM $PID &
 sleep 0.5
 curl -s localhost:8080/ready    # {"status":"draining","since_s":0,...}
 curl -s localhost:8080/health   # {"status":"alive",...} (still 200)
-curl -s -X POST localhost:8080/api/v1/agents/supportdesk.echo -d '{}'
+# Any path except /health, /ready, /metrics and /openapi.json answers
+# DRAINING while the drain is in progress.
+curl -s localhost:8080/api/v1/agents
 # {"error":{"code":"DRAINING","message":"server is shutting down..."}}
 
 # Wait for process to exit
 wait $PID
 ```
+
+No database is required: without `AF_STACK_DATABASE_URL` the runtime logs
+`database URL not configured; running without persistent state` and still
+serves `/health` and `/ready`, which is all this test needs. The drain
+window is only observable while a request is in flight — with nothing in
+flight the process exits on SIGTERM immediately, so start a slow request
+first (or accept that the `draining` curls may race the exit).

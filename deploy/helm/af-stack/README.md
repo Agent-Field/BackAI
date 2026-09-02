@@ -212,18 +212,27 @@ kubectl -n af-stack patch hpa af-stack-runtime \
 
 ### Rotate the KMS key
 
-The runtime uses envelope encryption: rotating the KMS key requires
-re-wrapping every stored secret. Procedure:
+**Automated rotation is not implemented.** The runtime loads one KEK at boot
+and labels ciphertext with a fixed key id: there is no `af-stack secrets
+rotate-kms`, nothing reads `AF_STACK_KMS_KEY_NEW`, and this chart ships no
+rotate-kms CronJob. There is no dual-key window, so swapping the key before
+you have exported the values makes every row in `suite_secrets` permanently
+unrecoverable.
 
-1. Generate a new key:  `openssl rand -hex 32`
-2. Add it to your KMS Secret under a temporary key (e.g. `AF_STACK_KMS_KEY_NEW`).
-3. Run the runtime's rotate-kms job (Phase 14.2 — when shipped):
-   `kubectl create job --from=cronjob/af-stack-rotate-kms one-shot-rotate`
-4. Once the job completes, swap `AF_STACK_KMS_KEY` to the new value in the Secret.
-5. `helm upgrade` (or `kubectl rollout restart deploy/af-stack-runtime`) to pick up the new key.
+The only safe order is export → swap → re-write:
 
-Until Phase 14.2 lands, treat KMS keys as one-shot: only rotate by tearing the
-secrets vault down and restoring from a re-encrypted dump.
+1. Back up the database.
+2. **While the old key is still active**, read every secret out through the
+   audited reveal endpoint (`POST /api/v1/vault/secrets/{key}/reveal` per
+   tenant). The CLI has no reveal verb.
+3. Generate the new key (`openssl rand -hex 32`), set `AF_STACK_KMS_KEY` to it
+   in the Secret, and `helm upgrade` (or
+   `kubectl rollout restart deploy/af-stack-runtime`) to pick it up. The vault
+   is unreadable from here until step 4 finishes.
+4. Re-write each value with `af-stack secrets set <key> --value-stdin`.
+5. Archive the old key material — without it, anything missed in step 2 is gone.
+
+Full runbook: `docs/backup-restore.md`.
 
 ### Swap the storage adapter
 
@@ -282,7 +291,8 @@ so upgrades are zero-downtime as long as your HPA `minReplicas >= 2`.
   ServiceEntry / TrafficSplit resources. Add manually if you run a mesh.
 - **NetworkPolicy assumes ingress-nginx by default.** Override
   `networkPolicy.ingressControllerSelector` for traefik / contour / cilium.
-- **KMS rotation is manual** until Phase 14.2 ships the rotate-kms job.
+- **KMS rotation is manual.** There is no rotate-kms job or CronJob; the
+  supported path is export → swap → re-write (see above).
 - **In-chart Postgres uses `emptyDir` in `values-dev.yaml`.** Data is lost on
   pod restart. Production must use external Postgres.
 - **No PersistentVolumeClaims on the runtime.** It is stateless by design.

@@ -104,13 +104,23 @@ gunzip -c "$FROM" | pg_restore --clean --if-exists --no-owner \
   --no-privileges -d "$URL"
 ```
 
-After restore, **always** run the runtime migrations again — they're
-idempotent and will catch any schema drift between the backup vintage
-and the current code:
+After restore, **always** restart the runtime — it applies every
+pending core, workload-module and jobs migration on boot (over
+`AF_STACK_MIGRATE_DATABASE_URL` when that is set) and exits non-zero if
+they fail. Migrations are idempotent, so this also catches any schema
+drift between the backup vintage and the current code:
 
 ```bash
-docker compose run --rm runtime /usr/local/bin/af-stack migrate up
+docker compose up -d --force-recreate runtime
+docker compose logs runtime | grep "migrations applied"
 ```
+
+There is no `af-stack migrate` subcommand. If you are working inside a
+clone of the repo, `af-stack db push --all` is a developer alternative —
+but it needs a checkout, a `DATABASE_URL`, a separately installed
+`goose`, `--all` to pick up workload-module migrations, and it does not
+apply the River jobs migrations. Booting the runtime is the complete
+path.
 
 ## Storage backup
 
@@ -135,23 +145,37 @@ mc mirror s3://your-prod-backup-bucket/af-stack-20260607/ af/af-stack
 ```
 
 Sandbox run rows in PostgreSQL reference storage by URL. After a
-restore, expect some signed-URL endpoints to 404 until you re-link or
-mark old runs as archived — there's a `scripts/storage-relink.sh`
-helper for this.
+restore, expect the `*_url` columns to 404 if the bucket path changed.
+There is no relink helper: either mirror the bucket back to the same
+path (the command above does exactly that), or clear the stale URL
+columns by hand. Do not try to "archive" the affected rows —
+`suite_sandbox_runs.status` is constrained to
+`queued | running | done | failed | timeout | killed`.
 
 ## KMS key rotation
 
-The `AF_STACK_KMS_KEY` encrypts secret values inside `suite_secrets`.
-To rotate:
+**KMS rotation is not implemented.** The runtime loads one KEK at boot
+and labels ciphertext with a fixed key id; there is no `af-stack secrets
+rotate-kms`, and `AF_STACK_KMS_KEY_NEW` is read by nothing (the same
+caveat is in `deploy/helm/af-stack/README.md`). There is no dual-key
+window, so **swapping the key before you have exported the values makes
+every row in `suite_secrets` permanently unrecoverable.**
 
-1. Set `AF_STACK_KMS_KEY_NEW=<new 64-char hex>` alongside the existing
-   key.
-2. Run `af-stack secrets rotate-kms` — re-encrypts every row with the
-   new key in a transaction (uses both old + new keys during the migration).
-3. Restart the runtime with `AF_STACK_KMS_KEY` set to the new value
-   only.
-4. Archive the old key in your password manager labelled
-   `<env>-pre-<timestamp>`.
+The only safe order today is export → swap → re-write:
+
+1. Back up the database (see above).
+2. **While the old key is still active**, read every secret out through
+   the audited reveal endpoint — `POST /api/v1/vault/secrets/{key}/reveal`
+   per tenant, or `POST /api/v1/secrets/{key}/reveal` with an operator
+   session for the default tenant. The CLI has no reveal verb.
+3. Restart the runtime with the new `AF_STACK_KMS_KEY` (or the newly
+   wrapped cloud data key). The vault is unreadable from this point
+   until step 4 finishes — every existing row is ciphertext under the
+   old key.
+4. Re-write each value:
+   `printf %s "$VALUE" | af-stack secrets set <key> --value-stdin`.
+5. Archive the old key material labelled `<env>-pre-<timestamp>` —
+   without it, any row you missed in step 2 is gone.
 
 ## Backup verification
 
