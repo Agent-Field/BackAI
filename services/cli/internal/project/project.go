@@ -83,6 +83,7 @@ func RunDev(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	fmt.Fprintf(stdout, "  Customer app  %s  (open this first)\n", customerURL)
 	fmt.Fprintf(stdout, "  Dashboard     http://localhost:%s\n", dashPort)
 	fmt.Fprintf(stdout, "  API           http://localhost:%s\n", apiPort)
+	fmt.Fprintf(stdout, "  Your apps     AF_STACK_URL=http://localhost:%s\n", apiPort)
 
 	// Only auto-open in detached mode; in the foreground `docker compose up`
 	// holds the terminal and the URLs above are already printed.
