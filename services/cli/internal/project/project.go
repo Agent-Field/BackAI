@@ -52,6 +52,12 @@ func RunDev(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	}
 	root, err := checkout.Find()
 	if err != nil {
+		// An app written by `af-stack init <name>` carries its own backend:
+		// run that instead of demanding a clone.
+		var nf *checkout.NotFoundError
+		if errors.As(err, &nf) && nf.ScaffoldedApp != "" {
+			return runAppDev(ctx, nf.ScaffoldedApp, *noPreflight, stdout, stderr)
+		}
 		return err
 	}
 

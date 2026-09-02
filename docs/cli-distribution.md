@@ -63,6 +63,11 @@ docker compose up
 Four commands. Works on any machine with git + docker. Browser opens
 dashboard, the dev is "in."
 
+With the CLI installed there is a no-clone route to the same backend:
+`af-stack init <name>` scaffolds an app that carries its own
+`docker-compose.yml`, and `npm start` boots it from the published release
+images.
+
 ### Install CLI for power features
 
 One line — the install script from
@@ -106,10 +111,14 @@ Every command below exists in the current binary (see
 [`services/cli/cmd/af-stack/main.go`](../services/cli/cmd/af-stack/main.go)).
 
 ```bash
+# Standalone app + its own bundled backend (any directory, no clone)
+af-stack init my-ai-product        # app + docker-compose.yml + backend/
+cd my-ai-product && npm install && npm start   # boots the backend, then the app
+
 # Fork bootstrap + dev loop (run inside a clone of this repo)
 af-stack init --name "DocuChat" --color "#0A66C2"
 # optional: --logo ./your-logo.svg sets the light+dark mark in brand.yaml
-af-stack dev --detach
+af-stack dev --detach              # in a scaffolded app, af-stack dev boots its bundled backend
 af-stack mode personal|saas                  # auth+billing off ⇄ multi-tenant SaaS
 af-stack upgrade [--check]                   # pull latest upstream into this fork
 

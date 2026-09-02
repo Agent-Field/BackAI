@@ -33,9 +33,9 @@ BackAI is currently in beta and under active development. Expect rapid improveme
 
 ## Quickstart
 
-Prerequisite: Docker with Compose. Node 18+ is optional: `af-stack dev`
-uses it to auto-allocate conflict-free ports and falls back to the
-defaults without it.
+Prerequisite: Docker with Compose. Node 18+ is optional in this checkout:
+`af-stack dev` uses it to auto-allocate conflict-free ports and falls back
+to the defaults without it.
 
 ```bash
 git clone https://github.com/Agent-Field/backai.git
@@ -139,8 +139,9 @@ approvals, sandbox limits, and audit records keep build and live operations
 inside explicit boundaries.
 
 ```bash
-# A standalone app that calls a running BackAI. Works in any directory.
-af-stack init my-ai-product
+# A complete app with its own bundled backend. Works in any directory; needs Docker.
+af-stack init my-ai-product && cd my-ai-product
+npm install && npm start   # boots the backend, then talks to it
 
 # Or brand a full fork and hand it to your coding agent. These run inside
 # a clone of this repo; that clone is where the four surfaces below live.
@@ -149,6 +150,11 @@ af-stack init --name "Acme AI" --color "#2563EB"
 # optional: --logo ./your-logo.svg sets the light+dark mark in brand.yaml
 af-stack agent new researcher
 ```
+
+The first path needs no clone: the scaffold carries a `docker-compose.yml`
+that boots Postgres, the LLM gateway, the runtime, the operator dashboard,
+and a demo agent from the published release images, pinned to the CLI's
+version.
 
 Inside a fork, builders and agents usually edit only four surfaces:
 

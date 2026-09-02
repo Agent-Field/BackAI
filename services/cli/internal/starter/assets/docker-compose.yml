@@ -1,0 +1,190 @@
+# Bundled BackAI backend for this app.
+#
+# Written by `af-stack init`. `af-stack dev` (which `npm start` runs first via
+# its prestart hook) brings this stack up detached, waits for the runtime to
+# report ready, and writes AF_STACK_URL into .env. Stop it with
+# `docker compose down` (add -v to also drop the data volumes).
+#
+# The images are BackAI's published release images, pinned to the CLI version
+# that scaffolded this app. Set AF_STACK_VERSION in .env to run another
+# release. Host ports: when a default below is busy, `af-stack dev` writes a
+# free port for it into .env (AF_STACK_PORT, AGENTFIELD_PORT, ...).
+
+services:
+  postgres:
+    # pgvector-enabled Postgres so AgentField's vector memory works.
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: afstack
+      POSTGRES_PASSWORD: afstack
+      POSTGRES_MULTIPLE_DATABASES: afstack,agentfield
+      # Restricted serving role for the runtime (see backend/postgres-init.sh).
+      AF_STACK_APP_DB_PASSWORD: ${AF_STACK_APP_DB_PASSWORD:-afstack_app}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./backend/postgres-init.sh:/docker-entrypoint-initdb.d/postgres-init.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U afstack"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${AF_STACK_S3_ACCESS_KEY:-minio}
+      MINIO_ROOT_PASSWORD: ${AF_STACK_S3_SECRET_KEY:-minio-secret}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # LiteLLM proxy: every upstream model provider behind the runtime's
+  # OpenAI-compatible /api/v1/llm/* gateway. Only the provider keys you set
+  # in .env are used; with none set the runtime answers in demo mode.
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    ports:
+      - "${LITELLM_PORT:-4000}:4000"
+    volumes:
+      - ./backend/litellm-config.yaml:/app/config.yaml:ro
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-litellm-dev}
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    restart: unless-stopped
+
+  # AgentField control plane: agent registry, execution, and traces.
+  agentfield:
+    image: agentfield/control-plane:latest
+    environment:
+      AGENTFIELD_STORAGE_MODE: postgres
+      AGENTFIELD_STORAGE_POSTGRES_URL: postgres://afstack:afstack@postgres:5432/agentfield?sslmode=disable
+      AGENTFIELD_STORAGE_POSTGRES_ENABLE_MEMORY_FALLBACK: "false"
+      AGENTFIELD_STORAGE_POSTGRES_ENABLE_DID_FALLBACK: "false"
+      AGENTFIELD_STORAGE_POSTGRES_ENABLE_VC_FALLBACK: "false"
+      AGENTFIELD_STORAGE_POSTGRES_ENABLE_AUTO_MIGRATION: "true"
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    ports:
+      - "${AGENTFIELD_PORT:-8081}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # BackAI runtime: the one base URL your app talks to.
+  runtime:
+    image: ghcr.io/agent-field/af-stack-runtime:${AF_STACK_VERSION:-__AF_STACK_TAG__}
+    environment:
+      AF_STACK_HTTP_ADDR: ":8080"
+      AF_STACK_METRICS_ADDR: ":9090"
+      # Serve as the restricted role; migrate as the privileged owner.
+      AF_STACK_DATABASE_URL: postgres://afstack_app:${AF_STACK_APP_DB_PASSWORD:-afstack_app}@postgres:5432/afstack?sslmode=disable
+      AF_STACK_MIGRATE_DATABASE_URL: postgres://afstack:afstack@postgres:5432/afstack?sslmode=disable
+      AF_STACK_AGENTFIELD_URL: http://agentfield:8080
+      # Dev secrets. Override both in .env before exposing this stack.
+      AF_STACK_AUTH_SECRET: ${AF_STACK_AUTH_SECRET:-dev-secret-change-me-in-prod}
+      AF_STACK_KMS_KEY: ${AF_STACK_KMS_KEY:-dev-secret-change-me}
+      # "saas" (auth + billing per the module flags) or "personal" (no login,
+      # no paywall). Flip with AF_STACK_MODE=personal in .env and restart.
+      AF_STACK_MODE: ${AF_STACK_MODE:-saas}
+      AF_STACK_MODULE_MULTI_TENANCY: ${AF_STACK_MODULE_MULTI_TENANCY:-false}
+      AF_STACK_MODULE_BILLING: ${AF_STACK_MODULE_BILLING:-true}
+      AF_STACK_LITELLM_URL: http://litellm:4000
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-litellm-dev}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      # Deterministic demo provider until a real provider key is set.
+      AF_STACK_DEMO_MODE: ${AF_STACK_DEMO_MODE:-auto}
+      AF_STACK_S3_ADAPTER: minio
+      AF_STACK_S3_ENDPOINT: minio:9000
+      AF_STACK_S3_BUCKET: ${AF_STACK_S3_BUCKET:-af-stack}
+      AF_STACK_S3_ACCESS_KEY: ${AF_STACK_S3_ACCESS_KEY:-minio}
+      AF_STACK_S3_SECRET_KEY: ${AF_STACK_S3_SECRET_KEY:-minio-secret}
+      AF_STACK_S3_REGION: us-east-1
+      # Sandbox adapter: docker uses the host daemon over the socket mounted
+      # below (dev only); set e2b/gvisor before exposing this stack.
+      AF_STACK_SANDBOX_ADAPTER: ${AF_STACK_SANDBOX_ADAPTER:-docker}
+      LOG_FORMAT: json
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "${AF_STACK_PORT:-8080}:8080"
+      - "${AF_STACK_METRICS_PORT:-9090}:9090"
+    # Root only so the docker sandbox adapter can use the host socket.
+    user: "0:0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
+      agentfield:
+        condition: service_started
+      litellm:
+        condition: service_started
+    restart: unless-stopped
+
+  # Operator console: keys, runs, costs, budgets, billing, logs.
+  dashboard:
+    image: ghcr.io/agent-field/af-stack-dashboard:${AF_STACK_VERSION:-__AF_STACK_TAG__}
+    environment:
+      DATABASE_URL: postgres://afstack:afstack@postgres:5432/afstack?sslmode=disable
+      AF_STACK_AUTH_SECRET: ${AF_STACK_AUTH_SECRET:-dev-secret-change-me-in-prod}
+      AF_STACK_MODE: ${AF_STACK_MODE:-saas}
+      # Seeded on first boot while no operator exists.
+      AF_STACK_DEFAULT_OPERATOR_EMAIL: ${AF_STACK_DEFAULT_OPERATOR_EMAIL:-operator@af-stack.local}
+      AF_STACK_DEFAULT_OPERATOR_PASSWORD: ${AF_STACK_DEFAULT_OPERATOR_PASSWORD:-changeme123}
+      AF_STACK_DEFAULT_OPERATOR_NAME: ${AF_STACK_DEFAULT_OPERATOR_NAME:-Default Operator}
+      BETTER_AUTH_URL: http://localhost:${AF_STACK_DASHBOARD_PORT:-33000}
+      BETTER_AUTH_TRUSTED_ORIGINS: ${BETTER_AUTH_TRUSTED_ORIGINS:-http://localhost:${AF_STACK_DASHBOARD_PORT:-33000}}
+      RUNTIME_URL: http://runtime:8080
+      NEXT_PUBLIC_RUNTIME_URL: http://localhost:${AF_STACK_PORT:-8080}
+      NEXT_PUBLIC_RUNTIME_UI_URL: http://localhost:${AGENTFIELD_PORT:-8081}
+      NEXT_PUBLIC_DASHBOARD_URL: http://localhost:${AF_STACK_DASHBOARD_PORT:-33000}
+      NEXT_TELEMETRY_DISABLED: "1"
+    ports:
+      - "${AF_STACK_DASHBOARD_PORT:-33000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      runtime:
+        condition: service_started
+    restart: unless-stopped
+
+  # Demo agent: registers `supportdesk` with a no-key `echo` reasoner, so
+  # `POST /api/v1/agents/supportdesk.echo` proves the wiring end to end.
+  supportdesk-agent:
+    image: ghcr.io/agent-field/af-stack-supportdesk-agent:${AF_STACK_VERSION:-__AF_STACK_TAG__}
+    environment:
+      AGENTFIELD_SERVER: http://agentfield:8080
+      NODE_ID: supportdesk
+      AGENT_CALLBACK_URL: http://supportdesk-agent:8090
+    depends_on:
+      agentfield:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  minio-data:

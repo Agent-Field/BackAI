@@ -11,7 +11,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Agent-Field/backai/services/cli/internal/buildinfo"
 	"github.com/Agent-Field/backai/services/cli/internal/output"
+	"github.com/Agent-Field/backai/services/cli/internal/starter"
 )
 
 // runScaffold implements the npm-like `af-stack init <name>`: it creates a
@@ -57,6 +59,13 @@ func runScaffold(args []string, stdout, stderr io.Writer) error {
 		return output.Usage("init: unknown template %q for a new project (available: node, saas); to scaffold the coding-agent hero template inside an AF Stack checkout, run `af-stack init --template coding-agent` without a project name", *template)
 	}
 
+	// Every scaffold carries its own backend: the compose stack that boots
+	// BackAI from the release images matching this CLI. `af-stack dev` (and
+	// `npm start`, through its prestart hook) runs it in place.
+	for rel, contents := range starter.BackendFiles(buildinfo.Version) {
+		files[rel] = contents
+	}
+
 	projectSlug := slugify(name)
 	target := filepath.Join(*dir, projectSlug)
 
@@ -85,20 +94,19 @@ func runScaffold(args []string, stdout, stderr io.Writer) error {
 		"files":    written,
 	}
 	return output.Result(stdout, *asJSON, machine, func(w io.Writer) error {
-		fmt.Fprintf(w, "Created %s — a new %s app on the AF Stack backend (%d files).\n\n", target, tmpl, len(written))
-		fmt.Fprintln(w, "Next steps:")
+		fmt.Fprintf(w, "Created %s — a new %s app with its own BackAI backend (%d files).\n\n", target, tmpl, len(written))
+		fmt.Fprintln(w, "Next steps (Docker must be running):")
 		fmt.Fprintf(w, "  cd %s\n", target)
 		if tmpl == "saas" {
-			fmt.Fprintln(w, "  cp .env.example .env    # set VITE_AF_STACK_URL")
-			fmt.Fprintln(w, "  npm install && npm run dev")
-			fmt.Fprintln(w, "  af-stack test           # run the fork gates")
+			fmt.Fprintln(w, "  npm install && npm run dev    # boots the bundled backend, then the app on :34000")
+			fmt.Fprintln(w, "  af-stack test                 # run the fork gates")
 		} else {
-			fmt.Fprintln(w, "  cp .env.example .env    # set AF_STACK_URL to the \"API runtime\" URL af-stack dev prints")
-			fmt.Fprintln(w, "  npm install && npm start")
+			fmt.Fprintln(w, "  npm install && npm start      # boots the bundled backend, then runs src/index.mjs")
 		}
 		fmt.Fprintln(w, "")
-		fmt.Fprintln(w, "No backend yet? Start one from your BackAI clone with: af-stack dev")
-		fmt.Fprintln(w, "(it prints the API runtime URL; when :8080 is busy it picks another port)")
+		fmt.Fprintln(w, "The backend is docker-compose.yml in that directory: `af-stack dev` starts it")
+		fmt.Fprintln(w, "(that is what the npm hook runs), `docker compose down` stops it. Ports are")
+		fmt.Fprintln(w, "allocated into .env when the defaults (8080, 8081, 5432, ...) are busy.")
 		return nil
 	})
 }
@@ -143,7 +151,10 @@ func nodeTemplate(displayName, slug string) map[string]string {
   "type": "module",
   "description": "An app built on the AF Stack backend.",
   "scripts": {
-    "start": "node src/index.mjs"
+    "prestart": "af-stack dev",
+    "start": "node src/index.mjs",
+    "backend": "af-stack dev",
+    "backend:stop": "docker compose down"
   }
 }
 `
@@ -197,10 +208,10 @@ function fail(what, detail) {
   console.error("\n" + what);
   if (detail) console.error("Details: " + detail);
   console.error(` + "`" + `
-Start a backend from your BackAI clone with 'af-stack dev'. It prints the
-runtime's URL as "API runtime" — when :8080 is busy it picks another port —
-so put that URL in .env:   AF_STACK_URL=http://localhost:<port>
-(and AF_STACK_API_KEY if auth is on).` + "`" + `);
+This app carries its own backend (docker-compose.yml). Start it with
+'af-stack dev' in this directory — 'npm start' does that first — and it
+writes the runtime's URL into .env as AF_STACK_URL (another port than 8080
+when 8080 is busy). Docker must be running.` + "`" + `);
   process.exit(1);
 }
 
@@ -229,9 +240,23 @@ async function main() {
   console.log("Talking to BackAI at " + BASE_URL);
   await checkRuntime();
   try {
-    // The simplest call that proves the wiring: list available agents.
-    const agents = await api("/agents");
-    console.log("Available agents:", agents);
+    // The simplest call that proves the wiring: list the registered agents.
+    const listing = await api("/agents");
+    const agents = Array.isArray(listing) ? listing : listing?.agents ?? [];
+    console.log("Registered agents:", agents.map((a) => a.node_id ?? a).join(", ") || "(none yet)");
+
+    // Call the bundled demo agent's no-key reasoner: it echoes its input back
+    // through the gateway -> AgentField -> agent round trip.
+    if (agents.some((a) => (a.node_id ?? a) === "supportdesk")) {
+      const reply = await api("/agents/supportdesk.echo", {
+        method: "POST",
+        body: { input: { payload: { message: "hello from " + BASE_URL } } },
+      });
+      const echoed = reply?.result?.echoed ?? reply?.output?.echoed ?? reply?.echoed ?? reply;
+      console.log("Echo agent replied: " + JSON.stringify(echoed));
+    } else {
+      console.log("The supportdesk agent has not registered yet; run again in a few seconds.");
+    }
 
     // Example: ask the OpenAI-compatible LLM gateway for a one-liner.
     // const reply = await api("/llm/chat/completions", { method: "POST", body: {
@@ -251,11 +276,18 @@ async function main() {
 main();
 `
 
-	env := `# BackAI runtime base URL: the "API runtime" URL that ` + "`af-stack dev`" + ` prints.
-# The default is 8080, but af-stack dev picks another port when 8080 is busy.
+	env := `# BackAI runtime base URL. ` + "`af-stack dev`" + ` (run by ` + "`npm start`" + `) boots the bundled
+# backend and writes the real value here — another port than 8080 when 8080
+# is busy — so you normally never edit this line.
 AF_STACK_URL=http://localhost:8080
 # Bearer token — required when the runtime has auth enabled
 AF_STACK_API_KEY=
+
+# The bundled backend (docker-compose.yml) reads this file too:
+#   AF_STACK_VERSION=<tag>        run another BackAI release
+#   OPENROUTER_API_KEY=...        (or OPENAI/ANTHROPIC/...) turns demo mode off
+#   AF_STACK_MODE=personal        no login, no paywall
+#   AF_STACK_PORT=..., AGENTFIELD_PORT=..., POSTGRES_PORT=...   host ports
 `
 
 	gitignore := `node_modules/
@@ -270,16 +302,29 @@ first-class primitive.
 
 ## Quickstart
 
-1. Start a backend from your BackAI clone: ` + "`af-stack dev`" + `. Note the URL it
-   prints as **API runtime** (8080 by default; another port if 8080 was busy).
-2. Configure this app: ` + "`cp .env.example .env`" + `, set ` + "`AF_STACK_URL`" + ` to that URL
-   and, if auth is on, ` + "`AF_STACK_API_KEY`" + `. ` + "`src/index.mjs`" + ` reads ` + "`.env`" + ` itself.
-3. Run it: ` + "`npm install && npm start`" + `
+Docker (with Compose) must be running. Then:
+
+` + fence + `sh
+npm install && npm start
+` + fence + `
+
+` + "`npm start`" + ` first runs ` + "`af-stack dev`" + `, which boots the bundled backend in
+` + "`docker-compose.yml`" + ` — Postgres, MinIO, LiteLLM, the AgentField control plane,
+the BackAI runtime, the operator dashboard, and the ` + "`supportdesk`" + ` demo agent —
+waits for the runtime, and writes its URL into ` + "`.env`" + ` as ` + "`AF_STACK_URL`" + `.
+Then ` + "`src/index.mjs`" + ` lists the registered agents and calls ` + "`supportdesk.echo`" + `.
+The first run pulls the images; later runs are a no-op when the backend is up.
+
+- Operator dashboard: http://localhost:33000 (` + "`operator@af-stack.local`" + ` / ` + "`changeme123`" + `)
+- API: http://localhost:8080/api/v1 (` + "`af-stack dev`" + ` picks other ports when these are busy and records them in ` + "`.env`" + `)
+- Stop: ` + "`npm run backend:stop`" + ` (` + "`docker compose down`" + `; add ` + "`-v`" + ` to drop the data)
+- Live model calls: set ` + "`OPENROUTER_API_KEY`" + ` (or another provider key) in ` + "`.env`" + ` and restart
 
 ## What's here
 
 - ` + "`src/index.mjs`" + ` — talks to the backend with the built-in ` + "`fetch`" + ` (zero deps).
-- ` + "`.env.example`" + ` — the two env vars the app needs.
+- ` + "`docker-compose.yml`" + ` + ` + "`backend/`" + ` — the bundled backend, pinned to the BackAI release that scaffolded this app.
+- ` + "`.env.example`" + ` — the app's env vars; the backend reads the same file.
 
 ## Upgrade to the typed SDK
 
@@ -299,7 +344,10 @@ const reply = await suite.llm.chat({
 	claudeMd := "# " + displayName + ` — an app on the AF Stack backend
 
 This project was scaffolded by ` + "`af-stack init " + slug + "`" + `. It CONSUMES an
-AF Stack backend over HTTP — it is not a fork of the stack itself.
+AF Stack backend over HTTP — it is not a fork of the stack itself. The backend
+it consumes is bundled: ` + "`docker-compose.yml`" + ` boots BackAI from the release
+images, ` + "`af-stack dev`" + ` (run by ` + "`npm start`" + `) starts it and writes its URL
+into ` + "`.env`" + `, ` + "`docker compose down`" + ` stops it.
 
 ## How to talk to the backend
 - One base URL (` + "`AF_STACK_URL`" + `), everything under ` + "`/api/v1`" + `, bearer auth
@@ -326,7 +374,7 @@ Plans and Stripe keys are configured by the operator in the dashboard
 ## Ground rules
 - The backend owns auth, tenancy, billing, and secrets — call it, don't
   reimplement it here.
-- No backend running? Start one from an AF Stack checkout with ` + "`af-stack dev`" + `.
+- Backend not running? ` + "`af-stack dev`" + ` in this directory (needs Docker).
 - Keep real credentials in ` + "`.env`" + ` (gitignored), never in code.
 `
 

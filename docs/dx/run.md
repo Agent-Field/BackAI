@@ -8,10 +8,7 @@ af-stack dev
 ```
 
 From inside the clone, that's the whole thing — see the
-[golden path](README.md) for the `git clone` line. Run it anywhere else and
-it exits 1 with `must run from inside a BackAI checkout — a clone of
-https://github.com/Agent-Field/backai …`, followed by the clone command and
-the standalone-app alternative. `af-stack dev`:
+[golden path](README.md) for the `git clone` line. `af-stack dev`:
 
 1. Runs a **port preflight** (`scripts/preflight.mjs --fix`) — finds a
    free host port for each service, writes the overrides into `.env`, and
@@ -24,6 +21,11 @@ the standalone-app alternative. `af-stack dev`:
 
 Prefer raw compose? `docker compose up` works too — but then you own port
 conflicts yourself.
+
+`af-stack dev` also runs inside an app scaffolded by
+`af-stack init <name>` — that app brings its own backend, so no clone is
+involved. See [In a scaffolded app](#in-a-scaffolded-app) below. Anywhere
+else (no checkout, no scaffold) it exits 1 and prints both ways in.
 
 ## Local URLs
 
@@ -44,6 +46,45 @@ next free one and records the override in `.env` (e.g.
 `AF_STACK_DASHBOARD_PORT`, `AF_STACK_CUSTOMER_APP_PORT`, `AF_STACK_PORT`,
 `AGENTFIELD_PORT`, `MINIO_CONSOLE_PORT`) — so read `.env` / the printed map
 if a URL above doesn't respond.
+
+## In a scaffolded app
+
+`af-stack init <name>` writes an app that carries its own backend: a
+`docker-compose.yml` plus a `backend/` directory
+(`backend/postgres-init.sh`, `backend/litellm-config.yaml`). The compose
+file pulls the published BackAI release images, pinned to the version of
+the CLI that scaffolded it — Postgres (pgvector), MinIO, LiteLLM, the
+AgentField control plane, the runtime, the operator dashboard, and the
+`supportdesk` demo agent with its no-key `echo` reasoner. Docker with
+Compose is the only prerequisite (plus Node 18+ for the app itself).
+
+Run `af-stack dev` from inside that app and it:
+
+1. Allocates conflict-free host ports, writing `AF_STACK_PORT`,
+   `AGENTFIELD_PORT`, `POSTGRES_PORT` and friends into the app's `.env`
+   when the defaults (8080 / 8081 / 5432 / …) are busy.
+2. Runs `docker compose up -d` and waits for the runtime's `/ready`.
+3. Writes `AF_STACK_URL=http://localhost:<port>` into `.env` and prints the
+   URLs — API runtime, operator dashboard
+   (`http://localhost:33000`, `operator@af-stack.local` / `changeme123`),
+   AgentField UI.
+
+It is **detached**: it returns once the backend is ready. The first run
+pulls the images, so give it a minute.
+
+The scaffold's `package.json` wires that up for you:
+
+| Command | Does |
+| --- | --- |
+| `npm start` | `prestart` runs `af-stack dev` (a no-op when the backend is already up), then the app lists the registered agents and calls `supportdesk.echo` |
+| `npm run backend` | `af-stack dev` on its own |
+| `npm run backend:stop` | `docker compose down` (add `-v` to drop the data volumes too) |
+
+`af-stack init <name> --template saas` (a Vite/React starter) gets the same
+bundled backend; there `npm run dev` boots it via a `predev` hook.
+
+There is no customer app in the scaffolded backend — the app you scaffolded
+is the customer app.
 
 ## `.env`
 

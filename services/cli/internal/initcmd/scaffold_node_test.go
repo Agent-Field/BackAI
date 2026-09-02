@@ -2,6 +2,7 @@ package initcmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -56,7 +57,20 @@ func backaiRuntime(t *testing.T) *httptest.Server {
 	})
 	mux.HandleFunc("/api/v1/agents", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[{"node_id":"supportdesk"}]`))
+		_, _ = w.Write([]byte(`{"agents":[{"node_id":"supportdesk","reasoners":["echo"]}]}`))
+	})
+	mux.HandleFunc("POST /api/v1/agents/supportdesk.echo", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		var body struct {
+			Input struct {
+				Payload map[string]any `json:"payload"`
+			} `json:"input"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"execution_id": "exec-1", "status": "completed",
+			"result": map[string]any{"echoed": body.Input.Payload},
+		})
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -68,8 +82,12 @@ func TestNodeStarterTalksToRuntime(t *testing.T) {
 	dir := scaffoldNodeStarter(t)
 	srv := backaiRuntime(t)
 	out, errOut, code := runStarter(t, dir, "AF_STACK_URL="+srv.URL)
-	if code != 0 || !strings.Contains(out, "supportdesk") {
+	if code != 0 || !strings.Contains(out, "Registered agents: supportdesk") {
 		t.Fatalf("code=%d\nstdout:\n%s\nstderr:\n%s", code, out, errOut)
+	}
+	// The demo call round-trips through the gateway and comes back echoed.
+	if !strings.Contains(out, `Echo agent replied: {"message":"hello from `+srv.URL+`"}`) {
+		t.Fatalf("starter did not call supportdesk.echo:\n%s", out)
 	}
 }
 
@@ -114,7 +132,7 @@ func TestNodeStarterExplainsForeignServer(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("expected exit 1, got %d\n%s", code, errOut)
 	}
-	for _, want := range []string{"not a BackAI runtime", "API runtime", "AF_STACK_URL=http://localhost:<port>"} {
+	for _, want := range []string{"not a BackAI runtime", "af-stack dev", "AF_STACK_URL"} {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("stderr missing %q:\n%s", want, errOut)
 		}

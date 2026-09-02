@@ -38,9 +38,15 @@ required in practice: without the flag init prompts on stdin, and in a
 non-interactive shell that read hits EOF and the command fails with
 `init: --name is required` — so always pass it. Everything after is editing the four
 surfaces. Prefer these commands over hand-copying files.
-`af-stack init <name>` with a positional name is different: it scaffolds a
-small standalone app that calls a running BackAI, in any directory, with no
-surfaces to brand or extend.
+`af-stack init <name>` with a positional name is different: it scaffolds an
+app that **carries its own backend** — a `docker-compose.yml` plus a
+`backend/` directory that boot the published BackAI release images, pinned
+to the CLI's version. It works in any directory, needs no clone (only
+Docker, plus Node 18+ for the app), and has no surfaces to brand or extend.
+`npm start` runs `af-stack dev` first (a no-op when the backend is already
+up), then the app, which lists the registered agents and calls
+`supportdesk.echo`. `af-stack agent|module|plugin new` and `deploy` still
+need a clone.
 
 ## Read these first
 
@@ -228,10 +234,11 @@ Follow this sequence. Don't skip steps.
    `git clone https://github.com/Agent-Field/backai <name> && cd <name>`, then
    `af-stack init --name "<Name>" --template <node|coding-agent>`.
    (`af-stack init <name>` with a positional name is a different command: it
-   scaffolds a small standalone `node`/`saas` app that calls a running BackAI
-   and has none of the four surfaces.) To add a surface to an EXISTING
-   checkout, use `af-stack agent|module|plugin new`, or copy the matching
-   template from `snippets/`:
+   scaffolds a `node`/`saas` app that ships its own backend — `af-stack dev`
+   inside it boots the release images, no clone — and has none of the four
+   surfaces.) To add a surface to an EXISTING checkout, use
+   `af-stack agent|module|plugin new`, or copy the matching template from
+   `snippets/`:
    - New agent → `snippets/agent.py`
    - New workload module (Python sidecar) → `snippets/workload-module/`
    - New dashboard plugin → `snippets/dashboard-plugin/`
@@ -243,7 +250,8 @@ Follow this sequence. Don't skip steps.
 5. **Wire with SDK only.** Connect surfaces using `suite.*` (runtime
    handlers, dashboard, customer-app) or `app.*` (inside agents). Never
    reach the DB / LiteLLM / AgentField directly from outside its layer.
-6. **Run locally.** `af-stack dev` brings up the whole stack (falls back to
+6. **Run locally.** `af-stack dev` brings up the whole stack — from source
+   in a checkout, from the release images in a scaffolded app (falls back to
    `docker compose up` in a raw fork). Use the runtime's
    `/api/v1/openapi.json` to verify your routes are registered.
 7. **Deploy.** `deploy/` has Helm / Fly / Railway / Render / compose — pick a

@@ -16,8 +16,10 @@ af-stack deploy helm          # ship it (helm | fly | railway | render)
 
 Four commands, one loop: **init → dev → edit → deploy**, all inside the
 clone. `af-stack init <name>` with a positional name is a different thing:
-it scaffolds a small standalone app that *calls* a running BackAI, in any
-directory, and has no surfaces to brand or extend. See
+it scaffolds an app that *carries its own backend* — a `docker-compose.yml`
+and a `backend/` directory pinned to the CLI's version — in any directory,
+with no clone and no surfaces to brand or extend. `af-stack dev` inside that
+app boots the backend from the published release images. See
 [run.md](run.md) for what `af-stack dev` actually brings up and
 [build-app.md](build-app.md) for the surfaces you edit.
 
