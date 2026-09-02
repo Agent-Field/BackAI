@@ -108,7 +108,7 @@ Every command below exists in the current binary (see
 [`services/cli/cmd/af-stack/main.go`](../services/cli/cmd/af-stack/main.go)).
 
 ```bash
-# Fork bootstrap + dev loop
+# Fork bootstrap + dev loop (run inside a clone of this repo)
 af-stack init --name "DocuChat" --color "#0A66C2" --logo ./logo.png
 af-stack dev --detach
 af-stack mode personal|saas                  # auth+billing off ⇄ multi-tenant SaaS

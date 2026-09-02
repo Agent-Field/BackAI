@@ -1,7 +1,7 @@
 # Theming and Branding
 
 BackAI branding starts in root [`brand.yaml`](../brand.yaml). For a
-new fork, prefer the CLI:
+new fork, prefer the CLI, run inside your clone of the repo:
 
 ```bash
 af-stack init --name "DocuChat" --color "#0A66C2" --logo ./logo.png

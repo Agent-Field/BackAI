@@ -7,13 +7,17 @@ source — where this hub and older prose disagree, this hub wins.
 ## The golden path (CLI-first)
 
 ```bash
-af-stack init my-app          # scaffold a fork / new project
+git clone https://github.com/Agent-Field/backai my-app && cd my-app
+af-stack init --name "My App" # brand the fork: brand.yaml, logos, default agent
 af-stack dev                  # preflight ports + docker compose up
 # … edit one of the four surfaces (below) …
 af-stack deploy helm          # ship it (helm | fly | railway | render)
 ```
 
-Four commands, one loop: **init → dev → edit → deploy**. See
+Four commands, one loop: **init → dev → edit → deploy**, all inside the
+clone. `af-stack init <name>` with a positional name is a different thing:
+it scaffolds a small standalone app that *calls* a running BackAI, in any
+directory, and has no surfaces to brand or extend. See
 [run.md](run.md) for what `af-stack dev` actually brings up and
 [build-app.md](build-app.md) for the surfaces you edit.
 
