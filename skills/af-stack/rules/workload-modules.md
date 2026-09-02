@@ -208,6 +208,18 @@ const stats = await fetch(`${process.env.RUNTIME_URL}/workload/<your-id>/stats`)
 
 ## Testing locally
 
+Validate the module offline first — no Docker, no runtime, no operator key:
+
+```bash
+af-stack module validate workload-modules/<id>   # add --json for machine output
+```
+
+It checks the manifest shape and lints the `migrations/` SQL for tenant
+isolation. Exit 0 = valid, 5 = validation failed, 4 = the directory doesn't
+exist, 2 = bad args. It takes a **directory path** — a bare module id exits 4.
+
+Then bring the stack up:
+
 ```bash
 # Start base AF Stack
 docker compose up -d
@@ -243,5 +255,5 @@ services/runtime/internal/modules/<your-id>/
 See `services/runtime/internal/modules/modules.go` for the `Module`
 interface contract. Registration happens in
 `services/runtime/cmd/af-stack/main.go`. Don't add Go modules without
-reading `development/strategy.md` first — eventually is when this becomes the canonical
-shape.
+reading [`boundaries.md`](boundaries.md) first — eventually is when this
+becomes the canonical shape.

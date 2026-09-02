@@ -258,7 +258,7 @@ Per-tenant budgets returning `HTTP 402 BUDGET_EXCEEDED` when crossed.
 
 ## Roadmap primitives (yet to ship)
 
-These are documented in `docs/extensibility.md` / `development/strategy.md`. If the user
+`docs/product.md` tracks what's REAL vs planned. If the user
 needs them today, propose a workaround or wait.
 
 | Primitive | Status | Workaround until shipped |

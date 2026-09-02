@@ -32,9 +32,11 @@ af-stack mcp add github --transport stdio \                 # register tool serv
 # edit the four surfaces below, then ship via deploy/ (Helm/Fly/Railway/Render/compose)
 ```
 
-`af-stack init --template coding-agent` brands the checkout and adds a real
-coding agent (multi-tenancy ON, a GH_TOKEN secret slot). Everything after is
-editing the four surfaces. Prefer these commands over hand-copying files.
+`af-stack init --name "<Name>" --template coding-agent` brands the checkout and
+adds a real coding agent (multi-tenancy ON, a GH_TOKEN secret slot). `--name` is
+required: init only prompts for it on a TTY, so a non-interactive shell (what a
+coding agent runs in) must pass the flag. Everything after is editing the four
+surfaces. Prefer these commands over hand-copying files.
 `af-stack init <name>` with a positional name is different: it scaffolds a
 small standalone app that calls a running BackAI, in any directory, with no
 surfaces to brand or extend.
@@ -45,10 +47,10 @@ If unsure of the strategic frame, primitives table, or canonical DX:
 
 - `docs/stack.md` — the 8-band layered architecture (Client / Edge / API
   Gateway / Intelligence / Execution / Delivery / Observability / Data)
-- `development/positioning.md` — the canonical fork-and-edit DX + vocabulary
-  (Workload Module · Dashboard Plugin · Adapter)
-- `development/strategy.md` — the ownership boundary (AgentField vs af-stack vs
-  LiteLLM) and the 4-phase plan
+- `docs/dx/README.md` — the golden path and the four edit surfaces
+- `docs/dx/adapters.md` — what an Adapter is and which slots swap by env var
+- [`rules/boundaries.md`](rules/boundaries.md) — the ownership boundary
+  (AgentField vs af-stack vs LiteLLM)
 - `docs/product.md` — what's REAL vs needs-key vs not-in-v1
 
 ## The 4 edit surfaces (the most important table)
@@ -58,7 +60,7 @@ Every other directory is platform code you don't edit.
 
 | Surface | Where | Language | What goes here |
 |---|---|---|---|
-| **Customer App** | `apps/customer-app/src/app/(app)/...` | TypeScript / React | Branded SaaS pages the customer sees (sign-up, dashboard, billing, app-specific UI) |
+| **Customer App** | `apps/customer-app/src/app/<route>/page.tsx` (pattern: `src/app/dashboard/page.tsx`) | TypeScript / React | Branded SaaS pages the customer sees (dashboard, app-specific UI). Auth pages live under `(auth)/` — don't edit them |
 | **Agent** | `apps/backend/agents/<name>/` | Python | AgentField agent definition + reasoners + harness use + MCP server registration |
 | **Workload Module** | `workload-modules/<id>/` (scaffold with `af-stack module new <id>`) | Go in-runtime handler is the intended path, but the runtime loader isn't wired yet — a Python workload runs as an AF agent today | Backend HTTP routes + DB migrations + jobs + crons that aren't core platform |
 | **Dashboard Plugin** | `apps/dashboard/plugins/<id>/` | TypeScript / React | Operator-console read-only tabs (charts, lists, status) |
@@ -143,7 +145,9 @@ page), you don't need Tier 2. Use the dashboard, or call these from an
 operator-only workload-module route gated by your auth rules.
 
 **Authoritative source**: for the live REST surface, read
-`/api/v1/openapi.json` on a running runtime (or `apps/backend/static/openapi.json`).
+`/api/v1/openapi.json` on a running runtime. A checked-in snapshot lives at
+`docs-site/public/openapi.json` (refresh with `docs-site/scripts/fetch-openapi.sh`;
+it can lag the runtime).
 For the Python SDK, see `packages/sdk-py/af_stack/`. For the TS SDK, see
 `packages/sdk-ts/src/`. For the Go SDK, see `packages/sdk-go/suite/`.
 
@@ -202,7 +206,7 @@ These are non-negotiable. Each has a detailed rationale in `rules/`.
    [`rules/sdk.md`](rules/sdk.md) → "LLM rate limits — 429 responses".
 10. **The repo IS the product.** No "managed offering" code paths, no
     "free tier" feature gates in OSS. We don't ship code that depends on
-    a SaaS we run. See `development/positioning.md`.
+    a SaaS we run. See [`rules/boundaries.md`](rules/boundaries.md).
 
 ## Canonical workflow — when the user says "build X on AF Stack"
 
@@ -219,14 +223,22 @@ Follow this sequence. Don't skip steps.
 3. **Map primitives.** Walk the primitives table; mark which rows X
    uses. If any are 🚧 (roadmap), warn the user and propose a workaround
    or wait.
-4. **Scaffold.** For a NEW project, start from the CLI:
-   `af-stack init <name> --template <coding-agent|node>`. To add a surface to
-   an EXISTING project, copy the matching template from `snippets/`:
+4. **Scaffold.** For a NEW project, clone the repo and brand it in place —
+   `git clone https://github.com/Agent-Field/backai <name> && cd <name>`, then
+   `af-stack init --name "<Name>" --template <node|coding-agent>`.
+   (`af-stack init <name>` with a positional name is a different command: it
+   scaffolds a small standalone `node`/`saas` app that calls a running BackAI
+   and has none of the four surfaces.) To add a surface to an EXISTING
+   checkout, use `af-stack agent|module|plugin new`, or copy the matching
+   template from `snippets/`:
    - New agent → `snippets/agent.py`
    - New workload module (Python sidecar) → `snippets/workload-module/`
    - New dashboard plugin → `snippets/dashboard-plugin/`
    - New customer-app page → `snippets/customer-app-page.tsx`
-   Drop into the right surface path. Rename + edit.
+   Drop into the right surface path. Rename + edit. Then check it offline —
+   `af-stack module validate <dir>` / `af-stack agent validate <dir>` (both
+   take a **directory path**, not a bare id, and accept `--json`; no runtime
+   needed).
 5. **Wire with SDK only.** Connect surfaces using `suite.*` (runtime
    handlers, dashboard, customer-app) or `app.*` (inside agents). Never
    reach the DB / LiteLLM / AgentField directly from outside its layer.
@@ -255,7 +267,7 @@ Session-scope memory; see `rules/boundaries.md`."
 - **AgentField (inside agents)**: `from agentfield import Agent, AIConfig`
   + `app.ai(...)`, `app.memory.*`, `app.harness(...)`, `@app.reasoner(...)`.
 - **OpenAPI (machine-readable)**: `GET /openapi.json` on a running
-  runtime, or `apps/backend/static/openapi.json`.
+  runtime, or the snapshot at `docs-site/public/openapi.json`.
 
 ## Detailed references (fetch on demand)
 

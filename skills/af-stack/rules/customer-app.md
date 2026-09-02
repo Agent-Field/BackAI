@@ -15,39 +15,54 @@ apps/customer-app/src/
 │   ├── (auth)/             # ← DON'T edit — sign-in, sign-up, sign-out
 │   │   ├── sign-in/
 │   │   ├── sign-up/
-│   │   └── sign-out/
-│   ├── (app)/              # ← EDIT FREELY — customer-facing pages
-│   │   ├── dashboard/
-│   │   ├── settings/
-│   │   ├── billing/        # ← billing page (wired to suite.billing)
-│   │   ├── api-key/        # ← customer's API key management
-│   │   ├── code-helper/    # ← demo page, replace with your product
-│   │   └── ... your pages here
-│   ├── api/                # ← MOSTLY don't edit; some proxy routes here
-│   ├── layout.tsx          # ← brand-only edits
+│   │   ├── sign-out/
+│   │   └── layout.tsx
+│   ├── api/                # ← MOSTLY don't edit — better-auth handler,
+│   │   ├── auth/[...all]/  #   onboarding key, and the runtime proxy
+│   │   ├── customer/onboarding-key/
+│   │   └── v1/[...path]/   # ← proxy to the runtime (/api/v1/...)
+│   ├── dashboard/          # ← the one shipped customer page; copy it
+│   │   └── page.tsx
+│   ├── <your-route>/       # ← EDIT FREELY — add your pages here
+│   ├── brand.css           # ← generated from brand.yaml; don't hand-edit
+│   ├── favicon.ico         # ← your favicon lives HERE (no public/ dir)
+│   ├── globals.css
+│   ├── layout.tsx          # ← root layout; brand-only edits
 │   └── page.tsx            # ← landing page; edit freely
 ├── components/
 │   ├── ui/                 # ← DON'T edit — shadcn primitives
-│   ├── layout/             # ← brand-only edits (header / sidebar)
+│   ├── app-sidebar.tsx     # ← the sidebar; nav is an inline items array
+│   ├── nav-*.tsx           # ← sidebar sections
 │   └── ... your components
-└── lib/
-    └── ...                 # auth-client, utils
+├── hooks/
+├── lib/                    # api, auth, auth-client, brand (generated),
+│   └── ...                 # db, provisioning, session, sso, utils
+└── middleware.ts           # ← the auth gate
 ```
+
+There is **no `(app)/` route group**, no `components/layout/`, and no
+`public/` directory. Routes are plain folders under `src/app/`; creating
+`src/app/(app)/dashboard/page.tsx` alongside the real `src/app/dashboard/`
+is a hard Next.js duplicate-route build failure.
 
 ## Edit zones — the contract
 
 | Zone | Edit policy | What lives there |
 |---|---|---|
 | `(auth)/` | **Don't edit** | Pre-wired better-auth flows (sign-up auto-provisions tenant + membership + API key) |
-| `(app)/` | **Edit freely** | Your customer-facing pages |
+| `app/<route>/` | **Edit freely** | Your customer-facing pages |
 | `api/` | **Mostly don't edit** | Proxy routes to the runtime; better-auth handlers |
 | `components/ui/` | **Don't edit** | shadcn primitives — extend if needed, don't modify |
-| `components/layout/` | **Brand only** | Sidebar / topbar — edit the brand bits, keep the auth shell |
-| `app/layout.tsx` | **Brand only** | Wraps everything; brand colors / fonts |
+| `components/app-sidebar.tsx` | **Brand only** | Sidebar shell + the inline nav `items` array |
+| `app/layout.tsx` | **Brand only** | Root layout; brand colors / fonts |
 | `app/page.tsx` | **Edit freely** | Landing page |
 
-When you add a page, drop it under `(app)/<your-route>/page.tsx`. The
-auth middleware enforces sign-in before serving anything under `(app)/`.
+When you add a page, drop it at `src/app/<your-route>/page.tsx`. Gating is
+**deny-by-default**: `src/middleware.ts` matches every route and redirects
+to `/sign-in` unless the path starts with one of the `PUBLIC_PREFIXES`
+(`/sign-in`, `/sign-up`, `/api/`, `/_next`, `/favicon`) — so a new page is
+signed-in-only automatically, without belonging to any route group. In
+personal mode (`AF_STACK_MODE=personal`) the gate is skipped entirely.
 
 ## What's pre-wired (don't reinvent)
 
@@ -71,29 +86,33 @@ Don't pass tenant IDs around.
 
 ### Layout shell
 
-`(app)/layout.tsx` wraps every customer page with the sidebar + topbar.
-You're free to edit the brand bits (logo, name, color); leave the auth +
+There is no shared app shell layout — each page composes its own by
+mounting `<SidebarProvider>` + `<AppSidebar>`. Copy
+`src/app/dashboard/page.tsx` as the pattern. You're free to edit the brand
+bits (logo, name, color) in `components/app-sidebar.tsx`; leave the auth +
 session machinery alone.
 
 ### Brand theming
 
-CSS variables in `apps/customer-app/src/app/brand.css` (will eventually
-move this to a generated artifact from `brand.yaml`). Every shadcn
-primitive, every chart, every page inherits the palette.
+CSS variables in `apps/customer-app/src/app/brand.css` — generated from
+`brand.yaml` by `scripts/generate-brand.mjs`, so edit `brand.yaml`, not the
+CSS. Every shadcn primitive, every chart, every page inherits the palette.
 
 Don't hardcode hex colors. Use Tailwind tokens (`bg-primary`,
 `text-foreground`, `border-border`, `text-muted-foreground`).
 
-### Billing UI
+### Billing and API keys — NOT shipped as customer pages
 
-`(app)/billing/page.tsx` is wired to `suite.billing.*`. When the
-operator has Stripe / Lago configured, real portal links work; when
-not, an empty state shows.
+There is no customer-facing billing page and no customer-facing API-key
+page. The **operator dashboard** owns both today
+(`apps/dashboard/src/app/(dashboard)/platform/billing` and
+`.../people/keys`).
 
-### API key management
-
-`(app)/api-key/page.tsx` lets the customer view + rotate their tenant
-API key. Pre-wired; don't reinvent.
+To add a customer-facing one, create
+`apps/customer-app/src/app/billing/page.tsx` and call the runtime through
+the app's own proxy route (`src/app/api/v1/[...path]/route.ts`) — the
+`@af-stack/sdk` package is **not** a dependency of `apps/customer-app`, so
+don't `import { suite } from "@af-stack/sdk"` here.
 
 ## How to use suite.* from customer pages
 
@@ -128,26 +147,30 @@ runtime.
 To take a fresh fork from BackAI to your product:
 
 1. **`brand.yaml`** — the source of truth for app name, colors, and logo.
+   The product name reaches components through the generated
+   `src/lib/brand.ts` (`brand.displayName`); don't hardcode it.
 2. **`apps/customer-app/src/app/page.tsx`** — landing page copy.
-3. **`apps/customer-app/src/components/layout/customer-topbar.tsx`** —
-   logo + product name in the topbar.
-4. **`apps/customer-app/public/favicon.ico`** + logo files — your assets.
-5. **`apps/customer-app/src/app/(app)/dashboard/page.tsx`** — the first
-   thing customers see after sign-in.
+3. **`apps/customer-app/src/components/app-sidebar.tsx`** — the sidebar
+   nav: the inline `items` array passed to `<NavMain>`.
+4. **`apps/customer-app/src/app/favicon.ico`** — your favicon (there is no
+   `public/` directory).
+5. **`apps/customer-app/src/app/dashboard/page.tsx`** — the first thing
+   customers see after sign-in.
 
-The CLI should eventually ship `af-stack init`, which does steps 1, 3, and 4
-automatically.
+`af-stack init --name "<Name>" --color "<#hex>"` does step 1 for you (and
+`--logo <path>` sets the light+dark mark in `brand.yaml`); regenerate the
+derived files with `pnpm run generate:brand`.
 
 ## Adding a page — concrete walkthrough
 
 The user wants `/items` as a customer-facing list:
 
-1. Create `apps/customer-app/src/app/(app)/items/page.tsx`. Copy from
+1. Create `apps/customer-app/src/app/items/page.tsx`. Copy from
    `snippets/customer-app-page.tsx`.
 2. Edit the title, description, and `fetchItems()` to point at your
    workload module's `/items` route.
-3. Add `Items` to the sidebar in
-   `apps/customer-app/src/components/layout/customer-sidebar.tsx`.
+3. Add `Items` to the inline `items` array in
+   `apps/customer-app/src/components/app-sidebar.tsx`.
 4. Test: `docker compose up`, sign up, click "Items" in the sidebar.
 
 ## What you should NOT do in the customer-app
@@ -158,6 +181,7 @@ The user wants `/items` as a customer-facing list:
 | Read the DB directly | Customer app shouldn't know your schema | Route through your workload module |
 | Add a backend route in `app/api/...` for business logic | API routes here are proxies, not domain logic | Add to your workload module |
 | Modify `(auth)/` | Breaks the sign-up auto-provisioning | Override theme via brand only |
+| Create `src/app/(app)/...` | The route group doesn't exist; duplicates a real route and fails the Next.js build | Plain folder: `src/app/<route>/page.tsx` |
 | Use hex colors | Breaks dark mode + theming | Tailwind tokens |
 | Pass tenant_id around manually | RLS handles it | Trust the session |
 | Build a chat history UI without using AgentField Session memory | Drift from the platform | Call your agent which uses Session-scope memory |

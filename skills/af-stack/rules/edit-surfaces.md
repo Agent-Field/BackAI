@@ -7,7 +7,7 @@ The 4 edit surfaces in the user's fork. This file resolves the
 
 | Surface | Path | Language |
 |---|---|---|
-| Customer App | `apps/customer-app/src/app/(app)/...` | TypeScript / React |
+| Customer App | `apps/customer-app/src/app/<route>/page.tsx` | TypeScript / React |
 | Agent | `apps/backend/agents/<name>/` | Python |
 | Workload Module | `examples/<id>/handlers/` (Python sidecar today) OR `services/runtime/internal/modules/<id>/` (Go, eventually) | Python (sidecar) or Go (in-runtime) |
 | Dashboard Plugin | `apps/dashboard/plugins/<id>/` | TypeScript / React |
@@ -19,7 +19,7 @@ The user wants ...
 
 ├─ a page in the customer-facing SaaS?
 │    → Customer App
-│      apps/customer-app/src/app/(app)/<route>/page.tsx
+│      apps/customer-app/src/app/<route>/page.tsx
 │
 ├─ a tab in the operator console showing some state?
 │    → Dashboard Plugin
