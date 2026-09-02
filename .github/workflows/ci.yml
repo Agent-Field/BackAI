@@ -51,6 +51,9 @@ jobs:
               - 'go.mod'
               - 'go.sum'
               - '.golangci.yml'
+              # secrets.TestEnvExampleBootsKMS pins the quickstart contract
+              # that the committed example env boots the runtime.
+              - '.env.example'
             python:
               - '**/*.py'
               - 'pyproject.toml'
