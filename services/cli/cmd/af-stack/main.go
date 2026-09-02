@@ -62,6 +62,7 @@ import (
 
 	"github.com/Agent-Field/backai/services/cli/internal/admincmd"
 	"github.com/Agent-Field/backai/services/cli/internal/billingcmd"
+	"github.com/Agent-Field/backai/services/cli/internal/buildinfo"
 	"github.com/Agent-Field/backai/services/cli/internal/client"
 	"github.com/Agent-Field/backai/services/cli/internal/conncmd"
 	"github.com/Agent-Field/backai/services/cli/internal/dbcmd"
@@ -86,6 +87,7 @@ func main() {
 	// The global --no-telemetry flag may appear anywhere; strip it before
 	// dispatch so subcommand flag parsers never see it.
 	optOut, args := extractNoTelemetry(os.Args[1:])
+	buildinfo.Version = version
 
 	tel := telemetry.New(version, optOut, os.Stderr)
 	cmdName := "help"

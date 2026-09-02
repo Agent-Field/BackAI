@@ -1,0 +1,188 @@
+# LiteLLM Proxy config — handles every upstream LLM provider so the
+# runtime doesn't ship a hand-rolled client per vendor.
+#
+# AF Stack forwards /api/v1/llm/* to this proxy (default URL:
+# http://litellm:4000 inside docker-compose). LiteLLM picks the upstream
+# from `model_list` and uses the appropriate provider key.
+#
+# Format reference: https://docs.litellm.ai/docs/proxy/configs
+#
+# Model naming: the `model_name` field is what AF Stack callers use
+# (e.g. `model="qwen/qwen-2.5-72b-instruct"`). It's a label — LiteLLM
+# resolves it to the `litellm_params.model` value when calling upstream.
+#
+# Adding a provider: drop in a model_list entry pointing at the
+# `litellm_params.model` slug LiteLLM expects (`openrouter/...`,
+# `gpt-4o`, `claude-3-5-sonnet-20241022`, `gemini/...`,
+# `mistral/...`, `deepseek/...`, `groq/...`, `bedrock/...`, etc.).
+# LiteLLM only activates an entry when the required env key is set —
+# missing keys produce a clear runtime error, not a silent miss.
+#
+# Cost: when an upstream's pricing is known to LiteLLM, the proxy
+# injects `response_cost` (USD) into the response. The AF Stack runtime
+# prefers that number over its static pricing.EstimateCostUSD fallback.
+
+model_list:
+  # ───── OpenRouter (default; one key gets ~100 models) ─────
+  # AF Stack's default model is qwen/qwen-2.5-72b-instruct — cheap,
+  # capable, fast. The runtime's sample-agent points at this by default.
+  - model_name: qwen/qwen-2.5-72b-instruct
+    litellm_params:
+      model: openrouter/qwen/qwen-2.5-72b-instruct
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  - model_name: qwen/qwen-2.5-7b-instruct
+    litellm_params:
+      model: openrouter/qwen/qwen-2.5-7b-instruct
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  - model_name: meta-llama/llama-3.3-70b-instruct
+    litellm_params:
+      model: openrouter/meta-llama/llama-3.3-70b-instruct
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  # NOTE: slugs verified live on openrouter.ai/api/v1/models — the
+  # previous entries (google/gemini-flash-1.5, anthropic/claude-3.5-sonnet)
+  # were retired upstream and returned "No endpoints found", which
+  # permanently marked the whole openrouter provider degraded on the
+  # Health page.
+  - model_name: google/gemini-2.5-flash
+    litellm_params:
+      model: openrouter/google/gemini-2.5-flash
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  - model_name: anthropic/claude-sonnet-4.5
+    litellm_params:
+      model: openrouter/anthropic/claude-sonnet-4.5
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  # ───── OpenAI (direct) ─────
+  - model_name: openai/gpt-4o-mini
+    litellm_params:
+      model: gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: openai/gpt-4o
+    litellm_params:
+      model: gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+
+  # ───── Anthropic (direct) ─────
+  - model_name: anthropic/claude-haiku-4-5-20251001
+    litellm_params:
+      model: claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: anthropic/claude-sonnet-4-6
+    litellm_params:
+      model: claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: anthropic/claude-opus-4-7
+    litellm_params:
+      model: claude-opus-4-7
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # ───── Google (direct via Gemini) ─────
+  - model_name: google/gemini-2.0-flash-exp
+    litellm_params:
+      model: gemini/gemini-2.0-flash-exp
+      api_key: os.environ/GEMINI_API_KEY
+
+  # ───── Mistral (direct) — activates when MISTRAL_API_KEY set ─────
+  - model_name: mistral/mistral-small-latest
+    litellm_params:
+      model: mistral/mistral-small-latest
+      api_key: os.environ/MISTRAL_API_KEY
+
+  - model_name: mistral/mistral-large-latest
+    litellm_params:
+      model: mistral/mistral-large-latest
+      api_key: os.environ/MISTRAL_API_KEY
+
+  # ───── DeepSeek (direct) — activates when DEEPSEEK_API_KEY set ─────
+  - model_name: deepseek/deepseek-chat
+    litellm_params:
+      model: deepseek/deepseek-chat
+      api_key: os.environ/DEEPSEEK_API_KEY
+
+  - model_name: deepseek/deepseek-reasoner
+    litellm_params:
+      model: deepseek/deepseek-reasoner
+      api_key: os.environ/DEEPSEEK_API_KEY
+
+  # ───── Embeddings — suite memory + hybrid search ─────
+  # The runtime's default embedder id (memory.DefaultEmbeddingModel) is
+  # `openai/text-embedding-3-small`. Route it through OpenRouter's
+  # OpenAI-compatible /embeddings endpoint so the stock one-key setup
+  # (OPENROUTER_API_KEY) gets working vector memory + semantic search
+  # without a separate OpenAI key.
+  - model_name: openai/text-embedding-3-small
+    litellm_params:
+      model: openai/text-embedding-3-small
+      api_base: https://openrouter.ai/api/v1
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  # ───── Groq (direct) — activates when GROQ_API_KEY set ─────
+  - model_name: groq/llama-3.3-70b-versatile
+    litellm_params:
+      model: groq/llama-3.3-70b-versatile
+      api_key: os.environ/GROQ_API_KEY
+
+  - model_name: groq/mixtral-8x7b-32768
+    litellm_params:
+      model: groq/mixtral-8x7b-32768
+      api_key: os.environ/GROQ_API_KEY
+
+  # ─────────────────────────────────────────────────────────────
+  # Multimodal (#14) — OpenAI audio + image surface via LiteLLM
+  # First-party adapters (ElevenLabs, Cartesia, Flux, fal.ai)
+  # bypass LiteLLM entirely; only the OpenAI catalog is mapped here.
+  # ─────────────────────────────────────────────────────────────
+
+  # ───── Audio — text to speech (TTS) ─────
+  - model_name: openai/tts-1
+    litellm_params:
+      model: tts-1
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: openai/tts-1-hd
+    litellm_params:
+      model: tts-1-hd
+      api_key: os.environ/OPENAI_API_KEY
+
+  # ───── Audio — speech to text (STT) ─────
+  - model_name: openai/whisper-1
+    litellm_params:
+      model: whisper-1
+      api_key: os.environ/OPENAI_API_KEY
+
+  # ───── Images — generation / edit / variations ─────
+  - model_name: openai/dall-e-2
+    litellm_params:
+      model: dall-e-2
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: openai/dall-e-3
+    litellm_params:
+      model: dall-e-3
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: openai/gpt-image-1
+    litellm_params:
+      model: gpt-image-1
+      api_key: os.environ/OPENAI_API_KEY
+
+general_settings:
+  # Internal sidecar auth. AF Stack runtime sends this on every call.
+  # Customers authenticate with their tenant API key one layer earlier
+  # (against the runtime), so they never see this value.
+  master_key: os.environ/LITELLM_MASTER_KEY
+
+litellm_settings:
+  # Drop the request to the upstream verbatim — AF Stack already
+  # validated the OpenAI-compat shape on its side.
+  drop_params: true
+  # Surface upstream cost when LiteLLM knows the pricing. The runtime
+  # prefers this number over its static pricing.EstimateCostUSD table.
+  set_verbose: false
