@@ -39,6 +39,7 @@ jobs:
       compose: ${{ steps.filter.outputs.compose }}
       deploy: ${{ steps.filter.outputs.deploy }}
       images: ${{ steps.filter.outputs.images }}
+      install_script: ${{ steps.filter.outputs.install_script }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -88,6 +89,9 @@ jobs:
               - 'package.json'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
+            install_script:
+              - 'scripts/install.sh'
+              - '.github/workflows/ci.yml'
 
   lint-go:
     name: Lint (Go)
@@ -256,6 +260,51 @@ jobs:
       - uses: azure/setup-helm@v4
       - name: Validate Helm, Fly, Railway, Render, and prod compose
         run: scripts/validate-deploy-targets.py
+
+  install-script:
+    # The first line of the README quickstart is `curl … install.sh | bash`.
+    # Lint it and actually run it against the latest GitHub release, in the
+    # same shapes users hit: piped from stdin, from a file, and pinned.
+    name: Install script
+    needs: changes
+    if: needs.changes.outputs.install_script == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Lint
+        run: |
+          bash -n scripts/install.sh
+          shellcheck scripts/install.sh
+      - name: Install latest release (piped, like the README one-liner)
+        run: |
+          AF_STACK_INSTALL_DIR="$RUNNER_TEMP/piped" bash -c 'cat scripts/install.sh | bash'
+          "$RUNNER_TEMP/piped/af-stack" version | grep -E '^af-stack [0-9]+\.[0-9]+\.[0-9]+'
+      - name: Install latest release (from file)
+        run: |
+          AF_STACK_INSTALL_DIR="$RUNNER_TEMP/file" bash scripts/install.sh
+          "$RUNNER_TEMP/file/af-stack" version | grep -E '^af-stack [0-9]+\.[0-9]+\.[0-9]+'
+      - name: Install a pinned version
+        run: |
+          AF_STACK_VERSION=v0.12.4 AF_STACK_INSTALL_DIR="$RUNNER_TEMP/pinned" bash scripts/install.sh
+          "$RUNNER_TEMP/pinned/af-stack" version | grep -F 'af-stack 0.12.4'
+      - name: Reject a tampered checksum
+        run: |
+          set -euo pipefail
+          # Point the script at a local "release" whose checksums.txt is wrong
+          # and make sure it refuses to install.
+          mkdir -p "$RUNNER_TEMP/tamper"
+          cd "$RUNNER_TEMP/tamper"
+          curl -fsSL https://github.com/Agent-Field/backai/releases/download/v0.12.4/af-stack_0.12.4_linux_amd64.tar.gz -o af-stack_0.12.4_linux_amd64.tar.gz
+          printf '%s  af-stack_0.12.4_linux_amd64.tar.gz\n' "$(printf 'x%.0s' $(seq 64))" > checksums.txt
+          # shellcheck disable=SC2016
+          if AF_STACK_INSTALL_DIR="$RUNNER_TEMP/tamper/bin" bash -c '
+                source <(sed -n "/^verify_checksum()/,/^}/p" "$GITHUB_WORKSPACE/scripts/install.sh")
+                warn() { echo "warn: $1"; }
+                archive=af-stack_0.12.4_linux_amd64.tar.gz
+                verify_checksum'; then
+            echo "verify_checksum accepted a bad checksum" >&2; exit 1
+          fi
 
   build-app-images:
     name: Build app images
