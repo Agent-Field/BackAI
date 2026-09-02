@@ -1,11 +1,14 @@
 // Package checkout locates the BackAI checkout — a clone of the repository —
-// that in-tree commands (`init --name`, `dev`, `agent|module|plugin new`,
-// `deploy`) operate on, and explains clearly when there is none.
+// that in-tree commands (`init --name`, `agent|module|plugin new`, `deploy`,
+// and `dev` when there is one) operate on, and explains clearly when there
+// is none.
 //
 // The most common way to end up outside a checkout is to scaffold a
 // standalone app with `af-stack init <name>`, cd into it, and then run a
-// fork command there. That directory calls a running BackAI; it has no
-// apps/ tree to brand or add agents to. The error says so.
+// fork command there. That directory has no apps/ tree to brand or add
+// agents to; the error says so. (`dev` is the exception: the app carries a
+// bundled backend, and project.RunDev runs it when NotFoundError names a
+// ScaffoldedApp.)
 package checkout
 
 import (
@@ -31,7 +34,7 @@ func (e *NotFoundError) Error() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "must run from inside a BackAI checkout — a clone of %s (a directory containing apps/dashboard and apps/customer-app); %s is not one.", RepoURL, e.Dir)
 	if e.ScaffoldedApp != "" {
-		fmt.Fprintf(&b, "\n  %s is a standalone app created by `af-stack init <name>`: it calls a running BackAI and has no fork surfaces to brand or extend.", e.ScaffoldedApp)
+		fmt.Fprintf(&b, "\n  %s is a standalone app created by `af-stack init <name>`: it has a bundled backend (`af-stack dev` works there) but no fork surfaces to brand or extend.", e.ScaffoldedApp)
 	}
 	fmt.Fprintf(&b, "\n  To brand a fork or add agents, modules, or plugins:  git clone %s my-fork && cd my-fork", RepoURL)
 	fmt.Fprintf(&b, "\n  To scaffold a standalone app instead:                af-stack init <name>   (works in any directory)")
