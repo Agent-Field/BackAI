@@ -198,6 +198,7 @@ function printEndpointMap(items, project) {
   console.log(`  Admin console   http://localhost:${P("AF_STACK_DASHBOARD_PORT")}`)
   console.log(`  API runtime     http://localhost:${P("AF_STACK_PORT")}/api/v1`)
   console.log(`  Runtime health  http://localhost:${P("AF_STACK_PORT")}/health`)
+  console.log(`  Your apps       AF_STACK_URL=http://localhost:${P("AF_STACK_PORT")}`)
   console.log(`  AgentField UI   http://localhost:${P("AGENTFIELD_PORT")}`)
   console.log(`  Metrics         http://localhost:${P("AF_STACK_METRICS_PORT")}/metrics`)
   console.log(`  LiteLLM         http://localhost:${P("LITELLM_PORT")}`)
