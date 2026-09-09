@@ -227,3 +227,26 @@ version = "1.0.0"
 		t.Fatalf("Install secret.txt error = %v, want ErrSourceUnreadable", err)
 	}
 }
+
+func TestInstallLocalJSONOnly(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "skill.json"), []byte(`{"name":"json-only","version":"2.0.0"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sk, err := NewInstaller().Install(dir, "")
+	if err != nil {
+		t.Fatalf("Install json-only dir: %v", err)
+	}
+	if sk.Name != "json-only" || sk.Version != "2.0.0" {
+		t.Errorf("got %s@%s, want json-only@2.0.0", sk.Name, sk.Version)
+	}
+
+	sk, err = NewInstaller().Install(filepath.Join(dir, "skill.json"), "")
+	if err != nil {
+		t.Fatalf("Install skill.json: %v", err)
+	}
+	if sk.Name != "json-only" {
+		t.Errorf("file target Name = %q, want json-only", sk.Name)
+	}
+}

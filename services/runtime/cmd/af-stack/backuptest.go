@@ -57,14 +57,10 @@ func registerBackupTestCron(sched *crons.SystemScheduler, log *slog.Logger) {
 // the timestamp. The command inherits the process env (AF_STACK_*_DATABASE_URL,
 // BACKUP_TEST_SCRATCH_URL, etc.).
 func runBackupRestoreTest(ctx context.Context, log *slog.Logger) error {
-	script := strings.TrimSpace(os.Getenv("BACKUP_TEST_SCRIPT"))
-	if script == "" {
-		script = "scripts/backup-restore-test.sh"
+	script, err := resolveBackupTestScript()
+	if err != nil {
+		return err
 	}
-	if filepath.Base(script) != "backup-restore-test.sh" {
-		return fmt.Errorf("backup-test: refused unexpected script %q", script)
-	}
-	script = filepath.Clean(script)
 	timeout := 10 * time.Minute
 	if v := strings.TrimSpace(os.Getenv("BACKUP_TEST_TIMEOUT_SECONDS")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -87,6 +83,34 @@ func runBackupRestoreTest(ctx context.Context, log *slog.Logger) error {
 	appmetrics.SetBackupTestLastSuccess(now)
 	log.Info("backup-test succeeded", "script", script)
 	return nil
+}
+
+// resolveBackupTestScript returns the in-checkout verification script.
+// BACKUP_TEST_SCRIPT may override the path, but the resolved file must
+// stay under the process working directory and be named
+// backup-restore-test.sh so an env var cannot point at /tmp/evil/....
+func resolveBackupTestScript() (string, error) {
+	script := strings.TrimSpace(os.Getenv("BACKUP_TEST_SCRIPT"))
+	if script == "" {
+		script = filepath.Join("scripts", "backup-restore-test.sh")
+	}
+	abs, err := filepath.Abs(script)
+	if err != nil {
+		return "", fmt.Errorf("backup-test: resolve script: %w", err)
+	}
+	abs = filepath.Clean(abs)
+	if filepath.Base(abs) != "backup-restore-test.sh" {
+		return "", fmt.Errorf("backup-test: refused unexpected script %q", script)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("backup-test: working directory: %w", err)
+	}
+	rel, err := filepath.Rel(filepath.Clean(wd), abs)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("backup-test: refused unexpected script %q", script)
+	}
+	return abs, nil
 }
 
 // tailOutput returns the last limit bytes of command output for a bounded log.
