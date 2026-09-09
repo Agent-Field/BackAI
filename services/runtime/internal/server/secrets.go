@@ -6,12 +6,12 @@
 // Every response shape must match the zod schemas in
 // apps/dashboard/src/lib/api.ts exactly:
 //
-//   GET    /api/v1/secrets                       -> SecretListSchema
-//   GET    /api/v1/secrets/{key}                 -> SecretMetadataSchema
-//   POST   /api/v1/secrets/{key}/reveal           -> SecretValueSchema
-//   PUT    /api/v1/secrets/{key}                 -> SecretMetadataSchema (body: PutSecretInput)
-//   DELETE /api/v1/secrets/{key}                 -> {"deleted": true}
-//   POST   /api/v1/secrets/{key}/rotate           -> SecretMetadataSchema (body: {"value": string})
+//	GET    /api/v1/secrets                       -> SecretListSchema
+//	GET    /api/v1/secrets/{key}                 -> SecretMetadataSchema
+//	POST   /api/v1/secrets/{key}/reveal           -> SecretValueSchema
+//	PUT    /api/v1/secrets/{key}                 -> SecretMetadataSchema (body: PutSecretInput)
+//	DELETE /api/v1/secrets/{key}                 -> {"deleted": true}
+//	POST   /api/v1/secrets/{key}/rotate           -> SecretMetadataSchema (body: {"value": string})
 //
 // Plaintext only ever leaves the runtime via /reveal. List and Get
 // responses MUST NOT include the value field.
@@ -220,7 +220,7 @@ func (s *Server) recordSecretReveal(r *http.Request, tenantID, key string) {
 	resourceID := key
 
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Second)
 		defer cancel()
 		// Bind the write connection to the row's tenant so the audit-log RLS
 		// WITH CHECK passes (the pool's PrepareConn hook reads ctx). Secrets

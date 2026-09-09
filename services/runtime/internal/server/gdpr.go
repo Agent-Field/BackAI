@@ -146,7 +146,7 @@ func (s *Server) lookupSuiteUserEmail(ctx context.Context, userID string) (strin
 }
 
 func (s *Server) exportSuiteUser(ctx context.Context, userID, email string) (map[string]any, error) {
-	queries := map[string]string{
+	queries := map[string]string{ // #nosec G101 -- export query names, not credentials
 		"suite_user": `select coalesce(jsonb_agg(to_jsonb(row)), '[]'::jsonb)
 			from (select id::text, email, name, avatar_url, created_at, deleted_at
 			      from suite_users where id = $1::uuid) row`,

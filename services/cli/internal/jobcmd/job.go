@@ -82,10 +82,10 @@ func runNew(baseDir string, args []string, stdout, stderr io.Writer) error {
 	if _, statErr := os.Stat(abs); statErr == nil {
 		return output.Invalid("job new: %s already exists (refusing to overwrite)", rel)
 	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(abs), 0o750); err != nil {
 		return output.Fail("job new: create jobs dir: %v", err)
 	}
-	// #nosec G306 -- scaffolded worker source, world-readable (not a secret).
+	// #nosec G304,G306,G703 -- scaffolded worker source, world-readable (not a secret).
 	if err := os.WriteFile(abs, []byte(contents), 0o644); err != nil {
 		return output.Fail("job new: write %s: %v", rel, err)
 	}

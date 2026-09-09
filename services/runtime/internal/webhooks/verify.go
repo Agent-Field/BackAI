@@ -17,7 +17,7 @@ package webhooks
 
 import (
 	"crypto/hmac"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- legacy provider HMAC (GitHub "sha1=" signatures)
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"

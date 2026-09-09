@@ -49,7 +49,7 @@ func lintDir(dir string) ([]Finding, error) {
 			continue
 		}
 		path := filepath.Join(dir, e.Name())
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(filepath.Clean(path)) // #nosec G304,G703 -- local migration files from an operator-supplied dir
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", path, err)
 		}

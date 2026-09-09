@@ -24,7 +24,9 @@ package skills
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,52 +111,37 @@ func (i *Installer) installLocal(src Source, tenantID string) (Skill, error) {
 		return Skill{}, fmt.Errorf("%w: %v", ErrSourceUnreadable, err)
 	}
 
-	var (
-		mfst manifest
-		read bool
-	)
-	if info.IsDir() {
-		tomlPath := filepath.Join(abs, "skill.toml")
-		jsonPath := filepath.Join(abs, "skill.json")
-		if data, err := os.ReadFile(tomlPath); err == nil {
-			if err := toml.Unmarshal(data, &mfst); err != nil {
-				return Skill{}, fmt.Errorf("%w: skill.toml: %v", ErrSourceUnreadable, err)
-			}
-			read = true
-		} else if data, err := os.ReadFile(jsonPath); err == nil {
-			if err := json.Unmarshal(data, &mfst); err != nil {
-				return Skill{}, fmt.Errorf("%w: skill.json: %v", ErrSourceUnreadable, err)
-			}
-			read = true
+	dir := abs
+	if !info.IsDir() {
+		// Only the two canonical manifest names are readable as a file
+		// target so the open stays inside OpenRoot + a constant basename.
+		base := strings.ToLower(filepath.Base(abs))
+		if base != "skill.toml" && base != "skill.json" {
+			return Skill{}, fmt.Errorf("%w: %q is neither skill.toml nor skill.json", ErrSourceUnreadable, abs)
 		}
-	} else {
-		// Caller pointed straight at a manifest file.
-		data, err := os.ReadFile(abs)
-		if err != nil {
-			return Skill{}, fmt.Errorf("%w: %v", ErrSourceUnreadable, err)
-		}
-		switch strings.ToLower(filepath.Ext(abs)) {
-		case ".toml":
-			if err := toml.Unmarshal(data, &mfst); err != nil {
-				return Skill{}, fmt.Errorf("%w: %v", ErrSourceUnreadable, err)
-			}
-		case ".json":
-			if err := json.Unmarshal(data, &mfst); err != nil {
-				return Skill{}, fmt.Errorf("%w: %v", ErrSourceUnreadable, err)
-			}
-		default:
-			return Skill{}, fmt.Errorf("%w: %q is neither .toml nor .json", ErrSourceUnreadable, abs)
-		}
-		read = true
+		dir = filepath.Dir(abs)
 	}
 
-	if !read {
-		return Skill{}, fmt.Errorf("%w: no skill.toml or skill.json found at %s", ErrSourceUnreadable, abs)
+	data, name, err := readSkillManifest(dir)
+	if err != nil {
+		return Skill{}, err
+	}
+
+	var mfst manifest
+	switch name {
+	case "skill.toml":
+		if err := toml.Unmarshal(data, &mfst); err != nil {
+			return Skill{}, fmt.Errorf("%w: skill.toml: %v", ErrSourceUnreadable, err)
+		}
+	case "skill.json":
+		if err := json.Unmarshal(data, &mfst); err != nil {
+			return Skill{}, fmt.Errorf("%w: skill.json: %v", ErrSourceUnreadable, err)
+		}
 	}
 
 	if mfst.Name == "" {
 		// Fall back to the directory name if the manifest omitted it.
-		mfst.Name = filepath.Base(abs)
+		mfst.Name = filepath.Base(dir)
 	}
 	if mfst.Version == "" {
 		mfst.Version = "0.0.1"
@@ -236,6 +223,36 @@ func nilIfEmpty(s string) *string {
 // appendDefaultIfNil ensures the slice is non-nil. When values is nil
 // and defaults is supplied, defaults wins so the wire emits an array
 // with sensible content rather than an empty placeholder.
+// readSkillManifest opens only the two canonical manifest names under
+// dir via os.OpenRoot so a source path cannot escape into sibling files.
+func readSkillManifest(dir string) ([]byte, string, error) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: %v", ErrSourceUnreadable, err)
+	}
+	defer root.Close()
+
+	for _, name := range []string{"skill.toml", "skill.json"} {
+		data, err := readRootFile(root, name)
+		if err == nil {
+			return data, name, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, "", fmt.Errorf("%w: %s: %v", ErrSourceUnreadable, name, err)
+		}
+	}
+	return nil, "", fmt.Errorf("%w: no skill.toml or skill.json found at %s", ErrSourceUnreadable, dir)
+}
+
+func readRootFile(root *os.Root, name string) ([]byte, error) {
+	f, err := root.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(f)
+}
+
 func appendDefaultIfNil(values []string, defaults ...string) []string {
 	if values != nil {
 		return values

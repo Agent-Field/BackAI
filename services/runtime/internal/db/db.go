@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -43,10 +44,18 @@ func Open(ctx context.Context, cfg Config) (*DB, error) {
 		return nil, fmt.Errorf("db: parse url: %w", err)
 	}
 	if cfg.MaxConnections > 0 {
-		pcfg.MaxConns = int32(cfg.MaxConnections)
+		n, err := int32n(cfg.MaxConnections, "MaxConnections")
+		if err != nil {
+			return nil, err
+		}
+		pcfg.MaxConns = n
 	}
 	if cfg.MaxIdleConns > 0 {
-		pcfg.MinConns = int32(cfg.MaxIdleConns)
+		n, err := int32n(cfg.MaxIdleConns, "MaxIdleConns")
+		if err != nil {
+			return nil, err
+		}
+		pcfg.MinConns = n
 	}
 	if cfg.ConnMaxLifetime > 0 {
 		pcfg.MaxConnLifetime = cfg.ConnMaxLifetime
@@ -156,6 +165,13 @@ func (d *DB) Close() {
 	if d != nil && d.Pool != nil {
 		d.Pool.Close()
 	}
+}
+
+func int32n(n int, name string) (int32, error) {
+	if n <= 0 || n > math.MaxInt32 {
+		return 0, fmt.Errorf("db: %s out of range: %d", name, n)
+	}
+	return int32(n), nil
 }
 
 // Stats is a minimal stats snapshot.

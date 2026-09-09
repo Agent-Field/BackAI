@@ -35,7 +35,7 @@ type TestReport struct {
 // runTSC is indirected for testing. It typechecks a single standalone .ts
 // file with a bare tsc + DOM lib (no node_modules needed).
 var runTSC = func(ctx context.Context, file string) error {
-	cmd := exec.CommandContext(ctx, "tsc",
+	cmd := exec.CommandContext(ctx, "tsc", // #nosec G204 -- fixed tsc flags; file is a local path this CLI resolved
 		"--noEmit", "--strict", "--skipLibCheck",
 		"--target", "ES2020", "--module", "ESNext",
 		"--moduleResolution", "bundler", "--lib", "ES2020,DOM",

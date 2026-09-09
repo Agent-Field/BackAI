@@ -143,21 +143,21 @@ func (r *Registry) Names() []string {
 
 func defaultDescriptors() []Descriptor {
 	return []Descriptor{
-		{
+		{ // #nosec G101 -- provider metadata (public URLs + env var names)
 			Name:              "github",
 			Kind:              KindOAuth,
 			BaseURL:           "https://api.github.com",
 			AuthHeaderName:    "Authorization",
 			AuthValuePrefix:   "Bearer ",
 			AuthorizeEndpoint: "https://github.com/login/oauth/authorize",
-			TokenEndpoint:     "https://github.com/login/oauth/access_token",
+			TokenEndpoint:     "https://github.com/login/oauth/access_token", // #nosec G101 -- public OAuth endpoint
 			DefaultScopes:     []string{"repo", "read:user"},
 			ScopeSeparator:    " ",
 			WebhookScheme:     WebhookGitHubHMAC,
 			ClientIDEnv:       "CONNECTIONS_GITHUB_CLIENT_ID",
-			ClientSecretEnv:   "CONNECTIONS_GITHUB_CLIENT_SECRET",
+			ClientSecretEnv:   "CONNECTIONS_GITHUB_CLIENT_SECRET", // #nosec G101 -- env var name
 		},
-		{
+		{ // #nosec G101 -- provider metadata (public URLs)
 			Name:            "stripe",
 			Kind:            KindAPIKey,
 			BaseURL:         "https://api.stripe.com",
@@ -167,33 +167,33 @@ func defaultDescriptors() []Descriptor {
 			// Stripe is a secret-key provider — no OAuth consent flow in the
 			// standard integration path, so no authorize/token endpoints.
 		},
-		{
+		{ // #nosec G101 -- provider metadata (public URLs + env var names)
 			Name:              "google",
 			Kind:              KindOAuth,
 			BaseURL:           "https://www.googleapis.com",
 			AuthHeaderName:    "Authorization",
 			AuthValuePrefix:   "Bearer ",
 			AuthorizeEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
-			TokenEndpoint:     "https://oauth2.googleapis.com/token",
+			TokenEndpoint:     "https://oauth2.googleapis.com/token", // #nosec G101 -- public OAuth endpoint
 			DefaultScopes:     []string{"https://www.googleapis.com/auth/userinfo.email"},
 			ScopeSeparator:    " ",
 			WebhookScheme:     WebhookNone,
 			ClientIDEnv:       "CONNECTIONS_GOOGLE_CLIENT_ID",
-			ClientSecretEnv:   "CONNECTIONS_GOOGLE_CLIENT_SECRET",
+			ClientSecretEnv:   "CONNECTIONS_GOOGLE_CLIENT_SECRET", // #nosec G101 -- env var name
 		},
-		{
+		{ // #nosec G101 -- provider metadata (public URLs + env var names)
 			Name:              "slack",
 			Kind:              KindOAuth,
 			BaseURL:           "https://slack.com/api",
 			AuthHeaderName:    "Authorization",
 			AuthValuePrefix:   "Bearer ",
 			AuthorizeEndpoint: "https://slack.com/oauth/v2/authorize",
-			TokenEndpoint:     "https://slack.com/api/oauth.v2.access",
+			TokenEndpoint:     "https://slack.com/api/oauth.v2.access", // #nosec G101 -- public OAuth endpoint
 			DefaultScopes:     []string{"chat:write"},
 			ScopeSeparator:    ",",
 			WebhookScheme:     WebhookNone,
 			ClientIDEnv:       "CONNECTIONS_SLACK_CLIENT_ID",
-			ClientSecretEnv:   "CONNECTIONS_SLACK_CLIENT_SECRET",
+			ClientSecretEnv:   "CONNECTIONS_SLACK_CLIENT_SECRET", // #nosec G101 -- env var name
 		},
 	}
 }

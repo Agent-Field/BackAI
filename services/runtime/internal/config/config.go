@@ -9,6 +9,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -372,7 +373,7 @@ func Load(path string) (Config, error) {
 	cfg := Default()
 
 	if path != "" {
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(filepath.Clean(path)) // #nosec G304 -- operator-supplied config path
 		if err != nil && !os.IsNotExist(err) {
 			return Config{}, fmt.Errorf("read config %s: %w", path, err)
 		}

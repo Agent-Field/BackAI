@@ -161,7 +161,7 @@ func (s *Server) handleAdminDeleteBrand(w http.ResponseWriter, r *http.Request) 
 func readBrandYAML() (map[string]any, string, error) {
 	for _, p := range []string{"brand.yaml", "../../brand.yaml", "/app/brand.yaml"} {
 		abs, _ := filepath.Abs(p)
-		data, err := os.ReadFile(p)
+		data, err := os.ReadFile(filepath.Clean(p)) // #nosec G304 -- fixed brand.yaml search paths
 		if err == nil {
 			var out map[string]any
 			if err := yaml.Unmarshal(data, &out); err != nil {

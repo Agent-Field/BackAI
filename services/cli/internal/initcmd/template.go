@@ -59,7 +59,7 @@ func scaffoldCodingAgent(root string) (created []string, skippedExisting bool, e
 		"README.md":        codingAgentReadme(codingAgentNodeID),
 	}
 	dir := filepath.Join(root, codingAgentDir)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, false, fmt.Errorf("init: create %s: %w", codingAgentDir, err)
 	}
 	// Deterministic order so the CLI summary + tests are stable.
@@ -70,7 +70,7 @@ func scaffoldCodingAgent(root string) (created []string, skippedExisting bool, e
 			skippedExisting = true
 			continue
 		}
-		// #nosec G306 -- scaffolded project source files (main.py, Dockerfile,
+		// #nosec G304,G306,G703 -- scaffolded project source files (main.py, Dockerfile,
 		// README) are meant to be world-readable like any checked-in source.
 		if err := os.WriteFile(dest, []byte(files[name]), 0o644); err != nil {
 			return nil, skippedExisting, fmt.Errorf("init: write %s: %w", rel, err)
@@ -91,7 +91,7 @@ func scaffoldCodingAgent(root string) (created []string, skippedExisting bool, e
 			skippedExisting = true
 			continue
 		}
-		// #nosec G306 -- world-readable project scaffolding, not secrets.
+		// #nosec G304,G306,G703 -- world-readable project scaffolding, not secrets.
 		if err := os.WriteFile(dest, []byte(rootFiles[name]), 0o644); err != nil {
 			return nil, skippedExisting, fmt.Errorf("init: write %s: %w", name, err)
 		}
@@ -344,7 +344,7 @@ var (
 // the operator's comments, anchors, and formatting intact.
 func wireCodingAgentCompose(root string) (wired bool, err error) {
 	path := filepath.Join(root, "docker-compose.yml")
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(filepath.Clean(path)) // #nosec G304 -- project docker-compose.yml
 	if err != nil {
 		if os.IsNotExist(err) {
 			return false, nil
@@ -361,7 +361,7 @@ func wireCodingAgentCompose(root string) (wired bool, err error) {
 	}
 	insertAt := loc[1]
 	updated := content[:insertAt] + codingAgentComposeService + content[insertAt:]
-	// #nosec G306 -- docker-compose.yml is world-readable project source.
+	// #nosec G304,G306,G703 -- docker-compose.yml is world-readable project source.
 	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
 		return false, fmt.Errorf("init: update docker-compose.yml: %w", err)
 	}
@@ -389,14 +389,14 @@ const heroEnvBlock = "\n# Hero flow (coding-agent template): multi-tenancy on so
 func ensureHeroEnv(root string) (string, error) {
 	path := filepath.Join(root, ".env")
 	if exists(path) {
-		raw, err := os.ReadFile(path)
+		raw, err := os.ReadFile(filepath.Clean(path)) // #nosec G304 -- project-local .env
 		if err != nil {
 			return "", fmt.Errorf("init: read .env: %w", err)
 		}
 		if mtEnvKeyRE.Match(raw) {
 			return "present", nil // respect the operator's explicit choice
 		}
-		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+		f, err := os.OpenFile(filepath.Clean(path), os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G304,G302 -- project-local .env
 		if err != nil {
 			return "", fmt.Errorf("init: open .env: %w", err)
 		}
@@ -411,7 +411,7 @@ func ensureHeroEnv(root string) (string, error) {
 	var content string
 	examplePath := filepath.Join(root, ".env.example")
 	if exists(examplePath) {
-		b, err := os.ReadFile(examplePath)
+		b, err := os.ReadFile(filepath.Clean(examplePath)) // #nosec G304 -- project-local .env.example
 		if err != nil {
 			return "", fmt.Errorf("init: read .env.example: %w", err)
 		}
@@ -420,9 +420,9 @@ func ensureHeroEnv(root string) (string, error) {
 	if !mtEnvKeyRE.MatchString(content) {
 		content += heroEnvBlock
 	}
-	// #nosec G306 -- .env is world-readable project scaffolding (no real
+	// #nosec G304,G306,G703 -- .env is project scaffolding (no real
 	// secrets; the hero placeholders are filled in by the user afterwards).
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		return "", fmt.Errorf("init: write .env: %w", err)
 	}
 	return "created", nil

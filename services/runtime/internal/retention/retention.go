@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -88,6 +89,10 @@ func runPolicy(ctx context.Context, db *sql.DB, p Policy) (Report, error) {
 		if err := ctx.Err(); err != nil {
 			return report, err
 		}
+		table := quoteIdent(p.Table)
+		col := quoteIdent(p.OrderColumn)
+		// Identifiers are regex-validated and quoted; batch is an int we
+		// control. Sprintf is only used to splice those safe tokens.
 		q := fmt.Sprintf(`
 			delete from %s
 			 where ctid in (
@@ -96,7 +101,7 @@ func runPolicy(ctx context.Context, db *sql.DB, p Policy) (Report, error) {
 			    order by %s
 			    limit %d
 			 )
-		`, p.Table, p.Table, p.OrderColumn, p.OrderColumn, batch)
+		`, table, table, col, col, batch) // #nosec G201 -- identifiers validated + quoted
 		res, err := db.ExecContext(ctx, q, cutoff)
 		if err != nil {
 			return report, err
@@ -110,6 +115,10 @@ func runPolicy(ctx context.Context, db *sql.DB, p Policy) (Report, error) {
 }
 
 var identRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+func quoteIdent(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
 
 func validatePolicy(p Policy) error {
 	if !identRE.MatchString(p.Table) {

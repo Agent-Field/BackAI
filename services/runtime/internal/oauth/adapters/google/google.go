@@ -41,7 +41,7 @@ var DefaultScopes = []string{
 // them with an httptest server URL via reassignment + Cleanup.
 var (
 	authorizeURL = "https://accounts.google.com/o/oauth2/v2/auth"
-	tokenURL     = "https://oauth2.googleapis.com/token"
+	tokenURL     = "https://oauth2.googleapis.com/token" // #nosec G101 -- public OAuth endpoint, not a credential
 	revokeURL    = "https://oauth2.googleapis.com/revoke"
 )
 

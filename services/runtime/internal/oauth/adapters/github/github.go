@@ -38,7 +38,7 @@ var DefaultScopes = []string{"repo", "read:user"}
 // httptest server URL via package-level reassignment + Cleanup.
 var (
 	authorizeURL = "https://github.com/login/oauth/authorize"
-	tokenURL     = "https://github.com/login/oauth/access_token"
+	tokenURL     = "https://github.com/login/oauth/access_token" // #nosec G101 -- public OAuth endpoint, not a credential
 	revokeBase   = "https://api.github.com/applications"
 )
 

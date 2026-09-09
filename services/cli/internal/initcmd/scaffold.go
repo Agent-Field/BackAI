@@ -76,10 +76,10 @@ func runScaffold(args []string, stdout, stderr io.Writer) error {
 	written := make([]string, 0, len(files))
 	for rel, contents := range files {
 		path := filepath.Join(target, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			return output.Fail("init: create %s: %v", rel, err)
 		}
-		// #nosec G306 -- scaffolded project source files, not secrets.
+		// #nosec G304,G306,G703 -- scaffolded project source files, not secrets.
 		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 			return output.Fail("init: write %s: %v", rel, err)
 		}
@@ -131,7 +131,7 @@ func ensureTargetDir(target string, force bool) error {
 	case err == nil:
 		return fmt.Errorf("init: %s already exists and is not a directory", target)
 	case os.IsNotExist(err):
-		return os.MkdirAll(target, 0o755)
+		return os.MkdirAll(target, 0o750)
 	default:
 		return err
 	}

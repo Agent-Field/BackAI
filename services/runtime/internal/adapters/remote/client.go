@@ -455,7 +455,7 @@ func backoff(attempt int, lastErr error) time.Duration {
 	if base > 5*time.Second {
 		base = 5 * time.Second
 	}
-	jitter := time.Duration(rand.Int64N(int64(base) / 2))
+	jitter := time.Duration(rand.Int64N(int64(base) / 2)) // #nosec G404 -- retry jitter, not a secret
 	return base + jitter - (base / 4)
 }
 

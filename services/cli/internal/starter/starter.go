@@ -77,14 +77,14 @@ func EnsureBackend(root, version string) ([]string, error) {
 		if _, err := os.Stat(path); err == nil {
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			return written, fmt.Errorf("create %s: %w", rel, err)
 		}
 		mode := os.FileMode(0o644)
 		if strings.HasSuffix(rel, ".sh") {
 			mode = 0o755
 		}
-		// #nosec G306 -- compose stack and mounted config, not secrets.
+		// #nosec G304,G306,G703 -- compose stack and mounted config, not secrets.
 		if err := os.WriteFile(path, []byte(contents), mode); err != nil {
 			return written, fmt.Errorf("write %s: %w", rel, err)
 		}
@@ -266,7 +266,7 @@ func nextFreePort(start int, claimed map[int]bool) (int, error) {
 // Values from the process environment win, as they do for docker compose.
 func ReadEnv(root string) (map[string]string, error) {
 	values := map[string]string{}
-	f, err := os.Open(filepath.Join(root, ".env"))
+	f, err := os.Open(filepath.Clean(filepath.Join(root, ".env"))) // #nosec G304 -- project-local .env
 	if err != nil {
 		if os.IsNotExist(err) {
 			return values, nil
@@ -303,12 +303,12 @@ func ReadEnv(root string) (map[string]string, error) {
 func SetEnv(root string, values map[string]string, comment string) error {
 	envPath := filepath.Join(root, ".env")
 	var lines []string
-	data, err := os.ReadFile(envPath)
+	data, err := os.ReadFile(filepath.Clean(envPath)) // #nosec G304 -- project-local .env
 	switch {
 	case err == nil:
 		lines = strings.Split(strings.TrimRight(string(data), "\n"), "\n")
 	case os.IsNotExist(err):
-		if ex, exErr := os.ReadFile(filepath.Join(root, ".env.example")); exErr == nil {
+		if ex, exErr := os.ReadFile(filepath.Clean(filepath.Join(root, ".env.example"))); exErr == nil { // #nosec G304 -- project-local .env.example
 			lines = strings.Split(strings.TrimRight(string(ex), "\n"), "\n")
 		}
 	default:
@@ -348,7 +348,7 @@ func SetEnv(root string, values map[string]string, comment string) error {
 			lines = append(lines, k+"="+remaining[k])
 		}
 	}
-	// #nosec G306 G703 -- <root>/.env of the app the user is running in; local dev config, not secrets.
+	// #nosec G304,G306,G703 -- <root>/.env of the app the user is running in; local dev config, not secrets.
 	return os.WriteFile(envPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
 }
 

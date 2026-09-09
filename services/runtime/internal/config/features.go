@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -129,7 +130,7 @@ func LoadFeatureConfig(path string) (FeatureConfig, []ValidationError, error) {
 	if path == "" {
 		path = DefaultFeatureConfigPath
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path)) // #nosec G304 -- operator-supplied feature config path
 	if err != nil {
 		if os.IsNotExist(err) {
 			raw := RawFeatureConfig{Preset: PresetLean}
