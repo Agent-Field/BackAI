@@ -33,7 +33,7 @@ import (
 type commandRunner func(ctx context.Context, dir string, name string, args []string, stdout, stderr io.Writer) error
 
 var runCommand commandRunner = func(ctx context.Context, dir string, name string, args []string, stdout, stderr io.Writer) error {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := exec.CommandContext(ctx, name, args...) // #nosec G204 -- CLI wraps docker/node/browser open with argv this package builds
 	cmd.Dir = dir
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
@@ -121,7 +121,7 @@ func readEnvValue(root, key, def string) string {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		return v
 	}
-	data, err := os.ReadFile(filepath.Join(root, ".env"))
+	data, err := os.ReadFile(filepath.Clean(filepath.Join(root, ".env"))) // #nosec G304 -- project-local .env
 	if err != nil {
 		return def
 	}
@@ -697,9 +697,10 @@ func openURL(ctx context.Context, url string, stderr io.Writer) {
 func writeFiles(root string, files map[string]string) error {
 	for rel, contents := range files {
 		path := filepath.Join(root, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			return err
 		}
+		// #nosec G304,G306,G703 -- scaffolded project source under the operator's target dir
 		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 			return err
 		}

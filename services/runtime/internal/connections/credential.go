@@ -24,7 +24,7 @@ type Cipher interface {
 // the runtime — it is never returned to app code, logged, or placed on a
 // Connection.
 type credential struct {
-	APIKey       string `json:"api_key,omitempty"`
+	APIKey       string `json:"api_key,omitempty"` // #nosec G117 -- sealed with AES-256-GCM before persist; never logged
 	AccessToken  string `json:"access_token,omitempty"`
 	RefreshToken string `json:"refresh_token,omitempty"`
 }
@@ -45,7 +45,7 @@ func sealCredential(c Cipher, cred credential) ([]byte, error) {
 	if c == nil {
 		return nil, fmt.Errorf("connections: cipher not configured")
 	}
-	plaintext, err := json.Marshal(cred)
+	plaintext, err := json.Marshal(cred) // #nosec G117 -- envelope is AES-256-GCM sealed before persist
 	if err != nil {
 		return nil, fmt.Errorf("connections: marshal credential: %w", err)
 	}

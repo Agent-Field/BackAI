@@ -1,0 +1,8 @@
+# CVE-2026-33997 is a Docker Engine *daemon* flaw in `docker plugin install`
+# privilege checks, fixed in Engine 29.3.1. This repo only imports
+# github.com/docker/docker as a client of an already-running daemon (the
+# sandbox adapter). That Go module is deprecated and frozen at
+# v28.5.2+incompatible — there is no v29 tag consumers can `go get`.
+# Migrating to github.com/moby/moby/{client,api} is a separate breaking
+# SDK change and does not ship the daemon plugin-install path either.
+CVE-2026-33997

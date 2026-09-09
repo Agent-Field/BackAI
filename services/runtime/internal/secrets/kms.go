@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 
 	cloudkms "cloud.google.com/go/kms/apiv1"
@@ -173,7 +174,7 @@ func loadAzureKMSCipher(ctx context.Context) (*Cipher, error) {
 
 func encryptedDataKeyFromEnv() ([]byte, error) {
 	if file := strings.TrimSpace(os.Getenv("AF_STACK_KMS_ENCRYPTED_DATA_KEY_FILE")); file != "" {
-		raw, err := os.ReadFile(file)
+		raw, err := os.ReadFile(filepath.Clean(file)) // #nosec G304,G703 -- operator-supplied KMS key file
 		if err != nil {
 			return nil, fmt.Errorf("secrets: read AF_STACK_KMS_ENCRYPTED_DATA_KEY_FILE: %w", err)
 		}

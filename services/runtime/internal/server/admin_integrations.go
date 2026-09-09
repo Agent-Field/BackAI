@@ -186,7 +186,7 @@ var integrationFieldDefaults = map[string]string{
 // that are optional without a literal default value. Fields with neither
 // a default nor a note render as required. Every field's classification
 // must match what the consuming adapter actually enforces.
-var integrationFieldNotes = map[string]string{
+var integrationFieldNotes = map[string]string{ // #nosec G101 -- UI help text, not a credential
 	// Browserbase infers the project from a single-project API key.
 	"browserbase_project_id": "Optional — inferred from the API key when left blank.",
 	// The remote-adapter sidecar protocol enforces bearer auth only when

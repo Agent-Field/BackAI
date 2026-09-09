@@ -6,15 +6,15 @@
 //
 // Lifecycle:
 //
-//   Connect: spawn the process, pipe stdin/stdout, launch a stderr
-//            scraper goroutine (first chunk is surfaced as last_error
-//            on the next Connect failure), perform the "initialize"
-//            handshake, send the "notifications/initialized" notice.
-//   ListTools: tools/list request -> Tool array.
-//   Call: tools/call request -> CallResult (MCP's content array passed
-//            through unchanged).
-//   Close: SIGTERM the child, give it a short grace window, then SIGKILL
-//            if still alive. Cancels the reader goroutine.
+//	Connect: spawn the process, pipe stdin/stdout, launch a stderr
+//	         scraper goroutine (first chunk is surfaced as last_error
+//	         on the next Connect failure), perform the "initialize"
+//	         handshake, send the "notifications/initialized" notice.
+//	ListTools: tools/list request -> Tool array.
+//	Call: tools/call request -> CallResult (MCP's content array passed
+//	         through unchanged).
+//	Close: SIGTERM the child, give it a short grace window, then SIGKILL
+//	         if still alive. Cancels the reader goroutine.
 //
 // Concurrency: Connect / Close are NOT safe for concurrent calls from
 // different goroutines (the Pool serialises them). ListTools / Call ARE
@@ -61,13 +61,13 @@ type Adapter struct {
 	args []string
 	log  *slog.Logger
 
-	mu      sync.Mutex // serialises Connect/Close + the requestID counter
-	closed  bool
-	cancel  context.CancelFunc
-	stdin   io.WriteCloser
-	stdout  *bufio.Reader
-	stderr  io.ReadCloser
-	doneCh  chan struct{}
+	mu     sync.Mutex // serialises Connect/Close + the requestID counter
+	closed bool
+	cancel context.CancelFunc
+	stdin  io.WriteCloser
+	stdout *bufio.Reader
+	stderr io.ReadCloser
+	doneCh chan struct{}
 
 	// Response routing — the reader goroutine fans out incoming JSON
 	// frames to the goroutine that issued the matching request.
@@ -121,7 +121,7 @@ func (a *Adapter) Connect(ctx context.Context) error {
 	// Spawn under a cancellable context so Close() can SIGKILL via
 	// cancel() if the child ignores SIGTERM.
 	cmdCtx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(cmdCtx, a.args[0], a.args[1:]...)
+	cmd := exec.CommandContext(cmdCtx, a.args[0], a.args[1:]...) // #nosec G204 -- operator-configured MCP server argv
 
 	// Env: merge the row's env on TOP of a minimal passthrough (PATH +
 	// HOME) so utilities like `uvx` can find their interpreter. Tests

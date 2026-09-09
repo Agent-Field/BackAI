@@ -58,11 +58,11 @@ type demoSeedRemoved struct {
 // fills 20+ rows, sparklines have shape, but the seed completes in well
 // under a second.
 const (
-	demoGatewayRows = 200
-	demoCostRows    = 20
-	demoWebhookRows = 6
+	demoGatewayRows  = 200
+	demoCostRows     = 20
+	demoWebhookRows  = 6
 	demoActivityRows = 30
-	demoTenantID    = "00000000-0000-0000-0000-000000000000"
+	demoTenantID     = "00000000-0000-0000-0000-000000000000"
 )
 
 func (s *Server) registerAdminDemoRoutes() {
@@ -171,14 +171,14 @@ func seedDemoRows(ctx context.Context, pool *pgxpool.Pool) (demoSeedInserted, er
 	agents := []string{"supportdesk.reply_plan", "supportdesk.classify_issue", "demo.echo", "demo.summarise"}
 	for i := 0; i < demoGatewayRows; i++ {
 		// Spread across 24h, denser near "now" so the rpm tile is non-zero.
-		ageSecs := int(rand.Float64() * 48 * 3600)
+		ageSecs := int(demoFrac() * 48 * 3600)
 		created := now.Add(-time.Duration(ageSecs) * time.Second)
-		agent := agents[rand.IntN(len(agents))]
+		agent := agents[demoIntN(len(agents))]
 		endpoint := "/api/v1/execute/" + agent
 		// 8% failure overall.
 		statusCode := 200
-		if rand.Float64() < 0.08 {
-			switch rand.IntN(4) {
+		if demoFrac() < 0.08 {
+			switch demoIntN(4) {
 			case 0:
 				statusCode = 400
 			case 1:
@@ -189,7 +189,7 @@ func seedDemoRows(ctx context.Context, pool *pgxpool.Pool) (demoSeedInserted, er
 				statusCode = 500
 			}
 		}
-		durationMs := 80 + rand.IntN(1200)
+		durationMs := 80 + demoIntN(1200)
 		_, err := pool.Exec(ctx, `
 			insert into suite_gateway_requests
 			    (tenant_id, endpoint, method, status_code, duration_ms, created_at)
@@ -209,13 +209,13 @@ func seedDemoRows(ctx context.Context, pool *pgxpool.Pool) (demoSeedInserted, er
 		"openrouter/google/gemini-flash-1.5",
 	}
 	for i := 0; i < demoCostRows; i++ {
-		ageSecs := int(rand.Float64() * 48 * 3600)
+		ageSecs := int(demoFrac() * 48 * 3600)
 		occurred := now.Add(-time.Duration(ageSecs) * time.Second)
-		model := models[rand.IntN(len(models))]
+		model := models[demoIntN(len(models))]
 		// Cost values: realistic per-call spend (~$0.0001..$0.01).
-		costUSD := 0.0001 + rand.Float64()*0.0099
-		promptTokens := 40 + rand.IntN(2000)
-		completionTokens := 20 + rand.IntN(800)
+		costUSD := 0.0001 + demoFrac()*0.0099
+		promptTokens := 40 + demoIntN(2000)
+		completionTokens := 20 + demoIntN(800)
 		// agent = 'demo-seed' is the sentinel wipeDemoRows uses.
 		_, err := pool.Exec(ctx, `
 			insert into suite_cost_events
@@ -233,7 +233,7 @@ func seedDemoRows(ctx context.Context, pool *pgxpool.Pool) (demoSeedInserted, er
 	eventTypes := []string{"run.completed", "tenant.created", "budget.threshold_crossed", "support.reply", "demo.ping", "audit.recorded"}
 	dirs := []string{"outbound", "outbound", "inbound", "outbound", "inbound", "outbound"}
 	for i := 0; i < demoWebhookRows; i++ {
-		ageSecs := int(rand.Float64() * 48 * 3600)
+		ageSecs := int(demoFrac() * 48 * 3600)
 		created := now.Add(-time.Duration(ageSecs) * time.Second)
 		_, err := pool.Exec(ctx, `
 			insert into suite_webhook_deliveries
@@ -255,9 +255,9 @@ func seedDemoRows(ctx context.Context, pool *pgxpool.Pool) (demoSeedInserted, er
 	actions := []string{"tenant.created", "user.signed_in", "api_key.issued", "budget.set", "config.updated", "feature.toggled", "audit.exported"}
 	resourceTypes := []string{"tenant", "user", "api_key", "budget", "config", "feature", "audit"}
 	for i := 0; i < demoActivityRows; i++ {
-		ageSecs := int(rand.Float64() * 48 * 3600)
+		ageSecs := int(demoFrac() * 48 * 3600)
 		occurred := now.Add(-time.Duration(ageSecs) * time.Second)
-		idx := rand.IntN(len(actions))
+		idx := demoIntN(len(actions))
 		_, err := pool.Exec(ctx, `
 			insert into suite_user_activity
 			    (tenant_id, actor_type, action, resource_type, resource_id, metadata, occurred_at)
@@ -273,4 +273,13 @@ func seedDemoRows(ctx context.Context, pool *pgxpool.Pool) (demoSeedInserted, er
 	}
 
 	return out, nil
+}
+
+// demoFrac / demoIntN wrap math/rand for non-secret demo fixture jitter.
+func demoFrac() float64 {
+	return rand.Float64() // #nosec G404 -- demo seed data, not a secret
+}
+
+func demoIntN(n int) int {
+	return rand.IntN(n) // #nosec G404 -- demo seed data, not a secret
 }

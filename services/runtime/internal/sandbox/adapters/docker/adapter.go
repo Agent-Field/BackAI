@@ -45,6 +45,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"path"
 	"strings"
 	"sync"
@@ -200,7 +201,7 @@ func (a *Adapter) Run(ctx context.Context, spec sandbox.RunSpec) (*sandbox.RunRe
 	if err != nil {
 		return nil, fmt.Errorf("container create: %w", err)
 	}
-	defer a.cleanup(containerID)
+	defer a.cleanup(runCtx, containerID)
 	a.trackRun(spec.ID, containerID)
 	defer a.untrackRun(spec.ID)
 
@@ -507,7 +508,7 @@ func (a *Adapter) observeStats(
 		if mem == 0 {
 			mem = stat.MemoryStats.Usage
 		}
-		mbi := int(mem / (1024 * 1024))
+		mbi := int(min(mem/(1024*1024), uint64(math.MaxInt)))
 		if mbi > memPeakMB {
 			memPeakMB = mbi
 		}
@@ -579,11 +580,11 @@ func (a *Adapter) persistLogs(ctx context.Context, spec sandbox.RunSpec, stdout,
 // cleanup removes the container regardless of exit status. Uses a
 // short background context so an already-cancelled run still gets its
 // container reaped.
-func (a *Adapter) cleanup(containerID string) {
+func (a *Adapter) cleanup(parent context.Context, containerID string) {
 	if containerID == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 10*time.Second)
 	defer cancel()
 	if err := a.cli.ContainerRemove(ctx, containerID, container.RemoveOptions{
 		Force: true,
@@ -659,7 +660,7 @@ func (a *Adapter) Stream(ctx context.Context, spec sandbox.RunSpec) (<-chan sand
 		cancel()
 		close(linesCh)
 		a.untrackRun(spec.ID)
-		a.cleanup(containerID)
+		a.cleanup(runCtx, containerID)
 		return nil, nil, err
 	}
 
@@ -667,7 +668,7 @@ func (a *Adapter) Stream(ctx context.Context, spec sandbox.RunSpec) (<-chan sand
 		cancel()
 		close(linesCh)
 		a.untrackRun(spec.ID)
-		a.cleanup(containerID)
+		a.cleanup(runCtx, containerID)
 		return nil, nil, fmt.Errorf("container start: %w", err)
 	}
 
@@ -677,7 +678,7 @@ func (a *Adapter) Stream(ctx context.Context, spec sandbox.RunSpec) (<-chan sand
 		defer close(linesCh)
 		defer close(resultCh)
 		defer a.untrackRun(spec.ID)
-		defer a.cleanup(containerID)
+		defer a.cleanup(runCtx, containerID)
 
 		logsReader, err := a.cli.ContainerLogs(runCtx, containerID, container.LogsOptions{
 			ShowStdout: true, ShowStderr: true, Follow: true,
@@ -735,7 +736,7 @@ func (a *Adapter) Stream(ctx context.Context, spec sandbox.RunSpec) (<-chan sand
 		case e := <-waitErr:
 			if errors.Is(e, context.DeadlineExceeded) || errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 				status = sandbox.StatusTimeout
-				_ = a.cli.ContainerStop(context.Background(), containerID, container.StopOptions{})
+				_ = a.cli.ContainerStop(context.WithoutCancel(runCtx), containerID, container.StopOptions{})
 			} else {
 				runErr = e
 				status = sandbox.StatusFailed

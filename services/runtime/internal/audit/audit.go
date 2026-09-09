@@ -127,7 +127,11 @@ func (w *Writer) Write(ctx context.Context, r *http.Request, ev Event) {
 	}
 
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		parent := ctx
+		if r != nil {
+			parent = r.Context()
+		}
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 2*time.Second)
 		defer cancel()
 		// Bind the write connection to the row's tenant so the audit-log RLS
 		// WITH CHECK passes (the pool's PrepareConn hook reads this from ctx).

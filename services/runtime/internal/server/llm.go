@@ -592,7 +592,7 @@ func (s *Server) handleLLMChatCompletions(w http.ResponseWriter, r *http.Request
 		// Best-effort store on a detached context so a slow write (or a
 		// client disconnect) never delays or cancels the response.
 		go func(payload []byte, pt, ct int) {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Second)
 			defer cancel()
 			if err := s.llmCache.Put(ctx, tenantID, req.Model, cacheHash,
 				payload, pt, ct, llmCacheTTL); err != nil {

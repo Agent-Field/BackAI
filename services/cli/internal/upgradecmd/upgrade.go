@@ -224,7 +224,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 // ─── helpers ──────────────────────────────────────────────────────────────
 
 func gitOut(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command("git", args...) // #nosec G204 -- git argv is built by this package, not untrusted input
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -276,7 +276,7 @@ func incomingMigrations(root, target string) []string {
 // changes) and returns the conflicted paths split fork-owned / platform.
 func predictConflicts(root, target string) (fork, platform []string, err error) {
 	// merge-tree exits 1 on conflicts, >1 on real errors.
-	cmd := exec.Command("git", "merge-tree", "--write-tree", "--name-only", "HEAD", target)
+	cmd := exec.Command("git", "merge-tree", "--write-tree", "--name-only", "HEAD", target) // #nosec G204 -- fixed git subcommand
 	cmd.Dir = root
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
@@ -336,7 +336,7 @@ func tryBackup(root string, stdout, stderr io.Writer) string {
 	out := filepath.Join(root, fmt.Sprintf("backup-pre-upgrade-%s.sql.gz",
 		time.Now().UTC().Format("20060102-150405")))
 	fmt.Fprintf(stdout, "Backing up the database before migrations (%s)…\n", filepath.Base(out))
-	cmd := exec.Command("bash", script, "--url", dbURL, "--out", out)
+	cmd := exec.Command("bash", script, "--url", dbURL, "--out", out) // #nosec G204,G702 -- fixed scripts/backup.sh under the project root
 	cmd.Dir = root
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr

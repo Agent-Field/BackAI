@@ -279,7 +279,7 @@ func readBrand(path string) (brandFile, error) {
 	if !exists(path) {
 		return brand, nil
 	}
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(filepath.Clean(path)) // #nosec G304 -- operator brand.yaml
 	if err != nil {
 		return brandFile{}, err
 	}
@@ -294,7 +294,7 @@ func writeBrand(path string, brand brandFile) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, raw, 0o644)
+	return os.WriteFile(path, raw, 0o644) // #nosec G304,G306 -- brand.yaml is project source
 }
 
 func copyLogo(root, rawPath string) (string, error) {
@@ -315,14 +315,14 @@ func copyLogo(root, rawPath string) (string, error) {
 	}
 	destRel := filepath.ToSlash(filepath.Join("brand", "logo"+ext))
 	dest := filepath.Join(root, filepath.FromSlash(destRel))
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
 		return "", err
 	}
-	raw, err := os.ReadFile(source)
+	raw, err := os.ReadFile(filepath.Clean(source)) // #nosec G304 -- operator-supplied logo path
 	if err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(dest, raw, 0o644); err != nil {
+	if err := os.WriteFile(dest, raw, 0o644); err != nil { // #nosec G304,G306,G703 -- copied logo under the project brand dir
 		return "", err
 	}
 	return "./" + destRel, nil
@@ -352,7 +352,7 @@ func updateDefaultAgentName(root, next string) error {
 		if !exists(path) {
 			continue
 		}
-		raw, err := os.ReadFile(path)
+		raw, err := os.ReadFile(filepath.Clean(path)) // #nosec G304 -- in-repo agent rename targets
 		if err != nil {
 			return err
 		}
@@ -363,7 +363,7 @@ func updateDefaultAgentName(root, next string) error {
 		if updated == string(raw) {
 			continue
 		}
-		if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(updated), 0o644); err != nil { // #nosec G304,G306,G703 -- in-repo source rewrite
 			return err
 		}
 	}
@@ -371,7 +371,7 @@ func updateDefaultAgentName(root, next string) error {
 }
 
 func currentAgentName(root string) string {
-	raw, err := os.ReadFile(filepath.Join(root, "docker-compose.yml"))
+	raw, err := os.ReadFile(filepath.Clean(filepath.Join(root, "docker-compose.yml"))) // #nosec G304 -- project compose file
 	if err == nil {
 		if match := composeNodeIDRE.FindSubmatch(raw); len(match) == 2 {
 			return string(match[1])

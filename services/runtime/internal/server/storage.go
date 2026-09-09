@@ -420,6 +420,7 @@ func (s *Server) handleStorageDownload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", transformedCT)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Content-Length", strconv.Itoa(len(out)))
 		w.Header().Set("Cache-Control", "private, max-age=300")
 		if obj.ETag != "" {
@@ -427,7 +428,7 @@ func (s *Server) handleStorageDownload(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Last-Modified", obj.LastModified.UTC().Format(http.TimeFormat))
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(out)
+		_, _ = w.Write(out) // #nosec G705 -- image bytes with an image/* Content-Type + nosniff
 		return
 	}
 	w.Header().Set("Content-Type", ct)

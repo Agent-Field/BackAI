@@ -35,7 +35,7 @@ const coreMigrationsRel = "services/runtime/internal/db/migrations"
 // goose binary. dir is passed as -dir; gooseArgs are the trailing command.
 var gooseRun = func(ctx context.Context, dir string, gooseArgs []string, stdout, stderr io.Writer) error {
 	full := append([]string{"-dir", dir}, gooseArgs...)
-	cmd := exec.CommandContext(ctx, "goose", full...)
+	cmd := exec.CommandContext(ctx, "goose", full...) // #nosec G204 -- goose argv is built by this package from local migration dirs
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	return cmd.Run()

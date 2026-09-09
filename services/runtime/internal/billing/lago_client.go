@@ -24,7 +24,7 @@ const (
 	// http://lago-api:3000 or https://api.getlago.com.
 	EnvLagoAPIURL = "LAGO_API_URL"
 	// EnvLagoAPIKey is the bearer token used for Lago's API.
-	EnvLagoAPIKey = "LAGO_API_KEY"
+	EnvLagoAPIKey = "LAGO_API_KEY" // #nosec G101 -- env var name, not a credential
 )
 
 // NewLagoClientFromEnv returns a Lago adapter. Missing URL or API key

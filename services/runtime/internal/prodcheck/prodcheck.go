@@ -46,13 +46,15 @@ const (
 // boot logs and in the /ready envelope, so operators and tooling can branch on
 // them. Do not rename without a deprecation.
 const (
-	CodeDBRoleBypassesRLS     = "PRODCHECK_DB_ROLE_BYPASSES_RLS" //nolint:gosec // stable status code, not a credential
+	// #nosec G101 -- stable status code, not a credential
+	CodeDBRoleBypassesRLS     = "PRODCHECK_DB_ROLE_BYPASSES_RLS" //nolint:gosec
 	CodeTenantTableRLSMissing = "PRODCHECK_TENANT_TABLE_RLS_MISSING"
-	CodeCORSWildcardCreds     = "PRODCHECK_CORS_WILDCARD_CREDENTIALED" //nolint:gosec // stable status code, not a credential
-	CodeSecretsDevKey         = "PRODCHECK_SECRETS_DEV_KEY"
-	CodeStorageNotIsolated    = "PRODCHECK_STORAGE_NOT_ISOLATED"
-	CodeSandboxNetworkOpen    = "PRODCHECK_SANDBOX_NETWORK_OPEN"
-	CodeCatalogUnavailable    = "PRODCHECK_CATALOG_UNAVAILABLE"
+	// #nosec G101 -- stable status code, not a credential
+	CodeCORSWildcardCreds  = "PRODCHECK_CORS_WILDCARD_CREDENTIALED" //nolint:gosec
+	CodeSecretsDevKey      = "PRODCHECK_SECRETS_DEV_KEY"
+	CodeStorageNotIsolated = "PRODCHECK_STORAGE_NOT_ISOLATED"
+	CodeSandboxNetworkOpen = "PRODCHECK_SANDBOX_NETWORK_OPEN"
+	CodeCatalogUnavailable = "PRODCHECK_CATALOG_UNAVAILABLE"
 )
 
 // Result is one check outcome.

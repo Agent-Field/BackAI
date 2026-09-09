@@ -109,13 +109,13 @@ func setMode(root, envPath, mode string) error {
 			out = ensureTrailingNewline(string(raw)) +
 				"\n# Deployment mode: saas | personal (set via `af-stack mode`).\n" + line + "\n"
 		}
-		// #nosec G306 -- .env is world-readable project config (no secrets here).
+		// #nosec G304,G306,G703 -- .env is world-readable project config (no secrets here).
 		return os.WriteFile(envPath, []byte(out), 0o644)
 	case errors.Is(err, os.ErrNotExist):
 		// Seed from .env.example when available so the new .env keeps the
 		// full documented variable set, then upsert the mode line.
 		content := ""
-		if b, rerr := os.ReadFile(filepath.Join(root, ".env.example")); rerr == nil {
+		if b, rerr := os.ReadFile(filepath.Clean(filepath.Join(root, ".env.example"))); rerr == nil { // #nosec G304 -- project-local .env.example
 			content = string(b)
 		}
 		if modeLineRE.MatchString(content) {
@@ -124,7 +124,7 @@ func setMode(root, envPath, mode string) error {
 			content = ensureTrailingNewline(content) +
 				"\n# Deployment mode: saas | personal (set via `af-stack mode`).\n" + line + "\n"
 		}
-		// #nosec G306 -- see above.
+		// #nosec G304,G306,G703 -- see above.
 		return os.WriteFile(envPath, []byte(content), 0o644)
 	default:
 		return fmt.Errorf("mode: read .env: %w", err)

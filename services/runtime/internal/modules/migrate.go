@@ -73,7 +73,7 @@ func readMigrationFiles(dir string) ([]migrationFile, error) {
 			return nil, fmt.Errorf("migration version %d declared twice: %s and %s", version, prev, name)
 		}
 		seen[version] = name
-		data, err := os.ReadFile(filepath.Join(dir, name))
+		data, err := os.ReadFile(filepath.Clean(filepath.Join(dir, name))) // #nosec G304 -- module migration listed by ReadDir
 		if err != nil {
 			return nil, fmt.Errorf("read migration %s: %w", name, err)
 		}

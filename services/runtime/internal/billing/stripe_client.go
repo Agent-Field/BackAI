@@ -77,11 +77,11 @@ type Client interface {
 const EnvBillingAdapter = "AF_STACK_BILLING_ADAPTER"
 
 // EnvSecretKey is the env var that activates the real Stripe client.
-const EnvSecretKey = "STRIPE_SECRET_KEY"
+const EnvSecretKey = "STRIPE_SECRET_KEY" // #nosec G101 -- env var name, not a credential
 
 // EnvWebhookSecret is the env var the webhook handler uses to validate
 // incoming Stripe-Signature headers.
-const EnvWebhookSecret = "STRIPE_WEBHOOK_SECRET"
+const EnvWebhookSecret = "STRIPE_WEBHOOK_SECRET" // #nosec G101 -- env var name, not a credential
 
 // NewClientFromEnv returns the configured Client.
 //

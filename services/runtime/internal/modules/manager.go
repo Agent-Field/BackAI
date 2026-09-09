@@ -114,7 +114,7 @@ func Load(root string, enabled []string, log *slog.Logger) *Manager {
 func (m *Manager) loadOne(dir, manifestPath string, enabledSet map[string]struct{}, seen map[string]string) *Loaded {
 	l := &Loaded{Dir: dir, Migration: MigrationSkipped}
 
-	data, err := os.ReadFile(manifestPath)
+	data, err := os.ReadFile(filepath.Clean(manifestPath)) // #nosec G304 -- module manifest under the configured modules root
 	if err != nil {
 		l.LoadErr = fmt.Errorf("read manifest: %w", err)
 		l.Migration = MigrationError

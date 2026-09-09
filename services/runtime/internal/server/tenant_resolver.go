@@ -46,6 +46,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/hooks"
 	"github.com/Agent-Field/backai/services/runtime/internal/tenancy"
@@ -259,7 +260,7 @@ func (s *Server) tenantResolver(next http.Handler) http.Handler {
 			// tenancy.Manager (tests), and a nil manager must not panic.
 			if s.tenancy != nil {
 				go func(id string) {
-					touchCtx, cancel := context.WithTimeout(context.Background(), 2_000_000_000)
+					touchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 					defer cancel()
 					s.tenancy.TouchKey(touchCtx, id)
 				}(k.ID)

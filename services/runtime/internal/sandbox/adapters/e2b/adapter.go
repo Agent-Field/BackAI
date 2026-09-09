@@ -413,7 +413,11 @@ func (a *Adapter) execStream(ctx context.Context, s createSandboxResponse, spec 
 		return "", "", 0, fmt.Errorf("start message too large: %d bytes", len(payload))
 	}
 	frame := make([]byte, 5+len(payload))
-	binary.BigEndian.PutUint32(frame[1:5], uint32(len(payload))) //nolint:gosec // length bounded by the MaxUint32 check above
+	payloadLen, err := uint32FromLen(len(payload))
+	if err != nil {
+		return "", "", 0, err
+	}
+	binary.BigEndian.PutUint32(frame[1:5], payloadLen)
 	copy(frame[5:], payload)
 
 	url := a.envdBase + "/process.Process/Start"
@@ -629,4 +633,11 @@ func urlQueryEscape(s string) string {
 		}
 	}
 	return b.String()
+}
+
+func uint32FromLen(n int) (uint32, error) {
+	if n < 0 || n > math.MaxUint32 {
+		return 0, fmt.Errorf("length out of uint32 range: %d", n)
+	}
+	return uint32(n), nil // #nosec G115 -- range-checked above
 }

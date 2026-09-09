@@ -23,7 +23,7 @@ import (
 
 const (
 	defaultShipwrightAgentCall = "shipwright.build"
-	envShipwrightAgentCall     = "AF_STACK_SHIPWRIGHT_AGENT_CALL"
+	envShipwrightAgentCall     = "AF_STACK_SHIPWRIGHT_AGENT_CALL" // #nosec G101 -- env var name, not a credential
 )
 
 type ShipwrightStore interface {

@@ -4,9 +4,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -59,6 +61,10 @@ func runBackupRestoreTest(ctx context.Context, log *slog.Logger) error {
 	if script == "" {
 		script = "scripts/backup-restore-test.sh"
 	}
+	if filepath.Base(script) != "backup-restore-test.sh" {
+		return fmt.Errorf("backup-test: refused unexpected script %q", script)
+	}
+	script = filepath.Clean(script)
 	timeout := 10 * time.Minute
 	if v := strings.TrimSpace(os.Getenv("BACKUP_TEST_TIMEOUT_SECONDS")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -69,7 +75,7 @@ func runBackupRestoreTest(ctx context.Context, log *slog.Logger) error {
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(runCtx, "bash", script)
+	cmd := exec.CommandContext(runCtx, "bash", script) // #nosec G204,G702 -- allowlisted backup-restore-test.sh only
 	cmd.Env = os.Environ()
 	out, err := cmd.CombinedOutput()
 	if err != nil {

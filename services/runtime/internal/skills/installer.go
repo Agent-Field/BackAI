@@ -116,12 +116,12 @@ func (i *Installer) installLocal(src Source, tenantID string) (Skill, error) {
 	if info.IsDir() {
 		tomlPath := filepath.Join(abs, "skill.toml")
 		jsonPath := filepath.Join(abs, "skill.json")
-		if data, err := os.ReadFile(tomlPath); err == nil {
+		if data, err := os.ReadFile(filepath.Clean(tomlPath)); err == nil { // #nosec G304 -- local skill manifest under resolved abs root
 			if err := toml.Unmarshal(data, &mfst); err != nil {
 				return Skill{}, fmt.Errorf("%w: skill.toml: %v", ErrSourceUnreadable, err)
 			}
 			read = true
-		} else if data, err := os.ReadFile(jsonPath); err == nil {
+		} else if data, err := os.ReadFile(filepath.Clean(jsonPath)); err == nil { // #nosec G304 -- local skill manifest under resolved abs root
 			if err := json.Unmarshal(data, &mfst); err != nil {
 				return Skill{}, fmt.Errorf("%w: skill.json: %v", ErrSourceUnreadable, err)
 			}
@@ -129,7 +129,7 @@ func (i *Installer) installLocal(src Source, tenantID string) (Skill, error) {
 		}
 	} else {
 		// Caller pointed straight at a manifest file.
-		data, err := os.ReadFile(abs)
+		data, err := os.ReadFile(filepath.Clean(abs)) // #nosec G304 -- local skill manifest under resolved abs root
 		if err != nil {
 			return Skill{}, fmt.Errorf("%w: %v", ErrSourceUnreadable, err)
 		}

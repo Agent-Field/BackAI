@@ -211,7 +211,7 @@ func (c *Client) loadOrCreateAnonID() string {
 		return randomID()
 	}
 	path := filepath.Join(c.configDir, "anonymous_id")
-	if raw, err := os.ReadFile(path); err == nil {
+	if raw, err := os.ReadFile(filepath.Clean(path)); err == nil { // #nosec G304 -- per-user ~/.af-stack/anonymous_id
 		if id := strings.TrimSpace(string(raw)); id != "" {
 			return id
 		}
