@@ -4,6 +4,8 @@ package skills
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -96,11 +98,11 @@ func TestParseSourceErrors(t *testing.T) {
 	cases := []string{
 		"",
 		"   ",
-		"af-skill://",                 // missing vendor/name
-		"af-skill://onlyvendor",       // vendor present, no name
-		"af-skill://acme/name@",       // empty version after @
-		"embedded:",                    // missing name
-		"unknown-format-no-prefix",     // not classified
+		"af-skill://",              // missing vendor/name
+		"af-skill://onlyvendor",    // vendor present, no name
+		"af-skill://acme/name@",    // empty version after @
+		"embedded:",                // missing name
+		"unknown-format-no-prefix", // not classified
 	}
 	for _, in := range cases {
 		_, err := ParseSource(in)
@@ -186,5 +188,42 @@ func TestStoreNilHasPool(t *testing.T) {
 	s2 := NewStore(nil, nil)
 	if s2.HasPool() {
 		t.Errorf("zero-pool Store.HasPool() = true, want false")
+	}
+}
+
+func TestInstallLocalManifest(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "skill.toml"), []byte(`
+name = "confine-me"
+version = "1.0.0"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Sibling secret must not be readable via a crafted source.
+	if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("nope"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	inst := NewInstaller()
+	sk, err := inst.Install(dir, "")
+	if err != nil {
+		t.Fatalf("Install dir: %v", err)
+	}
+	if sk.Name != "confine-me" {
+		t.Errorf("Name = %q, want confine-me", sk.Name)
+	}
+
+	sk, err = inst.Install(filepath.Join(dir, "skill.toml"), "")
+	if err != nil {
+		t.Fatalf("Install skill.toml: %v", err)
+	}
+	if sk.Name != "confine-me" {
+		t.Errorf("file target Name = %q, want confine-me", sk.Name)
+	}
+
+	_, err = inst.Install(filepath.Join(dir, "secret.txt"), "")
+	if !errors.Is(err, ErrSourceUnreadable) {
+		t.Fatalf("Install secret.txt error = %v, want ErrSourceUnreadable", err)
 	}
 }
