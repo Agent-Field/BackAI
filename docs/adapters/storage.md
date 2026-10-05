@@ -14,7 +14,7 @@ Supported today:
 
 | Adapter | Use |
 |---|---|
-| `minio` | Local development and self-hosted S3-compatible storage |
+| `minio` | Local development and self-hosted S3-compatible storage. Bundled compose files run `rustfs/rustfs` under the service name `minio` — MinIO Community images left Docker Hub. |
 | `s3` | AWS S3 or compatible managed object storage (also covers R2 / GCS / Azure Blob via the S3 API) |
 | `remote` | An out-of-process storage adapter speaking the [remote protocol](PROTOCOL.md) |
 
