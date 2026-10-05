@@ -31,22 +31,29 @@ services:
       timeout: 3s
       retries: 10
 
+  # MinIO Community images left Docker Hub (and Quay anonymous pulls 401).
+  # rustfs/rustfs is a public S3-compatible drop-in on :9000. The service
+  # name stays `minio` so AF_STACK_S3_ENDPOINT=minio:9000 keeps working.
   minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
+    image: rustfs/rustfs:1.0.1
+    command: ["/data"]
     environment:
-      MINIO_ROOT_USER: ${AF_STACK_S3_ACCESS_KEY:-minio}
-      MINIO_ROOT_PASSWORD: ${AF_STACK_S3_SECRET_KEY:-minio-secret}
+      RUSTFS_ACCESS_KEY: ${AF_STACK_S3_ACCESS_KEY:-minio}
+      RUSTFS_SECRET_KEY: ${AF_STACK_S3_SECRET_KEY:-minio-secret}
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+      RUSTFS_CONSOLE_ENABLE: "true"
     ports:
       - "${MINIO_PORT:-9000}:9000"
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio-data:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/health"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 15s
 
   # LiteLLM proxy: every upstream model provider behind the runtime's
   # OpenAI-compatible /api/v1/llm/* gateway. Only the provider keys you set
