@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/tenantctx"
 )
@@ -102,6 +103,7 @@ func (r *fakeRows) Err() error                    { return nil }
 func (r *fakeRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
 func (r *fakeRows) RawValues() [][]byte           { return nil }
 func (r *fakeRows) Conn() *pgx.Conn               { return nil }
+func (r *fakeRows) TypeMap() *pgtype.Map          { return pgtype.NewMap() }
 func (r *fakeRows) Next() bool {
 	if r.idx < len(r.data) {
 		r.idx++
