@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
+	"github.com/chromedp/chromedp/remote"
 
 	"github.com/Agent-Field/backai/services/runtime/internal/tools/adapters/browser"
 )
@@ -104,7 +105,7 @@ type session struct {
 	taskCtx  context.Context
 	cancel   context.CancelFunc
 	cleanup  func() // provider-session release; nil once fired
-	healthy  bool   // first successful chromedp.Run completed
+	healthy  bool   // first successful chromedp action completed
 	lastUsed time.Time
 }
 
@@ -139,12 +140,14 @@ func (d *Driver) Navigate(ctx context.Context, sessionID, url string) (browser.R
 		if resp != nil {
 			out.StatusCode = int(resp.Status)
 		}
-		var title, loc string
-		if err := chromedp.Run(runCtx, chromedp.Title(&title), chromedp.Location(&loc)); err != nil {
+		out.Title, err = chromedp.Run(runCtx, chromedp.Title())
+		if err != nil {
 			return fmt.Errorf("cdpdriver: navigate readback: %w", err)
 		}
-		out.Title = title
-		out.URL = loc
+		out.URL, err = chromedp.Run(runCtx, chromedp.Location())
+		if err != nil {
+			return fmt.Errorf("cdpdriver: navigate readback: %w", err)
+		}
 		return nil
 	})
 	if err != nil {
@@ -158,7 +161,9 @@ func (d *Driver) ExtractText(ctx context.Context, sessionID string) (browser.Res
 	var text string
 	err := d.withSession(ctx, sessionID, d.opts.ActionTimeout, func(runCtx context.Context) error {
 		const script = `document.body ? document.body.innerText : ""`
-		if err := chromedp.Run(runCtx, chromedp.Evaluate(script, &text)); err != nil {
+		var err error
+		text, err = chromedp.Run(runCtx, chromedp.Evaluate[string](script))
+		if err != nil {
 			return fmt.Errorf("cdpdriver: extract_text: %w", err)
 		}
 		return nil
@@ -173,7 +178,9 @@ func (d *Driver) ExtractText(ctx context.Context, sessionID string) (browser.Res
 func (d *Driver) Screenshot(ctx context.Context, sessionID string) (browser.Result, error) {
 	var png []byte
 	err := d.withSession(ctx, sessionID, d.opts.ActionTimeout, func(runCtx context.Context) error {
-		if err := chromedp.Run(runCtx, chromedp.CaptureScreenshot(&png)); err != nil {
+		var err error
+		png, err = chromedp.Run(runCtx, chromedp.CaptureScreenshot())
+		if err != nil {
 			return fmt.Errorf("cdpdriver: screenshot: %w", err)
 		}
 		return nil
@@ -187,7 +194,7 @@ func (d *Driver) Screenshot(ctx context.Context, sessionID string) (browser.Resu
 // Click clicks the first visible element matching the CSS selector.
 func (d *Driver) Click(ctx context.Context, sessionID, selector string) (browser.Result, error) {
 	err := d.withSession(ctx, sessionID, d.opts.ActionTimeout, func(runCtx context.Context) error {
-		if err := chromedp.Run(runCtx, chromedp.Click(selector, chromedp.ByQuery, chromedp.NodeVisible)); err != nil {
+		if err := chromedp.Do(runCtx, chromedp.Click(chromedp.CSS(selector), chromedp.NodeVisible)); err != nil {
 			return fmt.Errorf("cdpdriver: click %q: %w", selector, err)
 		}
 		return nil
@@ -201,7 +208,7 @@ func (d *Driver) Click(ctx context.Context, sessionID, selector string) (browser
 // Fill sets the value of the input matching the CSS selector.
 func (d *Driver) Fill(ctx context.Context, sessionID, selector, value string) (browser.Result, error) {
 	err := d.withSession(ctx, sessionID, d.opts.ActionTimeout, func(runCtx context.Context) error {
-		if err := chromedp.Run(runCtx, chromedp.SetValue(selector, value, chromedp.ByQuery)); err != nil {
+		if err := chromedp.Do(runCtx, chromedp.SetValue(chromedp.CSS(selector), value)); err != nil {
 			return fmt.Errorf("cdpdriver: fill %q: %w", selector, err)
 		}
 		return nil
@@ -319,14 +326,14 @@ func (d *Driver) connect(ctx context.Context, sessionID string, s *session, time
 	// Browserless cloud) hand out the exact browser endpoint with auth
 	// baked into the query string; chromedp's default /json/version
 	// probe-and-rewrite breaks those connections.
-	allocCtx, cancelAlloc := chromedp.NewRemoteAllocator(context.Background(), wsURL, chromedp.NoModifyURL)
+	allocCtx, cancelAlloc := remote.NewAllocator(context.Background(), wsURL, remote.NoModifyURL)
 	taskCtx, cancelTask := chromedp.NewContext(allocCtx)
 	cancelAll := func() {
 		cancelTask()
 		cancelAlloc()
 	}
 
-	// Force the websocket dial now (Run with no actions allocates), so a
+	// Force the websocket dial now (Do with no actions allocates), so a
 	// dead endpoint fails the current verb instead of poisoning the
 	// session map. The allocation MUST run on the long-lived taskCtx —
 	// chromedp pins the browser connection to the context used at
@@ -334,7 +341,7 @@ func (d *Driver) connect(ctx context.Context, sessionID string, s *session, time
 	// session down as soon as that context is canceled. The timeout is
 	// therefore enforced from outside.
 	dialErr := make(chan error, 1)
-	go func() { dialErr <- chromedp.Run(taskCtx) }()
+	go func() { dialErr <- chromedp.Do(taskCtx) }()
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
