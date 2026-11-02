@@ -18,7 +18,7 @@
     "@hookform/resolvers": "^5.9.2",
     "@tanstack/react-table": "^8.21.3",
     "@types/pg": "^8.23.1",
-    "better-auth": "1.6.33",
+    "better-auth": "1.7.15",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
