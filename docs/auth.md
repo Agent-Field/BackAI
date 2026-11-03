@@ -125,9 +125,13 @@ AF_STACK_SSO_SCOPES="openid email profile"
 Register these redirect URIs in Authentik, WorkOS, or your OIDC broker:
 
 ```text
-https://admin.example.com/api/auth/oauth2/callback/enterprise-sso
-https://app.example.com/api/auth/oauth2/callback/enterprise-sso
+https://admin.example.com/api/auth/callback/enterprise-sso
+https://app.example.com/api/auth/callback/enterprise-sso
 ```
+
+better-auth 1.7 moved these off `/api/auth/oauth2/callback/:id`. The apps
+still rewrite the old path so already-registered IdP URIs keep working;
+register the new URIs on new brokers.
 
 The provider must return an email claim. New SSO users are mirrored into
 `suite_users` by the same better-auth hook as email/password users. They

@@ -161,7 +161,6 @@ function makeAuth() {
               config: [
                 {
                   providerId: sso.providerId,
-                  issuer: sso.issuer,
                   discoveryUrl: sso.discoveryUrl,
                   clientId:
                     process.env.AF_STACK_SSO_CLIENT_ID ?? process.env.DASHBOARD_SSO_CLIENT_ID!,
@@ -170,7 +169,6 @@ function makeAuth() {
                     process.env.DASHBOARD_SSO_CLIENT_SECRET!,
                   scopes: sso.scopes,
                   pkce: true,
-                  requireIssuerValidation: true,
                   overrideUserInfo: true,
                 },
               ],
