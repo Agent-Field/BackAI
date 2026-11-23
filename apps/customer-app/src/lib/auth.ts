@@ -22,8 +22,7 @@ import { provisionTenant, lookupCustomerContext } from "@/lib/provisioning"
 import { getCustomerSSOConfig } from "@/lib/sso"
 
 function makeAuth() {
-  const databaseUrl =
-    process.env.DATABASE_URL ?? process.env.AF_STACK_DATABASE_URL
+  const databaseUrl = process.env.DATABASE_URL ?? process.env.AF_STACK_DATABASE_URL
   if (!databaseUrl) {
     return null
   }
@@ -71,13 +70,11 @@ function makeAuth() {
               config: [
                 {
                   providerId: sso.providerId,
-                  issuer: sso.issuer,
                   discoveryUrl: sso.discoveryUrl,
                   clientId: process.env.AF_STACK_SSO_CLIENT_ID!,
                   clientSecret: process.env.AF_STACK_SSO_CLIENT_SECRET!,
                   scopes: sso.scopes,
                   pkce: true,
-                  requireIssuerValidation: true,
                   overrideUserInfo: true,
                 },
               ],
@@ -128,9 +125,7 @@ export const auth =
     {},
     {
       get() {
-        throw new Error(
-          "DATABASE_URL or AF_STACK_DATABASE_URL must be set for better-auth.",
-        )
+        throw new Error("DATABASE_URL or AF_STACK_DATABASE_URL must be set for better-auth.")
       },
     },
   ) as ReturnType<typeof betterAuth>)
