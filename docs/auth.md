@@ -125,9 +125,26 @@ AF_STACK_SSO_SCOPES="openid email profile"
 Register these redirect URIs in Authentik, WorkOS, or your OIDC broker:
 
 ```text
-https://admin.example.com/api/auth/oauth2/callback/enterprise-sso
-https://app.example.com/api/auth/oauth2/callback/enterprise-sso
+https://admin.example.com/api/auth/callback/enterprise-sso
+https://app.example.com/api/auth/callback/enterprise-sso
 ```
+
+better-auth 1.7 moved these off `/api/auth/oauth2/callback/:id`, and the old
+path is no longer served. The authorize request now carries the new
+`redirect_uri`, so a broker that only has the old URI registered rejects the
+login. When upgrading an existing deployment, register the new URIs with the
+broker before you deploy.
+
+Also when upgrading from better-auth 1.6:
+
+- Magic links and SSO logins started before the upgrade stop working. Users
+  request a new link or restart the SSO login.
+- Passwords over 128 characters are rejected at sign-in. Rotate an operator
+  password that long.
+- OIDC accounts are matched on the `sub` claim. 1.6 preferred a userinfo `id`
+  when the broker returned one. If your broker returns different values for
+  the two, sign in with an existing SSO user after the upgrade to check it
+  still links.
 
 The provider must return an email claim. New SSO users are mirrored into
 `suite_users` by the same better-auth hook as email/password users. They

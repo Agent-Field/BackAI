@@ -72,8 +72,8 @@ function SignInInner({ sso }: SignInFormProps) {
   const handleSSO = async () => {
     setSubmitting(true)
     try {
-      const result = await signIn.oauth2({
-        providerId: SSO_PROVIDER_ID,
+      const result = await signIn.social({
+        provider: SSO_PROVIDER_ID,
         callbackURL: next,
       })
       if (result.error) {

@@ -92,8 +92,8 @@ function LoginFormInner({ sso }: LoginFormProps) {
   const handleSSO = async () => {
     setSubmitting(true)
     try {
-      const result = await signIn.oauth2({
-        providerId: SSO_PROVIDER_ID,
+      const result = await signIn.social({
+        provider: SSO_PROVIDER_ID,
         callbackURL: next,
       })
       if (result.error) {
@@ -114,8 +114,8 @@ function LoginFormInner({ sso }: LoginFormProps) {
             <div className="border-destructive/30 bg-destructive/5 text-destructive flex gap-2 rounded-md border p-3 text-sm">
               <AlertCircle className="mt-0.5 size-4 shrink-0" />
               <p>
-                This account is not an operator. Sign in with the first operator account
-                created during setup.
+                This account is not an operator. Sign in with the first operator account created
+                during setup.
               </p>
             </div>
           ) : null}
